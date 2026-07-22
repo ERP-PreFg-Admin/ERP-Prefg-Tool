@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server"
-import { query, pool, execute } from "@/lib/db"
+import { query, pool } from "@/lib/db"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { skus as skusSql } from "@/lib/queries/skus"
 import { manufacturers as mfgsSql } from "@/lib/queries/manufacturers"
 import { getFileBuffer } from "@/lib/s3"
-import { sendPoEmail } from "@/lib/mailer"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import type { PoolConnection } from "mysql2/promise"
 import logger from "@/lib/logger"
@@ -196,32 +195,7 @@ export const POST = withGateway({
       logger.info({ ...ctx, eventId, poId, po_no, message: "Normal PO created" })
       recordProcessedEvent("PO", eventId, { poId, po_no })
 
-      // ── Auto-send PO email right after a normal PO is created ─────────────
-      // Normal POs skip the approval flow entirely, so this is the only auto-send
-      // trigger for them (impromptu POs auto-send on approval instead — see
-      // app/api/approvals/[id]/route.ts). Awaited (not fire-and-forget) so the
-      // create response can tell the caller whether the email actually sent.
-      const mailEventId = makeEventId("PO_NORMAL_MAIL", "send", poId)
-      let emailed = false
-      let emailError: string | undefined
-      try {
-        emailed = await sendPoEmail(poId, "auto_approval")
-        if (emailed) {
-          await execute(purchaseOrdersSql.setEmailSentAt, [poId])
-          logger.info({ ...ctx, eventId: mailEventId, poId, po_no, message: "Auto-sent normal PO email" })
-          recordProcessedEvent("PO_NORMAL_MAIL", mailEventId, { poId, po_no })
-        } else {
-          emailError = "Manufacturer has no email address on file"
-          logger.warn({ ...ctx, eventId: mailEventId, poId, po_no, message: "Normal PO created but manufacturer has no email — skipped auto-send" })
-          recordFailedEvent("PO_NORMAL_MAIL", mailEventId, { poId, po_no }, emailError)
-        }
-      } catch (err: any) {
-        emailError = err.message
-        logger.error({ ...ctx, eventId: mailEventId, poId, po_no, error: err.message, message: "Auto-send normal PO email failed" })
-        recordFailedEvent("PO_NORMAL_MAIL", mailEventId, { poId, po_no }, err.message)
-      }
-
-      return NextResponse.json({ ok: true, po_no, emailed, emailError })
+      return NextResponse.json({ ok: true, po_no })
     } catch (err: any) {
       await conn.rollback()
       logger.error({ ...ctx, eventId, err: err.message, stack: err.stack, message: "Normal PO create failed" })

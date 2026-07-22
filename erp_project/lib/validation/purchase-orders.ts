@@ -39,5 +39,10 @@ export const poCreateSchema = z
 
 export const poActionSchema = z.union([poBulkCsvSchema, poCreateSchema])
 
+export const poSendMailSchema = z.object({
+  po_ids: z.array(z.union([z.number(), z.string()])).min(1, "Select at least one PO to send mail for."),
+})
+
 export type PoBulkCsv = z.infer<typeof poBulkCsvSchema>
 export type PoCreate = z.infer<typeof poCreateSchema>
+export type PoSendMail = z.infer<typeof poSendMailSchema>

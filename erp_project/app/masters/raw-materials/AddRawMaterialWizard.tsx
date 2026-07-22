@@ -470,7 +470,7 @@ export function AddRawMaterialWizard({
                       onChange={(e) => setMoqSlabPricing(e.target.checked)}
                       className="h-4 w-4 rounded border-input"
                     />
-                    Vendor offers different rates by MOQ slab (allow the same vendor more than once)
+                    Vendor rates by MOQ slab
                   </label>
 
                   {rmVendors.length === 0 ? (

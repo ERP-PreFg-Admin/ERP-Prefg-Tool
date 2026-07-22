@@ -436,7 +436,7 @@ export function AddPackingMaterialWizard({
                       onChange={(e) => setMoqSlabPricing(e.target.checked)}
                       className="h-4 w-4 rounded border-input"
                     />
-                    Vendor rates by MOQ slab (allow the same vendor more than once)
+                    Vendor rates by MOQ slab
                   </label>
 
                   {pmVendors.length === 0 ? (

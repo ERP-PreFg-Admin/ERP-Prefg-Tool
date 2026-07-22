@@ -1,9 +1,7 @@
 import nodemailer from "nodemailer"
 import { GMAIL_USER, GMAIL_APP_PASSWORD } from "@/lib/env"
-import { query, execute } from "@/lib/db"
+import { query } from "@/lib/db"
 import { generatePoPdf, type PoEmailData } from "@/lib/pdf/po-document"
-import { uploadFile, getFileBuffer } from "@/lib/s3"
-import { s3FilesSql } from "@/lib/queries/s3-files"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { entityEmails } from "@/lib/queries/entity-emails"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
@@ -55,7 +53,7 @@ export async function fetchPoData(poId: number): Promise<PoEmailData | null> {
  * this manufacturer in the entity_emails contact list (/po-tracking/
  * po-procurement/entity-emails) — deduped case-insensitively.
  */
-async function resolveMfgRecipients(mfgCode: string, primaryEmail: string | null): Promise<string[]> {
+export async function resolveMfgRecipients(mfgCode: string, primaryEmail: string | null): Promise<string[]> {
   const rows = await query<{ email: string }>(entityEmails.selectByEntity, ["mfg", mfgCode])
   const seen = new Set<string>()
   const recipients: string[] = []
@@ -70,194 +68,145 @@ async function resolveMfgRecipients(mfgCode: string, primaryEmail: string | null
   return recipients
 }
 
-/**
- * Returns true if the email was sent, false if the manufacturer has no email on file.
- * Throws on actual send/PDF failures.
- */
-export async function sendPoEmail(
-  poId: number,
-  trigger: "auto_approval" | "manual" = "auto_approval"
-): Promise<boolean> {
-  const data = await fetchPoData(poId)
+type SelectedPoLine = { id: number; po_no: string; sku_code: string; sku_name: string | null; qty: number; status: string }
+type OngoingPoLine = { po_no: string; sku_code: string; sku_name: string | null; qty: number }
 
-  if (!data) {
-    console.warn(`[mailer] sendPoEmail: PO id=${poId} not found`)
-    return false
-  }
-  const recipients = await resolveMfgRecipients(data.mfg_code, data.mfg_email)
-  if (recipients.length === 0) {
-    console.warn(`[mailer] sendPoEmail: PO id=${poId} — manufacturer has no email on file, skipping`)
-    return false
-  }
+// Statuses worth attaching a PDF copy for — the two actions this flow exists
+// to notify manufacturers about. Other selected statuses (received, punched,
+// etc.) just show up in the summary table with no attachment.
+const ATTACHABLE_STATUSES = new Set(["raised", "cancelled"])
 
-  const eventId = makeEventId("PO_EMAIL", "send", poId)
-  recordRawEvent("PO_EMAIL", eventId, {
-    poId,
-    po_no:     data.po_no,
-    mfg_name:  data.mfg_name,
-    mfg_email: recipients.join(", "),
-    trigger,
-  })
+const STATUS_LABELS: Record<string, string> = {
+  draft: "Draft", raised: "Raised", punched: "Inward", short_closed: "Short Closed",
+  partially_received: "Partially Received", received: "Received", cancelled: "Cancelled",
+}
 
-  let pdfBuffer: Buffer
-  try {
-    pdfBuffer = await generatePoPdf(data)
-    console.log(`[mailer] PDF generated for PO ${data.po_no} (${pdfBuffer.length} bytes)`)
-  } catch (pdfErr: any) {
-    logger.error({ ...ctx, eventId, err: pdfErr.message, stack: pdfErr.stack, message: "PO email PDF generation failed" })
-    recordFailedEvent("PO_EMAIL", eventId, { poId, po_no: data.po_no }, "PDF generation failed: " + pdfErr.message)
-    throw new Error("PDF generation failed: " + pdfErr.message)
-  }
+function selectedPoRows(lines: SelectedPoLine[]): string {
+  return lines
+    .map(
+      (l) => `
+        <tr>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee">${l.po_no}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee">${l.sku_code}${l.sku_name ? " — " + l.sku_name : ""}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${Number(l.qty).toLocaleString("en-IN")}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee">${STATUS_LABELS[l.status] ?? l.status}</td>
+        </tr>`
+    )
+    .join("")
+}
 
-  // Store PDF in S3 and save key to DB (non-blocking — email still sends if this fails)
-  const safeMfgName = data.mfg_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-  const poMonth = data.date ? new Date(data.date).toISOString().slice(0, 7) : new Date().toISOString().slice(0, 7)
-  const s3Key = `purchase-orders/${safeMfgName}/${poMonth}/PO-${data.po_no}.pdf`
-  try {
-    await uploadFile(pdfBuffer as unknown as Buffer, s3Key, "application/pdf")
-    await execute(s3FilesSql.updatePoAttachment, [s3Key, poId])
-    console.log(`[mailer] PO PDF stored at key=${s3Key}`)
-  } catch (s3Err: any) {
-    console.error("[mailer] S3 store failed (email will still send):", s3Err)
-  }
-
-  const from = GMAIL_USER
-  const dispatchDate = data.expected_on
-    ? new Date(data.expected_on).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-    : "TBD"
-
-  try {
-    await transporter.sendMail({
-      from: `mcaffeine ERP <${from}>`,
-      to: recipients.join(", "),
-      subject: `Purchase Order ${data.po_no} — mcaffeine`,
-      html: `
-        <div style="font-family:sans-serif;max-width:560px;margin:auto;color:#111">
-          <h2 style="margin-bottom:4px">Purchase Order: ${data.po_no}</h2>
-          <p style="color:#555;margin-top:0">Please find your PO details attached as a PDF.</p>
-          <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px">
-            <tr style="background:#f5f5f5">
-              <td style="padding:8px 12px;font-weight:600">SKU</td>
-              <td style="padding:8px 12px">${data.sku_code} — ${data.sku_name ?? ""}</td>
-            </tr>
-            <tr>
-              <td style="padding:8px 12px;font-weight:600">Quantity</td>
-              <td style="padding:8px 12px">${Number(data.qty).toLocaleString("en-IN")}</td>
-            </tr>
-            <tr style="background:#f5f5f5">
-              <td style="padding:8px 12px;font-weight:600">Expected Dispatch</td>
-              <td style="padding:8px 12px">${dispatchDate}</td>
-            </tr>
-            ${data.destination ? `<tr><td style="padding:8px 12px;font-weight:600">Destination</td><td style="padding:8px 12px">${data.destination}</td></tr>` : ""}
-          </table>
-          <p style="font-size:12px;color:#888">
-            This is an auto-generated email from the mcaffeine ERP system.
-            Please confirm receipt by replying to this email.
-          </p>
-        </div>
-      `,
-      attachments: [
-        {
-          filename: `PO-${data.po_no}.pdf`,
-          content: pdfBuffer,
-        },
-      ],
-    })
-  } catch (sendErr: any) {
-    logger.error({ ...ctx, eventId, err: sendErr.message, stack: sendErr.stack, message: "PO email send failed" })
-    // console.error("[mailer] sendMail failed:", sendErr)
-    recordFailedEvent("PO_EMAIL", eventId, { poId, po_no: data.po_no }, sendErr.message)
-    throw sendErr
-  }
-  logger.info({ ...ctx, eventId, poId, po_no: data.po_no, mfg_email: recipients.join(", "), message: "PO email sent successfully" })
-  // console.log(`[mailer] PO ${data.po_no} sent to ${recipients.join(", ")}`)
-  recordProcessedEvent("PO_EMAIL", eventId, {
-    poId,
-    po_no:     data.po_no,
-    mfg_email: recipients.join(", "),
-    s3PdfKey:  s3Key,
-  })
-  return true
+function ongoingPoRows(lines: OngoingPoLine[]): string {
+  return lines
+    .map(
+      (l) => `
+        <tr>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee">${l.po_no}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee">${l.sku_code}${l.sku_name ? " — " + l.sku_name : ""}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${Number(l.qty).toLocaleString("en-IN")}</td>
+        </tr>`
+    )
+    .join("")
 }
 
 /**
- * Notify the manufacturer that a PO has been cancelled. Re-attaches the
- * original PO PDF (already stored at attachment_key from when the PO was
- * raised/emailed) instead of regenerating one — download failure never
- * blocks the email, same as sendPoEmail's non-blocking S3 store.
+ * One consolidated email per manufacturer for a user-selected set of POs
+ * (mix of any status — newly raised, cancelled, whatever the user picked in
+ * the PO Procurement table's checkbox selection), with the PO PDF attached
+ * for each raised/cancelled one, plus a live snapshot of every currently-open
+ * PO for that manufacturer (including the ones just selected — they're
+ * ongoing too, shown as-is).
  *
- * Returns true if the email was sent, false if the manufacturer has no
- * email on file. Throws on actual send failures.
+ * Returns true if sent, false if the manufacturer has no email on file.
+ * Throws on actual send failures — caller decides whether that fails the
+ * whole multi-manufacturer send or just that manufacturer's leg.
  */
-export async function sendPoCancellationEmail(poId: number, reason?: string): Promise<boolean> {
-  const data = await fetchPoData(poId)
-
-  if (!data) {
-    logger.warn({ ...ctx, poId, message: "sendPoCancellationEmail: PO not found" })
-    console.warn(`[mailer] sendPoCancellationEmail: PO id=${poId} not found`)
+export async function sendMfgSelectionEmail(
+  mfgId: number,
+  selected: SelectedPoLine[]
+): Promise<boolean> {
+  const mfgRows = await query<{ code: string; name: string; email: string | null }>(
+    `SELECT m.code, m.name, d.email FROM master_mfgs m JOIN details_mfg d ON d.mfg_id = m.id WHERE m.id = ? LIMIT 1`,
+    [mfgId]
+  )
+  const mfg = mfgRows[0]
+  if (!mfg) {
+    logger.warn({ ...ctx, mfgId, message: "sendMfgSelectionEmail: manufacturer not found" })
     return false
   }
-  const recipients = await resolveMfgRecipients(data.mfg_code, data.mfg_email)
+
+  const recipients = await resolveMfgRecipients(mfg.code, mfg.email)
   if (recipients.length === 0) {
-    logger.warn({ ...ctx, poId, message: "sendPoCancellationEmail - manufacturer has no email on file, skipping" })
-    console.warn(`[mailer] sendPoCancellationEmail: PO id=${poId} — manufacturer has no email on file, skipping`)
+    logger.warn({ ...ctx, mfgId, message: "sendMfgSelectionEmail: manufacturer has no email on file, skipping" })
     return false
   }
 
-  const eventId = makeEventId("PO_EMAIL", "cancel-email", poId)
-  recordRawEvent("PO_EMAIL", eventId, {
-    poId,
-    po_no:     data.po_no,
-    mfg_name:  data.mfg_name,
-    mfg_email: recipients.join(", "),
-    trigger:   "cancellation",
-  })
+  const ongoing = await query<any>(purchaseOrdersSql.ongoingByMfg, [mfgId])
+  const openLines: OngoingPoLine[] = ongoing.map((r) => ({
+    po_no: r.po_no, sku_code: r.sku_code, sku_name: r.sku_name, qty: Number(r.qty),
+  }))
 
-  let pdfBuffer: Buffer | null = null
-  const attachmentRows = await query<{ attachment_key: string | null }>(s3FilesSql.getPoAttachment, [poId])
-  const attachmentKey = attachmentRows[0]?.attachment_key
-  if (attachmentKey) {
+  const attachments: { filename: string; content: Buffer }[] = []
+  for (const line of selected) {
+    if (!ATTACHABLE_STATUSES.has(line.status)) continue
     try {
-      pdfBuffer = await getFileBuffer(attachmentKey)
+      const data = await fetchPoData(line.id)
+      if (!data) continue
+      const pdfBuffer = await generatePoPdf(data)
+      attachments.push({ filename: `PO-${line.po_no}.pdf`, content: pdfBuffer as unknown as Buffer })
     } catch (err: any) {
-      console.error(`[mailer] Could not fetch original PO PDF for cancellation email (poId=${poId}):`, err)
+      logger.error({ ...ctx, poId: line.id, po_no: line.po_no, error: err.message, message: "PO PDF generation failed for selection email — sending without this attachment" })
     }
   }
+
+  const eventId = makeEventId("PO_SELECTION_EMAIL", "send", mfgId)
+  recordRawEvent("PO_SELECTION_EMAIL", eventId, {
+    mfgId, mfg_name: mfg.name, mfg_email: recipients.join(", "), selectedCount: selected.length, attachmentCount: attachments.length,
+  })
 
   try {
     await transporter.sendMail({
       from: `mcaffeine ERP <${GMAIL_USER}>`,
       to: recipients.join(", "),
-      subject: `CANCELLED - Purchase Order ${data.po_no}`,
+      subject: `PO Update — ${mfg.name}`,
       html: `
-        <div style="font-family:sans-serif;max-width:560px;margin:auto;color:#111">
-          <h2 style="margin-bottom:4px;color:#b91c1c">Purchase Order Cancelled: ${data.po_no}</h2>
-          <p style="color:#555;margin-top:0">This purchase order has been cancelled and should not be fulfilled.</p>
+        <div style="font-family:sans-serif;max-width:620px;margin:auto;color:#111">
+          <h2 style="margin-bottom:4px">PO Update: ${mfg.name}</h2>
+          <p style="color:#555;margin-top:0">Please find the latest status of the following purchase orders${attachments.length > 0 ? " (PDFs attached for raised/cancelled POs)" : ""}.</p>
           <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px">
             <tr style="background:#f5f5f5">
-              <td style="padding:8px 12px;font-weight:600">SKU</td>
-              <td style="padding:8px 12px">${data.sku_code} — ${data.sku_name ?? ""}</td>
+              <td style="padding:6px 12px;font-weight:600">PO No.</td>
+              <td style="padding:6px 12px;font-weight:600">SKU</td>
+              <td style="padding:6px 12px;font-weight:600;text-align:right">Quantity</td>
+              <td style="padding:6px 12px;font-weight:600">Status</td>
             </tr>
-            <tr>
-              <td style="padding:8px 12px;font-weight:600">Originally Raised Quantity</td>
-              <td style="padding:8px 12px">${Number(data.qty).toLocaleString("en-IN")}</td>
-            </tr>
+            ${selectedPoRows(selected)}
           </table>
-          ${reason?.trim() ? `<blockquote style="margin:16px 0;padding:8px 12px;border-left:3px solid #b91c1c;color:#555;font-size:13px">${reason.trim()}</blockquote>` : ""}
-          <p style="font-size:12px;color:#888">
+          ${openLines.length > 0 ? `
+            <h3 style="margin:20px 0 4px;font-size:14px">Currently Open Purchase Orders</h3>
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <tr style="background:#f5f5f5">
+                <td style="padding:6px 12px;font-weight:600">PO No.</td>
+                <td style="padding:6px 12px;font-weight:600">SKU</td>
+                <td style="padding:6px 12px;font-weight:600;text-align:right">Quantity</td>
+              </tr>
+              ${ongoingPoRows(openLines)}
+            </table>
+          ` : ""}
+          <p style="font-size:12px;color:#888;margin-top:20px">
             This is an auto-generated email from the mcaffeine ERP system.
+            Please confirm receipt by replying to this email.
           </p>
         </div>
       `,
-      attachments: pdfBuffer ? [{ filename: `PO-${data.po_no}.pdf`, content: pdfBuffer }] : undefined,
+      attachments: attachments.length > 0 ? attachments : undefined,
     })
   } catch (sendErr: any) {
-    logger.error({ ...ctx, eventId, err: sendErr.message, stack: sendErr.stack, message: "PO cancellation email send failed" })
-    recordFailedEvent("PO_EMAIL", eventId, { poId, po_no: data.po_no }, sendErr.message)
+    logger.error({ ...ctx, eventId, err: sendErr.message, stack: sendErr.stack, message: "PO selection email send failed" })
+    recordFailedEvent("PO_SELECTION_EMAIL", eventId, { mfgId, mfg_name: mfg.name }, sendErr.message)
     throw sendErr
   }
 
-  logger.info({ ...ctx, eventId, poId, po_no: data.po_no, mfg_email: recipients.join(", "), message: "PO cancellation email sent successfully" })
-  recordProcessedEvent("PO_EMAIL", eventId, { poId, po_no: data.po_no, mfg_email: recipients.join(", ") })
+  logger.info({ ...ctx, eventId, mfgId, mfg_name: mfg.name, mfg_email: recipients.join(", "), message: "PO selection email sent successfully" })
+  recordProcessedEvent("PO_SELECTION_EMAIL", eventId, { mfgId, mfg_name: mfg.name, mfg_email: recipients.join(", ") })
   return true
 }

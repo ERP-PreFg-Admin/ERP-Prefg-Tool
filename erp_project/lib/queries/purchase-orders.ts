@@ -159,9 +159,6 @@ export const purchaseOrdersSql = {
   /** Credit split qty back to the parent as received_qty (never mutates qty). Parameters: [splitTotal, id] */
   incrementReceivedQtyBySplit: `UPDATE purchase_orders SET received_qty = COALESCE(received_qty, 0) + ? WHERE id = ?`,
 
-  /** Stamp email_sent_at on first send only. Parameters: [id] */
-  setEmailSentAt: `UPDATE purchase_orders SET email_sent_at = NOW() WHERE id = ? AND email_sent_at IS NULL`,
-
   /** Fetch MFG name for readable approval diff. Parameters: [id] */
   selectById: `
     SELECT po.id, po.po_no, po.sku_code, po.qty, po.expected_on,
@@ -239,6 +236,39 @@ export const purchaseOrdersSql = {
         expected_on = ?, destination = ?
     WHERE id = ?
   `,
+
+  /**
+   * Itemized ongoing (not received, not cancelled) POs for one manufacturer.
+   * Drives the mfg-batch screen's "current open POs" panel and the batch
+   * email's "currently open" summary section. Parameters: [mfg_id]
+   */
+  ongoingByMfg: `
+    SELECT po.id, po.po_no, po.sku_code, sk.name AS sku_name, po.qty,
+           po.expected_on, ${EFFECTIVE_STATUS_EXPR} AS status
+    FROM purchase_orders po
+    LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
+    WHERE po.mfg_id = ?
+      AND ${EFFECTIVE_STATUS_EXPR} NOT IN ('received', 'cancelled')
+    ORDER BY po.date DESC, po.id DESC
+  `,
+
+  /**
+   * Fetch PO + SKU + manufacturer info for an arbitrary set of PO ids —
+   * drives the "select POs, review, send mail" flow's grouping-by-manufacturer
+   * step. Use buildSelectByIds(count) for the placeholder-count-matched SQL.
+   * Params: [...ids]
+   */
+  buildSelectByIds(count: number): string {
+    const placeholders = Array(count).fill("?").join(",")
+    return `
+      SELECT po.id, po.po_no, po.mfg_id, m.code AS mfg_code, m.name AS mfg_name,
+             po.sku_code, sk.name AS sku_name, po.qty, ${EFFECTIVE_STATUS_EXPR} AS status
+      FROM purchase_orders po
+      INNER JOIN master_mfgs m ON m.id = po.mfg_id
+      LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
+      WHERE po.id IN (${placeholders})
+    `
+  },
 
   /** Full PO data for email generation and PDF rendering. Parameters: [po_id] */
   selectForEmail: `

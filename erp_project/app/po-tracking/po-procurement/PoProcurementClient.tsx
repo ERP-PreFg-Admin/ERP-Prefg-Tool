@@ -19,6 +19,7 @@ import AddPODialog from "./AddPODialog"
 import ImpromptuPODialog from "./ImpromptuPODialog"
 import PoBulkUploadDialog from "./PoBulkUploadDialog"
 import SplitPODialog from "./SplitPODialog"
+import PoSelectionBar from "./PoSelectionBar"
 
 type SortDir = "asc" | "desc"
 
@@ -88,6 +89,26 @@ export default function PoProcurementClient({
   const [showFilters,  setShowFilters]  = useState(false)
   const [editTarget,   setEditTarget]   = useState<PoRow | null>(null)
   const [splitTarget,  setSplitTarget]  = useState<PoRow | null>(null)
+
+  // ── Gmail-style PO selection → review (grouped by mfg) → send mail ────────
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+
+  function toggleRow(id: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAll(ids: number[]) {
+    setSelectedIds((prev) => {
+      const allSelected = ids.length > 0 && ids.every((id) => prev.has(id))
+      if (allSelected) return new Set([...prev].filter((id) => !ids.includes(id)))
+      return new Set([...prev, ...ids])
+    })
+  }
 
   // Local state for the filter panel (only committed to URL on Apply)
   const [draftMfgCode,     setDraftMfgCode]     = useState(currentMfgCode)
@@ -332,6 +353,9 @@ export default function PoProcurementClient({
         sortBy={currentSortBy}
         sortDir={currentSortDir}
         onSort={handleSort}
+        selectedIds={selectedIds}
+        onToggleRow={toggleRow}
+        onToggleAll={toggleAll}
       />
 
       {/* ── Pagination ── */}
@@ -386,6 +410,12 @@ export default function PoProcurementClient({
         po={splitTarget}
         warehouseOptions={warehouseOptions}
         onSplit={afterAction}
+      />
+
+      <PoSelectionBar
+        selectedRows={rows.filter((r) => selectedIds.has(r.id))}
+        onClear={() => setSelectedIds(new Set())}
+        onSubmitted={() => { setSelectedIds(new Set()); afterAction() }}
       />
     </div>
   )

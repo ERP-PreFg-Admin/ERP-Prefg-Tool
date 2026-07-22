@@ -17,13 +17,11 @@ import { revalidateTag } from "next/cache"
 import { z } from "zod"
 import type { PoolConnection } from "mysql2/promise"
 import { withGateway } from "@/lib/gateway/with-gateway"
-import { query, execute, pool } from "@/lib/db"
-import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
+import { query, pool } from "@/lib/db"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { MODULE_HANDLERS, type DiffItem } from "@/lib/approvals/module-handlers"
 import { APPROVAL_STATUS, STATUS } from "@/lib/constants"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
-import { sendPoEmail } from "@/lib/mailer"
 import logger from "@/lib/logger"
 
 const approvalIdParamSchema = z.object({
@@ -110,26 +108,6 @@ export const POST = withGateway({
     recordProcessedEvent("APPROVAL", eventId, {
       approvalId, module: approval.module, entityId: approval.entity_id, approverId, action,
     })
-
-    // ── Auto-send PO email after impromptu PO approval ────────────────────
-    // Fire-and-forget: don't block the approval response on email/PDF generation.
-    // email_sent_at is stamped after send so the table shows re-send icons.
-    if (action === "approve" && approval.module === "PO") {
-      const poId = approval.entity_id
-      ;(async () => {
-        try {
-          const sent = await sendPoEmail(poId)
-          if (sent) {
-            await execute(purchaseOrdersSql.setEmailSentAt, [poId])
-            logger.info({ ...eventLogCtx, message: "Auto-sent PO email", poId })
-          } else {
-            logger.warn({ ...eventLogCtx, message: "PO approved but manufacturer has no email — skipped auto-send", poId })
-          }
-        } catch (err: any) {
-          logger.error({ ...eventLogCtx, message: "Auto-send PO email failed", poId, error: err.message })
-        }
-      })()
-    }
 
     return NextResponse.json({ ok: true })
   } catch (err: any) {
