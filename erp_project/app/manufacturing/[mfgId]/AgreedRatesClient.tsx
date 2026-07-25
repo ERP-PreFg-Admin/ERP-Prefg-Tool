@@ -6,12 +6,14 @@ import { Badge } from "@/components/ui/badge"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
+import { DownloadButton } from "@/components/masters/DownloadButton"
 import type { AgreedPmRateRow, AgreedRmRateRow } from "@/types/masters"
 import { fmtDate, fmtMoney } from "../mfg-utils"
 
 export default function AgreedRatesClient({
-  rmRows, pmRows,
+  mfgId, rmRows, pmRows,
 }: {
+  mfgId: number
   rmRows: AgreedRmRateRow[]
   pmRows: AgreedPmRateRow[]
 }) {
@@ -19,19 +21,26 @@ export default function AgreedRatesClient({
 
   return (
     <div className="space-y-4 text-xs">
-      <div className="inline-flex rounded-lg border border-input p-0.5 bg-background">
-        {(["rm", "pm"] as const).map((m) => (
-          <button
-            key={m}
-            onClick={() => setMode(m)}
-            className={
-              "rounded-md px-3 py-1.5 text-xs font-medium transition-colors " +
-              (mode === m ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent")
-            }
-          >
-            {m.toUpperCase()}
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-3">
+        <div className="inline-flex rounded-lg border border-input p-0.5 bg-background">
+          {(["rm", "pm"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={
+                "rounded-md px-3 py-1.5 text-xs font-medium transition-colors " +
+                (mode === m ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent")
+              }
+            >
+              {m.toUpperCase()}
+            </button>
+          ))}
+        </div>
+        <DownloadButton
+          endpoint={`/api/manufacturing/${mfgId}/agreed-rates/export`}
+          label={`Agreed ${mode.toUpperCase()} Rates`}
+          extraParams={{ mode }}
+        />
       </div>
 
       <Card>

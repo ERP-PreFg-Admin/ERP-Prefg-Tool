@@ -4,7 +4,7 @@ import { redirect, notFound } from "next/navigation"
 import { timedQuery } from "@/lib/query-timing"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { manufacturers as manufacturersSql } from "@/lib/queries/manufacturers"
-import { getRmVendorByMfg, getRmVendorHistoryByMfg, getAgreedRmRatesByMfg, getAgreedPmRatesByMfg } from "@/lib/cached-reference-data"
+import { getRmVendorByMfg, getRmVendorHistoryByMfg, getPmVendorByMfg, getPmVendorHistoryByMfg, getAgreedRmRatesByMfg, getAgreedPmRatesByMfg } from "@/lib/cached-reference-data"
 import type {
   FinalCostingRow, MfgLine, MfgLineOption,
   MiscCostLine, MiscCostType,
@@ -12,7 +12,7 @@ import type {
 import TabBar, { type MfgTab } from "./TabBar"
 import ManufacturingLinesClient from "./ManufacturingLinesClient"
 import MiscCostClient from "./MiscCostClient"
-import RmVendorTable from "./RmVendorTable"
+import RmVendorTable from "./ApprovedRates"
 import AgreedRatesClient from "./AgreedRatesClient"
 import FinalCostingTable from "./FinalCostingTable"
 
@@ -100,11 +100,13 @@ async function MiscTabContent({ mfgId }: { mfgId: number }) {
 }
 
 async function RmVendorTabContent({ mfgId }: { mfgId: number }) {
-  const [rows, historyRows] = await Promise.all([
+  const [rmRows, rmHistoryRows, pmRows, pmHistoryRows] = await Promise.all([
     getRmVendorByMfg(mfgId),
     getRmVendorHistoryByMfg(mfgId),
+    getPmVendorByMfg(mfgId),
+    getPmVendorHistoryByMfg(mfgId),
   ])
-  return <RmVendorTable rows={rows} historyRows={historyRows} />
+  return <RmVendorTable mfgId={mfgId} rmRows={rmRows} rmHistoryRows={rmHistoryRows} pmRows={pmRows} pmHistoryRows={pmHistoryRows} />
 }
 
 async function AgreedRatesTabContent({ mfgId }: { mfgId: number }) {
@@ -112,7 +114,7 @@ async function AgreedRatesTabContent({ mfgId }: { mfgId: number }) {
     getAgreedRmRatesByMfg(mfgId),
     getAgreedPmRatesByMfg(mfgId),
   ])
-  return <AgreedRatesClient rmRows={rmRows} pmRows={pmRows} />
+  return <AgreedRatesClient mfgId={mfgId} rmRows={rmRows} pmRows={pmRows} />
 }
 
 async function FinalCostingTabContent({ mfgId }: { mfgId: number }) {
@@ -125,14 +127,14 @@ async function FinalCostingTabContent({ mfgId }: { mfgId: number }) {
   const materialByBom = new Map(materialCostRows.map((r) => [r.bom_id, { rm: Number(r.rm_cost), pm: Number(r.pm_cost) }]))
   const miscByBom = new Map<number, Record<MiscCostType, number>>()
   for (const r of miscCostRows) {
-    const entry = miscByBom.get(r.bom_id) ?? { jw: 0, shrink: 0, shipper: 0 }
+    const entry = miscByBom.get(r.bom_id) ?? { jw: 0, shrink: 0, shipper: 0, rm_loss: 0, pm_loss: 0 }
     entry[r.type] = Number(r.cost)
     miscByBom.set(r.bom_id, entry)
   }
 
   const rows: FinalCostingRow[] = lineRows.map((l) => {
     const material = materialByBom.get(l.bom_id) ?? { rm: 0, pm: 0 }
-    const misc = miscByBom.get(l.bom_id) ?? { jw: 0, shrink: 0, shipper: 0 }
+    const misc = miscByBom.get(l.bom_id) ?? { jw: 0, shrink: 0, shipper: 0, rm_loss: 0, pm_loss: 0 }
     const wastage = (material.rm + material.pm) * 0.10
     const total = material.rm + material.pm + wastage + misc.jw + misc.shrink + misc.shipper
     return {

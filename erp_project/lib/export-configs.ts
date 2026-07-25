@@ -172,6 +172,107 @@ export const MFG_LINES_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "this_month_plan", label: "This Month Plan", type: "number" },
 ]
 
+// ── Manufacturing — Approved Procurement Rates (RM/PM toggle) ────────────────
+// Row shapes come straight from manufacturingSql.selectRmVendorByMfg /
+// selectPmVendorByMfg (see app/manufacturing/[mfgId]/ApprovedRates.tsx).
+
+export const MFG_APPROVED_RM_RATES_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: "rm_code",             label: "RM Code",        type: "text"   },
+  { key: "rm_name",              label: "Name",           type: "text"   },
+  { key: "make",                 label: "Make",           type: "text"   },
+  { key: "type",                 label: "Type",           type: "text"   },
+  { key: "approved_vendor_code", label: "Vendor Code",    type: "text"   },
+  { key: "vendor_name",          label: "Vendor Name",    type: "text"   },
+  { key: "curr_rate",            label: "Rate",           type: "number" },
+  { key: "effective_from",       label: "Effective From", type: "date"   },
+  { key: "uom",                  label: "UOM",            type: "text"   },
+  { key: "status",               label: "Status",         type: "text"   },
+]
+
+export const MFG_APPROVED_PM_RATES_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: "pm_code",              label: "PM Code",        type: "text"   },
+  { key: "pm_name",              label: "Name",           type: "text"   },
+  { key: "type",                 label: "Type",           type: "text"   },
+  { key: "approved_vendor_code", label: "Vendor Code",    type: "text"   },
+  { key: "vendor_name",          label: "Vendor Name",    type: "text"   },
+  { key: "curr_rate",            label: "Rate",           type: "number" },
+  { key: "effective_from",       label: "Effective From", type: "date"   },
+  { key: "effective_to",         label: "Effective To",   type: "date"   },
+  { key: "uom",                  label: "UOM",            type: "text"   },
+  { key: "status",                label: "Status",        type: "text"   },
+]
+
+export const MFG_APPROVED_RM_RATES_HISTORY_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: "rm_code",        label: "RM Code",        type: "text"   },
+  { key: "rm_name",        label: "Name",           type: "text"   },
+  { key: "vendor_name",    label: "Vendor Name",    type: "text"   },
+  { key: "rate",           label: "Rate",           type: "number" },
+  { key: "effective_from", label: "Effective From", type: "date"   },
+  { key: "effective_to",   label: "Effective To",   type: "date"   },
+]
+
+export const MFG_APPROVED_PM_RATES_HISTORY_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: "pm_code",        label: "PM Code",        type: "text"   },
+  { key: "pm_name",        label: "Name",           type: "text"   },
+  { key: "vendor_name",    label: "Vendor Name",    type: "text"   },
+  { key: "rate",           label: "Rate",           type: "number" },
+  { key: "effective_from", label: "Effective From", type: "date"   },
+  { key: "effective_to",   label: "Effective To",   type: "date"   },
+]
+
+// ── Manufacturing — Agreed Rates (RM/PM toggle) ───────────────────────────────
+// Row shapes come straight from manufacturingSql.selectAgreedRmRatesByMfg /
+// selectAgreedPmRatesByMfg (see app/manufacturing/[mfgId]/AgreedRatesClient.tsx).
+
+export const MFG_AGREED_RM_RATES_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: "code",           label: "Code",           type: "text"   },
+  { key: "name",           label: "Name",           type: "text"   },
+  { key: "curr_rate",      label: "Rate",           type: "number" },
+  { key: "effective_from", label: "Effective From", type: "date"   },
+  { key: "uom",            label: "UOM",            type: "text"   },
+  { key: "status",         label: "Status",         type: "text"   },
+]
+
+export const MFG_AGREED_PM_RATES_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: "code",           label: "Code",           type: "text"   },
+  { key: "name",           label: "Name",           type: "text"   },
+  { key: "curr_rate",      label: "Rate",           type: "number" },
+  { key: "effective_from", label: "Effective From", type: "date"   },
+  { key: "effective_to",   label: "Effective To",   type: "date"   },
+  { key: "uom",            label: "UOM",            type: "text"   },
+  { key: "status",         label: "Status",         type: "text"   },
+]
+
+// ── Manufacturing — Misc. Cost (Job Work / Shrink Wrap / Shipper / Wastage) ──
+// Row shape comes from manufacturingSql.selectMiscCurrentRatesByMfg (see
+// app/manufacturing/[mfgId]/MiscCostClient.tsx) — one file covers all 4 types,
+// distinguished by the "Type" column.
+
+const MISC_COST_TYPE_LABEL: Record<string, string> = {
+  jw: "Job Work",
+  shrink: "Shrink Wrap",
+  shipper: "Shipper",
+  rm_loss: "RM Wastage %",
+  pm_loss: "PM Wastage %",
+}
+
+export const MISC_COST_CURRENT_RATES_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: "type",           label: "Type",           format: (v) => MISC_COST_TYPE_LABEL[String(v)] ?? String(v) },
+  { key: "sku_code",       label: "SKU Code",       type: "text"   },
+  { key: "sku_name",       label: "SKU Name",       type: "text"   },
+  { key: "bom_code",       label: "BOM Code",       type: "text"   },
+  {
+    // Mixed unit column (currency amount for jw/shrink/shipper, percentage for
+    // rm_loss/pm_loss) — left as "text" so both render as the format() string below
+    // instead of the xlsx writer's number branch, which would apply to only one unit.
+    key: "cost", label: "Cost / Wastage %",
+    format: (v, row) => (row.type === "rm_loss" || row.type === "pm_loss") ? `${Number(v ?? 0).toFixed(2)}%` : Number(v ?? 0).toFixed(2),
+  },
+  { key: "effective_from", label: "Effective From", type: "date"   },
+  { key: "effective_till", label: "Effective Till", type: "date"   },
+  { key: "status",         label: "Status",         type: "text"   },
+]
+
 // ── Manufacturing — Agreed Final Costing ──────────────────────────────────────
 
 export const FINAL_COSTING_EXPORT_COLUMNS: ExportColumn[] = [

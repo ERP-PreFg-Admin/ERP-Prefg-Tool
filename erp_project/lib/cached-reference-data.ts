@@ -22,7 +22,7 @@ import { packingMaterials } from "@/lib/queries/packing-materials"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { skus as skusSql } from "@/lib/queries/skus"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
-import type { Vendor, Mfg, Sku, AgreedPmRateRow, AgreedRmRateRow, RmVendorRow, RmVendorHistoryRow } from "@/types/masters"
+import type { Vendor, Mfg, Sku, AgreedPmRateRow, AgreedRmRateRow, RmVendorRow, RmVendorHistoryRow, PmVendorRow, PmVendorHistoryRow } from "@/types/masters"
 
 const REVALIDATE_SECONDS = 120
 
@@ -126,6 +126,18 @@ export const getRmVendorHistoryByMfg = unstable_cache(
   (mfgId: number) => timedQuery<RmVendorHistoryRow>(manufacturingSql.selectRmVendorHistoryByMfg, [mfgId], { label: "manufacturing.selectRmVendorHistoryByMfg (cached)" }),
   ["ref-mfg-rm-vendor-history"],
   { revalidate: MFG_RATES_REVALIDATE_SECONDS, tags: ["ref:mfg-rm-rates"] }
+)
+
+export const getPmVendorByMfg = unstable_cache(
+  (mfgId: number) => timedQuery<PmVendorRow>(manufacturingSql.selectPmVendorByMfg, [mfgId], { label: "manufacturing.selectPmVendorByMfg (cached)" }),
+  ["ref-mfg-pm-vendor"],
+  { revalidate: MFG_RATES_REVALIDATE_SECONDS, tags: ["ref:mfg-pm-rates"] }
+)
+
+export const getPmVendorHistoryByMfg = unstable_cache(
+  (mfgId: number) => timedQuery<PmVendorHistoryRow>(manufacturingSql.selectPmVendorHistoryByMfg, [mfgId], { label: "manufacturing.selectPmVendorHistoryByMfg (cached)" }),
+  ["ref-mfg-pm-vendor-history"],
+  { revalidate: MFG_RATES_REVALIDATE_SECONDS, tags: ["ref:mfg-pm-rates"] }
 )
 
 export const getAgreedRmRatesByMfg = unstable_cache(

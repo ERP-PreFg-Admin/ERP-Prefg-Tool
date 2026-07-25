@@ -35,9 +35,11 @@ export type CreateMfgLine = z.infer<typeof createMfgLineSchema>
 export type UpdateMfgLine = z.infer<typeof updateMfgLineSchema>
 export type MfgLineAction = z.infer<typeof mfgLineActionSchema>
 
-// ── JW / Shrink Wrap / Shipper costs (bom_misc) ─────────────────────────────
+// ── JW / Shrink Wrap / Shipper / Wastage costs (bom_misc) ────────────────────
+// rm_loss/pm_loss are RM/PM wastage PERCENTAGES stored in the same `cost`
+// column jw/shrink/shipper use for an absolute currency amount.
 
-export const miscCostTypeSchema = z.enum(["jw", "shrink", "shipper"])
+export const miscCostTypeSchema = z.enum(["jw", "shrink", "shipper", "rm_loss", "pm_loss"])
 export const miscCostStatusSchema = z.enum(["active", "inactive", "discontinued"])
 
 export const createMiscCostSchema = z.object({
@@ -60,9 +62,16 @@ export const updateMiscCostSchema = z.object({
   status: miscCostStatusSchema,
 })
 
+/** Bulk CSV import — rows arrive as raw strings (from CsvImportDialog's client-side parse); the route resolves sku_code -> bom_id and coerces cost/status per row. */
+export const bulkMiscCostSchema = z.object({
+  action: z.literal("bulk"),
+  rows: z.array(z.record(z.string(), z.string())),
+})
+
 export const miscCostActionSchema = z.discriminatedUnion("action", [
   createMiscCostSchema,
   updateMiscCostSchema,
+  bulkMiscCostSchema,
 ])
 
 export type CreateMiscCost = z.infer<typeof createMiscCostSchema>

@@ -1,0 +1,69 @@
+// GET /api/manufacturing/[mfgId]/approved-rates/history/export
+//
+// Exports the "Approved Procurement Rates" tab's Rate History table for one
+// manufacturer — same rows as ApprovedRates.tsx's history section, via the
+// same queries (manufacturingSql.selectRmVendorHistoryByMfg /
+// selectPmVendorHistoryByMfg) for parity with what's on screen.
+//
+// Query params:
+//   mode   — "rm" (default) | "pm"
+//   format — "csv" (default) | "xlsx"
+//
+// Responses:
+//   200 — file attachment
+//   401 — unauthenticated · 403 — insufficient access
+//   400 — invalid mfgId · 500 — server error
+
+import { NextResponse } from "next/server"
+import { query } from "@/lib/db"
+import { manufacturingSql } from "@/lib/queries/manufacturing"
+import { withGateway } from "@/lib/gateway/with-gateway"
+import { mfgIdParamSchema } from "@/lib/validation/manufacturing"
+import { buildCsv, buildXlsx, buildExportFilename } from "@/lib/export"
+import { MFG_APPROVED_RM_RATES_HISTORY_EXPORT_COLUMNS, MFG_APPROVED_PM_RATES_HISTORY_EXPORT_COLUMNS } from "@/lib/export-configs"
+import type { RmVendorHistoryRow, PmVendorHistoryRow } from "@/types/masters"
+import logger from "@/lib/logger"
+
+export const GET = withGateway({
+  paramsSchema: mfgIdParamSchema,
+  access: { pageSlug: "/manufacturing", level: "viewer" },
+  handler: async ({ req, params, ctx }) => {
+    const { mfgId } = params
+    const mode   = req.nextUrl.searchParams.get("mode") === "pm" ? "pm" : "rm"
+    const format = req.nextUrl.searchParams.get("format") === "xlsx" ? "xlsx" : "csv"
+
+    try {
+      const rows    = mode === "pm"
+        ? await query<PmVendorHistoryRow>(manufacturingSql.selectPmVendorHistoryByMfg, [mfgId])
+        : await query<RmVendorHistoryRow>(manufacturingSql.selectRmVendorHistoryByMfg, [mfgId])
+      const columns = mode === "pm" ? MFG_APPROVED_PM_RATES_HISTORY_EXPORT_COLUMNS : MFG_APPROVED_RM_RATES_HISTORY_EXPORT_COLUMNS
+      const label   = mode === "pm" ? "PM Rate History" : "RM Rate History"
+
+      const filename = buildExportFilename(`manufacturing_approved_${mode}_rate_history`, format, { mfgId: String(mfgId) })
+      logger.info({ ...ctx, mfgId, mode, rowCount: rows.length, message: "Approved procurement rate history export served" })
+
+      if (format === "xlsx") {
+        const buffer = await buildXlsx(label, columns, rows)
+        return new NextResponse(buffer, {
+          status: 200,
+          headers: {
+            "Content-Type":        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "Content-Disposition": `attachment; filename="${filename}"`,
+          },
+        })
+      }
+
+      const csv = buildCsv(columns, rows)
+      return new NextResponse(csv, {
+        status: 200,
+        headers: {
+          "Content-Type":        "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${filename}"`,
+        },
+      })
+    } catch (err: any) {
+      logger.error({ ...ctx, mfgId, mode, error: err.message, message: "Approved procurement rate history export failed" })
+      return NextResponse.json({ error: "Export failed" }, { status: 500 })
+    }
+  },
+})

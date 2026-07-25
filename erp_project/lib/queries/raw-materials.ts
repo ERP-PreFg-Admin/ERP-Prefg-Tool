@@ -487,6 +487,26 @@ export const rawMaterials = {
     FROM rm_vrm_dynamic WHERE id = ? LIMIT 1
   `,
 
+  /** Full archived rate history for one RM×Vendor pair from history_vrm, newest first.
+   *  Parameters: [rm_id, vendor_id]
+   */
+  selectVendorRateHistory: `
+    SELECT id, rate, effective_from, effective_to, updated_on, status
+    FROM history_vrm
+    WHERE mtrl_type = 'rm' AND mtrl_id = ? AND vendor_id = ?
+    ORDER BY updated_on DESC, id DESC
+  `,
+
+  /** Full archived rate history for one RM×Manufacturer pair from history_mrm, newest first.
+   *  Parameters: [rm_id, mfg_id]
+   */
+  selectMfgRateHistory: `
+    SELECT id, rate, effective_from, effective_to, updated_on, status
+    FROM history_mrm
+    WHERE mtrl_type = 'rm' AND mtrl_id = ? AND mfg_id = ?
+    ORDER BY updated_on DESC, id DESC
+  `,
+
   // ── Approval-flow helpers ────────────────────────────────────────────────
 
   /** Set status on a rm_mrm_fixed rate row (e.g. 'in_review', 'draft', 'active').

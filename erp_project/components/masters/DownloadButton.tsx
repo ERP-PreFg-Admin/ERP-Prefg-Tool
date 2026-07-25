@@ -17,6 +17,10 @@
  *     endpoint="/api/masters/skus/export"
  *     label="SKUs"
  *   />
+ *
+ * `extraParams` merges in query params that aren't part of the URL (e.g. an
+ * RM/PM toggle held in local component state rather than useSearchParams) —
+ * set after the current URL's params so they can override same-named keys.
  */
 
 import { useState } from "react"
@@ -30,9 +34,11 @@ type DownloadButtonProps = {
   /** Entity label shown in button titles, e.g. "SKUs" */
   label: string
   disabled?: boolean
+  /** Extra query params to merge in, e.g. { mode: "rm" } for a local toggle */
+  extraParams?: Record<string, string>
 }
 
-export function DownloadButton({ endpoint, label, disabled }: DownloadButtonProps) {
+export function DownloadButton({ endpoint, label, disabled, extraParams }: DownloadButtonProps) {
   const searchParams          = useSearchParams()
   const [loading, setLoading] = useState<"csv" | "xlsx" | null>(null)
 
@@ -44,6 +50,9 @@ export function DownloadButton({ endpoint, label, disabled }: DownloadButtonProp
     const params = new URLSearchParams(searchParams.toString())
     params.delete("page")
     params.delete("size")
+    if (extraParams) {
+      for (const [key, value] of Object.entries(extraParams)) params.set(key, value)
+    }
     params.set("format", format)
 
     // window.location.href triggers a native browser download without navigating

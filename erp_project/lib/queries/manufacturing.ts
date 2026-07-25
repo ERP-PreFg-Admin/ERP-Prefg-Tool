@@ -117,9 +117,11 @@ export const manufacturingSql = {
     SELECT id, bom_id, mfg_id FROM master_bom_mfg WHERE id = ? LIMIT 1
   `,
 
-  // ── Misc. Cost: JW / Shrink Wrap / Shipper (bom_misc) ─────────────────────
+  // ── Misc. Cost: JW / Shrink Wrap / Shipper / Wastage (bom_misc) ────────────
+  // rm_loss/pm_loss hold a wastage PERCENTAGE in the same `cost` column
+  // jw/shrink/shipper use for an absolute currency amount.
 
-  /** All JW/Shrink/Shipper lines for one manufacturer — the client toggles between types. Params: [mfg_id] */
+  /** All JW/Shrink/Shipper/Wastage lines for one manufacturer — the client toggles between types. Params: [mfg_id] */
   selectMiscByMfg: `
     SELECT
       bm.id, bm.bom_id, bm.mfg_id, bm.type, bm.cost,
@@ -128,11 +130,23 @@ export const manufacturingSql = {
     FROM bom_misc bm
     INNER JOIN master_bom  b  ON b.id  = bm.bom_id
     LEFT  JOIN master_skus sk ON sk.id = b.sku_id
-    WHERE bm.mfg_id = ? AND bm.type IN ('jw', 'shrink', 'shipper')
+    WHERE bm.mfg_id = ? AND bm.type IN ('jw', 'shrink', 'shipper', 'rm_loss', 'pm_loss')
     ORDER BY sk.sku_code ASC
   `,
 
-  /** SKU/BOM options scoped to lines this manufacturer already produces (for the JW/Shrink/Shipper "Add" dialog). Params: [mfg_id] */
+  /** Current (active) JW/Shrink/Shipper/Wastage lines for one manufacturer, across all types — for the "Download CSV/Excel" export. Params: [mfg_id] */
+  selectMiscCurrentRatesByMfg: `
+    SELECT
+      bm.type, b.bom_code, sk.sku_code, sk.name AS sku_name,
+      bm.cost, bm.effective_from, bm.effective_till, bm.status
+    FROM bom_misc bm
+    INNER JOIN master_bom  b  ON b.id  = bm.bom_id
+    LEFT  JOIN master_skus sk ON sk.id = b.sku_id
+    WHERE bm.mfg_id = ? AND bm.status = 'active'
+    ORDER BY bm.type ASC, sk.sku_code ASC
+  `,
+
+  /** SKU/BOM options scoped to lines this manufacturer already produces (for the JW/Shrink/Shipper/Wastage "Add" dialog). Params: [mfg_id] */
   selectMfgLineOptions: `
     SELECT DISTINCT mbm.bom_id AS id, b.bom_code, sk.sku_code, sk.name AS sku_name
     FROM master_bom_mfg mbm
@@ -140,6 +154,16 @@ export const manufacturingSql = {
     LEFT  JOIN master_skus sk ON sk.id = b.sku_id
     WHERE mbm.mfg_id = ?
     ORDER BY sk.sku_code ASC
+  `,
+
+  /** Resolve one SKU code to the bom_id this manufacturer produces it under — for the bulk misc-cost CSV importer. Params: [mfg_id, sku_code] */
+  selectMfgLineBySkuCode: `
+    SELECT DISTINCT mbm.bom_id AS id
+    FROM master_bom_mfg mbm
+    INNER JOIN master_bom  b  ON b.id  = mbm.bom_id
+    LEFT  JOIN master_skus sk ON sk.id = b.sku_id
+    WHERE mbm.mfg_id = ? AND sk.sku_code = ?
+    LIMIT 1
   `,
 
   /**
@@ -198,6 +222,45 @@ export const manufacturingSql = {
     LEFT  JOIN master_vendors v ON v.id = h.vendor_id
     WHERE h.mfg_id = ? AND h.mtrl_type = 'rm'
     ORDER BY r.rm_code ASC, h.effective_from DESC
+  `,
+
+  /**
+   * PM×mfg rates for the Approved Procurement Rates tab. pm_mrm_fixed has no
+   * approved-vendor column (unlike rm_mrm_fixed), so the vendor is resolved
+   * the same "best effort" way pmRateHandler.applyAndArchive does: whichever
+   * active pm_vrm_dynamic row exists for that PM, picked via a correlated
+   * subquery so a PM with several active vendor rows still returns one row
+   * here instead of fanning out. Params: [mfg_id]
+   */
+  selectPmVendorByMfg: `
+    SELECT
+      p.pm_code, p.name AS pm_name, p.type,
+      vv.vendor_code AS approved_vendor_code, v.name AS vendor_name,
+      pmm.curr_rate, pmm.effective_from, pmm.effective_to, pmm.uom, pmm.status
+    FROM pm_mrm_fixed pmm
+    INNER JOIN master_pm p ON p.id = pmm.pm_id
+    LEFT  JOIN pm_vrm_dynamic vv ON vv.id = (
+      SELECT id FROM pm_vrm_dynamic WHERE pm_id = pmm.pm_id AND status = 'active' ORDER BY id LIMIT 1
+    )
+    LEFT  JOIN master_vendors v ON v.id = vv.vendor_id
+    WHERE pmm.mfg_id = ?
+    ORDER BY p.pm_code ASC
+  `,
+
+  /**
+   * Past PM×vendor rate periods for this manufacturer (history_mrm mirrors
+   * selectRmVendorHistoryByMfg but filters mtrl_type = 'pm'). Params: [mfg_id]
+   */
+  selectPmVendorHistoryByMfg: `
+    SELECT
+      p.pm_code, p.name AS pm_name,
+      v.name AS vendor_name,
+      h.rate, h.effective_from, h.effective_to
+    FROM history_mrm h
+    INNER JOIN master_pm p ON p.id = h.mtrl_id
+    LEFT  JOIN master_vendors v ON v.id = h.vendor_id
+    WHERE h.mfg_id = ? AND h.mtrl_type = 'pm'
+    ORDER BY p.pm_code ASC, h.effective_from DESC
   `,
 
   // ── Agreed Rates (read-only, RM/PM toggle) ────────────────────────────────

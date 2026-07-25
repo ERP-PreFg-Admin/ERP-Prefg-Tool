@@ -1,14 +1,18 @@
 // POST /api/manufacturing/misc-costs
 //
 // Create or update a bom_misc line — a manufacturer's per-SKU Job Work /
-// Shrink Wrap / Shipper cost. No approval flow, same directness as
+// Shrink Wrap / Shipper / Wastage cost. No approval flow, same directness as
 // /api/manufacturing/lines.
+//
+// The "bulk" action (used by CsvImportDialog) additionally requires a
+// `mfg_id` query param — every bom_misc row is scoped to one manufacturer,
+// which the manufacturing page already knows, so it isn't repeated per CSV row.
 
 import { NextResponse } from "next/server"
 import { execute, query } from "@/lib/db"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
-import { miscCostActionSchema } from "@/lib/validation/manufacturing"
+import { miscCostActionSchema, miscCostTypeSchema } from "@/lib/validation/manufacturing"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
@@ -16,7 +20,7 @@ import logger from "@/lib/logger"
 export const POST = withGateway({
   schema: miscCostActionSchema,
   access: { pageSlug: "/manufacturing", level: "editor" },
-  handler: async ({ body, ctx }) => {
+  handler: async ({ req, body, ctx }) => {
     if (body.action === "create-misc") {
       const eventId = makeEventId("MFG_MISC_COST", "create", `${body.mfg_id}-${body.bom_id}-${body.type}`)
       const logCtx = { ...ctx, eventId, module: "MFG_MISC_COST_CREATE" }
@@ -73,6 +77,60 @@ export const POST = withGateway({
         throw new ApiError(500, "internal", "Database error")
       }
     }
+
+    // action === "bulk" — CSV import of Job Work / Shrink Wrap / Shipper / Wastage lines,
+    // scoped to one manufacturer (mfg_id query param) rather than one per CSV row.
+    if (body.action === "bulk") {
+      const mfgId = Number(req.nextUrl.searchParams.get("mfg_id"))
+      if (!Number.isFinite(mfgId) || mfgId <= 0) {
+        throw new ApiError(400, "validation_error", "Missing or invalid mfg_id query param")
+      }
+
+      const eventId = makeEventId("MFG_MISC_COST_BULK", "create", String(mfgId))
+      const logCtx = { ...ctx, eventId, module: "MFG_MISC_COST_BULK" }
+      logger.info({ ...logCtx, mfgId, rowCount: body.rows.length, message: "Misc. cost bulk upload started" })
+      recordRawEvent("MFG_MISC_COST_BULK", eventId, { mfgId, rowCount: body.rows.length })
+
+      let inserted = 0
+      let skipped = 0
+      const skipReasons: string[] = []
+
+      for (const row of body.rows) {
+        const skuCode = row.sku_code?.trim()
+        const typeParsed = miscCostTypeSchema.safeParse(row.type?.trim())
+        const cost = Number(row.cost)
+        const effectiveFrom = row.effective_from?.trim()
+        const effectiveTill = row.effective_till?.trim() || null
+        const status = row.status?.trim() || "active"
+
+        if (!skuCode || !typeParsed.success || !Number.isFinite(cost) || !effectiveFrom) {
+          skipped++
+          skipReasons.push(`${skuCode || "(blank)"}: missing/invalid required field`)
+          continue
+        }
+
+        const lineRows = await query<{ id: number }>(manufacturingSql.selectMfgLineBySkuCode, [mfgId, skuCode])
+        const bomId = lineRows[0]?.id
+        if (!bomId) {
+          skipped++
+          skipReasons.push(`${skuCode}: not linked to this manufacturer`)
+          continue
+        }
+
+        try {
+          await execute(manufacturingSql.insertMisc, [bomId, mfgId, typeParsed.data, cost, effectiveFrom, effectiveTill, status])
+          inserted++
+        } catch (err: any) {
+          skipped++
+          skipReasons.push(`${skuCode}: ${err.message}`)
+        }
+      }
+
+      logger.info({ ...logCtx, mfgId, inserted, skipped, message: "Misc. cost bulk upload finished" })
+      recordProcessedEvent("MFG_MISC_COST_BULK", eventId, { mfgId, inserted, skipped, skipReasons })
+      return NextResponse.json({ ok: true, inserted, skipped })
+    }
+
     return NextResponse.json({ ok: false, error: "Invalid action" }, { status: 400 })
   },
 })

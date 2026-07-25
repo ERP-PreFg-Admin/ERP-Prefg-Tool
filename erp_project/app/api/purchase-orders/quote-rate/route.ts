@@ -48,7 +48,7 @@ export const GET = withGateway({
 
     const rm = Number(material.rm_cost)
     const pm = Number(material.pm_cost)
-    const misc: Record<MiscCostType, number> = { jw: 0, shrink: 0, shipper: 0 }
+    const misc: Record<MiscCostType, number> = { jw: 0, shrink: 0, shipper: 0, rm_loss: 0, pm_loss: 0 }
     for (const r of miscCostRows) {
       if (r.bom_id === line.bom_id) misc[r.type] = Number(r.cost)
     }

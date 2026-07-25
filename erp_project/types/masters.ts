@@ -306,10 +306,10 @@ export type MfgOverviewRow = {
   open_value: number
 }
 
-/** `bom_misc` cost type — job work, shrink wrap, shipper (plus utility/margin/rm_loss, unused by this UI). */
-export type MiscCostType = "jw" | "shrink" | "shipper"
+/** `bom_misc` cost type — job work, shrink wrap, shipper (absolute cost); rm_loss/pm_loss (RM/PM wastage %, stored in the same `cost` column). */
+export type MiscCostType = "jw" | "shrink" | "shipper" | "rm_loss" | "pm_loss"
 
-/** `bom_misc` joined with `master_bom`/`master_skus`. Used by the JW/Shrink Wrap/Shipper tabs. */
+/** `bom_misc` joined with `master_bom`/`master_skus`. Used by the JW/Shrink Wrap/Shipper/Wastage tabs. */
 export type MiscCostLine = {
   id: number
   bom_id: number
@@ -322,6 +322,18 @@ export type MiscCostLine = {
   bom_code: string | null
   sku_code: string | null
   sku_name: string | null
+}
+
+/** Current (active) bom_misc line across all 4 cost types for one manufacturer — used by the misc-costs CSV/Excel export. */
+export type MiscCostCurrentRateRow = {
+  type: MiscCostType
+  bom_code: string | null
+  sku_code: string | null
+  sku_name: string | null
+  cost: string | null
+  effective_from: string | null
+  effective_till: string | null
+  status: string
 }
 
 /** SKU/BOM option scoped to lines a manufacturer already produces — for the JW/Shrink/Shipper "Add" dialog. */
@@ -345,6 +357,31 @@ export type RmVendorRow = {
 export type RmVendorHistoryRow = {
   rm_code: string | null
   rm_name: string
+  vendor_name: string | null
+  rate: string | null
+  effective_from: string | null
+  effective_to: string | null
+}
+
+/** PM×vendor rate row for one manufacturer — pm_mrm_fixed has no approved-vendor column, so the
+ * vendor shown is whichever active pm_vrm_dynamic row exists for that PM (same "best effort"
+ * vendor resolution used by pmRateHandler.applyAndArchive when archiving history). */
+export type PmVendorRow = {
+  pm_code: string | null
+  pm_name: string
+  type: string | null
+  approved_vendor_code: string | null
+  vendor_name: string | null
+  curr_rate: string | null
+  effective_from: string | null
+  effective_to: string | null
+  uom: string | null
+  status: string
+}
+
+export type PmVendorHistoryRow = {
+  pm_code: string | null
+  pm_name: string
   vendor_name: string | null
   rate: string | null
   effective_from: string | null

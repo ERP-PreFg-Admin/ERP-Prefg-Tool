@@ -40,14 +40,14 @@ export const GET = withGateway({
       const materialByBom = new Map(materialCostRows.map((r) => [r.bom_id, { rm: Number(r.rm_cost), pm: Number(r.pm_cost) }]))
       const miscByBom = new Map<number, Record<MiscCostType, number>>()
       for (const r of miscCostRows) {
-        const entry = miscByBom.get(r.bom_id) ?? { jw: 0, shrink: 0, shipper: 0 }
+        const entry = miscByBom.get(r.bom_id) ?? { jw: 0, shrink: 0, shipper: 0, rm_loss: 0, pm_loss: 0 }
         entry[r.type] = Number(r.cost)
         miscByBom.set(r.bom_id, entry)
       }
 
       const rows: FinalCostingRow[] = lineRows.map((l) => {
         const material = materialByBom.get(l.bom_id) ?? { rm: 0, pm: 0 }
-        const misc = miscByBom.get(l.bom_id) ?? { jw: 0, shrink: 0, shipper: 0 }
+        const misc = miscByBom.get(l.bom_id) ?? { jw: 0, shrink: 0, shipper: 0, rm_loss: 0, pm_loss: 0 }
         const wastage = (material.rm + material.pm) * 0.10
         const total = material.rm + material.pm + wastage + misc.jw + misc.shrink + misc.shipper
         return {

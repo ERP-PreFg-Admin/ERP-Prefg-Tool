@@ -418,4 +418,24 @@ export const packingMaterials = {
     SELECT id, pm_id, vendor_id, curr_rate, moq, uom, effective_from, effective_to, status
     FROM pm_vrm_dynamic WHERE id = ? LIMIT 1
   `,
+
+  /** Full archived rate history for one PM×Vendor pair from history_vrm, newest first.
+   *  Parameters: [pm_id, vendor_id]
+   */
+  selectVendorRateHistory: `
+    SELECT id, rate, effective_from, effective_to, updated_on, status
+    FROM history_vrm
+    WHERE mtrl_type = 'pm' AND mtrl_id = ? AND vendor_id = ?
+    ORDER BY updated_on DESC, id DESC
+  `,
+
+  /** Full archived rate history for one PM×Manufacturer pair from history_mrm, newest first.
+   *  Parameters: [pm_id, mfg_id]
+   */
+  selectMfgRateHistory: `
+    SELECT id, rate, effective_from, effective_to, updated_on, status
+    FROM history_mrm
+    WHERE mtrl_type = 'pm' AND mtrl_id = ? AND mfg_id = ?
+    ORDER BY updated_on DESC, id DESC
+  `,
 }

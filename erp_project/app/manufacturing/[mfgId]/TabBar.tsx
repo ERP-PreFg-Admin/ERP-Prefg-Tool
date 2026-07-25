@@ -13,7 +13,7 @@ const TABS: { key: MfgTab; label: string; countKey?: "active" | "on_hold" | "tec
   { key: "on_hold",       label: "Stopped / On Hold",   countKey: "on_hold" },
   { key: "tech_transfer", label: "Tech Transfers",      countKey: "tech_transfer" },
   { key: "misc_cost",     label: "Misc. Cost" },
-  { key: "rm_vendor",     label: "RM Vendor" },
+  { key: "rm_vendor",     label: "Approved Procurement Rates" },
   { key: "agreed_rates",  label: "Agreed Rates" },
   { key: "final_costing", label: "Agreed Final Costing" },
 ]
