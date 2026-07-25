@@ -1,0 +1,58 @@
+/**
+ * Generic per-module audit trail — `history_masters_edits`.
+ *
+ * Populated alongside (not instead of) the `approvals`/`approval_items`
+ * pending-review mechanism: one row is inserted per create/edit/delete
+ * submission, then approve/reject updates that SAME row's status/approved_by/
+ * approved_on in place. Any module can adopt this by inserting on submit and
+ * letting the shared approve/reject route resolve the pending row — see
+ * lib/master-routes/history-utils.ts.
+ */
+
+export const historySql = {
+  /** Parameters: [module, entity_id] */
+  nextVersion: `
+    SELECT COALESCE(MAX(version_no), 0) + 1 AS next
+    FROM history_masters_edits
+    WHERE module = ? AND entity_id = ?
+  `,
+
+  /**
+   * Insert one audit-trail row for a create/edit/delete submission.
+   * created_on is stored as IST — the DB session runs in UTC.
+   * Parameters: [module, entity_id, action_type, remarks, created_by, version_no]
+   */
+  insert: `
+    INSERT INTO history_masters_edits
+      (module, entity_id, action_type, remarks, created_by, created_on, version_no)
+    VALUES (?, ?, ?, ?, ?, CONVERT_TZ(NOW(), '+00:00', '+05:30'), ?)
+  `,
+
+  /**
+   * Resolve the most recent pending row for this entity to approved/rejected.
+   * approved_on is stored as IST. Parameters: [status, approved_by, module, entity_id]
+   */
+  resolvePending: `
+    UPDATE history_masters_edits
+    SET status = ?, approved_by = ?, approved_on = CONVERT_TZ(NOW(), '+00:00', '+05:30')
+    WHERE module = ? AND entity_id = ? AND status = 'pending'
+    ORDER BY created_on DESC, id DESC
+    LIMIT 1
+  `,
+
+  /** Full audit trail for one entity, newest first, with human-readable names.
+   *  id DESC breaks ties within the same second — created_on is DATETIME(0).
+   *  Parameters: [module, entity_id] */
+  selectForEntity: `
+    SELECT
+      h.id, h.action_type, h.remarks, h.status, h.version_no,
+      h.created_on, h.approved_on,
+      cu.name AS created_by_name,
+      au.name AS approved_by_name
+    FROM history_masters_edits h
+    LEFT JOIN users cu ON cu.id = h.created_by
+    LEFT JOIN users au ON au.id = h.approved_by
+    WHERE h.module = ? AND h.entity_id = ?
+    ORDER BY h.created_on DESC, h.id DESC
+  `,
+}
