@@ -1,13 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
-import type { MfgOverviewRow } from "@/types/masters"
+import type { MfgMonthlyPoRow, MfgOverviewRow } from "@/types/masters"
 import { fillRate, fmtInt, fmtMoney, seriesBarClass } from "./mfg-utils"
 
 function StatBlock({ label, value }: { label: string; value: string | number }) {
@@ -19,8 +19,41 @@ function StatBlock({ label, value }: { label: string; value: string | number }) 
   )
 }
 
-function MfgCard({ row }: { row: MfgOverviewRow }) {
-  const utilised = fillRate(row.this_month_plan, row.capacity)
+function MonthlyPoMiniTable({ rows }: { rows: MfgMonthlyPoRow[] }) {
+  if (rows.length === 0) {
+    return <p className="text-[11px] text-muted-foreground">No POs raised this month.</p>
+  }
+  return (
+    <div className="max-h-24 overflow-y-auto rounded-md border border-border">
+      <table className="w-full text-[11px]">
+        <thead className="sticky top-0 bg-muted/50">
+          <tr>
+            <th className="px-2 py-1 text-left font-medium text-muted-foreground">SKU</th>
+            <th className="px-2 py-1 text-right font-medium text-muted-foreground">PO Qty</th>
+            <th className="px-2 py-1 text-right font-medium text-muted-foreground">Recv. Qty</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} className="border-t border-border">
+              <td className="px-2 py-1 max-w-20 truncate" title={r.sku_name ?? undefined}>{r.sku_code ?? "—"}</td>
+              <td className="px-2 py-1 text-right tabular-nums">{fmtInt(r.po_qty)}</td>
+              <td className="px-2 py-1 text-right tabular-nums">{fmtInt(r.received_qty)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function MfgCard({ row, monthlyPoRows }: { row: MfgOverviewRow; monthlyPoRows: MfgMonthlyPoRow[] }) {
+  // Fill rate = this month's received qty / PO qty, across every SKU this
+  // manufacturer produces — not the capacity-based utilisation the MFG
+  // Comparison table's "Fill Rate" column below still uses.
+  const poQtyTotal = monthlyPoRows.reduce((sum, r) => sum + Number(r.po_qty ?? 0), 0)
+  const receivedQtyTotal = monthlyPoRows.reduce((sum, r) => sum + Number(r.received_qty ?? 0), 0)
+  const fillPct = fillRate(receivedQtyTotal, poQtyTotal)
 
   return (
     <Link href={`/manufacturing/${row.id}`}>
@@ -31,16 +64,21 @@ function MfgCard({ row }: { row: MfgOverviewRow }) {
               <div className="font-semibold text-sm">{row.name}</div>
               <div className="text-[11px] text-muted-foreground font-mono">{row.code}</div>
             </div>
-            <Badge variant={utilised >= 90 ? "success" : utilised >= 60 ? "warning" : "secondary"}>
-              {utilised}% utilised
+            <Badge variant={fillPct >= 90 ? "success" : fillPct >= 60 ? "warning" : "secondary"}>
+              {fillPct}% fill rate
             </Badge>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <StatBlock label="Monthly Capacity" value={fmtInt(row.capacity)} />
-            <StatBlock label="This Month Plan" value={fmtInt(row.this_month_plan)} />
+            {/* <StatBlock label="Monthly Capacity" value={fmtInt(row.capacity)} /> */}
+            {/* <StatBlock label="This Month Plan" value={fmtInt(row.this_month_plan)} /> */}
             <StatBlock label="Active SKUs" value={fmtInt(row.active_skus)} />
             <StatBlock label="Open POs" value={fmtInt(row.open_pos)} />
+          </div>
+
+          <div>
+            <div className="text-[11px] text-muted-foreground mb-1">POs This Month</div>
+            <MonthlyPoMiniTable rows={monthlyPoRows} />
           </div>
         </CardContent>
       </Card>
@@ -50,10 +88,25 @@ function MfgCard({ row }: { row: MfgOverviewRow }) {
 
 const CARD_CAP = 6
 
-export default function ManufacturingOverviewClient({ rows }: { rows: MfgOverviewRow[] }) {
+export default function ManufacturingOverviewClient({
+  rows, monthlyPoRows,
+}: {
+  rows: MfgOverviewRow[]
+  monthlyPoRows: MfgMonthlyPoRow[]
+}) {
   const [showAllCards, setShowAllCards] = useState(false)
   const totalPlan = rows.reduce((sum, r) => sum + Number(r.this_month_plan ?? 0), 0)
   const maxPlan = Math.max(1, ...rows.map((r) => Number(r.this_month_plan ?? 0)))
+
+  const monthlyPoByMfg = useMemo(() => {
+    const map = new Map<number, MfgMonthlyPoRow[]>()
+    for (const r of monthlyPoRows) {
+      const list = map.get(r.mfg_id) ?? []
+      list.push(r)
+      map.set(r.mfg_id, list)
+    }
+    return map
+  }, [monthlyPoRows])
 
   if (rows.length === 0) {
     return (
@@ -77,7 +130,7 @@ export default function ManufacturingOverviewClient({ rows }: { rows: MfgOvervie
       <div className="space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {visibleCards.map((row) => (
-            <MfgCard key={row.id} row={row} />
+            <MfgCard key={row.id} row={row} monthlyPoRows={monthlyPoByMfg.get(row.id) ?? []} />
           ))}
         </div>
         {overflowCount > 0 && (

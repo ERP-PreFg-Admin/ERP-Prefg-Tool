@@ -107,6 +107,22 @@ export const purchaseOrdersSql = {
     ${FULL_WHERE}
   `,
 
+  /**
+   * Every PO matching the full WHERE, unpaginated — for the CSV/Excel export
+   * (which must return all rows a filtered/searched view would page through,
+   * not just the current page). Params: buildFilterParams(...)  (21 total)
+   */
+  buildSelectFiltered(sortBy = "date", sortDir: "asc" | "desc" = "desc"): string {
+    const col = SAFE_SORT_COLS[sortBy] ?? "po.date"
+    const dir = sortDir === "asc" ? "ASC" : "DESC"
+    return `
+      ${SELECT_COLS}
+      ${FROM_JOINS}
+      ${FULL_WHERE}
+      ORDER BY ${col} ${dir}, po.id ${dir}
+    `
+  },
+
   /** Per-status counts for tab badges (ignores status param). Params: buildStatusCountParams(...)  (18 total) */
   statusCounts: `
     SELECT ${EFFECTIVE_STATUS_EXPR} AS status, COUNT(*) AS cnt
@@ -235,6 +251,48 @@ export const purchaseOrdersSql = {
     SET mfg_id = ?, sku_code = ?, qty = ?, unit_price = ?, total_amount = ?,
         expected_on = ?, destination = ?
     WHERE id = ?
+  `,
+
+  // ── PO Bulk Upload — create-or-update by po_no, + history_pos audit trail ──
+
+  /** Look up an existing PO by its unique po_no — used by the bulk CSV importer to decide create vs. update. Params: [po_no] */
+  selectByPoNo: `
+    SELECT id, po_no, status, expected_on, destination
+    FROM purchase_orders
+    WHERE po_no = ?
+    LIMIT 1
+  `,
+
+  /**
+   * Update only the 3 fields the bulk CSV importer is allowed to edit on an
+   * existing PO (status, expected_on, destination) — qty/rate/etc. are
+   * deliberately out of reach here; use updateDraft for a full field edit.
+   * Parameters: [status, expected_on, destination, id]
+   */
+  updatePoStatusFields: `
+    UPDATE purchase_orders
+    SET status = ?, expected_on = ?, destination = ?
+    WHERE id = ?
+  `,
+
+  /**
+   * Record one history_pos row. For a "create" action, field_name/old_value/
+   * new_value are all null (one summary row per new PO); for an "update"
+   * action, one row per changed field. Params: [po_id, po_no, action_type, field_name, old_value, new_value, s3_key, changed_by]
+   */
+  insertPoHistory: `
+    INSERT INTO history_pos (po_id, po_no, action_type, field_name, old_value, new_value, s3_key, changed_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `,
+
+  /** All history_pos entries for one PO, newest first — shown in PoTable's Actions menu. Params: [po_id] */
+  selectPoHistoryByPoId: `
+    SELECT h.id, h.action_type, h.field_name, h.old_value, h.new_value, h.changed_on,
+           u.name AS changed_by_name
+    FROM history_pos h
+    LEFT JOIN users u ON u.id = h.changed_by
+    WHERE h.po_id = ?
+    ORDER BY h.changed_on DESC, h.id DESC
   `,
 
   /**

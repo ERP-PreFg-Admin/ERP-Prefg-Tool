@@ -45,6 +45,44 @@ export const manufacturingSql = {
   `,
 
   /**
+   * This calendar month's PO qty vs received qty per SKU, for one
+   * manufacturer's detail page header. Draft/cancelled/rejected POs never
+   * became a real commitment, so they're excluded — everything else
+   * (raised through received) counts toward "ordered this month" even if
+   * still in flight. Uses CURDATE() rather than an app-computed date range
+   * since `date` is itself written via CURDATE() at PO insert time (see
+   * purchaseOrdersSql.insert/insertNormal) — same DB clock on both ends.
+   * Params: [mfg_id]
+   */
+  selectMonthlyPoSummaryByMfg: `
+    SELECT
+      po.mfg_id, po.sku_code, sk.name AS sku_name,
+      SUM(po.qty) AS po_qty,
+      SUM(COALESCE(po.received_qty, 0)) AS received_qty
+    FROM purchase_orders po
+    LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
+    WHERE po.mfg_id = ?
+      AND po.status NOT IN ('draft', 'cancelled', 'rejected')
+      AND YEAR(po.date) = YEAR(CURDATE()) AND MONTH(po.date) = MONTH(CURDATE())
+    GROUP BY po.mfg_id, po.sku_code, sk.name
+    ORDER BY sk.name ASC
+  `,
+
+  /** Same as selectMonthlyPoSummaryByMfg but across every manufacturer at once — for the MFG Overview cards' mini table. */
+  selectMonthlyPoSummaryAllMfgs: `
+    SELECT
+      po.mfg_id, po.sku_code, sk.name AS sku_name,
+      SUM(po.qty) AS po_qty,
+      SUM(COALESCE(po.received_qty, 0)) AS received_qty
+    FROM purchase_orders po
+    LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
+    WHERE po.status NOT IN ('draft', 'cancelled', 'rejected')
+      AND YEAR(po.date) = YEAR(CURDATE()) AND MONTH(po.date) = MONTH(CURDATE())
+    GROUP BY po.mfg_id, po.sku_code, sk.name
+    ORDER BY sk.name ASC
+  `,
+
+  /**
    * One row per active manufacturer with aggregated production + PO stats.
    * Production-share / fill-rate percentages are derived in application code
    * from these sums, not stored.
@@ -153,6 +191,20 @@ export const manufacturingSql = {
     INNER JOIN master_bom  b  ON b.id  = mbm.bom_id
     LEFT  JOIN master_skus sk ON sk.id = b.sku_id
     WHERE mbm.mfg_id = ?
+    ORDER BY sk.sku_code ASC
+  `,
+
+  /**
+   * Active SKUs this manufacturer currently produces (active production
+   * line + active SKU) — used by the PO Procurement "Add PO" dialog once a
+   * manufacturer is picked, to list orderable SKUs as rows. Params: [mfg_id]
+   */
+  selectActiveSkusForMfg: `
+    SELECT DISTINCT sk.sku_code, sk.name AS sku_name
+    FROM master_bom_mfg mbm
+    INNER JOIN master_bom  b  ON b.id  = mbm.bom_id
+    INNER JOIN master_skus sk ON sk.id = b.sku_id
+    WHERE mbm.mfg_id = ? AND mbm.status = 'active' AND sk.status = 'active'
     ORDER BY sk.sku_code ASC
   `,
 

@@ -2,22 +2,24 @@
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useMemo, useState } from "react"
-import { Filter, Mail, Plus, Upload, X } from "lucide-react"
+import { Filter, Mail, Plus, X } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
+import { DownloadButton } from "@/components/masters/DownloadButton"
+import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { cn } from "@/lib/utils"
 
 import type { MfgOption, PoRow, SkuOption, TabKey, WarehouseOption } from "./po-types"
 import { STATUS_CONFIG, STATUS_KEYS, TABS } from "./po-types"
 import { fmtInt, fmtMoney } from "./po-utils"
+import { PO_BULK_CSV_FIELDS } from "./po-bulk-fields"
 import PoTable from "./PoTable"
 import AddPODialog from "./AddPODialog"
 import ImpromptuPODialog from "./ImpromptuPODialog"
-import PoBulkUploadDialog from "./PoBulkUploadDialog"
 import SplitPODialog from "./SplitPODialog"
 import PoSelectionBar from "./PoSelectionBar"
 
@@ -85,7 +87,6 @@ export default function PoProcurementClient({
   const searchParams = useSearchParams()
 
   const [showAddPO,    setShowAddPO]    = useState(false)
-  const [showBulk,     setShowBulk]     = useState(false)
   const [showFilters,  setShowFilters]  = useState(false)
   const [editTarget,   setEditTarget]   = useState<PoRow | null>(null)
   const [splitTarget,  setSplitTarget]  = useState<PoRow | null>(null)
@@ -197,18 +198,23 @@ export default function PoProcurementClient({
             </span>
           )}
         </button>
-        <button
-          onClick={() => setShowBulk(true)}
-          className="inline-flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3 text-xs font-medium hover:bg-accent transition-colors"
-        >
-          <Upload className="h-3.5 w-3.5" /> Bulk Upload
-        </button>
+        <CsvImportDialog
+          entityLabel="PO"
+          entityLabelPlural="POs"
+          title="Bulk Upload / Update POs via CSV"
+          endpoint="/api/purchase-orders"
+          templateFilename="po_bulk_template.csv"
+          fields={PO_BULK_CSV_FIELDS}
+          previewExcel
+          onSuccess={afterAction}
+        />
         <button
           onClick={() => router.push("/po-tracking/po-procurement/entity-emails")}
           className="inline-flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3 text-xs font-medium hover:bg-accent transition-colors"
         >
           <Mail className="h-3.5 w-3.5" /> Entity Emails
         </button>
+        <DownloadButton endpoint="/api/purchase-orders/export" label="PO Procurement" />
         <button
           onClick={() => setShowAddPO(true)}
           className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors sm:ml-auto"
@@ -374,16 +380,9 @@ export default function PoProcurementClient({
       <AddPODialog
         open={showAddPO}
         onClose={() => setShowAddPO(false)}
-        skuOptions={skuOptions}
         mfgOptions={mfgOptions}
         warehouseOptions={warehouseOptions}
         onCreated={afterAction}
-      />
-
-      <PoBulkUploadDialog
-        open={showBulk}
-        onClose={() => setShowBulk(false)}
-        onSubmitted={afterAction}
       />
 
       <ImpromptuPODialog

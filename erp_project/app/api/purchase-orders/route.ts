@@ -4,7 +4,7 @@ import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { skus as skusSql } from "@/lib/queries/skus"
 import { manufacturers as mfgsSql } from "@/lib/queries/manufacturers"
-import { getFileBuffer } from "@/lib/s3"
+import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import type { PoolConnection } from "mysql2/promise"
 import logger from "@/lib/logger"
@@ -21,41 +21,16 @@ export const GET = withGateway({
   },
 })
 
-// ── Minimal CSV parser (handles quoted fields) ────────────────────────────────
-function parseCsv(text: string): string[][] {
-  const result: string[][] = []
-  for (const line of text.split(/\r?\n/)) {
-    if (!line.trim()) continue
-    const cells: string[] = []
-    let i = 0
-    while (i < line.length) {
-      if (line[i] === '"') {
-        i++
-        let val = ""
-        while (i < line.length) {
-          if (line[i] === '"' && line[i + 1] === '"') { val += '"'; i += 2 }
-          else if (line[i] === '"') { i++; break }
-          else { val += line[i++] }
-        }
-        cells.push(val)
-        if (line[i] === ",") i++
-      } else {
-        const end = line.indexOf(",", i)
-        if (end === -1) { cells.push(line.slice(i).trim()); break }
-        cells.push(line.slice(i, end).trim()); i = end + 1
-      }
-    }
-    result.push(cells)
-  }
-  return result
-}
-
 // POST /api/purchase-orders
 // Handles two actions via the 'action' field in the request body:
 //
-//   bulk_csv — { action:"bulk_csv", key, filename }
-//     Fetches the CSV from S3, parses it, and inserts all valid rows directly
-//     as 'raised' (no approval stage). Returns { ok, inserted, skipped }.
+//   bulk — { action:"bulk", rows }
+//     Client-parsed CSV/Excel rows (see PO_BULK_CSV_FIELDS) are re-serialized
+//     to CSV, uploaded to S3, and staged as ONE PO_BULK approval — same
+//     pattern as BOM/Vendor/RM/PM bulk uploads. Nothing is created or updated
+//     until an approver approves it; poBulkHandler.applyAndArchive
+//     (lib/approvals/handlers/purchase-orders.ts) does the real
+//     create-or-update-by-po_no work and writes history_pos entries.
 //
 //   (default) — { mfg_id, sku_code, qty, unit_price?, expected_on, destination, reason, po_type? }
 //     Creates a single PO. Normal → raised immediately. Impromptu → draft + approval.
@@ -67,82 +42,36 @@ export const POST = withGateway({
   handler: async ({ body, session, ctx }) => {
   const userId = Number(session.user.id)
 
-  // ── bulk_csv: parse S3 CSV and insert all rows directly as raised ─────────
-  if ("key" in body) {
-    const { key: s3Key, filename } = body
-
-    let csvText: string
-    try {
-      const buffer = await getFileBuffer(s3Key)
-      csvText = buffer.toString("utf-8")
-    } catch (err: any) {
-      throw new ApiError(422, "s3_fetch_failed", `Could not read file from S3: ${err.message}`)
-    }
-
-    const allRows = parseCsv(csvText)
-    if (allRows.length < 2) {
-      throw new ApiError(422, "empty_csv", "CSV has no data rows (only header or empty).")
-    }
-
-    const dataRows = allRows.slice(1)
-    type BulkRow = { mfg_code: string; sku_code: string; qty: number; expected_on: string | null; destination: string | null }
-    const validRows: BulkRow[] = []
-    for (const cells of dataRows) {
-      const mfg_code    = (cells[0] ?? "").trim()
-      const sku_code    = (cells[1] ?? "").trim()
-      const qty         = Number(cells[2] ?? 0)
-      const expected_on = (cells[3] ?? "").trim() || null
-      const destination = (cells[4] ?? "").trim() || null
-      if (!mfg_code || !sku_code || qty <= 0) continue
-      validRows.push({ mfg_code, sku_code, qty, expected_on, destination })
-    }
-
-    if (validRows.length === 0) {
-      throw new ApiError(422, "no_valid_rows", "No valid data rows found — check mfg_code, sku_code, qty columns.")
-    }
-
-    const eventId = makeEventId("PO_BULK", "bulk")
-    recordRawEvent("PO_BULK", eventId, { filename, s3Key, rowCount: validRows.length })
-
-    const year  = new Date().getFullYear()
-    const month = String(new Date().getMonth() + 1).padStart(2, "0")
-    const prefix = `BULK-${year}${month}`
+  // ── bulk: stage the uploaded rows as one PO_BULK approval ─────────────────
+  // ("rows" in body, not body.action === "bulk" — poActionSchema is a plain
+  // z.union, and PoCreate has no "action" field at all, so a direct property
+  // access wouldn't type-check without narrowing via "in" first.)
+  if ("rows" in body) {
+    const yyyymm = new Date().toISOString().slice(0, 7)
+    const eventId = makeEventId("PO_BULK", "stage")
+    recordRawEvent("PO_BULK", eventId, { rowCount: body.rows.length })
 
     const conn: PoolConnection = await pool.getConnection()
     await conn.beginTransaction()
     try {
-      const [cntRows] = await conn.execute(purchaseOrdersSql.countByPrefix, [`${prefix}-%`])
-      let seq      = Number((cntRows as any[])[0]?.cnt ?? 0)
-      let inserted = 0
-      let skipped  = 0
-
-      for (const row of validRows) {
-        const [mfgRows] = await conn.execute(`SELECT id FROM master_mfgs WHERE code = ? LIMIT 1`, [row.mfg_code])
-        const mfg = (mfgRows as any[])[0]
-        if (!mfg) { skipped++; continue }
-
-        seq++
-        const po_no = `${prefix}-${seq.toString().padStart(3, "0")}`
-        await conn.execute(purchaseOrdersSql.insertBulkPo, [
-          po_no, mfg.id, row.sku_code, row.qty, row.expected_on, row.destination, s3Key,
-        ])
-        inserted++
-      }
-
+      const { key: s3Key, filename } = await uploadRowsAsCsv(body.rows, `imports/po-bulk/${yyyymm}`, "po_bulk")
+      const approvalId = await stageBulkUploadApproval(conn, {
+        userId, module: "PO_BULK", s3Key, filename, rowCount: body.rows.length,
+      })
       await conn.commit()
-      logger.info({ ...ctx, eventId, filename, s3Key, inserted, skipped, message: "Bulk CSV PO insert committed" })
-      recordProcessedEvent("PO_BULK", eventId, { filename, s3Key, inserted, skipped })
-      return NextResponse.json({ ok: true, inserted, skipped })
+      logger.info({ ...ctx, eventId, approvalId, s3Key, rowCount: body.rows.length, message: "PO bulk upload staged for approval" })
+      recordProcessedEvent("PO_BULK", eventId, { approvalId, s3Key, rowCount: body.rows.length })
+      return NextResponse.json({ ok: true, approval_id: approvalId, staged: body.rows.length })
     } catch (err: any) {
       await conn.rollback()
-      recordFailedEvent("PO_BULK", eventId, { filename, s3Key }, err.message)
-      logger.error({ ...ctx, eventId, err: err.message, stack: err.stack, message: "Bulk CSV PO insert failed" })
+      recordFailedEvent("PO_BULK", eventId, {}, err.message)
+      logger.error({ ...ctx, eventId, err: err.message, stack: err.stack, message: "PO bulk upload staging failed" })
       throw new ApiError(500, "internal", "Database error: " + err.message)
     } finally {
       conn.release()
     }
   }
-  // ── end bulk_csv ────────────────────────────────────────────────────────────
+  // ── end bulk ────────────────────────────────────────────────────────────────
 
   const { mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, reason, po_type } = body
 

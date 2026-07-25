@@ -74,3 +74,14 @@ export const EMPTY_FORM: ImpromptuForm = {
 }
 
 export type SplitRow = { destination: string; qty: string }
+
+/** One history_pos row — an audit entry from the PO bulk CSV create/update flow. */
+export type PoHistoryRow = {
+  id: number
+  action_type: "create" | "update"
+  field_name: string | null
+  old_value: string | null
+  new_value: string | null
+  changed_on: string | null
+  changed_by_name: string | null
+}

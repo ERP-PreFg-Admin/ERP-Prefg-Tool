@@ -114,6 +114,29 @@ export const PM_MFG_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "effective_from", label: "Effective From", type: "date" },
 ]
 
+// ── PO Procurement ────────────────────────────────────────────────────────────
+// Row shape comes from purchaseOrdersSql.buildSelectFiltered (see
+// app/api/purchase-orders/export/route.ts) — same columns PoTable.tsx shows.
+
+export const PO_PROCUREMENT_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: "po_no",         label: "PO No.",              type: "text"   },
+  { key: "mfg_code",      label: "Mfg Code",            type: "text"   },
+  { key: "mfg_name",      label: "Manufacturer",        type: "text"   },
+  { key: "date",          label: "PO Date",             type: "date"   },
+  { key: "expected_on",   label: "Expected Dispatch",   type: "date"   },
+  { key: "sku_code",      label: "SKU",                 type: "text"   },
+  { key: "sku_name",      label: "SKU Name",            type: "text"   },
+  { key: "sku_status",    label: "SKU Status",          type: "text"   },
+  { key: "qty",           label: "PO Qty",              type: "number" },
+  { key: "received_qty",  label: "Received Qty",        type: "number" },
+  { key: "unit_price",    label: "Rate",                type: "number" },
+  { key: "total_amount",  label: "Amount",              type: "number" },
+  { key: "invoice_no",    label: "Invoice No",          type: "text"   },
+  { key: "destination",   label: "Destination",         type: "text"   },
+  { key: "status",        label: "Status",              type: "text"   },
+  { key: "po_type",       label: "PO Type",             type: "text"   },
+]
+
 // ── Vendors ───────────────────────────────────────────────────────────────────
 
 export const VENDOR_EXPORT_COLUMNS: ExportColumn[] = [

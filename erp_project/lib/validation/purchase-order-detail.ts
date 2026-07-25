@@ -24,7 +24,12 @@ export const quoteRateQuerySchema = z.object({
   mfg_id: z.coerce.number().int().positive("mfg_id is required"),
 })
 
+export const mfgSkusQuerySchema = z.object({
+  mfg_id: z.coerce.number().int().positive("mfg_id is required"),
+})
+
 export type PoIdParam = z.infer<typeof poIdParamSchema>
 export type PoSplit = z.infer<typeof poSplitSchema>
 export type PoCancel = z.infer<typeof poCancelSchema>
 export type QuoteRateQuery = z.infer<typeof quoteRateQuerySchema>
+export type MfgSkusQuery = z.infer<typeof mfgSkusQuerySchema>

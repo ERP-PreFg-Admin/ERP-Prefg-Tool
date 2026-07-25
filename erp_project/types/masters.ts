@@ -306,6 +306,15 @@ export type MfgOverviewRow = {
   open_value: number
 }
 
+/** This calendar month's PO qty vs received qty per SKU. Shown in the manufacturer detail page header and the MFG Overview cards. */
+export type MfgMonthlyPoRow = {
+  mfg_id: number
+  sku_code: string | null
+  sku_name: string | null
+  po_qty: string | null
+  received_qty: string | null
+}
+
 /** `bom_misc` cost type — job work, shrink wrap, shipper (absolute cost); rm_loss/pm_loss (RM/PM wastage %, stored in the same `cost` column). */
 export type MiscCostType = "jw" | "shrink" | "shipper" | "rm_loss" | "pm_loss"
 

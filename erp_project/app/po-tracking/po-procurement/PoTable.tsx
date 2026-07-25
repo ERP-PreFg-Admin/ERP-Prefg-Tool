@@ -2,7 +2,7 @@
 
 import {
   AlertTriangle, ArrowDown, ArrowUp, Ban, ChevronsUpDown,
-  FileText, Loader2, MoreVertical, Pencil, Scissors, XCircle,
+  FileText, History, Loader2, MoreVertical, Pencil, Scissors, XCircle,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils"
 import type { BadgeVariant, PoRow } from "./po-types"
 import { STATUS_CONFIG } from "./po-types"
 import { fmtDate, fmtInt, fmtMoney, fmtRate, isImpromptu, num } from "./po-utils"
+import PoHistoryDialog from "./PoHistoryDialog"
 
 // tolerance = min(100 units, 10% of original qty)
 function poTolerance(qty: number) {
@@ -326,6 +327,7 @@ export default function PoTable({
   const router                                      = useRouter()
   const [shortCloseTarget, setShortCloseTarget]     = useState<number | null>(null)
   const [cancelTarget, setCancelTarget]             = useState<number | null>(null)
+  const [historyTarget, setHistoryTarget]           = useState<PoRow | null>(null)
   const sh = { sortBy, sortDir, onSort }
 
   const pageIds = rows.map((r) => r.id)
@@ -389,6 +391,12 @@ export default function PoTable({
                     const hasAttachment = !!r.attachment_key
 
                     const menuActions: MenuAction[] = []
+
+                    menuActions.push({
+                      label:   "History",
+                      icon:    <History className="h-3.5 w-3.5" />,
+                      onClick: () => setHistoryTarget(r),
+                    })
 
                     if (hasAttachment) {
                       menuActions.push({
@@ -504,12 +512,7 @@ export default function PoTable({
                                 <Scissors className="h-3 w-3" />
                               </button>
                             )}
-                            {menuActions.length > 0 && (
-                              <ActionMenu actions={menuActions} />
-                            )}
-                            {!canEdit && !canSplit && menuActions.length === 0 && (
-                              <span className="text-muted-foreground text-xs">—</span>
-                            )}
+                            <ActionMenu actions={menuActions} />
                           </div>
                         </TableCell>
                       </TableRow>
@@ -536,6 +539,13 @@ export default function PoTable({
         poId={cancelTarget ?? 0}
         onClose={() => setCancelTarget(null)}
         onDone={() => router.refresh()}
+      />
+
+      {/* PO history — rendered outside table to avoid z-index issues */}
+      <PoHistoryDialog
+        poId={historyTarget?.id ?? null}
+        poNo={historyTarget?.po_no ?? null}
+        onClose={() => setHistoryTarget(null)}
       />
     </>
   )

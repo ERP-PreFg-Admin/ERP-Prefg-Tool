@@ -144,20 +144,20 @@ export default function LineDialog({
           )}
 
           <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-1.5">
+            {/* <div className="grid gap-1.5">
               <Label htmlFor="ml-capacity">Monthly Capacity</Label>
               <Input
                 id="ml-capacity" type="number" min={0} placeholder="e.g. 25000"
                 value={form.monthly_capacity} onChange={(e) => set("monthly_capacity", e.target.value)}
               />
-            </div>
-            <div className="grid gap-1.5">
+            </div> */}
+            {/* <div className="grid gap-1.5">
               <Label htmlFor="ml-plan">This Month Plan</Label>
               <Input
                 id="ml-plan" type="number" min={0} placeholder="e.g. 18000"
                 value={form.this_month_plan} onChange={(e) => set("this_month_plan", e.target.value)}
               />
-            </div>
+            </div> */}
           </div>
 
           <div className="grid grid-cols-2 gap-4">

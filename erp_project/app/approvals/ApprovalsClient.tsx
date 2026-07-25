@@ -1,13 +1,30 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Check, ShieldCheck, History } from "lucide-react"
+import { Check, ShieldCheck, History, ChevronDown, ChevronRight, CheckCheck } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { useToast } from "@/components/ui/toast"
 import type { Approval } from "./approvals-types"
+import { MODULE_LABEL, MODULE_COLOR } from "./approvals-types"
 import ApprovalCard, { type MaterialMap } from "./ApprovalCard"
 import RejectDialog from "./RejectDialog"
+import BulkApproveDialog from "./BulkApproveDialog"
+
+/** Groups pending approvals by module — busiest module first — so the list
+ *  reads as one light row per module instead of every approval stacked flat. */
+function groupByModule(approvals: Approval[]) {
+  const map = new Map<string, Approval[]>()
+  for (const a of approvals) {
+    const list = map.get(a.module) ?? []
+    list.push(a)
+    map.set(a.module, list)
+  }
+  return [...map.entries()]
+    .map(([module, items]) => ({ module, items }))
+    .sort((a, b) => b.items.length - a.items.length)
+}
 
 export default function ApprovalsClient({
   approvals: initialApprovals,
@@ -19,10 +36,14 @@ export default function ApprovalsClient({
   materialMap: MaterialMap
 }) {
   const router = useRouter()
+  const { toast } = useToast()
 
   const [approvals,      setApprovals]      = useState<Approval[]>(initialApprovals)
   const [expanded,       setExpanded]       = useState<number | null>(null)
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [rejectTarget,   setRejectTarget]   = useState<Approval | null>(null)
+  const [bulkTarget,     setBulkTarget]     = useState<string | null>(null)
+  const [bulkLoading,    setBulkLoading]    = useState(false)
   const [loading,        setLoading]        = useState(false)
   const [actionError,    setActionError]    = useState<Record<number, string>>({})
   const [openingFileFor, setOpeningFileFor] = useState<number | null>(null)
@@ -35,6 +56,17 @@ export default function ApprovalsClient({
     setExpanded(prev => prev === id ? null : id)
     clearError(id)
   }
+
+  function toggleGroup(module: string) {
+    setExpandedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(module)) next.delete(module)
+      else next.add(module)
+      return next
+    })
+  }
+
+  const groupedApprovals = useMemo(() => groupByModule(approvals), [approvals])
 
   async function openCsvFile(approvalId: number, s3Key: string) {
     setOpeningFileFor(approvalId)
@@ -86,6 +118,37 @@ export default function ApprovalsClient({
     }
   }
 
+  async function handleBulkApprove(module: string) {
+    const targets = approvals.filter(a => a.module === module)
+    setBulkLoading(true)
+    const succeededIds: number[] = []
+    let failedCount = 0
+
+    for (const a of targets) {
+      try {
+        const res = await fetch(`/api/approvals/${a.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "approve" }),
+        })
+        if (res.ok) succeededIds.push(a.id)
+        else failedCount++
+      } catch {
+        failedCount++
+      }
+    }
+
+    setApprovals(prev => prev.filter(a => !succeededIds.includes(a.id)))
+    setBulkLoading(false)
+    setBulkTarget(null)
+    toast({
+      title: failedCount === 0 ? "All approved" : "Finished with errors",
+      description: `${succeededIds.length} approved${failedCount > 0 ? `, ${failedCount} failed` : ""}.`,
+      variant: failedCount === 0 ? "success" : "error",
+    })
+    if (succeededIds.length > 0) router.refresh()
+  }
+
   return (
     <>
       {/* Page header */}
@@ -131,23 +194,63 @@ export default function ApprovalsClient({
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-3 px-4 pb-6">
-          {approvals.map((approval) => (
-            <ApprovalCard
-              key={approval.id}
-              approval={approval}
-              isExpanded={expanded === approval.id}
-              isApprover={isApprover}
-              loading={loading}
-              error={actionError[approval.id]}
-              openingFileFor={openingFileFor}
-              onToggle={() => toggleExpand(approval.id)}
-              onApprove={() => handleApprove(approval)}
-              onReject={() => setRejectTarget(approval)}
-              onOpenCsvFile={openCsvFile}
-              materialMap={materialMap}
-            />
-          ))}
+        <div className="space-y-1.5 px-4 pb-6">
+          {groupedApprovals.map(({ module, items }) => {
+            const isGroupOpen = expandedGroups.has(module)
+            const moduleColor = MODULE_COLOR[module] ?? "bg-slate-50 text-slate-700 border-slate-200"
+
+            return (
+              <div key={module}>
+                <div className="w-full flex items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-1.5 hover:bg-muted/40 transition-colors">
+                  <button
+                    onClick={() => toggleGroup(module)}
+                    className="flex flex-1 items-center gap-2 text-left min-w-0"
+                  >
+                    {isGroupOpen
+                      ? <ChevronDown  className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    }
+                    <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold tracking-wide ${moduleColor}`}>
+                      {MODULE_LABEL[module] ?? module}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {items.length} pending
+                    </span>
+                  </button>
+                  {isApprover && (
+                    <Button
+                      size="sm"
+                      className="h-6 shrink-0 gap-1 bg-emerald-800 hover:bg-emerald-900 text-white border-0 px-2 text-[11px]"
+                      onClick={(e) => { e.stopPropagation(); setBulkTarget(module) }}
+                    >
+                      <CheckCheck className="h-3 w-3" /> Approve All
+                    </Button>
+                  )}
+                </div>
+
+                {isGroupOpen && (
+                  <div className="space-y-1.5 mt-1.5 pl-2">
+                    {items.map((approval) => (
+                      <ApprovalCard
+                        key={approval.id}
+                        approval={approval}
+                        isExpanded={expanded === approval.id}
+                        isApprover={isApprover}
+                        loading={loading}
+                        error={actionError[approval.id]}
+                        openingFileFor={openingFileFor}
+                        onToggle={() => toggleExpand(approval.id)}
+                        onApprove={() => handleApprove(approval)}
+                        onReject={() => setRejectTarget(approval)}
+                        onOpenCsvFile={openCsvFile}
+                        materialMap={materialMap}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
 
@@ -156,6 +259,15 @@ export default function ApprovalsClient({
         loading={loading}
         onClose={() => setRejectTarget(null)}
         onConfirm={(remarks) => rejectTarget && handleReject(rejectTarget, remarks)}
+      />
+
+      <BulkApproveDialog
+        open={bulkTarget !== null}
+        moduleLabel={bulkTarget ? (MODULE_LABEL[bulkTarget] ?? bulkTarget) : ""}
+        count={bulkTarget ? approvals.filter(a => a.module === bulkTarget).length : 0}
+        loading={bulkLoading}
+        onClose={() => setBulkTarget(null)}
+        onConfirm={() => bulkTarget && handleBulkApprove(bulkTarget)}
       />
     </>
   )

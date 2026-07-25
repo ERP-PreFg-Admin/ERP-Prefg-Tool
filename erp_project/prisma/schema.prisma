@@ -75,9 +75,40 @@ model purchase_orders {
   email_sent_at  DateTime?               @db.DateTime(0)
   mfgs           master_mfgs             @relation(fields: [mfg_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_ibfk_1")
   bom            master_bom?             @relation(fields: [bom_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_ibfk_2")
+  history_pos    history_pos[]
 
   @@index([bom_id], map: "bom_id")
   @@index([mfg_id], map: "mfg_id")
+}
+
+/**
+ * Audit trail for the PO bulk-CSV create/update flow (see
+ * lib/approvals/handlers/purchase-orders.ts's poBulkHandler). One row per
+ * changed field for an "update" action; a single summary row (field_name/
+ * old_value/new_value all null) for a "create" action — mirrors the
+ * approval_items diff-per-field convention used elsewhere in this codebase.
+ */
+model history_pos {
+  id              Int                     @id @default(autoincrement())
+  po_id           Int
+  po_no           String                  @db.VarChar(50)
+  action_type     history_pos_action_type
+  field_name      String?                 @db.VarChar(50)
+  old_value       String?                 @db.VarChar(255)
+  new_value       String?                 @db.VarChar(255)
+  s3_key          String?                 @db.VarChar(500)
+  changed_by      Int?
+  changed_on      DateTime?               @default(now()) @db.DateTime(0)
+  purchase_orders purchase_orders         @relation(fields: [po_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "history_pos_ibfk_1")
+  users           users?                  @relation(fields: [changed_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "history_pos_ibfk_2")
+
+  @@index([po_id], map: "idx_history_pos_po_id")
+  @@index([changed_by], map: "history_pos_ibfk_2")
+}
+
+enum history_pos_action_type {
+  create
+  update
 }
 
 model session_history {
@@ -172,6 +203,7 @@ model users {
   master_vendors                         master_vendors[]
   session_history                        session_history[]
   sessions                               sessions[]
+  history_pos                            history_pos[]
 }
 
 model details_bom {

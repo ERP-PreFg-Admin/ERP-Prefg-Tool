@@ -6,7 +6,7 @@ import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { manufacturers as manufacturersSql } from "@/lib/queries/manufacturers"
 import { getRmVendorByMfg, getRmVendorHistoryByMfg, getPmVendorByMfg, getPmVendorHistoryByMfg, getAgreedRmRatesByMfg, getAgreedPmRatesByMfg } from "@/lib/cached-reference-data"
 import type {
-  FinalCostingRow, MfgLine, MfgLineOption,
+  FinalCostingRow, MfgLine, MfgLineOption, MfgMonthlyPoRow,
   MiscCostLine, MiscCostType,
 } from "@/types/masters"
 import TabBar, { type MfgTab } from "./TabBar"
@@ -15,6 +15,7 @@ import MiscCostClient from "./MiscCostClient"
 import RmVendorTable from "./ApprovedRates"
 import AgreedRatesClient from "./AgreedRatesClient"
 import FinalCostingTable from "./FinalCostingTable"
+import MfgMonthlyPoSummary from "./MfgMonthlyPoSummary"
 
 export const dynamic = "force-dynamic"
 
@@ -47,9 +48,10 @@ export default async function ManufacturerDetailPage({
   const tabParam = String(sp.tab ?? "active")
   const tab = (VALID_TABS.includes(tabParam as MfgTab) ? tabParam : "active") as MfgTab
 
-  const [mfgRows, statusCountRows] = await Promise.all([
+  const [mfgRows, statusCountRows, monthlyPoRows] = await Promise.all([
     timedQuery<{ id: number; code: string; name: string }>(manufacturersSql.selectNameById, [id]),
     timedQuery<{ status: string; cnt: number }>(manufacturingSql.statusCountsByMfg, [id], { label: "manufacturing.statusCountsByMfg" }),
+    timedQuery<MfgMonthlyPoRow>(manufacturingSql.selectMonthlyPoSummaryByMfg, [id], { label: "manufacturing.selectMonthlyPoSummaryByMfg" }),
   ])
   const mfg = mfgRows[0]
   if (!mfg) notFound()
@@ -59,9 +61,12 @@ export default async function ManufacturerDetailPage({
 
   return (
     <div className="p-6">
-      <div className="mb-4">
-        <h1 className="text-lg font-bold tracking-tight">{mfg.name}</h1>
-        <p className="text-muted-foreground text-xs mt-0.5 font-mono">{mfg.code}</p>
+      <div className="mb-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-bold tracking-tight">{mfg.name}</h1>
+          <p className="text-muted-foreground text-xs mt-0.5 font-mono">{mfg.code}</p>
+        </div>
+        <MfgMonthlyPoSummary rows={monthlyPoRows} />
       </div>
 
       <div className="space-y-4">

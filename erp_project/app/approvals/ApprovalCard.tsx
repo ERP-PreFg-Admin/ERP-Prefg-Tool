@@ -35,27 +35,27 @@ function DiffTable({ rows }: { rows: DiffRow[] }) {
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent bg-muted/40">
-            <TableHead className="h-8 text-[10px] font-semibold uppercase tracking-wide">Field</TableHead>
-            <TableHead className="h-8 text-[10px] font-semibold uppercase tracking-wide">Old Value</TableHead>
-            <TableHead className="h-8 text-[10px] font-semibold uppercase tracking-wide">New Value</TableHead>
+            <TableHead className="h-7 text-[10px] font-semibold uppercase tracking-wide">Field</TableHead>
+            <TableHead className="h-7 text-[10px] font-semibold uppercase tracking-wide">Old Value</TableHead>
+            <TableHead className="h-7 text-[10px] font-semibold uppercase tracking-wide">New Value</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {rows.map((r) => (
             <TableRow key={r.key} className="hover:bg-transparent">
-              <TableCell className="py-2 text-xs font-medium capitalize text-foreground w-[28%] align-top">
+              <TableCell className="py-1.5 text-xs font-medium capitalize text-foreground w-[28%] align-top">
                 {r.label}
               </TableCell>
               {r.fullWidth ? (
-                <TableCell colSpan={2} className="py-2 text-xs align-top">
+                <TableCell colSpan={2} className="py-1.5 text-xs align-top">
                   {r.fullWidth}
                 </TableCell>
               ) : (
                 <>
-                  <TableCell className="py-2 bg-red-50 dark:bg-red-950/30 text-xs text-red-700 dark:text-red-400 font-medium align-top">
+                  <TableCell className="py-1.5 bg-red-50 dark:bg-red-950/30 text-xs text-red-700 dark:text-red-400 font-medium align-top">
                     {r.old}
                   </TableCell>
-                  <TableCell className="py-2 bg-emerald-50 dark:bg-emerald-950/30 text-xs text-emerald-700 dark:text-emerald-400 font-medium align-top">
+                  <TableCell className="py-1.5 bg-emerald-50 dark:bg-emerald-950/30 text-xs text-emerald-700 dark:text-emerald-400 font-medium align-top">
                     {r.new}
                   </TableCell>
                 </>
@@ -349,10 +349,10 @@ export default function ApprovalCard({
     <div className={`rounded-xl border border-border bg-card overflow-hidden transition-all ${isExpanded ? "ring-1 ring-primary/20 shadow-sm" : ""}`}>
 
       {/* Clickable header */}
-      <button className="w-full text-left px-5 py-4 hover:bg-muted/30 transition-colors" onClick={onToggle}>
-        <div className="flex items-start gap-4">
+      <button className="w-full text-left px-4 py-2.5 hover:bg-muted/30 transition-colors" onClick={onToggle}>
+        <div className="flex items-start gap-3">
           <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-2 mb-2">
+            <div className="flex flex-wrap items-center gap-1.5 mb-1">
               <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold tracking-wide ${moduleColor}`}>
                 {MODULE_LABEL[approval.module] ?? approval.module}
               </span>
@@ -374,13 +374,13 @@ export default function ApprovalCard({
             <EntityInfo approval={approval} />
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <div className="text-right hidden sm:block">
-              <div className="flex items-center justify-end gap-2">
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground select-none">
+              <div className="flex items-center justify-end gap-1.5">
+                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground select-none">
                   {getInitials(approval.raised_by_name)}
                 </div>
-                <span className="text-sm font-medium">{approval.raised_by_name}</span>
+                <span className="text-xs font-medium">{approval.raised_by_name}</span>
               </div>
               <div className="flex items-center justify-end gap-1 mt-0.5 text-[11px] text-muted-foreground">
                 <Clock className="h-3 w-3 shrink-0" />
@@ -397,9 +397,9 @@ export default function ApprovalCard({
 
       {/* Expanded diff */}
       {isExpanded && (
-        <div className="border-t border-border bg-muted/20 px-5 py-4">
+        <div className="border-t border-border bg-muted/20 px-4 py-3">
           {approval.status && (
-            <div className="mb-3 text-xs text-muted-foreground">
+            <div className="mb-2 text-xs text-muted-foreground">
               {approval.status === "approved" ? "Approved" : "Rejected"} by{" "}
               <span className="font-medium text-foreground">{approval.approved_by_name ?? "—"}</span>
               {approval.approved_on && <> on {fmtDate(approval.approved_on)}</>}
@@ -410,7 +410,7 @@ export default function ApprovalCard({
               )}
             </div>
           )}
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
             {isBulk ? "Uploaded File" : isBom ? "Formulation Changes" : "Field Changes"}
           </p>
           {isBulk ? (
@@ -431,24 +431,24 @@ export default function ApprovalCard({
       {/* Actions footer */}
       {isApprover && (
         <div
-          className={`flex items-center justify-between px-5 py-2.5 border-t ${isExpanded ? "border-border bg-muted/10" : "border-border/40"}`}
+          className={`flex items-center justify-between px-4 py-2 border-t ${isExpanded ? "border-border bg-muted/10" : "border-border/40"}`}
           onClick={e => e.stopPropagation()}
         >
           <div>{error && <p className="text-xs text-destructive">{error}</p>}</div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <Button
               size="sm" variant="outline" disabled={loading}
-              className="h-7 gap-1 text-red-700 border-red-200 hover:bg-red-50"
+              className="h-6 gap-1 text-[11px] text-red-700 border-red-200 hover:bg-red-50"
               onClick={onReject}
             >
-              <X className="h-3.5 w-3.5" /> Reject
+              <X className="h-3 w-3" /> Reject
             </Button>
             <Button
               size="sm" disabled={loading}
-              className="h-7 gap-1 bg-emerald-600 hover:bg-emerald-700 text-white border-0"
+              className="h-6 gap-1 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white border-0"
               onClick={onApprove}
             >
-              <Check className="h-3.5 w-3.5" /> Approve
+              <Check className="h-3 w-3" /> Approve
             </Button>
           </div>
         </div>
