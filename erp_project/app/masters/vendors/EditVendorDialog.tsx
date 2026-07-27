@@ -46,6 +46,7 @@ export function EditVendorDialog({
 
   useEffect(() => {
     if (vendor) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets form fields when the dialog opens for a different vendor row
       setForm({
         name: vendor.name ?? "",
         type: vendor.type ?? "rm",

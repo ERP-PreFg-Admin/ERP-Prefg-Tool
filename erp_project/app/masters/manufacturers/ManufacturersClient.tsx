@@ -8,7 +8,6 @@
  */
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
-import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -27,6 +26,7 @@ import {
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { AddMfgDialog } from "./AddMfgDialog"
 import { DownloadButton } from "@/components/masters/DownloadButton"
+import { StatusBadge } from "@/components/masters/StatusBadge"
 import type { MasterField } from "@/components/masters/field-config"
 import { GST_REGEX, IFSC_REGEX, ACCOUNT_NUMBER_REGEX, EMAIL_REGEX } from "@/lib/validation/shared"
 import type { Mfg } from "@/types/masters"
@@ -145,8 +145,8 @@ export default function ManufacturersClient({
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((row) => (
-                  <TableRow key={row.mfg_id}>
+                rows.map((row, index) => (
+                  <TableRow key={row.mfg_id} className={index % 2 === 0 ? "bg-background" : "bg-muted/40"}>
                     <TableCell className="font-mono text-xs font-medium">{row.code}</TableCell>
                     <TableCell className="font-medium">{row.name}</TableCell>
                     <TableCell>{row.registered_name ?? "—"}</TableCell>
@@ -154,22 +154,7 @@ export default function ManufacturersClient({
                     <TableCell>{row.zone ?? "—"}</TableCell>
                     <TableCell>{row.gst_number ?? "—"}</TableCell>
                     <TableCell>{row.bank_name ?? "—"}</TableCell>
-                    <TableCell>
-                      {row.status === "in_review" ? (
-                        <Badge variant="warning" className="capitalize">In Review</Badge>
-                      ) : row.status === "rejected" ? (
-                        <Badge variant="destructive" className="capitalize">Rejected</Badge>
-                      ) : row.status === "draft" ? (
-                        <Badge variant="secondary" className="capitalize">Draft</Badge>
-                      ) : (
-                        <Badge
-                          variant={row.status === "active" ? "success" : "secondary"}
-                          className="capitalize"
-                        >
-                          {row.status ?? "—"}
-                        </Badge>
-                      )}
-                    </TableCell>
+                    <TableCell><StatusBadge status={row.status} /></TableCell>
                     <TableCell>
                       <div className="flex items-center">
                         <Button

@@ -86,8 +86,9 @@ export const GET = withGateway({
           "Content-Disposition": `attachment; filename="${filename}"`,
         },
       })
-    } catch (err: any) {
-      logger.error({ ...ctx, mfgId, error: err.message, message: "Final costing export failed" })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      logger.error({ ...ctx, mfgId, error: message, message: "Final costing export failed" })
       return NextResponse.json({ error: "Export failed" }, { status: 500 })
     }
   },

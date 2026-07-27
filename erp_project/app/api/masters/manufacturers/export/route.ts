@@ -20,7 +20,6 @@ import { manufacturers as mfgSql } from "@/lib/queries/manufacturers"
 import { buildCsv, buildXlsx, buildExportFilename } from "@/lib/export"
 import { MFG_EXPORT_COLUMNS } from "@/lib/export-configs"
 import { withGateway } from "@/lib/gateway/with-gateway"
-import logger from "@/lib/logger"
 
 const ROW_LIMIT = 50_000
 

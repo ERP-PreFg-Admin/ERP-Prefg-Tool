@@ -48,7 +48,7 @@ export async function generateMaterialCode(
   make?:string
 ): Promise<string> {
   const [rows] = await conn.execute(countSql)
-  const total = (rows as any[])[0].total as number
+  const total = (rows as { total: number }[])[0].total
   if(prefix == "PM") {
     return `${prefix}-${String(total + 1).padStart(4, "0")}`
   }
@@ -73,14 +73,15 @@ export async function insertVendorWithGeneratedCode(
 ): Promise<{ vendorId: number; code: string }> {
   const suffix = name.replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase()
   const [countRows] = await conn.execute(countTotalSql)
-  let serial = (countRows as any[])[0].total as number
+  let serial = (countRows as { total: number }[])[0].total
   for (; ; serial++) {
     const code = `VEN-${type.toUpperCase()}-${suffix}-${String(serial+1).padStart(3, "0")}`
     try {
       const [result] = await conn.execute(insertVendorSql, [code, name, type])
       return { vendorId: (result as { insertId: number }).insertId, code }
-    } catch (err: any) {
-      if (err.code === "ER_DUP_ENTRY") continue
+    } catch (err: unknown) {
+      const code2 = (err as { code?: string })?.code
+      if (code2 === "ER_DUP_ENTRY") continue
       throw err
     }
   }
@@ -99,26 +100,46 @@ export async function insertMfgWithGeneratedCode(
 ): Promise<{ mfgId: number; code: string }> {
   const suffix = name.replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase()
   const [countRows] = await conn.execute(countTotalSql)
-  let serial = (countRows as any[])[0].total as number
+  let serial = (countRows as { total: number }[])[0].total
 
   for (; ; serial++) {
     const code = `MFG-${String(serial+1).padStart(3, "0")}-${suffix}`
     try {
       const [result] = await conn.execute(insertMfgSql, [code, name])
       return { mfgId: (result as { insertId: number }).insertId, code }
-    } catch (err: any) {
-      if (err.code === "ER_DUP_ENTRY") continue
+    } catch (err: unknown) {
+      const errCode = (err as { code?: string })?.code
+      if (errCode === "ER_DUP_ENTRY") continue
       throw err
     }
   }
 }
 
+type RmParamsInput = {
+  rm_code?: string | null
+  name: string
+  make?: string | null
+  type?: string | null
+  uom?: string | null
+  hsn_code?: string | null
+  inci_name?: string | null
+}
+
+type PmParamsInput = {
+  pm_code?: string | null
+  name: string
+  type?: string | null
+  hsn_code?: string | null
+  uom?: string | null
+  pantone_color?: string | null
+}
+
 /** Builds params for rawMaterials.insert/update. `status` defaults to
  *  "in_review" for the normal create-then-approve flow; bulk-approval
  *  handlers pass "active" since the insert IS the approval being applied. */
-export async function toRmParams(conn: PoolConnection, r: any, status = "in_review"): Promise<any[]> {
+export async function toRmParams(conn: PoolConnection, r: RmParamsInput, status = "in_review"): Promise<(string | null)[]> {
   return [
-    r.rm_code?.trim() || await generateMaterialCode(conn, rawMaterials.countTotal, "RM", r.name, r.make), r.name.trim(),
+    r.rm_code?.trim() || await generateMaterialCode(conn, rawMaterials.countTotal, "RM", r.name, r.make ?? undefined), r.name.trim(),
     r.make?.trim() || null, r.type?.trim() || null,
     r.uom?.trim() || null, status,
     r.hsn_code?.trim() || null, r.inci_name?.trim() || null,
@@ -126,7 +147,7 @@ export async function toRmParams(conn: PoolConnection, r: any, status = "in_revi
 }
 
 /** Builds params for packingMaterials.insert/update. See toRmParams above for the `status` note. */
-export async function toPmParams(conn: PoolConnection, r: any, status = "in_review"): Promise<any[]> {
+export async function toPmParams(conn: PoolConnection, r: PmParamsInput, status = "in_review"): Promise<(string | null)[]> {
   return [
     r.pm_code?.trim() || await generateMaterialCode(conn, packingMaterials.countTotal, "PM"), r.name.trim(),
     r.type?.trim() || null, r.hsn_code?.trim() || null,
@@ -166,7 +187,7 @@ export async function findDuplicateBankingField(
     const trimmed = value?.trim()
     if (!trimmed) continue
     const [rows] = await conn.execute(query, [trimmed, excludeId])
-    const dup = (rows as any[])[0]
+    const dup = (rows as { code: string }[])[0]
     if (dup) return `${label} "${trimmed}" is already used by ${dup.code}`
   }
   return null
@@ -195,11 +216,35 @@ export async function insertApprovalWithItems(
   // rate). Edits to an EXISTING row go through applyVendorRateApproval /
   // applyMfgRateApproval below, or the diff-based inline paths in route.ts.
   const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, module, entityId, "create"])
-  const approvalId = (ar as any).insertId
+  const approvalId = (ar as { insertId: number }).insertId
   for (const [field, val] of fields) {
     if (val) await conn.execute(approvalsSql.insertApprovalItem, [approvalId, field, "", val])
   }
   return approvalId
+}
+
+type ExistingRateRow = {
+  id: number
+  status: string
+  curr_rate: unknown
+  moq?: unknown
+  uom: unknown
+  effective_from: unknown
+  mfg_id?: unknown
+}
+
+type VendorRateInput = {
+  curr_rate: unknown
+  moq?: unknown
+  rate_uom: unknown
+  effective_from?: string | null
+  mfg_id?: unknown
+}
+
+type MfgRateInput = {
+  curr_rate: unknown
+  rate_uom: unknown
+  effective_from?: string | null
 }
 
 // Handles the "existing vendor rate" approval path (used by add-rates + rm create-full).
@@ -207,19 +252,19 @@ export async function applyVendorRateApproval(
   conn: PoolConnection,
   userId: number,
   moduleVrm: string,
-  existing: any,
-  v: any,
+  existing: ExistingRateRow,
+  v: VendorRateInput,
   today: string,
   setVendorRateStatusSql: string,
 ): Promise<void> {
   if (existing.status === "in_review") return
   if (existing.status === "rejected") {
     const [rejRows] = await conn.execute(approvalsSql.selectLatestRejection, [moduleVrm, existing.id])
-    const rej = (rejRows as any[])[0]
+    const rej = (rejRows as { raised_by: number }[])[0]
     if (rej && rej.raised_by !== userId) return
   }
   const [pendingRows] = await conn.execute(approvalsSql.hasPending, [moduleVrm, existing.id])
-  if ((pendingRows as any[])[0]?.cnt > 0) return
+  if ((pendingRows as { cnt: number }[])[0]?.cnt > 0) return
 
   const diff = ([
     ["curr_rate", existing.curr_rate, v.curr_rate],
@@ -233,7 +278,7 @@ export async function applyVendorRateApproval(
   if (diff.length === 0) return
 
   const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, moduleVrm, existing.id, "edit"])
-  const approvalId = (ar as any).insertId
+  const approvalId = (ar as { insertId: number }).insertId
   for (const [field, oldVal, newVal] of diff) {
     await conn.execute(approvalsSql.insertApprovalItem, [approvalId, field, String(oldVal ?? ""), String(newVal ?? "")])
   }
@@ -245,19 +290,19 @@ export async function applyMfgRateApproval(
   conn: PoolConnection,
   userId: number,
   moduleMrm: string,
-  existing: any,
-  m: any,
+  existing: ExistingRateRow,
+  m: MfgRateInput,
   today: string,
   setRateStatusSql: string,
 ): Promise<void> {
   if (existing.status === "in_review") return
   if (existing.status === "rejected") {
     const [rejRows] = await conn.execute(approvalsSql.selectLatestRejection, [moduleMrm, existing.id])
-    const rej = (rejRows as any[])[0]
+    const rej = (rejRows as { raised_by: number }[])[0]
     if (rej && rej.raised_by !== userId) return
   }
   const [pendingRows] = await conn.execute(approvalsSql.hasPending, [moduleMrm, existing.id])
-  if ((pendingRows as any[])[0]?.cnt > 0) return
+  if ((pendingRows as { cnt: number }[])[0]?.cnt > 0) return
 
   const diff = ([
     ["curr_rate", existing.curr_rate, m.curr_rate],
@@ -267,7 +312,7 @@ export async function applyMfgRateApproval(
   if (diff.length === 0) return
 
   const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, moduleMrm, existing.id, "edit"])
-  const approvalId = (ar as any).insertId
+  const approvalId = (ar as { insertId: number }).insertId
   for (const [field, oldVal, newVal] of diff) {
     await conn.execute(approvalsSql.insertApprovalItem, [approvalId, field, String(oldVal ?? ""), String(newVal ?? "")])
   }

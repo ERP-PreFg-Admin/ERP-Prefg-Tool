@@ -21,6 +21,7 @@
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
+import { StatusBadge } from "@/components/masters/StatusBadge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -95,7 +96,9 @@ export default function VendorsClient({
   // server refetch fires only when "Apply" is clicked.
   const [draftType, setDraftType] = useState(currentType)
   const [draftZone, setDraftZone] = useState(currentZone)
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft type when the URL-driven type filter changes
   useEffect(() => setDraftType(currentType), [currentType])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft zone when the URL-driven zone filter changes
   useEffect(() => setDraftZone(currentZone), [currentZone])
   const draftDirty = draftType !== currentType || draftZone !== currentZone
 
@@ -152,13 +155,9 @@ export default function VendorsClient({
           ))}
         </select>
 
-        <button
-          onClick={() => navigate({ type: draftType, zone: draftZone })}
-          disabled={!draftDirty}
-          className="h-9 rounded-lg border border-input bg-background px-3 text-sm font-medium hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
+        <Button variant="outline" size="lg" onClick={() => navigate({ type: draftType, zone: draftZone })} disabled={!draftDirty}>
           Apply
-        </button>
+        </Button>
 
         <MasterToolbarActions>
           <DownloadButton
@@ -219,8 +218,8 @@ export default function VendorsClient({
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((row) => (
-                  <TableRow key={row.vendor_id}>
+                rows.map((row, index) => (
+                  <TableRow key={row.vendor_id} className={index % 2 === 0 ? "bg-background" : "bg-muted/40"}>
                     <TableCell className="font-mono text-xs font-medium">{row.code}</TableCell>
                     <TableCell className="font-medium">{row.name}</TableCell>
                     <TableCell>{row.registered_name ?? "—"}</TableCell>
@@ -231,22 +230,7 @@ export default function VendorsClient({
                     <TableCell>{row.zone ?? "—"}</TableCell>
                     <TableCell>{row.gst_number ?? "—"}</TableCell>
                     <TableCell>{row.bank_name ?? "—"}</TableCell>
-                    <TableCell>
-                      {row.status === "in_review" ? (
-                        <Badge variant="warning" className="capitalize">In Review</Badge>
-                      ) : row.status === "rejected" ? (
-                        <Badge variant="destructive" className="capitalize">Rejected</Badge>
-                      ) : row.status === "draft" ? (
-                        <Badge variant="secondary" className="capitalize">Draft</Badge>
-                      ) : (
-                        <Badge
-                          variant={row.status === "active" ? "success" : "secondary"}
-                          className="capitalize"
-                        >
-                          {row.status ?? "—"}
-                        </Badge>
-                      )}
-                    </TableCell>
+                    <TableCell><StatusBadge status={row.status} /></TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
                         <Button

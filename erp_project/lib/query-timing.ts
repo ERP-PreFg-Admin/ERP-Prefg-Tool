@@ -15,12 +15,12 @@ import { query as dbQuery } from "@/lib/db"
 export interface TimingOptions {
   label?: string       // Custom label for readability (defaults to sanitized SQL)
   warnThreshold?: number // ms threshold to mark as slow (default: 50ms)
-  queryFn?: <T = Record<string, unknown>>(sql: string, params?: any[]) => Promise<T[]> // defaults to lib/db.ts's query() — pass queryDwh from lib/db-sku.ts to time the SKU data warehouse pool instead
+  queryFn?: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<T[]> // defaults to lib/db.ts's query() — pass queryDwh from lib/db-sku.ts to time the SKU data warehouse pool instead
 }
 
 export async function timedQuery<T = Record<string, unknown>>(
   sql: string,
-  params?: any[],
+  params?: unknown[],
   options: TimingOptions = {}
 ): Promise<T[]> {
   const { label, warnThreshold = 50, queryFn = dbQuery } = options
@@ -50,8 +50,8 @@ export async function timedQuery<T = Record<string, unknown>>(
  *     [sql3, params3, "Load raw materials"]
  *   ])
  */
-export async function timedParallel<T extends any[]>(
-  queries: Array<[sql: string, params?: any[], label?: string]>
+export async function timedParallel<T extends unknown[]>(
+  queries: Array<[sql: string, params?: unknown[], label?: string]>
 ): Promise<T[]> {
   const start = performance.now()
 

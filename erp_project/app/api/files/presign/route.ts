@@ -22,7 +22,7 @@ export const GET = withGateway({
       ? await getPresignedViewUrl(key, expiresIn)
       : await getPresignedDownloadUrl(key, expiresIn)
     return NextResponse.json({ url, expiresIn })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[presign] failed key=%s", key, err)
     return NextResponse.json({ error: "Could not generate URL" }, { status: 500 })
   }

@@ -14,7 +14,6 @@ import { recordFailedEvent, recordRawEvent, makeEventId, recordProcessedEvent } 
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { poIdParamSchema, poCancelSchema } from "@/lib/validation/purchase-order-detail"
-import {auth} from "@/lib/auth"
 
 const CANCELLABLE = new Set(["raised", "punched", "partially_received"])
 
@@ -51,11 +50,13 @@ export const POST = withGateway({
       recordProcessedEvent("PO_CANCEL", eventId, { poId, poNo: po.po_no, userId })
 
       return NextResponse.json({ ok: true })
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof ApiError) throw err
-      recordFailedEvent("PO_CANCEL", eventId, { poId, userId }, err.message)
-      logger.error({ ...ctx, eventId, poId, err: err.message, stack: err.stack, message: "PO cancellation failed" })
-      throw new ApiError(500, "internal", "Database error: " + err.message)
+      const message = err instanceof Error ? err.message : String(err)
+      const stack = err instanceof Error ? err.stack : undefined
+      recordFailedEvent("PO_CANCEL", eventId, { poId, userId }, message)
+      logger.error({ ...ctx, eventId, poId, err: message, stack, message: "PO cancellation failed" })
+      throw new ApiError(500, "internal", "Database error: " + message)
     }
   },
 })

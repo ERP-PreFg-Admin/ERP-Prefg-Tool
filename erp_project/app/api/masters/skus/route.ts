@@ -38,13 +38,15 @@ export const POST = withGateway({
         recordProcessedEvent("SKU", eventId, { id: result.insertId })
         logger.info({ ...logCtx, id: result.insertId, message: "SKU created" })
         return NextResponse.json({ id: result.insertId })
-      } catch (err: any) {
-        recordFailedEvent("SKU", eventId, { sku_code, name }, err.message)
-        if (err.code === "ER_DUP_ENTRY") {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        const code = (err as { code?: string })?.code
+        recordFailedEvent("SKU", eventId, { sku_code, name }, message)
+        if (code === "ER_DUP_ENTRY") {
           logger.warn({ ...logCtx, sku_code, message: "Duplicate SKU code" })
           throw new ApiError(409, "duplicate", `SKU code "${sku_code}" already exists`)
         }
-        logger.error({ ...logCtx, error: err.message, code: err.code, message: "SKU create failed" })
+        logger.error({ ...logCtx, error: message, code, message: "SKU create failed" })
         throw new ApiError(500, "internal", "Database error")
       }
     }
@@ -76,8 +78,9 @@ export const POST = withGateway({
               userId,
             ])
             inserted++
-          } catch (err: any) {
-            if (err.code === "ER_DUP_ENTRY") {
+          } catch (err: unknown) {
+            const code = (err as { code?: string })?.code
+            if (code === "ER_DUP_ENTRY") {
               skipped++
             } else {
               throw err
@@ -88,11 +91,13 @@ export const POST = withGateway({
         recordProcessedEvent("SKU_BULK", eventId, { source: "csv", inserted, skipped })
         logger.info({ ...logCtx, inserted, skipped, message: "SKU bulk insert committed" })
         return NextResponse.json({ inserted, skipped })
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        const code = (err as { code?: string })?.code
         await conn.rollback()
-        recordFailedEvent("SKU_BULK", eventId, { source: "csv", rowCount: rows.length }, err.message)
-        logger.error({ ...logCtx, error: err.message, code: err.code, message: "SKU bulk insert failed" })
-        throw new ApiError(500, "internal", "Bulk insert failed: " + err.message)
+        recordFailedEvent("SKU_BULK", eventId, { source: "csv", rowCount: rows.length }, message)
+        logger.error({ ...logCtx, error: message, code, message: "SKU bulk insert failed" })
+        throw new ApiError(500, "internal", "Bulk insert failed: " + message)
       } finally {
         conn.release()
       }
@@ -123,8 +128,9 @@ export const POST = withGateway({
       const conn = await pool.getConnection()
       await conn.beginTransaction()
       try {
+        type SkuRow = { id: number; sku_code: string; name: string; brand: string | null; category: string | null; status: string; [key: string]: unknown }
         const [rows] = await conn.execute(skuSql.selectById, [id])
-        const current = (rows as any[])[0]
+        const current = (rows as SkuRow[])[0]
         if (!current) {
           logger.warn({ ...logCtx, id, message: "SKU not found" })
           throw new ApiError(404, "not_found", "SKU not found")
@@ -146,7 +152,7 @@ export const POST = withGateway({
         }
 
         const [approvalResult] = await conn.execute(approvalsSql.insertApproval, [userId, "SKU", id, "edit"])
-        const approvalId = (approvalResult as any).insertId
+        const approvalId = (approvalResult as { insertId: number }).insertId
 
         for (const [field, newVal] of diff) {
           await conn.execute(approvalsSql.insertApprovalItem, [
@@ -163,11 +169,13 @@ export const POST = withGateway({
         recordProcessedEvent("SKU_UPDATE", eventId, { id, approvalId })
         logger.info({ ...logCtx, id, approvalId, message: "SKU update submitted for approval" })
         return NextResponse.json({ ok: true, approval_id: approvalId })
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        const code = (err as { code?: string })?.code
         await conn.rollback()
-        recordFailedEvent("SKU_UPDATE", eventId, { id, name }, err.message)
+        recordFailedEvent("SKU_UPDATE", eventId, { id, name }, message)
         if (err instanceof ApiError) throw err
-        logger.error({ ...logCtx, id, error: err.message, code: err.code, message: "SKU update (approval) failed" })
+        logger.error({ ...logCtx, id, error: message, code, message: "SKU update (approval) failed" })
         throw new ApiError(500, "internal", "Database error")
       } finally {
         conn.release()
@@ -184,9 +192,10 @@ export const POST = withGateway({
       let rawRows
       try {
         rawRows = await parseS3Import(key)
-      } catch (err: any) {
-        logger.error({ ...logCtx, s3Key: key, error: err.message, message: "SKU S3 bulk: failed to parse file" })
-        throw new ApiError(400, "parse_error", "Failed to parse file: " + err.message)
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        logger.error({ ...logCtx, s3Key: key, error: message, message: "SKU S3 bulk: failed to parse file" })
+        throw new ApiError(400, "parse_error", "Failed to parse file: " + message)
       }
 
       if (rawRows.length === 0) {
@@ -217,8 +226,9 @@ export const POST = withGateway({
               userId,
             ])
             inserted++
-          } catch (err: any) {
-            if (err.code === "ER_DUP_ENTRY") {
+          } catch (err: unknown) {
+            const code = (err as { code?: string })?.code
+            if (code === "ER_DUP_ENTRY") {
               skipped++
             } else {
               throw err
@@ -229,16 +239,18 @@ export const POST = withGateway({
         recordProcessedEvent("SKU_BULK", eventId, { source: "s3", s3Key: key, inserted, skipped })
         logger.info({ ...logCtx, s3Key: key, inserted, skipped, message: "SKU S3 bulk import committed" })
         return NextResponse.json({ inserted, skipped })
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        const code = (err as { code?: string })?.code
         await conn.rollback()
-        recordFailedEvent("SKU_BULK", eventId, { source: "s3", s3Key: key }, err.message)
-        logger.error({ ...logCtx, s3Key: key, error: err.message, code: err.code, message: "SKU S3 bulk import failed" })
-        throw new ApiError(500, "internal", "Import failed: " + err.message)
+        recordFailedEvent("SKU_BULK", eventId, { source: "s3", s3Key: key }, message)
+        logger.error({ ...logCtx, s3Key: key, error: message, code, message: "SKU S3 bulk import failed" })
+        throw new ApiError(500, "internal", "Import failed: " + message)
       } finally {
         conn.release()
       }
     }
-    
+
     logger.warn({...ctx , message: "Invalid action"})
     return NextResponse.json({ error: "Invalid action" }, { status: 400 })
   }

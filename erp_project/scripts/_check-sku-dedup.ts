@@ -2,15 +2,18 @@ import 'dotenv/config'
 import { queryDwh } from "../lib/db-sku"
 import { skuDetails } from "../lib/queries/sku-details"
 
+type CountRow = { total: number }
+type SkuRow = { sku_code: string; [key: string]: unknown }
+
 async function main() {
-  const countRows: any = await queryDwh(skuDetails.countAll, [null, null, null, null, null, null, null, null])
+  const countRows = await queryDwh<CountRow>(skuDetails.countAll, [null, null, null, null, null, null, null, null])
   console.log("countAll (no filters):", countRows[0].total)
 
-  const page: any = await queryDwh(skuDetails.selectPaginated, [null, null, null, null, null, null, null, null, 5, 0])
+  const page = await queryDwh<SkuRow>(skuDetails.selectPaginated, [null, null, null, null, null, null, null, null, 5, 0])
   console.log("\nFirst 5 rows:")
   console.log(page)
 
-  const all: any = await queryDwh(skuDetails.selectAllFiltered, [null, null, null, null, null, null, null, null])
+  const all = await queryDwh<SkuRow>(skuDetails.selectAllFiltered, [null, null, null, null, null, null, null, null])
   const seen = new Set<string>()
   let dupes = 0
   for (const r of all) {
@@ -21,7 +24,7 @@ async function main() {
   console.log("Distinct sku_codes:", seen.size)
   console.log("Duplicate sku_code occurrences:", dupes)
 
-  const search: any = await queryDwh(skuDetails.selectAllFiltered, ["%100MCaf48%", "%100MCaf48%", "%100MCaf48%", "%100MCaf48%", null, null, null, null])
+  const search = await queryDwh<SkuRow>(skuDetails.selectAllFiltered, ["%100MCaf48%", "%100MCaf48%", "%100MCaf48%", "%100MCaf48%", null, null, null, null])
   console.log("\nRows matching '100MCaf48':", search)
 }
-main().catch((e) => { console.error("FAILED:", e.message); process.exit(1) })
+main().catch((e: unknown) => { console.error("FAILED:", e instanceof Error ? e.message : String(e)); process.exit(1) })

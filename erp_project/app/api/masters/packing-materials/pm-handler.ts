@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import type { ResultSetHeader } from "mysql2/promise"
 import { query, pool } from "@/lib/db"
 import { packingMaterials } from "@/lib/queries/packing-materials"
 import { parseS3Import } from "@/lib/import-s3"
@@ -8,7 +9,57 @@ import { insertApprovalWithItems, applyVendorRateApproval, applyMfgRateApproval,
 import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
 import { roundToWholeNumber, roundToTwoDecimals } from "@/lib/numeric"
 
-function toPmMfgRateParams(pmId: number, m: any, today: string): any[] {
+type PmMaterialRow = { id: number; pm_code: string; name: string; type: string; uom: string; hsn_code: string | null }
+
+type PmRateFields = {
+  vendor_id?: string | number
+  vendor_code?: string
+  mfg_id?: string | number
+  mfg_code?: string
+  curr_rate?: string | number
+  moq?: string | number
+  rate_uom?: string
+  rate_status?: string
+  effective_from?: string
+  effective_to?: string | null
+}
+
+type PmCreateBody = PmRateFields & {
+  pm_code?: string
+  name?: string
+  type?: string
+  uom?: string
+  hsn_code?: string
+  pantone_color?: string
+}
+
+type PmCheckDuplicateBody = { name?: string; type?: string }
+type PmCheckVendorBody = { name?: string; type?: string; vendor_id?: string | number; moq?: string | number }
+
+type PmLineItem = Record<string, unknown> & PmRateFields
+type PmCreateFullBody = {
+  pm?: Record<string, unknown> & { pm_code?: string; name?: string; type?: string; hsn_code?: string; uom?: string; pantone_color?: string }
+  vendors?: PmLineItem[]
+  manufacturers?: PmLineItem[]
+}
+type PmAddRatesBody = {
+  pm_id?: string | number
+  name?: string
+  type?: string
+  vendors?: PmLineItem[]
+  manufacturers?: PmLineItem[]
+}
+type PmBulkBody = { rows?: Record<string, unknown>[] }
+type PmS3BulkBody = { key?: string }
+
+type PmExistingRateRow = {
+  id: number; status: string; vendor_id?: number; mfg_id?: number
+  curr_rate: unknown; moq?: unknown; uom: unknown
+  effective_from: unknown; effective_to?: unknown
+  [key: string]: unknown
+}
+
+function toPmMfgRateParams(pmId: number, m: PmLineItem, today: string): (string | number | null)[] {
   return [
     pmId, m.mfg_id ? Number(m.mfg_id) : null,
     m.mfg_code?.trim() || null,
@@ -23,36 +74,38 @@ function toPmMfgRateParams(pmId: number, m: any, today: string): any[] {
 // happens on the Material Master page.
 export async function pmGetMaterials(ctx: object): Promise<NextResponse> {
   try {
-    const rows = await query<any>(packingMaterials.selectActiveFull)
+    const rows = await query<PmMaterialRow>(packingMaterials.selectActiveFull)
     return NextResponse.json({ materials: rows })
-  } catch (err: any) {
-    logger.error({ ...ctx, error: err.message, message: "PM get-materials error" })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    logger.error({ ...ctx, error: message, message: "PM get-materials error" })
     return NextResponse.json({ error: "Database error" }, { status: 500 })
   }
 }
 
-export async function pmCreate(body: any, userId: number, ctx: object): Promise<NextResponse> {
+export async function pmCreate(body: PmCreateBody, userId: number, ctx: object): Promise<NextResponse> {
   if (!body.name?.trim()) {
     logger.warn({ ...ctx, message: "PM create rejected: missing name" })
     return NextResponse.json({ error: "name is required" }, { status: 400 })
   }
+  const name = body.name.trim()
 
   const eventId = makeEventId("PM", "create")
   const hasVendorRate = !!body.vendor_code?.trim()
   const hasMfgRate = !!body.mfg_code?.trim()
   const rateTab = hasVendorRate ? "vendor" : hasMfgRate ? "manufacturer" : "none"
   const logCtx = { ...ctx, eventId, rateTab }
-  logger.info({ ...logCtx, message: "PM create started", name: body.name.trim(), pm_code: body.pm_code?.trim() })
-  recordRawEvent("PM", eventId, { name: body.name.trim(), pm_code: body.pm_code?.trim() || null })
+  logger.info({ ...logCtx, message: "PM create started", name, pm_code: body.pm_code?.trim() })
+  recordRawEvent("PM", eventId, { name, pm_code: body.pm_code?.trim() || null })
 
   if (hasVendorRate || hasMfgRate) {
     const conn = await pool.getConnection()
     await conn.beginTransaction()
     try {
-      const [pmResult] = await conn.execute(packingMaterials.insert, await toPmParams(conn, body))
-      const pmId = (pmResult as any).insertId
+      const [pmResult] = await conn.execute(packingMaterials.insert, await toPmParams(conn, { ...body, name }))
+      const pmId = (pmResult as ResultSetHeader).insertId
       await insertApprovalWithItems(conn, userId, "PM_MAT", pmId, [
-        ["name", body.name.trim()],
+        ["name", name],
         ["type", body.type?.trim() || ""],
         ["uom", body.uom?.trim() || ""],
         ["hsn_code", body.hsn_code?.trim() || ""],
@@ -84,11 +137,12 @@ export async function pmCreate(body: any, userId: number, ctx: object): Promise<
       recordProcessedEvent("PM", eventId, { pmId })
       logger.info({ ...logCtx, message: "PM + rate transaction committed", pmId })
       return NextResponse.json({ id: pmId })
-    } catch (err: any) {
+    } catch (err: unknown) {
       await conn.rollback()
-      recordFailedEvent("PM", eventId, { name: body.name.trim() }, err.message)
-      logger.error({ ...logCtx, message: `PM + rate insert error (${rateTab} tab)`, error: err.message, code: err.code })
-      return NextResponse.json({ error: "Database error: " + err.message }, { status: 500 })
+      const message = err instanceof Error ? err.message : String(err)
+      recordFailedEvent("PM", eventId, { name }, message)
+      logger.error({ ...logCtx, message: `PM + rate insert error (${rateTab} tab)`, error: message, code: (err as { code?: string })?.code })
+      return NextResponse.json({ error: "Database error: " + message }, { status: 500 })
     } finally {
       conn.release()
     }
@@ -97,10 +151,10 @@ export async function pmCreate(body: any, userId: number, ctx: object): Promise<
   const conn = await pool.getConnection()
   await conn.beginTransaction()
   try {
-    const [pmResult] = await conn.execute(packingMaterials.insert, await toPmParams(conn, body))
-    const pmId = (pmResult as any).insertId
+    const [pmResult] = await conn.execute(packingMaterials.insert, await toPmParams(conn, { ...body, name }))
+    const pmId = (pmResult as ResultSetHeader).insertId
     await insertApprovalWithItems(conn, userId, "PM_MAT", pmId, [
-      ["name", body.name.trim()],
+      ["name", name],
       ["type", body.type?.trim() || ""],
       ["uom", body.uom?.trim() || ""],
       ["hsn_code", body.hsn_code?.trim() || ""],
@@ -109,21 +163,23 @@ export async function pmCreate(body: any, userId: number, ctx: object): Promise<
     recordProcessedEvent("PM", eventId, { pmId })
     logger.info({ ...logCtx, message: "PM create succeeded (no rate)", pmId })
     return NextResponse.json({ id: pmId })
-  } catch (err: any) {
+  } catch (err: unknown) {
     await conn.rollback()
-    recordFailedEvent("PM", eventId, { name: body.name.trim() }, err.message)
-    if (err.code === "ER_DUP_ENTRY") {
+    const message = err instanceof Error ? err.message : String(err)
+    const code = (err as { code?: string })?.code
+    recordFailedEvent("PM", eventId, { name }, message)
+    if (code === "ER_DUP_ENTRY") {
       logger.warn({ ...logCtx, message: "PM create rejected: duplicate pm_code", pm_code: body.pm_code?.trim() })
       return NextResponse.json({ error: `PM code "${body.pm_code?.trim()}" already exists` }, { status: 409 })
     }
-    logger.error({ ...logCtx, message: "PM create error", error: err.message, code: err.code })
+    logger.error({ ...logCtx, message: "PM create error", error: message, code })
     return NextResponse.json({ error: "Database error" }, { status: 500 })
   } finally {
     conn.release()
   }
 }
 
-export async function pmCheckDuplicate(body: any, ctx: object): Promise<NextResponse> {
+export async function pmCheckDuplicate(body: PmCheckDuplicateBody, ctx: object): Promise<NextResponse> {
   const { name, type } = body
   const logCtx = { ...ctx, action: "check-PM" }
   if (!name?.trim() || !type?.trim()) {
@@ -134,13 +190,14 @@ export async function pmCheckDuplicate(body: any, ctx: object): Promise<NextResp
     const rows = await query<{ id: number }>(packingMaterials.checkDuplicate, [name.trim(), type.trim()])
     logger.info({ ...logCtx, message: "check-PM completed", name: name.trim(), type: type.trim(), exists: rows.length > 0 })
     return NextResponse.json({ exists: rows.length > 0 })
-  } catch (err: any) {
-    logger.error({ ...logCtx, message: "check-PM error", error: err.message, code: err.code })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    logger.error({ ...logCtx, message: "check-PM error", error: message, code: (err as { code?: string })?.code })
     return NextResponse.json({ error: "Database error" }, { status: 500 })
   }
 }
 
-export async function pmCheckVendor(body: any, ctx: object): Promise<NextResponse> {
+export async function pmCheckVendor(body: PmCheckVendorBody, ctx: object): Promise<NextResponse> {
   const { name, type, vendor_id, moq } = body
   const logCtx = { ...ctx, action: "check-vendor" }
   if (!name?.trim() || !vendor_id || !moq) {
@@ -150,18 +207,19 @@ export async function pmCheckVendor(body: any, ctx: object): Promise<NextRespons
   try {
     const pms = await query<{ id: number }>(packingMaterials.checkDuplicate, [name.trim(), type?.trim() || ""])
     if (pms.length === 0) return NextResponse.json({ exists: false })
-    const rates = await query<any>(packingMaterials.checkVendorRate, [pms[0].id, Number(vendor_id), Number(moq)])
+    const rates = await query<{ id: number; vendor_id: number; curr_rate: number; moq: number; uom: string; status: string; effective_from: string; effective_to: string | null }>(packingMaterials.checkVendorRate, [pms[0].id, Number(vendor_id), Number(moq)])
     if (rates.length === 0) return NextResponse.json({ exists: false })
     const r = rates[0]
     logger.info({ ...logCtx, message: "check-vendor: existing rate found", pmId: pms[0].id, vendor_id: Number(vendor_id) })
     return NextResponse.json({ exists: true, existing: { curr_rate: r.curr_rate, moq: r.moq, uom: r.uom } })
-  } catch (err: any) {
-    logger.error({ ...logCtx, message: "check-vendor error", error: err.message, code: err.code })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    logger.error({ ...logCtx, message: "check-vendor error", error: message, code: (err as { code?: string })?.code })
     return NextResponse.json({ error: "Database error" }, { status: 500 })
   }
 }
 
-export async function pmCreateFull(body: any, userId: number, ctx: object): Promise<NextResponse> {
+export async function pmCreateFull(body: PmCreateFullBody, userId: number, ctx: object): Promise<NextResponse> {
   const { pm } = body
   const vendorList = Array.isArray(body.vendors) ? body.vendors : []
   const mfgList = Array.isArray(body.manufacturers) ? body.manufacturers : []
@@ -172,9 +230,10 @@ export async function pmCreateFull(body: any, userId: number, ctx: object): Prom
     logger.warn({ ...logCtx, message: "create-full rejected: missing name" })
     return NextResponse.json({ error: "name is required" }, { status: 400 })
   }
+  const pmName = pm.name.trim()
 
-  logger.info({ ...logCtx, message: "create-full started", name: pm.name.trim(), vendorCount: vendorList.length, mfgCount: mfgList.length })
-  recordRawEvent("PM_FULL", eventId, { name: pm.name.trim(), vendorCount: vendorList.length, mfgCount: mfgList.length })
+  logger.info({ ...logCtx, message: "create-full started", name: pmName, vendorCount: vendorList.length, mfgCount: mfgList.length })
+  recordRawEvent("PM_FULL", eventId, { name: pmName, vendorCount: vendorList.length, mfgCount: mfgList.length })
 
   const today = new Date().toISOString().slice(0, 10)
   const conn = await pool.getConnection()
@@ -182,14 +241,14 @@ export async function pmCreateFull(body: any, userId: number, ctx: object): Prom
   try {
     const [pmResult] = await conn.execute(packingMaterials.insert, [
       pm.pm_code?.trim() || await generateMaterialCode(conn, packingMaterials.countTotal, "PM"),
-      pm.name.trim(), pm.type?.trim() || null,
+      pmName, pm.type?.trim() || null,
       pm.hsn_code?.trim() || null, pm.uom?.trim() || null, "in_review",
       pm.pantone_color?.trim() || null,
     ])
-    const pmId = (pmResult as any).insertId
+    const pmId = (pmResult as ResultSetHeader).insertId
     logger.info({ ...logCtx, message: "create-full: PM inserted", pmId })
     await insertApprovalWithItems(conn, userId, "PM_MAT", pmId, [
-      ["name", pm.name.trim()],
+      ["name", pmName],
       ["type", pm.type?.trim() || ""],
       ["uom", pm.uom?.trim() || ""],
       ["hsn_code", pm.hsn_code?.trim() || ""],
@@ -198,7 +257,7 @@ export async function pmCreateFull(body: any, userId: number, ctx: object): Prom
     for (const v of vendorList) {
       const vendorId = v.vendor_id ? Number(v.vendor_id) : null
       const [existingRows] = await conn.execute(packingMaterials.checkVendorRate, [pmId, vendorId, v.moq ? Number(v.moq) : null])
-      const existing = (existingRows as any[])[0]
+      const existing = (existingRows as PmExistingRateRow[])[0]
       if (existing) {
         await conn.execute(packingMaterials.archiveVendorRate, [
           pmId, existing.vendor_id, existing.curr_rate, existing.moq,
@@ -224,13 +283,13 @@ export async function pmCreateFull(body: any, userId: number, ctx: object): Prom
     for (const m of mfgList) {
       const mfgId = m.mfg_id ? Number(m.mfg_id) : null
       const [existingRows] = await conn.execute(packingMaterials.checkMfgRate, [pmId, mfgId])
-      const existing = (existingRows as any[])[0]
+      const existing = (existingRows as PmExistingRateRow[])[0]
       if (existing) {
         await applyMfgRateApproval(conn, userId, "PM_RATE", existing, m, today, packingMaterials.setRateStatus)
         logger.info({ ...logCtx, message: "create-full: mfg rate approval submitted", pmId, mfg_id: mfgId })
       } else {
         const [mResult] = await conn.execute(packingMaterials.insertMfgRate, toPmMfgRateParams(pmId, m, today))
-        const mrmId = (mResult as any).insertId
+        const mrmId = (mResult as ResultSetHeader).insertId
         await insertApprovalWithItems(conn, userId, "PM_RATE", mrmId, [
           ["curr_rate", m.curr_rate ? String(m.curr_rate) : ""],
           ["uom", m.rate_uom?.trim() || ""],
@@ -244,17 +303,18 @@ export async function pmCreateFull(body: any, userId: number, ctx: object): Prom
     recordProcessedEvent("PM_FULL", eventId, { pmId, vendorCount: vendorList.length, mfgCount: mfgList.length })
     logger.info({ ...logCtx, message: "create-full committed", pmId })
     return NextResponse.json({ id: pmId })
-  } catch (err: any) {
+  } catch (err: unknown) {
     await conn.rollback()
-    recordFailedEvent("PM_FULL", eventId, { name: pm.name.trim() }, err.message)
-    logger.error({ ...logCtx, message: "create-full error", error: err.message, code: err.code })
-    return NextResponse.json({ error: "Database error: " + err.message }, { status: 500 })
+    const message = err instanceof Error ? err.message : String(err)
+    recordFailedEvent("PM_FULL", eventId, { name: pmName }, message)
+    logger.error({ ...logCtx, message: "create-full error", error: message, code: (err as { code?: string })?.code })
+    return NextResponse.json({ error: "Database error: " + message }, { status: 500 })
   } finally {
     conn.release()
   }
 }
 
-export async function pmAddRates(body: any, userId: number, ctx: object): Promise<NextResponse> {
+export async function pmAddRates(body: PmAddRatesBody, userId: number, ctx: object): Promise<NextResponse> {
   const { name, type, pm_id } = body
   const vendorList = Array.isArray(body.vendors) ? body.vendors : []
   const mfgList = Array.isArray(body.manufacturers) ? body.manufacturers : []
@@ -293,7 +353,7 @@ export async function pmAddRates(body: any, userId: number, ctx: object): Promis
       for (const v of vendorList) {
         const vendorId = v.vendor_id ? Number(v.vendor_id) : null
         const [existingRows] = await conn.execute(packingMaterials.checkVendorRate, [pmId, vendorId, v.moq ? Number(v.moq) : null])
-        const existing = (existingRows as any[])[0]
+        const existing = (existingRows as PmExistingRateRow[])[0]
         if (existing) {
           await applyVendorRateApproval(conn, userId, "PM_VRM", existing, v, today, packingMaterials.setVendorRateStatus)
         } else {
@@ -310,12 +370,12 @@ export async function pmAddRates(body: any, userId: number, ctx: object): Promis
       for (const m of mfgList) {
         const mfgId = m.mfg_id ? Number(m.mfg_id) : null
         const [existingRows] = await conn.execute(packingMaterials.checkMfgRate, [pmId, mfgId])
-        const existing = (existingRows as any[])[0]
+        const existing = (existingRows as PmExistingRateRow[])[0]
         if (existing) {
           await applyMfgRateApproval(conn, userId, "PM_RATE", existing, m, today, packingMaterials.setRateStatus)
         } else {
           const [mResult] = await conn.execute(packingMaterials.insertMfgRate, toPmMfgRateParams(pmId, m, today))
-          const mrmId = (mResult as any).insertId
+          const mrmId = (mResult as ResultSetHeader).insertId
           await insertApprovalWithItems(conn, userId, "PM_RATE", mrmId, [
             ["curr_rate", m.curr_rate ? String(m.curr_rate) : ""],
             ["uom", m.rate_uom?.trim() || ""],
@@ -329,16 +389,18 @@ export async function pmAddRates(body: any, userId: number, ctx: object): Promis
       recordProcessedEvent("PM_RATES", eventId, { pmId, vendorCount: vendorList.length, mfgCount: mfgList.length })
       logger.info({ ...logCtx, message: "add-rates committed", pmId })
       return NextResponse.json({ pmId })
-    } catch (err: any) {
+    } catch (err: unknown) {
       await conn.rollback()
-      recordFailedEvent("PM_RATES", eventId, { pmId }, err.message)
-      logger.error({ ...logCtx, message: "add-rates transaction error", pmId, error: err.message, code: err.code })
-      return NextResponse.json({ error: "Database error: " + err.message }, { status: 500 })
+      const message = err instanceof Error ? err.message : String(err)
+      recordFailedEvent("PM_RATES", eventId, { pmId }, message)
+      logger.error({ ...logCtx, message: "add-rates transaction error", pmId, error: message, code: (err as { code?: string })?.code })
+      return NextResponse.json({ error: "Database error: " + message }, { status: 500 })
     } finally {
       conn.release()
     }
-  } catch (err: any) {
-    logger.error({ ...logCtx, message: "add-rates lookup error", error: err.message, code: err.code })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    logger.error({ ...logCtx, message: "add-rates lookup error", error: message, code: (err as { code?: string })?.code })
     return NextResponse.json({ error: "Database error" }, { status: 500 })
   }
 }
@@ -346,7 +408,7 @@ export async function pmAddRates(body: any, userId: number, ctx: object): Promis
 // Stages the WHOLE batch as one pending approval — nothing is inserted into
 // master_pm until an admin approves (see the PM_BULK handler in
 // lib/approvals/module-handlers.ts).
-export async function pmBulk(body: any, userId: number, ctx: object): Promise<NextResponse> {
+export async function pmBulk(body: PmBulkBody, userId: number, ctx: object): Promise<NextResponse> {
   const { rows } = body
   const eventId = makeEventId("PM_BULK", "bulk")
   const logCtx = { ...ctx, action: "bulk", eventId }
@@ -359,13 +421,13 @@ export async function pmBulk(body: any, userId: number, ctx: object): Promise<Ne
   logger.info({ ...logCtx, message: "Bulk upload started", rowCount: rows.length })
   recordRawEvent("PM_BULK", eventId, { source: "csv", rowCount: rows.length })
 
-  const staged = rows.filter((r: any) => r.name?.trim()).length
+  const staged = rows.filter((r: Record<string, unknown>) => (r.name as string | undefined)?.trim()).length
   const skipped = rows.length - staged
 
   const conn = await pool.getConnection()
   try {
     const yyyymm = new Date().toISOString().slice(0, 7)
-    const { key, filename } = await uploadRowsAsCsv(rows, `imports/packing-materials/${yyyymm}`, "pm_bulk")
+    const { key, filename } = await uploadRowsAsCsv(rows as Record<string, string>[], `imports/packing-materials/${yyyymm}`, "pm_bulk")
 
     await conn.beginTransaction()
     const approvalId = await stageBulkUploadApproval(conn, {
@@ -375,11 +437,12 @@ export async function pmBulk(body: any, userId: number, ctx: object): Promise<Ne
     recordProcessedEvent("PM_BULK", eventId, { source: "csv", staged, skipped, approvalId })
     logger.info({ ...logCtx, message: "Bulk upload staged for approval", rowCount: rows.length, staged, skipped, approvalId })
     return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rows.length })
-  } catch (err: any) {
+  } catch (err: unknown) {
     await conn.rollback()
-    recordFailedEvent("PM_BULK", eventId, { source: "csv", rowCount: rows.length }, err.message)
-    logger.error({ ...logCtx, message: "Bulk upload error", error: err.message, code: err.code })
-    return NextResponse.json({ error: "Bulk upload failed: " + err.message }, { status: 500 })
+    const message = err instanceof Error ? err.message : String(err)
+    recordFailedEvent("PM_BULK", eventId, { source: "csv", rowCount: rows.length }, message)
+    logger.error({ ...logCtx, message: "Bulk upload error", error: message, code: (err as { code?: string })?.code })
+    return NextResponse.json({ error: "Bulk upload failed: " + message }, { status: 500 })
   } finally {
     conn.release()
   }
@@ -387,7 +450,7 @@ export async function pmBulk(body: any, userId: number, ctx: object): Promise<Ne
 
 // Same staging-only behaviour as pmBulk above — the file is already in S3,
 // so we just parse it for a preview count and stage ONE approval.
-export async function pmS3Bulk(body: any, userId: number, ctx: object): Promise<NextResponse> {
+export async function pmS3Bulk(body: PmS3BulkBody, userId: number, ctx: object): Promise<NextResponse> {
   const { key } = body
   const eventId = makeEventId("PM_S3BULK", "bulk-s3")
   const logCtx = { ...ctx, action: "bulk_from_s3", eventId, s3Key: key?.trim() }
@@ -398,13 +461,14 @@ export async function pmS3Bulk(body: any, userId: number, ctx: object): Promise<
   }
   recordRawEvent("PM_S3BULK", eventId, { source: "s3", s3Key: key, rowCount: null })
 
-  let rawRows: any[]
+  let rawRows: Record<string, string>[]
   try {
     rawRows = await parseS3Import(key)
-  } catch (err: any) {
-    recordFailedEvent("PM_S3BULK", eventId, { source: "s3", s3Key: key }, err.message)
-    logger.error({ ...logCtx, message: "bulk_from_s3: failed to parse file", error: err.message })
-    return NextResponse.json({ error: "Failed to parse file: " + err.message }, { status: 400 })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    recordFailedEvent("PM_S3BULK", eventId, { source: "s3", s3Key: key }, message)
+    logger.error({ ...logCtx, message: "bulk_from_s3: failed to parse file", error: message })
+    return NextResponse.json({ error: "Failed to parse file: " + message }, { status: 400 })
   }
 
   if (rawRows.length === 0) {
@@ -428,11 +492,12 @@ export async function pmS3Bulk(body: any, userId: number, ctx: object): Promise<
     recordProcessedEvent("PM_S3BULK", eventId, { source: "s3", s3Key: key, staged, skipped, approvalId })
     logger.info({ ...logCtx, message: "bulk_from_s3 staged for approval", rowCount: rawRows.length, staged, skipped, approvalId })
     return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rawRows.length })
-  } catch (err: any) {
+  } catch (err: unknown) {
     await conn.rollback()
-    recordFailedEvent("PM_S3BULK", eventId, { source: "s3", s3Key: key }, err.message)
-    logger.error({ ...logCtx, message: "bulk_from_s3 staging failed", error: err.message, code: err.code })
-    return NextResponse.json({ error: "Import failed: " + err.message }, { status: 500 })
+    const message = err instanceof Error ? err.message : String(err)
+    recordFailedEvent("PM_S3BULK", eventId, { source: "s3", s3Key: key }, message)
+    logger.error({ ...logCtx, message: "bulk_from_s3 staging failed", error: message, code: (err as { code?: string })?.code })
+    return NextResponse.json({ error: "Import failed: " + message }, { status: 500 })
   } finally {
     conn.release()
   }

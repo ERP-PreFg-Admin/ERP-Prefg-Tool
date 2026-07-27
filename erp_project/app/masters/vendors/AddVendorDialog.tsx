@@ -210,6 +210,7 @@ export function AddVendorDialog({ onSuccess }: { onSuccess?: () => void }) {
                   ))}
                 </Tabs.List>
 
+                {/* eslint-disable-next-line react-hooks/refs -- reads the upload session folder generated once on dialog open, not a value driving this render's output */}
                 {DOC_TABS.map((tab) => (
                   <Tabs.Content key={tab.key} value={tab.key}>
                     <FileUpload

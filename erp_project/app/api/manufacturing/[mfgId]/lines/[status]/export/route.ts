@@ -61,8 +61,9 @@ export const GET = withGateway({
           "Content-Disposition": `attachment; filename="${filename}"`,
         },
       })
-    } catch (err: any) {
-      logger.error({ ...ctx, mfgId, status, error: err.message, message: "Manufacturing lines export failed" })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      logger.error({ ...ctx, mfgId, status, error: message, message: "Manufacturing lines export failed" })
       return NextResponse.json({ error: "Export failed" }, { status: 500 })
     }
   },

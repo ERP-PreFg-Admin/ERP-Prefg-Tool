@@ -44,19 +44,23 @@ export const POST = withGateway({
       const { rows } = body
       const duplicates: Record<number, string[]> = {}
 
-      const rmCache = new Map<string, any>()
-      const vendorCache = new Map<string, any>()
-      const mfgCache = new Map<string, any>()
+      type RmRow = { id: number; uom: string; status: string }
+      type VendorRow = { id: number; code: string; name: string; type: string; status: string | null }
+      type MfgRow = { id: number; code: string; name: string; status: string | null }
+
+      const rmCache = new Map<string, RmRow | null>()
+      const vendorCache = new Map<string, VendorRow | null>()
+      const mfgCache = new Map<string, MfgRow | null>()
       async function resolveRm(code: string) {
-        if (!rmCache.has(code)) rmCache.set(code, (await query<any>(rmSql.selectByCode, [code]))[0] ?? null)
+        if (!rmCache.has(code)) rmCache.set(code, (await query<RmRow>(rmSql.selectByCode, [code]))[0] ?? null)
         return rmCache.get(code)
       }
       async function resolveVendor(code: string) {
-        if (!vendorCache.has(code)) vendorCache.set(code, (await query<any>(vendorSql.selectByCode, [code]))[0] ?? null)
+        if (!vendorCache.has(code)) vendorCache.set(code, (await query<VendorRow>(vendorSql.selectByCode, [code]))[0] ?? null)
         return vendorCache.get(code)
       }
       async function resolveMfg(code: string) {
-        if (!mfgCache.has(code)) mfgCache.set(code, (await query<any>(mfgSql.selectByCode, [code]))[0] ?? null)
+        if (!mfgCache.has(code)) mfgCache.set(code, (await query<MfgRow>(mfgSql.selectByCode, [code]))[0] ?? null)
         return mfgCache.get(code)
       }
 
@@ -117,11 +121,12 @@ export const POST = withGateway({
       logger.info({ ...logCtx, approvalId, message: "RM vendor-rate bulk upload staged for approval" })
       recordProcessedEvent("RM_VRM_BULK", eventId, { rowCount: rows.length, source: "csv", approvalId })
       return NextResponse.json({ ok: true, approval_id: approvalId, staged: rows.length, skipped: 0 })
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
       await conn.rollback()
-      recordFailedEvent("RM_VRM_BULK", eventId, { rowCount: rows.length, source: "csv" }, err.message)
-      logger.error({ ...logCtx, err: err.message, message: "RM vendor-rate bulk upload failed" })
-      throw new ApiError(500, "internal", "Bulk upload failed: " + err.message)
+      recordFailedEvent("RM_VRM_BULK", eventId, { rowCount: rows.length, source: "csv" }, message)
+      logger.error({ ...logCtx, err: message, message: "RM vendor-rate bulk upload failed" })
+      throw new ApiError(500, "internal", "Bulk upload failed: " + message)
     } finally {
       conn.release()
     }

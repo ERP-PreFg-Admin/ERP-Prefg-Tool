@@ -22,8 +22,28 @@ const ctx = {
   requestId: crypto.randomUUID(),
 }
 
+type PoEmailRow = {
+  po_no: string
+  date: string | null
+  expected_on: string | null
+  destination: string | null
+  dest_location: string | null
+  sku_code: string
+  sku_name: string | null
+  qty: number | string
+  unit_price: number | string | null
+  total_amount: number | string | null
+  mfg_name: string
+  mfg_code: string
+  registered_name: string | null
+  gst_number: string | null
+  location: string | null
+  mfg_email: string | null
+  raised_by_name: string | null
+}
+
 export async function fetchPoData(poId: number): Promise<PoEmailData | null> {
-  const rows = await query<any>(purchaseOrdersSql.selectForEmail, [poId])
+  const rows = await query<PoEmailRow>(purchaseOrdersSql.selectForEmail, [poId])
   const po = rows[0]
   if (!po) return null
   return {
@@ -140,7 +160,7 @@ export async function sendMfgSelectionEmail(
     return false
   }
 
-  const ongoing = await query<any>(purchaseOrdersSql.ongoingByMfg, [mfgId])
+  const ongoing = await query<{ id: number; po_no: string; sku_code: string; sku_name: string | null; qty: number; expected_on: string | null; status: string }>(purchaseOrdersSql.ongoingByMfg, [mfgId])
   const openLines: OngoingPoLine[] = ongoing.map((r) => ({
     po_no: r.po_no, sku_code: r.sku_code, sku_name: r.sku_name, qty: Number(r.qty),
   }))
@@ -153,8 +173,9 @@ export async function sendMfgSelectionEmail(
       if (!data) continue
       const pdfBuffer = await generatePoPdf(data)
       attachments.push({ filename: `PO-${line.po_no}.pdf`, content: pdfBuffer as unknown as Buffer })
-    } catch (err: any) {
-      logger.error({ ...ctx, poId: line.id, po_no: line.po_no, error: err.message, message: "PO PDF generation failed for selection email — sending without this attachment" })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      logger.error({ ...ctx, poId: line.id, po_no: line.po_no, error: message, message: "PO PDF generation failed for selection email — sending without this attachment" })
     }
   }
 
@@ -200,9 +221,11 @@ export async function sendMfgSelectionEmail(
       `,
       attachments: attachments.length > 0 ? attachments : undefined,
     })
-  } catch (sendErr: any) {
-    logger.error({ ...ctx, eventId, err: sendErr.message, stack: sendErr.stack, message: "PO selection email send failed" })
-    recordFailedEvent("PO_SELECTION_EMAIL", eventId, { mfgId, mfg_name: mfg.name }, sendErr.message)
+  } catch (sendErr: unknown) {
+    const message = sendErr instanceof Error ? sendErr.message : String(sendErr)
+    const stack = sendErr instanceof Error ? sendErr.stack : undefined
+    logger.error({ ...ctx, eventId, err: message, stack, message: "PO selection email send failed" })
+    recordFailedEvent("PO_SELECTION_EMAIL", eventId, { mfgId, mfg_name: mfg.name }, message)
     throw sendErr
   }
 

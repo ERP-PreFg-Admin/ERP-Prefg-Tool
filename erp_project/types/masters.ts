@@ -287,9 +287,7 @@ export type bomType = {
   created_by : number | 0 
   created_at : Date | null    
 }
-export type bom_detailsType = {
-
-}
+export type bom_detailsType = Record<string, never>
 
 /** MFG Management line status — a manufacturer's SKU-level production state. */
 export type MfgLineStatus = "active" | "on_hold" | "tech_transfer"

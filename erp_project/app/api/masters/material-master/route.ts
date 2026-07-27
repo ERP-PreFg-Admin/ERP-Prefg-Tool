@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import type { ResultSetHeader } from "mysql2/promise"
 import { query, pool } from "@/lib/db"
 import { rawMaterials } from "@/lib/queries/raw-materials"
 import { packingMaterials as PMMaterials } from "@/lib/queries/packing-materials"
@@ -9,6 +10,17 @@ import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { materialMasterCreateSchema, materialMasterUpdateSchema } from "@/lib/validation/material-master"
 import { generateMaterialCode } from "@/lib/master-routes/material-utils"
+
+type RmBaseRow = {
+  id: number; rm_code: string; name: string; make: string; type: string | null
+  uom: string | null; status: string; hsn_code: string | null; inci_name: string
+  [key: string]: unknown
+}
+type PmBaseRow = {
+  id: number; pm_code: string; name: string; type: string; uom: string | null
+  status: string; hsn_code: string | null; pantone_color: string | null
+  [key: string]: unknown
+}
 
 // ─── POST: create a base material record (no vendor / manufacturer rates) ────
 // Body: { action: "create", material: "rm" | "pm", ...fields }
@@ -50,9 +62,9 @@ export const POST = withGateway({
           hsn_code?.trim() || null,
           inci_name,
         ])
-        const rmId = (rmResult as any).insertId
+        const rmId = (rmResult as ResultSetHeader).insertId
         const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, "RM_MAT", rmId, "create"])
-        const approvalId = (ar as any).insertId
+        const approvalId = (ar as ResultSetHeader).insertId
         const newFields: [string, string][] = [
           ["rm_code", rmCode],
           ["name", name],
@@ -71,11 +83,13 @@ export const POST = withGateway({
         recordProcessedEvent("RM_MAT", eventId, { rmId, approvalId })
         logger.info({ ...logCtx, rmId, approvalId, message: "Raw material created successfully" })
         return NextResponse.json({ ok: true, approval_id: approvalId })
-      } catch (err: any) {
+      } catch (err: unknown) {
         await conn.rollback()
-        recordFailedEvent("RM_MAT", eventId, { name }, err.message)
-        logger.error({ ...logCtx, err: err.message, stack: err.stack, message: "Raw material create failed" })
-        throw new ApiError(500, "internal", "Database error: " + err.message)
+        const message = err instanceof Error ? err.message : String(err)
+        const stack = err instanceof Error ? err.stack : undefined
+        recordFailedEvent("RM_MAT", eventId, { name }, message)
+        logger.error({ ...logCtx, err: message, stack, message: "Raw material create failed" })
+        throw new ApiError(500, "internal", "Database error: " + message)
       } finally {
         conn.release()
       }
@@ -117,11 +131,11 @@ export const POST = withGateway({
           pantone_color,
         ])
 
-        const pmId = (pmResult as any).insertId
+        const pmId = (pmResult as ResultSetHeader).insertId
 
         const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, "PM_MAT", pmId, "create"])
 
-        const approvalId = (ar as any).insertId
+        const approvalId = (ar as ResultSetHeader).insertId
 
         const newFields: [string, string][] = [
           ["pm_code", pmCode],
@@ -143,11 +157,13 @@ export const POST = withGateway({
         logger.info({ ...logCtx, pmId, approvalId, message: "Packing material created successfully" })
 
         return NextResponse.json({ ok: true, approval_id: approvalId })
-      } catch (err: any) {
+      } catch (err: unknown) {
         await conn.rollback()
-        recordFailedEvent("PM", eventId, { name, type }, err.message)
-        logger.error({ ...logCtx, err: err.message, stack: err.stack, message: "Packing material create failed" })
-        throw new ApiError(500, "internal", "Database error: " + err.message)
+        const message = err instanceof Error ? err.message : String(err)
+        const stack = err instanceof Error ? err.stack : undefined
+        recordFailedEvent("PM", eventId, { name, type }, message)
+        logger.error({ ...logCtx, err: message, stack, message: "Packing material create failed" })
+        throw new ApiError(500, "internal", "Database error: " + message)
       } finally {
         conn.release()
       }
@@ -179,7 +195,7 @@ export const PUT = withGateway({
       const eventId = makeEventId("RM_UPDATE", "update", id)
       const logCtx = { ...ctx, eventId, module: "RM_UPDATE" }
       logger.info({ ...logCtx, id, name, make, inci_name, message: "Raw material update started" })
-      const curRows = await query<any>(rawMaterials.selectBaseById, [id])
+      const curRows = await query<RmBaseRow>(rawMaterials.selectBaseById, [id])
       const cur = curRows[0]
       if (!cur) {
         logger.warn({ ...logCtx, id, message: "Raw material not found" })
@@ -223,7 +239,7 @@ export const PUT = withGateway({
       await conn.beginTransaction()
       try {
         const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, "RM_MAT", id, "edit"])
-        const approvalId = (ar as any).insertId
+        const approvalId = (ar as ResultSetHeader).insertId
         for (const [field, newVal] of diff) {
           await conn.execute(approvalsSql.insertApprovalItem, [approvalId, field, String(cur[field] ?? ""), String(newVal ?? "")])
         }
@@ -232,11 +248,13 @@ export const PUT = withGateway({
         recordProcessedEvent("RM_UPDATE", eventId, { id, approvalId })
         logger.info({ ...logCtx, id, approvalId, message: "Raw material update submitted for approval" })
         return NextResponse.json({ ok: true, approval_id: approvalId })
-      } catch (err: any) {
+      } catch (err: unknown) {
         await conn.rollback()
-        recordFailedEvent("RM_UPDATE", eventId, { id, name }, err.message)
-        logger.error({ ...logCtx, id, err: err.message, stack: err.stack, message: "Raw material update failed" })
-        throw new ApiError(500, "internal", "Database error: " + err.message)
+        const message = err instanceof Error ? err.message : String(err)
+        const stack = err instanceof Error ? err.stack : undefined
+        recordFailedEvent("RM_UPDATE", eventId, { id, name }, message)
+        logger.error({ ...logCtx, id, err: message, stack, message: "Raw material update failed" })
+        throw new ApiError(500, "internal", "Database error: " + message)
       } finally {
         conn.release()
       }
@@ -251,7 +269,7 @@ export const PUT = withGateway({
       const eventId = makeEventId("PM_UPDATE", "update", id)
       const logCtx = { ...ctx, eventId, module: "PM_UPDATE" }
       logger.info({ ...logCtx, id, name, type, message: "Packing material update started" })
-      const curRows = await query<any>(PMMaterials.selectBaseById, [id])
+      const curRows = await query<PmBaseRow>(PMMaterials.selectBaseById, [id])
       const cur = curRows[0]
       if (!cur) {
         logger.warn({ ...logCtx, id, message: "Packing material not found" })
@@ -296,7 +314,7 @@ export const PUT = withGateway({
 
       try {
         const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, "PM_MAT", id, "edit"])
-        const approvalId = (ar as any).insertId
+        const approvalId = (ar as ResultSetHeader).insertId
         for (const [field, newVal] of diff) {
           await conn.execute(approvalsSql.insertApprovalItem, [
             approvalId,
@@ -310,11 +328,13 @@ export const PUT = withGateway({
         recordProcessedEvent("PM_UPDATE", eventId, { id, approvalId })
         logger.info({ ...logCtx, id, approvalId, message: "Packing material update submitted for approval" })
         return NextResponse.json({ ok: true, approval_id: approvalId })
-      } catch (err: any) {
+      } catch (err: unknown) {
         await conn.rollback()
-        recordFailedEvent("PM_UPDATE", eventId, { id, name, type }, err.message)
-        logger.error({ ...logCtx, id, err: err.message, stack: err.stack, message: "Packing material update failed" })
-        throw new ApiError(500, "internal", "Database error: " + err.message)
+        const message = err instanceof Error ? err.message : String(err)
+        const stack = err instanceof Error ? err.stack : undefined
+        recordFailedEvent("PM_UPDATE", eventId, { id, name, type }, message)
+        logger.error({ ...logCtx, id, err: message, stack, message: "Packing material update failed" })
+        throw new ApiError(500, "internal", "Database error: " + message)
       } finally {
         conn.release()
       }

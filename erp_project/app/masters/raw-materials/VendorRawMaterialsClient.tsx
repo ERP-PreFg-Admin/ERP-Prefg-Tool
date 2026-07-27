@@ -9,7 +9,7 @@
 
 import { useState } from "react"
 import { GitCompare, Pencil } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { StatusBadge } from "@/components/masters/StatusBadge"
 import type { RM, Vendor, Mfg } from "@/types/masters"
 import {
   RmRateTable,
@@ -20,13 +20,7 @@ import {
 import { VendorDetailDialog } from "./VendorDetailDialog"
 import { EditRmVendorRateDialog } from "./EditRmVendorRateDialog"
 
-const vrmStatusBadge = (row: AnyRow) => {
-  const s = row.vrm_status as string | null
-  if (s === "in_review") return <Badge variant="warning"  className="capitalize">In Review</Badge>
-  if (s === "rejected")  return <Badge variant="destructive" className="capitalize">Rejected</Badge>
-  if (s === "draft")     return <Badge variant="secondary" className="capitalize">Draft</Badge>
-  return <Badge variant={s === "active" ? "success" : "secondary"} className="capitalize">{s ?? "—"}</Badge>
-}
+const vrmStatusBadge = (row: AnyRow) => <StatusBadge status={row.vrm_status as string | null} />
 
 function buildVendorColumns(vendors: Vendor[]): ColumnDef[] {
   const nameByVendorId = new Map(vendors.map((v) => [v.vendor_id, v.name]))

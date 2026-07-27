@@ -2,7 +2,11 @@
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useMemo, useState } from "react"
-import { Filter, Mail, Plus, X } from "lucide-react"
+import {
+  Filter, FileStack, IndianRupee, Mail, PackageCheck, PackageOpen, Plus, Send, Upload, X,
+} from "lucide-react"
+import type { LucideIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -14,7 +18,7 @@ import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { cn } from "@/lib/utils"
 
 import type { MfgOption, PoRow, SkuOption, TabKey, WarehouseOption } from "./po-types"
-import { STATUS_CONFIG, STATUS_KEYS, TABS } from "./po-types"
+import { STATUS_CONFIG, TABS } from "./po-types"
 import { fmtInt, fmtMoney } from "./po-utils"
 import { PO_BULK_CSV_FIELDS } from "./po-bulk-fields"
 import PoTable from "./PoTable"
@@ -28,12 +32,29 @@ type SortDir = "asc" | "desc"
 const selectCls =
   "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
 
-function SummaryCard({ label, value }: { label: string; value: string }) {
+// Dot color shown on each status tab — mirrors the Badge variant used for
+// that status elsewhere on the page, so the color means the same thing everywhere.
+const TAB_DOT: Record<string, string> = {
+  draft: "bg-muted-foreground/40",
+  raised: "bg-slate-400",
+  punched: "bg-primary",
+  short_closed: "bg-amber-500",
+  partially_received: "bg-blue-500",
+  received: "bg-emerald-500",
+  cancelled: "bg-destructive",
+}
+
+function SummaryCard({ icon: Icon, label, value, accent }: { icon: LucideIcon; label: string; value: string; accent: string }) {
   return (
     <Card>
-      <CardContent className="p-3">
-        <div className="text-[11px] text-muted-foreground">{label}</div>
-        <div className="mt-0.5 text-lg font-bold tracking-tight">{value}</div>
+      <CardContent className="flex items-center gap-3 p-3">
+        <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", accent)}>
+          <Icon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-[11px] text-muted-foreground">{label}</div>
+          <div className="mt-0.5 text-base font-bold tracking-tight tabular-nums truncate">{value}</div>
+        </div>
       </CardContent>
     </Card>
   )
@@ -170,10 +191,21 @@ export default function PoProcurementClient({
   return (
     <div className="space-y-4 text-xs [&_th]:h-9 [&_th]:px-3 [&_th]:text-[11px] [&_td]:px-3 [&_td]:py-2">
 
+      {/* ── Summary strip ── */}
+      <div className="text-sm grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        <SummaryCard icon={FileStack}     label="Total POs"          value={fmtInt(summary.total)}    accent="bg-muted text-muted-foreground" />
+        <SummaryCard icon={Send}          label="Raised"             value={fmtInt(summary.raised)}   accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" />
+        <SummaryCard icon={PackageCheck}  label="Punched"            value={fmtInt(summary.punched)}  accent="bg-primary/10 text-primary" />
+        <SummaryCard icon={PackageOpen}   label="Partially Received" value={fmtInt(summary.partiallyReceived)} accent="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" />
+        <SummaryCard icon={IndianRupee}   label="Value of Open POs"  value={fmtMoney(summary.openValue)} accent="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" />
+      </div>
+
       {/* ── Toolbar ── */}
       <div className="flex flex-col sm:flex-row gap-3">
         <UrlSearchInput initialValue={currentSearch} placeholder="Search PO, SKU, MFG…" />
-        <button
+        <Button
+          variant="outline"
+          size="lg"
           onClick={() => {
             setDraftMfgCode(currentMfgCode)
             setDraftPoType(currentPoType)
@@ -183,12 +215,7 @@ export default function PoProcurementClient({
             setDraftDestination(currentDestination)
             setShowFilters((v) => !v)
           }}
-          className={cn(
-            "inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors",
-            hasActiveFilters
-              ? "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"
-              : "border-input bg-background hover:bg-accent"
-          )}
+          className={cn(hasActiveFilters && "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300")}
         >
           <Filter className="h-3.5 w-3.5" />
           Filters
@@ -197,30 +224,16 @@ export default function PoProcurementClient({
               {[currentMfgCode, currentPoType, currentDateFrom, currentDateTo, currentSku, currentDestination].filter(Boolean).length}
             </span>
           )}
-        </button>
-        <CsvImportDialog
-          entityLabel="PO"
-          entityLabelPlural="POs"
-          title="Bulk Upload / Update POs via CSV"
-          endpoint="/api/purchase-orders"
-          templateFilename="po_bulk_template.csv"
-          fields={PO_BULK_CSV_FIELDS}
-          previewExcel
-          onSuccess={afterAction}
-        />
-        <button
-          onClick={() => router.push("/po-tracking/po-procurement/entity-emails")}
-          className="inline-flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3 text-xs font-medium hover:bg-accent transition-colors"
-        >
+        </Button>
+        <Button variant="outline" size="lg" onClick={() => setShowBulk(true)}>
+          <Upload className="h-3.5 w-3.5" /> Bulk Upload
+        </Button>
+        <Button variant="outline" size="lg" onClick={() => router.push("/po-tracking/po-procurement/entity-emails")}>
           <Mail className="h-3.5 w-3.5" /> Entity Emails
-        </button>
-        <DownloadButton endpoint="/api/purchase-orders/export" label="PO Procurement" />
-        <button
-          onClick={() => setShowAddPO(true)}
-          className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors sm:ml-auto"
-        >
+        </Button>
+        <Button size="lg" onClick={() => setShowAddPO(true)} className="sm:ml-auto">
           <Plus className="h-3.5 w-3.5" /> Add PO
-        </button>
+        </Button>
       </div>
 
       {/* ── Filter panel ── */}
@@ -306,49 +319,38 @@ export default function PoProcurementClient({
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button
-                onClick={clearFilters}
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-3 text-xs hover:bg-accent transition-colors"
-              >
-                Clear
-              </button>
-              <button
-                onClick={applyFilters}
-                className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs text-primary-foreground hover:bg-primary/90 transition-colors"
-              >
-                Apply
-              </button>
+              <Button variant="outline" size="sm" onClick={clearFilters}>Clear</Button>
+              <Button size="sm" onClick={applyFilters}>Apply</Button>
             </div>
           </CardContent>
         </Card>
       )}
 
       {/* ── Status tabs ── */}
-      <Card className="flex flex-wrap items-center gap-1.5 border-b border-border p-2">
-        <CardContent className="p-0">
-          {TABS.map((tab) => {
-            const isActive = activeTab === tab
-            const count = tab === "all"
-              ? statusCounts.all
-              : (statusCounts[tab] ?? 0)
-            return (
-              <button
-                key={tab}
-                onClick={() => navigate({ status: tab === "all" ? "" : tab })}
-                className={cn(
-                  "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-                  isActive
-                    ? "bg-foreground text-background"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                )}
-              >
-                {tab === "all" ? "All" : STATUS_CONFIG[tab].label}{" "}
-                <span className="opacity-70">({count})</span>
-              </button>
-            )
-          })}
-        </CardContent>
-      </Card>
+      <div className="flex flex-wrap items-center gap-1 border-b border-border">
+        {TABS.map((tab) => {
+          const isActive = activeTab === tab
+          const count = tab === "all"
+            ? statusCounts.all
+            : (statusCounts[tab] ?? 0)
+          return (
+            <button
+              key={tab}
+              onClick={() => navigate({ status: tab === "all" ? "" : tab })}
+              className={cn(
+                "relative flex items-center gap-1.5 px-2.5 py-2 text-xs font-medium transition-colors -mb-px border-b-2",
+                isActive
+                  ? "border-foreground text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {tab !== "all" && <span className={cn("h-1.5 w-1.5 rounded-full", TAB_DOT[tab])} />}
+              {tab === "all" ? "All" : STATUS_CONFIG[tab].label}
+              <span className="opacity-60 tabular-nums">({count})</span>
+            </button>
+          )
+        })}
+      </div>
 
       {/* ── Table ── */}
       <PoTable
@@ -366,15 +368,6 @@ export default function PoProcurementClient({
 
       {/* ── Pagination ── */}
       <PaginationBar page={page} pageSize={pageSize} total={total} />
-
-      {/* ── Summary cards ── */}
-      <div className="text-sm grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <SummaryCard label="Total POs"          value={fmtInt(summary.total)} />
-        <SummaryCard label="Raised"             value={fmtInt(summary.raised)} />
-        <SummaryCard label="Punched"            value={fmtInt(summary.punched)} />
-        <SummaryCard label="Partially Received" value={fmtInt(summary.partiallyReceived)} />
-        <SummaryCard label="Value of Open POs"  value={fmtMoney(summary.openValue)} />
-      </div>
 
       {/* ── Dialogs ── */}
       <AddPODialog

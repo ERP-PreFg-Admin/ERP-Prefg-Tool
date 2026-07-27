@@ -339,7 +339,7 @@ export default function PoTable({
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader>
+              <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
                   <TableHead className="w-9">
                     <input
@@ -354,7 +354,6 @@ export default function PoTable({
                   <SortHead colKey="date"         {...sh}>PO Date</SortHead>
                   <SortHead colKey="expected_on"  {...sh}>Exp. Dispatch</SortHead>
                   <SortHead colKey="sku_code"     {...sh}>SKU</SortHead>
-                  <TableHead>SKU Status</TableHead>
                   <SortHead colKey="qty"          {...sh} className="text-right">PO Qty</SortHead>
                   <TableHead>Received</TableHead>
                   <SortHead colKey="unit_price"   {...sh}>Rate</SortHead>
@@ -369,7 +368,7 @@ export default function PoTable({
               <TableBody>
                 {rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={15} className="text-center text-muted-foreground py-10">
+                    <TableCell colSpan={14} className="text-center text-muted-foreground py-10">
                       No purchase orders match your filters.
                     </TableCell>
                   </TableRow>
@@ -429,7 +428,7 @@ export default function PoTable({
                     }
 
                     return (
-                      <TableRow key={r.id}>
+                      <TableRow key={r.id} data-state={selectedIds.has(r.id) ? "selected" : undefined}>
                         <TableCell>
                           <input
                             type="checkbox"
@@ -455,19 +454,18 @@ export default function PoTable({
                         <TableCell className="text-xs tabular-nums text-muted-foreground whitespace-nowrap">{fmtDate(r.date)}</TableCell>
                         <TableCell className="text-xs tabular-nums text-muted-foreground whitespace-nowrap">{fmtDate(r.expected_on)}</TableCell>
 
-                        {/* SKU */}
+                        {/* SKU — status shown as a dot so the column carries both without a badge's width */}
                         <TableCell className="whitespace-nowrap">
-                          <div className="font-mono text-xs font-medium">{r.sku_code ?? "—"}</div>
+                          <div className="flex items-center gap-1.5 font-mono text-xs font-medium">
+                            {r.sku_status && (
+                              <span
+                                title={`SKU is ${r.sku_status}`}
+                                className={cn("h-1.5 w-1.5 shrink-0 rounded-full", r.sku_status === "active" ? "bg-emerald-500" : "bg-muted-foreground/40")}
+                              />
+                            )}
+                            {r.sku_code ?? "—"}
+                          </div>
                           <div className="text-xs text-muted-foreground max-w-35 truncate">{r.sku_name ?? ""}</div>
-                        </TableCell>
-
-                        {/* SKU status */}
-                        <TableCell>
-                          {r.sku_status ? (
-                            <Badge variant={r.sku_status === "active" ? "success" : "secondary"} className="capitalize">
-                              {r.sku_status}
-                            </Badge>
-                          ) : "—"}
                         </TableCell>
 
                         <TableCell className="text-right text-xs font-medium tabular-nums">{fmtInt(r.qty)}</TableCell>

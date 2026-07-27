@@ -29,6 +29,7 @@
 // Auth + body validation handled by withGateway (see lib/gateway/with-gateway.ts).
 // `mfgs.code` is UNIQUE; the generator retries the next serial on a collision.
 import { NextResponse } from "next/server"
+import type { ResultSetHeader } from "mysql2/promise"
 import { pool, query } from "@/lib/db"
 import { manufacturers } from "@/lib/queries/manufacturers"
 import { approvalsSql } from "@/lib/queries/approvals"
@@ -40,6 +41,15 @@ import { ApiError } from "@/lib/gateway/errors"
 import { mfgActionSchema } from "@/lib/validation/manufacturers"
 import { assertNoDuplicateBankingFields, findDuplicateBankingField, insertMfgWithGeneratedCode } from "@/lib/master-routes/material-utils"
 import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
+
+type MfgDetailRow = {
+  id: number; mfg_id: number; status: string; location: string | null
+  gst_number: string | null; registered_name: string | null; zone: string | null
+  bank_name: string | null; ifsc_number: string | null; account_number: string | null
+  email: string | null; gst_certificate_key: string | null; cancelled_cheque_key: string | null
+  pan_card_key: string | null; misc_document_key: string | null; code: string; name: string
+  [key: string]: unknown
+}
 
 export const POST = withGateway({
   schema: mfgActionSchema,
@@ -80,7 +90,7 @@ export const POST = withGateway({
         ])
         logger.info({ ...logCtx, mfgId, message: "Creating approval record in database" })
         const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, "MFG", mfgId, "create"])
-        const approvalId = (ar as any).insertId
+        const approvalId = (ar as ResultSetHeader).insertId
         const newFields: [string, string][] = [
           ["code", code],
           ["name", name],
@@ -108,11 +118,13 @@ export const POST = withGateway({
         logger.info({ ...logCtx, mfgId, approvalId, message: "Transaction committed successfully" })
         recordProcessedEvent("MFG", eventId, { mfgId, approvalId })
         return NextResponse.json({ ok: true, approval_id: approvalId })
-      } catch (err: any) {
+      } catch (err: unknown) {
         await conn.rollback()
+        const message = err instanceof Error ? err.message : String(err)
+        const stack = err instanceof Error ? err.stack : undefined
         logger.warn({ ...logCtx, message: "Transaction rolled back" })
-        recordFailedEvent("MFG", eventId, { name }, err.message)
-        logger.error({ ...logCtx, err: err.message, stack: err.stack, message: "Manufacturer create failed with unexpected error" })
+        recordFailedEvent("MFG", eventId, { name }, message)
+        logger.error({ ...logCtx, err: message, stack, message: "Manufacturer create failed with unexpected error" })
         throw new ApiError(500, "internal", "Database error")
       } finally {
         conn.release()
@@ -154,12 +166,14 @@ export const POST = withGateway({
         logger.info({ ...logCtx, approvalId, staged, skipped, message: "Manufacturer bulk upload staged for approval" })
         recordProcessedEvent("MFG_BULK", eventId, { source: "csv", staged, skipped, approvalId })
         return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rows.length })
-      } catch (err: any) {
+      } catch (err: unknown) {
         await conn.rollback()
+        const message = err instanceof Error ? err.message : String(err)
+        const stack = err instanceof Error ? err.stack : undefined
         logger.warn({ ...logCtx, staged, skipped, message: "Transaction rolled back" })
-        recordFailedEvent("MFG_BULK", eventId, { source: "csv", rowCount: rows.length }, err.message)
-        logger.error({ ...logCtx, err: err.message, stack: err.stack, message: "Manufacturer bulk upload failed" })
-        throw new ApiError(500, "internal", "Bulk upload failed: " + err.message)
+        recordFailedEvent("MFG_BULK", eventId, { source: "csv", rowCount: rows.length }, message)
+        logger.error({ ...logCtx, err: message, stack, message: "Manufacturer bulk upload failed" })
+        throw new ApiError(500, "internal", "Bulk upload failed: " + message)
       } finally {
         conn.release()
       }
@@ -180,7 +194,7 @@ export const POST = withGateway({
 
       for (const [field, sql, label] of fieldChecks) {
         const values = [...new Set(
-          rows.map((r: any) => String(r[field] ?? "").trim()).filter(Boolean)
+          rows.map((r: Record<string, unknown>) => String(r[field] ?? "").trim()).filter(Boolean)
         )]
         if (values.length === 0) continue
 
@@ -188,7 +202,7 @@ export const POST = withGateway({
         if (matches.length === 0) continue
         const codeByValue = new Map(matches.map((m) => [m.value, m.code]))
 
-        rows.forEach((row: any, i: number) => {
+        rows.forEach((row: Record<string, unknown>, i: number) => {
           const val = String(row[field] ?? "").trim()
           const code = val && codeByValue.get(val)
           if (code) {
@@ -216,7 +230,7 @@ export const POST = withGateway({
       await conn.beginTransaction()
       try {
         const [rows] = await conn.execute(manufacturers.selectById, [mfg_id])
-        const current = (rows as any[])[0]
+        const current = (rows as MfgDetailRow[])[0]
         if (!current) {
           await conn.rollback()
           throw new ApiError(404, "not_found", "Manufacturer not found")
@@ -239,7 +253,7 @@ export const POST = withGateway({
         }
 
         const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, "MFG", mfg_id, "edit"])
-        const approvalId = (ar as any).insertId
+        const approvalId = (ar as ResultSetHeader).insertId
         for (const [field, newVal] of diff) {
           await conn.execute(approvalsSql.insertApprovalItem, [
             approvalId, field, String(current[field] ?? ""), newVal,
@@ -251,11 +265,13 @@ export const POST = withGateway({
         logger.info({ ...logCtx, mfg_id, approvalId, message: "Manufacturer documents submitted for approval" })
         recordProcessedEvent("MFG_DOCS", eventId, { mfg_id, approvalId })
         return NextResponse.json({ ok: true, approval_id: approvalId })
-      } catch (err: any) {
+      } catch (err: unknown) {
         await conn.rollback()
-        recordFailedEvent("MFG_DOCS", eventId, { mfg_id: String(mfg_id) }, err.message)
+        const message = err instanceof Error ? err.message : String(err)
+        const stack = err instanceof Error ? err.stack : undefined
+        recordFailedEvent("MFG_DOCS", eventId, { mfg_id: String(mfg_id) }, message)
         if (err instanceof ApiError) throw err
-        logger.error({ ...logCtx, mfg_id, err: err.message, stack: err.stack, message: "Manufacturer document approval submission failed" })
+        logger.error({ ...logCtx, mfg_id, err: message, stack, message: "Manufacturer document approval submission failed" })
         throw new ApiError(500, "internal", "Database error")
       } finally {
         conn.release()
@@ -286,7 +302,7 @@ export const POST = withGateway({
       await conn.beginTransaction()
       try {
         const [rows] = await conn.execute(manufacturers.selectById, [mfg_id])
-        const current = (rows as any[])[0]
+        const current = (rows as MfgDetailRow[])[0]
 
         if (!current) {
           await conn.rollback()
@@ -320,7 +336,7 @@ export const POST = withGateway({
           return NextResponse.json({ ok: true, message: "No changes detected" })
         }
         const [approvalResult] = await conn.execute(approvalsSql.insertApproval, [userId, "MFG", mfg_id, "edit"])
-        const approvalId = (approvalResult as any).insertId
+        const approvalId = (approvalResult as ResultSetHeader).insertId
         const itemsToRecord = isDraftResubmit
           ? Object.entries(proposed).filter(([, v]) => v !== "")
           : diff
@@ -339,11 +355,13 @@ export const POST = withGateway({
 
         recordProcessedEvent("MFG_UPDATE", eventId, { mfg_id, approvalId })
         return NextResponse.json({ ok: true, approval_id: approvalId })
-      } catch (err: any) {
+      } catch (err: unknown) {
         await conn.rollback()
-        recordFailedEvent("MFG_UPDATE", eventId, { code: String(mfg_id), name: name.trim() }, err.message)
+        const message = err instanceof Error ? err.message : String(err)
+        const stack = err instanceof Error ? err.stack : undefined
+        recordFailedEvent("MFG_UPDATE", eventId, { code: String(mfg_id), name: name.trim() }, message)
         if (err instanceof ApiError) throw err
-        logger.error({ ...logCtx, mfg_id, err: err.message, stack: err.stack, message: "Manufacturer update failed" })
+        logger.error({ ...logCtx, mfg_id, err: message, stack, message: "Manufacturer update failed" })
         throw new ApiError(500, "internal", "Database error")
       } finally {
         conn.release()
@@ -361,9 +379,10 @@ export const POST = withGateway({
       let rawRows
       try {
         rawRows = await parseS3Import(key)
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
         logger.warn({ ...logCtx, message: "Failed to parse the File." })
-        throw new ApiError(400, "parse_error", "Failed to parse file: " + err.message)
+        throw new ApiError(400, "parse_error", "Failed to parse file: " + message)
       }
 
       if (rawRows.length === 0) {
@@ -396,12 +415,14 @@ export const POST = withGateway({
         logger.info({ ...logCtx, approvalId, staged, skipped, message: "Manufacturer bulk upload (S3) staged for approval" })
         recordProcessedEvent("MFG_BULK", eventId, { source: "s3", s3Key: key, staged, skipped, approvalId })
         return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rawRows.length })
-      } catch (err: any) {
+      } catch (err: unknown) {
         await conn.rollback()
+        const message = err instanceof Error ? err.message : String(err)
+        const stack = err instanceof Error ? err.stack : undefined
         logger.warn({ ...logCtx, staged, skipped, message: "Transaction rolled back" })
-        recordFailedEvent("MFG_BULK", eventId, { source: "s3", s3Key: key }, err.message)
-        logger.error({ ...logCtx, err: err.message, stack: err.stack, message: "Manufacturer bulk upload (S3) failed" })
-        throw new ApiError(500, "internal", "Import failed: " + err.message)
+        recordFailedEvent("MFG_BULK", eventId, { source: "s3", s3Key: key }, message)
+        logger.error({ ...logCtx, err: message, stack, message: "Manufacturer bulk upload (S3) failed" })
+        throw new ApiError(500, "internal", "Import failed: " + message)
       } finally {
         conn.release()
       }

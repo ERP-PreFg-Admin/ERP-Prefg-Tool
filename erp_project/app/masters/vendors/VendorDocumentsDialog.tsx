@@ -67,6 +67,7 @@ export function VendorDocumentsDialog({
 
   useEffect(() => {
     if (!vendor) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resets document state when the dialog opens for a different vendor row
     setDocs({
       gst_certificate_key:  vendor.gst_certificate_key,
       cancelled_cheque_key: vendor.cancelled_cheque_key,

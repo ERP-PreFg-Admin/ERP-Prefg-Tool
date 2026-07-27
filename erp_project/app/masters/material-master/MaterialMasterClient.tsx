@@ -18,7 +18,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { ArrowUp, ArrowDown, ChevronsUpDown } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -37,6 +37,7 @@ import {
 import { cn } from "@/lib/utils"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
+import { StatusBadge } from "@/components/masters/StatusBadge"
 import type { MasterField } from "@/components/masters/field-config"
 import AddMaterialDialog from "./AddMaterialDialog"
 import EditMaterialDialog, { EditButton } from "./EditMaterialDialog"
@@ -69,17 +70,7 @@ type ColumnDef = {
   render?: (row: AnyRow) => ReactNode
 }
 
-const statusBadge = (row: AnyRow) => {
-  const s = row.status as string | null
-  if (s === "in_review") return <Badge variant="warning"  className="capitalize">In Review</Badge>
-  if (s === "rejected")  return <Badge variant="destructive" className="capitalize">Rejected</Badge>
-  if (s === "draft")     return <Badge variant="secondary" className="capitalize">Draft</Badge>
-  return (
-    <Badge variant={s === "active" ? "success" : "secondary"} className="capitalize">
-      {s ?? "—"}
-    </Badge>
-  )
-}
+const statusBadge = (row: AnyRow) => <StatusBadge status={row.status as string | null} />
 
 const RM_COLUMNS: ColumnDef[] = [
   { key: "rm_code",   label: "RM Code",   sortAs: "text", className: "font-mono text-xs font-medium" },
@@ -246,7 +237,9 @@ export default function MaterialMasterClient({
           </select>
         )}
 
-        <button
+        <Button
+          variant="outline"
+          size="lg"
           onClick={() =>
             navigate({
               status: draftStatus,
@@ -255,10 +248,9 @@ export default function MaterialMasterClient({
             })
           }
           disabled={!draftDirty}
-          className="h-9 rounded-lg border border-input bg-background px-3 text-sm font-medium hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Apply
-        </button>
+        </Button>
 
         <MasterToolbarActions>
           <DownloadButton

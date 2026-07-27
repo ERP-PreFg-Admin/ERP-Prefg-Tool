@@ -42,9 +42,11 @@ export const POST = withGateway({
         logger.info({ ...logCtx, id: result.insertId, message: "Manufacturing line created" })
         recordProcessedEvent("MFG_LINE", eventId, { id: result.insertId, mfgId: body.mfg_id, bomId: body.bom_id })
         return NextResponse.json({ ok: true, id: result.insertId })
-      } catch (err: any) {
-        recordFailedEvent("MFG_LINE", eventId, { mfgId: body.mfg_id, bomId: body.bom_id }, err.message)
-        logger.error({ ...logCtx, err: err.message, stack: err.stack, message: "Manufacturing line create failed" })
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        const stack = err instanceof Error ? err.stack : undefined
+        recordFailedEvent("MFG_LINE", eventId, { mfgId: body.mfg_id, bomId: body.bom_id }, message)
+        logger.error({ ...logCtx, err: message, stack, message: "Manufacturing line create failed" })
         throw new ApiError(500, "internal", "Database error")
       }
     }
@@ -74,9 +76,11 @@ export const POST = withGateway({
       logger.info({ ...logCtx, id: body.id, message: "Manufacturing line updated" })
       recordProcessedEvent("MFG_LINE_UPDATE", eventId, { id: body.id })
       return NextResponse.json({ ok: true })
-    } catch (err: any) {
-      recordFailedEvent("MFG_LINE_UPDATE", eventId, { id: body.id }, err.message)
-      logger.error({ ...logCtx, err: err.message, stack: err.stack, message: "Manufacturing line update failed" })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      const stack = err instanceof Error ? err.stack : undefined
+      recordFailedEvent("MFG_LINE_UPDATE", eventId, { id: body.id }, message)
+      logger.error({ ...logCtx, err: message, stack, message: "Manufacturing line update failed" })
       throw new ApiError(500, "internal", "Database error")
     }
   },
