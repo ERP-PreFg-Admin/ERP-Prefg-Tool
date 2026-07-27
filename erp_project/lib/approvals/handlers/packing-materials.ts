@@ -103,7 +103,10 @@ export const pmBulkHandler: ModuleHandler = {
       for (const row of rows) {
         if (!row.name?.trim()) { skipped++; continue }
         try {
-          await conn.execute(pmSql.insert, await toPmParams(conn, row, STATUS.ACTIVE))
+          await conn.execute(pmSql.insert, await toPmParams(conn, {
+            pm_code: row.pm_code, name: row.name, type: row.type,
+            hsn_code: row.hsn_code, uom: row.uom, pantone_color: row.pantone_color,
+          }, STATUS.ACTIVE))
           inserted++
         } catch (err: any) {
           if (err.code === "ER_DUP_ENTRY") { skipped++ } else { throw err }

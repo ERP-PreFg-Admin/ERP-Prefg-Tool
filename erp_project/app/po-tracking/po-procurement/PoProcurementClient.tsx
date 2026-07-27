@@ -225,9 +225,14 @@ export default function PoProcurementClient({
             </span>
           )}
         </Button>
-        <Button variant="outline" size="lg" onClick={() => setShowBulk(true)}>
-          <Upload className="h-3.5 w-3.5" /> Bulk Upload
-        </Button>
+        <CsvImportDialog
+          entityLabel="PO"
+          entityLabelPlural="POs"
+          endpoint="/api/purchase-orders"
+          templateFilename="po_bulk_template.csv"
+          fields={PO_BULK_CSV_FIELDS}
+          onSuccess={afterAction}
+        />
         <Button variant="outline" size="lg" onClick={() => router.push("/po-tracking/po-procurement/entity-emails")}>
           <Mail className="h-3.5 w-3.5" /> Entity Emails
         </Button>

@@ -234,16 +234,16 @@ type ExistingRateRow = {
 }
 
 type VendorRateInput = {
-  curr_rate: unknown
+  curr_rate?: unknown
   moq?: unknown
-  rate_uom: unknown
+  rate_uom?: unknown
   effective_from?: string | null
   mfg_id?: unknown
 }
 
 type MfgRateInput = {
-  curr_rate: unknown
-  rate_uom: unknown
+  curr_rate?: unknown
+  rate_uom?: unknown
   effective_from?: string | null
 }
 

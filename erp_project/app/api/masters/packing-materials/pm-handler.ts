@@ -260,8 +260,12 @@ export async function pmCreateFull(body: PmCreateFullBody, userId: number, ctx: 
       const existing = (existingRows as PmExistingRateRow[])[0]
       if (existing) {
         await conn.execute(packingMaterials.archiveVendorRate, [
-          pmId, existing.vendor_id, existing.curr_rate, existing.moq,
-          existing.uom, existing.effective_from, existing.effective_to, existing.status,
+          pmId, existing.vendor_id ?? null, roundToTwoDecimals(existing.curr_rate),
+          existing.moq ? roundToWholeNumber(existing.moq) : null,
+          existing.uom ? String(existing.uom) : null,
+          existing.effective_from as string | Date | null,
+          existing.effective_to as string | Date | null ?? null,
+          existing.status,
         ])
         await conn.execute(packingMaterials.updateVendorRate, [
           v.curr_rate ? roundToTwoDecimals(v.curr_rate) : null,

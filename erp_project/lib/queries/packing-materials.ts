@@ -325,8 +325,8 @@ export const packingMaterials = {
 
   /** Archive an old pm_vrm row to vrm_history. Parameters: [pm_id, vendor_id, curr_rate, moq, uom, effective_from, effective_to, status] */
   archiveVendorRate: `
-    INSERT INTO history_vrm (mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status)
-    VALUES ('pm', ?, ?, ?, ?, ?, ?)
+    INSERT INTO history_vrm (mtrl_type, mtrl_id, vendor_id, rate, moq, uom, effective_from, effective_to, status)
+    VALUES ('pm', ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   /** Update an existing pm_vrm row. Parameters: [curr_rate, moq, uom, status, effective_from, id] */
