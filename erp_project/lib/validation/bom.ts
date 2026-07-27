@@ -25,15 +25,14 @@ export function isRmTotalValid(total: number): boolean {
 }
 
 // One RM or PM line, as entered manually or parsed from the wizard's CSV step.
-// All fields are mandatory except uom/effective_till — every CSV column must
-// be present per the "all CSV fields mandatory" requirement.
+// Effective From/Till are recipe-level (see bomCreateFullSchema's top-level
+// effective_from), not per line — every CSV column here must be present per
+// the "all CSV fields mandatory" requirement.
 export const bomLineSchema = z.object({
   mtrl_type: z.enum(["rm", "pm"]),
   mtrl_id: z.coerce.number().int().positive(),
   amount: z.coerce.number().positive(), // for rm lines, this IS the % value
   uom: z.string().trim().min(1).max(20).nullable().optional(),
-  effective_from: z.string().trim().min(1, "effective_from is required"),
-  effective_till: z.string().trim().nullable().optional(),
 })
 
 export const bomCheckExistingSchema = z.object({
@@ -55,6 +54,9 @@ export const bomCreateFullSchema = z
     sku_id: z.coerce.number().int().positive(),
     bom_id: z.coerce.number().int().positive().optional(), // required when mode === "update-existing"
     bom_code: z.string().trim().min(1).max(50).optional(), // required when mode === "new-version"
+    // Recipe-level effective date — required when mode === "new-version".
+    // update-existing doesn't touch it (the existing header's date stands).
+    effective_from: z.string().trim().optional(),
     source: z.enum(["manual", "csv"]),
     rm_lines: z.array(bomLineSchema).min(1, "At least one RM line is required"),
     pm_lines: z.array(bomLineSchema),
@@ -70,6 +72,9 @@ export const bomCreateFullSchema = z
     }
     if (data.mode === "new-version" && !data.bom_code) {
       ctx.addIssue({ code: "custom", path: ["bom_code"], message: "bom_code is required for new-version" })
+    }
+    if (data.mode === "new-version" && !data.effective_from?.trim()) {
+      ctx.addIssue({ code: "custom", path: ["effective_from"], message: "effective_from is required for new-version" })
     }
     if (data.rm_lines.some((l) => l.mtrl_type !== "rm")) {
       ctx.addIssue({ code: "custom", path: ["rm_lines"], message: "rm_lines must all have mtrl_type='rm'" })

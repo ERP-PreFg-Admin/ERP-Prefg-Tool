@@ -1,12 +1,10 @@
 /**
  * SERVER component for /masters/bom-master/history.
  *
- * Read-only counterpart to /masters/bom-master: lists BOM headers that have
- * at least one archived revision in history_bom (a BOM only gets one once an
- * "update existing BOM" approval has been applied — see
- * lib/approvals/module-handlers.ts bomHandler). Reuses the same paginated
- * grouped-listing query shape as the live page so BomTable/BomListItem work
- * unmodified.
+ * Read-only counterpart to /masters/bom-master: lists every BOM version that
+ * has been through an approval (a BOM only gets a history_bom row once
+ * approved — see lib/approvals/module-handlers.ts bomHandler), grouped
+ * SKU-wise with who created/updated/approved each version and when.
  */
 
 import { auth } from "@/lib/auth"
@@ -16,7 +14,7 @@ import { parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
 import { bom } from "@/lib/queries/bom"
 import { fuzzyRank } from "@/lib/fuzzy-search"
-import type { BomListItem } from "@/types/masters"
+import type { BomHistoryListItem } from "@/types/masters"
 import BomHistoryClient from "./BomHistoryClient"
 
 export default async function BOMHistoryPage({
@@ -38,11 +36,11 @@ export default async function BOMHistoryPage({
   const pageStart = performance.now()
   console.log(`[AUDIT] BOM History load - page=${page}, size=${size}, search=${search || "none"}`)
 
-  let rows: BomListItem[]
+  let rows: BomHistoryListItem[]
   let total: number
 
   if (search) {
-    const allMatching = await timedQuery<BomListItem>(
+    const allMatching = await timedQuery<BomHistoryListItem>(
       bom.selectAllFilteredHistoryGrouped, [null, null, null], { label: "selectAllFilteredHistoryGrouped" }
     )
     const ranked = fuzzyRank(allMatching, search, ["bom_code", "sku_code"])
@@ -50,7 +48,7 @@ export default async function BOMHistoryPage({
     rows = ranked.slice(offset, offset + size)
   } else {
     const [dbRows, countRows] = await Promise.all([
-      timedQuery<BomListItem>(bom.selectHistoryPaginatedGrouped, [like, like, like, size, offset], { label: "selectHistoryPaginatedGrouped" }),
+      timedQuery<BomHistoryListItem>(bom.selectHistoryPaginatedGrouped, [like, like, like, size, offset], { label: "selectHistoryPaginatedGrouped" }),
       timedQuery<{ total: number }>(bom.countHistoryGrouped, [like, like, like], { label: "countHistoryGrouped" }),
     ])
     rows = dbRows

@@ -100,6 +100,14 @@ export function BomDetailPanel({
                   <BomStatusBadge status={detail.status} />
                 </div>
               </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Effective From</p>
+                <p className="font-medium mt-0.5">{formatDate(detail.effective_from)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Effective Till</p>
+                <p className="font-medium mt-0.5">{formatDate(detail.effective_till)}</p>
+              </div>
             </div>
 
             {/* ── Artifacts — read-only here; add/remove happens in the Edit
@@ -204,7 +212,7 @@ export function BomDetailPanel({
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground font-mono mt-0.5">
-                          {line.mtrl_code ?? `#${line.mtrl_id ?? "—"}`} · From {formatDate(line.effective_from)}
+                          {line.mtrl_code ?? `#${line.mtrl_id ?? "—"}`}
                         </p>
                       </div>
                       <p className="text-sm font-semibold shrink-0 tabular-nums">

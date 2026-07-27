@@ -22,8 +22,6 @@ export type BomLineRow = {
   mtrl_id: number | null
   amount: string
   uom: string
-  effective_from: string
-  effective_till: string
 }
 
 export type BomMaterialOption = {
@@ -41,8 +39,6 @@ export function emptyBomLine(mtrlType: "rm" | "pm"): BomLineRow {
     mtrl_id: null,
     amount: "",
     uom: mtrlType === "rm" ? "%" : "pcs",
-    effective_from: "",
-    effective_till: "",
   }
 }
 
@@ -51,24 +47,10 @@ export function rmTotal(rows: BomLineRow[]): number {
 }
 
 const inputCls =
-  "w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-const labelCls = "block text-xs font-medium mb-1"
-
-function Field({ label, required, className, children }: { label: string; required?: boolean; className?: string; children: React.ReactNode }) {
-  return (
-    <div className={className}>
-      <label className={labelCls}>
-        {label}
-        {required && <span className="text-destructive ml-0.5">*</span>}
-      </label>
-      {children}
-    </div>
-  )
-}
+  "w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 
 function LineRowCard({
   row,
-  index,
   materials,
   onChange,
   onRemove,
@@ -85,21 +67,8 @@ function LineRowCard({
   }
 
   return (
-    <div className="rounded-lg border bg-card p-3 space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          {row.mtrl_type} Line {index + 1}
-        </span>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
-      </div>
-
-      <Field label="Material" required>
+    <div className="flex items-center gap-2 rounded-lg border bg-card p-2">
+      <div className="flex-1 min-w-0">
         <FuzzySelect
           options={materials}
           value={row.mtrl_id != null ? String(row.mtrl_id) : ""}
@@ -109,48 +78,29 @@ function LineRowCard({
           searchKeys={["name", "code"]}
           placeholder={`Search ${row.mtrl_type.toUpperCase()} name or code…`}
         />
-      </Field>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field label={row.mtrl_type === "rm" ? "Amount (%)" : "Amount"} required>
-          <input
-            type="number"
-            step="0.01"
-            className={inputCls}
-            placeholder={row.mtrl_type === "rm" ? "e.g. 45.5" : "e.g. 1"}
-            value={row.amount}
-            onChange={(e) => onChange({ ...row, amount: e.target.value })}
-          />
-        </Field>
-        <Field label="UOM">
-          <input
-            type="text"
-            className={inputCls}
-            placeholder="e.g. kg"
-            value={row.uom}
-            onChange={(e) => onChange({ ...row, uom: e.target.value })}
-          />
-        </Field>
       </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Effective From" required>
-          <input
-            type="date"
-            className={inputCls}
-            value={row.effective_from}
-            onChange={(e) => onChange({ ...row, effective_from: e.target.value })}
-          />
-        </Field>
-        <Field label="Effective Till">
-          <input
-            type="date"
-            className={inputCls}
-            value={row.effective_till}
-            onChange={(e) => onChange({ ...row, effective_till: e.target.value })}
-          />
-        </Field>
-      </div>
+      <input
+        type="number"
+        step="0.01"
+        className={cn(inputCls, "w-24 shrink-0")}
+        placeholder={row.mtrl_type === "rm" ? "45.5" : "1"}
+        value={row.amount}
+        onChange={(e) => onChange({ ...row, amount: e.target.value })}
+      />
+      <input
+        type="text"
+        className={cn(inputCls, "w-20 shrink-0")}
+        placeholder="kg"
+        value={row.uom}
+        onChange={(e) => onChange({ ...row, uom: e.target.value })}
+      />
+      <button
+        type="button"
+        onClick={onRemove}
+        className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors shrink-0"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
     </div>
   )
 }
@@ -208,7 +158,13 @@ function LineSection({
           No {mtrlType.toUpperCase()} lines yet.
         </p>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 px-2 text-xs font-medium text-muted-foreground">
+            <span className="flex-1">Material</span>
+            <span className="w-24 shrink-0">{mtrlType === "rm" ? "Amount (%)" : "Amount"}</span>
+            <span className="w-20 shrink-0">UOM</span>
+            <span className="w-[26px] shrink-0" />
+          </div>
           {rows.map((row, i) => (
             <LineRowCard
               key={i}

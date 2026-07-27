@@ -111,7 +111,6 @@ export default function BOMMasterComponent({
           <option value="all">All Statuses</option>
           <option value="draft">Draft</option>
           <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
           <option value="in review">In Review</option>
           <option value="discontinued">Discontinued</option>
         </select>
@@ -226,6 +225,8 @@ export default function BOMMasterComponent({
         pmRows={panel.editPmRows}
         onChangeRm={panel.setEditRmRows}
         onChangePm={panel.setEditPmRows}
+        effectiveFrom={panel.editEffectiveFrom}
+        onChangeEffectiveFrom={panel.setEditEffectiveFrom}
         rmMaterials={rmMaterials}
         pmMaterials={pmMaterials}
         saveError={panel.saveError}

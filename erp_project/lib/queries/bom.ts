@@ -4,11 +4,20 @@
  *
  * Real schema (verify against prisma/schema.prisma before adding queries —
  * master_bom has NO sku_code/mfg_id columns, only sku_id):
- *   master_bom(id, bom_code, sku_id, status, created_by, created_at, updated_by, updated_at)
+ *   master_bom(id, bom_code, sku_id, status, created_by, created_at, updated_by,
+ *              updated_at, effective_from, effective_till)
  *   details_bom(id, bom_id → master_bom.id, mtrl_type, mtrl_id, amount, uom,
  *               effective_from, effective_till, status, updated_by, last_updated)
  *   history_bom — same shape as details_bom plus mtrl_cost; snapshot target for
  *               "update existing BOM in place" (see lib/approvals/module-handlers.ts)
+ *
+ * effective_from/effective_till live on the BOM HEADER (master_bom), one pair
+ * per recipe — not per RM/PM line. effective_from is entered by the user when
+ * the BOM is created/edited; effective_till is set automatically (to the
+ * approval date) when a BOM is discontinued/superseded by a new version. The
+ * same two columns still exist on details_bom/history_bom for legacy rows
+ * (pre-dating this change) and are what the read-only BOM History page still
+ * shows — new lines no longer populate them.
  *
  * IMPORTANT: master_bom_status's "in_review" enum member is @map("in review")
  * in prisma/schema.prisma — the ACTUAL value stored in the DB column has a
@@ -31,7 +40,7 @@ export const bom = {
       b.bom_code, bd.bom_id, s.sku_code,
       bd.mtrl_id, bd.mtrl_type, bd.uom, bd.amount,
       NULL AS mtrl_cost, bd.status AS material_status, b.status AS bom_status,
-      bd.effective_from, bd.effective_till, bd.last_updated,
+      b.effective_from, b.effective_till, bd.last_updated,
       b.created_by
     FROM details_bom AS bd
     INNER JOIN master_bom AS b ON b.id = bd.bom_id
@@ -53,7 +62,7 @@ export const bom = {
       b.bom_code, bd.bom_id, s.sku_code,
       bd.mtrl_id, bd.mtrl_type, bd.uom, bd.amount,
       NULL AS mtrl_cost, bd.status AS material_status, b.status AS bom_status,
-      bd.effective_from, bd.effective_till, bd.last_updated,
+      b.effective_from, b.effective_till, bd.last_updated,
       b.created_by
     FROM details_bom AS bd
     INNER JOIN master_bom AS b ON b.id = bd.bom_id
@@ -75,7 +84,7 @@ export const bom = {
       b.bom_code, bd.bom_id, s.sku_code,
       bd.mtrl_id, bd.mtrl_type, bd.uom, bd.amount,
       NULL AS mtrl_cost, bd.status AS material_status, b.status AS bom_status,
-      bd.effective_from, bd.effective_till, bd.last_updated,
+      b.effective_from, b.effective_till, bd.last_updated,
       b.created_by
     FROM details_bom AS bd
     INNER JOIN master_bom AS b ON b.id = bd.bom_id
@@ -174,48 +183,39 @@ export const bom = {
 
   /**
    * Paginated BOM listing, ONE ROW PER BOM HEADER (not per material line).
-   * created_at is when the BOM header itself was created; effective_from is
-   * the earliest, effective_till the latest, among the BOM's material lines —
-   * these can legitimately differ (e.g. a BOM created today with lines that
-   * don't take effect until next month), so both are surfaced separately.
-   * Params: [like, like, like, status, status, LIMIT, OFFSET]
+   * effective_from/effective_till are the BOM header's own columns (recipe-
+   * level, not aggregated from lines). Params: [like, like, like, status, status, LIMIT, OFFSET]
    */
   selectPaginatedGrouped: `
     SELECT
       b.id AS bom_id, b.bom_code, s.sku_code, s.name AS sku_name,
-      b.created_at,
-      MIN(bd.effective_from) AS effective_from,
-      MAX(bd.effective_till) AS effective_till,
+      b.created_at, b.effective_from, b.effective_till,
       b.status AS status
     FROM master_bom AS b
-    LEFT JOIN details_bom AS bd ON bd.bom_id = b.id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
-    WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+    WHERE b.status <> 'inactive'
+      AND (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
       AND (? IS NULL OR b.status = ?)
-    GROUP BY b.id, b.bom_code, s.sku_code, s.name, b.created_at, b.status
     ORDER BY b.bom_code ASC
     LIMIT ? OFFSET ?
   `,
 
   /**
-   * Fetch ALL matching BOM headers, grouped (no LIMIT/OFFSET) — feeds the
-   * fuzzy-search ranking path (lib/fuzzy-search.ts) when a search term is
-   * present. Same shape/WHERE as selectPaginatedGrouped.
+   * Fetch ALL matching BOM headers (no LIMIT/OFFSET) — feeds the fuzzy-search
+   * ranking path (lib/fuzzy-search.ts) when a search term is present. Same
+   * shape/WHERE as selectPaginatedGrouped.
    * Params: [like, like, like, status, status]
    */
   selectAllFilteredGrouped: `
     SELECT
       b.id AS bom_id, b.bom_code, s.sku_code, s.name AS sku_name,
-      b.created_at,
-      MIN(bd.effective_from) AS effective_from,
-      MAX(bd.effective_till) AS effective_till,
+      b.created_at, b.effective_from, b.effective_till,
       b.status AS status
     FROM master_bom AS b
-    LEFT JOIN details_bom AS bd ON bd.bom_id = b.id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
-    WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+    WHERE b.status <> 'inactive'
+      AND (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
       AND (? IS NULL OR b.status = ?)
-    GROUP BY b.id, b.bom_code, s.sku_code, s.name, b.created_at, b.status
     ORDER BY b.bom_code ASC
   `,
 
@@ -227,7 +227,8 @@ export const bom = {
     SELECT COUNT(*) AS total
     FROM master_bom AS b
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
-    WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+    WHERE b.status <> 'inactive'
+      AND (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
       AND (? IS NULL OR b.status = ?)
   `,
 
@@ -235,7 +236,8 @@ export const bom = {
    * BOM header for the detail side-panel. Params: [bom_id]
    */
   selectHeaderById: `
-    SELECT b.id AS bom_id, b.bom_code, b.sku_id, s.sku_code, b.status, b.created_at
+    SELECT b.id AS bom_id, b.bom_code, b.sku_id, s.sku_code, b.status, b.created_at,
+      b.effective_from, b.effective_till
     FROM master_bom AS b
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
     WHERE b.id = ?
@@ -268,34 +270,41 @@ export const bom = {
   // ============ WRITE QUERIES ============
 
   /**
-   * Insert a new BOM header. Parameters: [bom_code, sku_id, created_by, status]
+   * Insert a new BOM header. Parameters: [bom_code, sku_id, created_by, status, effective_from]
    * Returns insertId to link detail lines to.
    */
   insertBomHeader: `
-    INSERT INTO master_bom (bom_code, sku_id, created_by, status, created_at)
-    VALUES (?, ?, ?, ?, NOW())
+    INSERT INTO master_bom (bom_code, sku_id, created_by, status, effective_from, created_at)
+    VALUES (?, ?, ?, ?, ?, NOW())
   `,
 
   /**
    * Insert a single BOM detail line. Only ever called at approval time (see
    * lib/approvals/module-handlers.ts bomHandler) — never at submission time.
-   * Parameters: [bom_id, mtrl_type, mtrl_id, amount, uom, effective_from, effective_till, status, updated_by]
+   * effective_from/effective_till are recipe-level (master_bom), not per line —
+   * this table's own columns of the same name are left NULL for new lines and
+   * only remain populated on legacy/history rows.
+   * Parameters: [bom_id, mtrl_type, mtrl_id, amount, uom, status, updated_by]
    */
   insertDetailLine: `
     INSERT INTO details_bom
-      (bom_id, mtrl_type, mtrl_id, amount, uom, effective_from, effective_till, status, updated_by, last_updated)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      (bom_id, mtrl_type, mtrl_id, amount, uom, status, updated_by, last_updated)
+    VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
   `,
 
   /**
-   * Archive one detail line snapshot into history_bom, before it's overwritten
-   * by an "update existing BOM in place" approval.
-   * Parameters: [bom_id, mtrl_type, mtrl_id, amount, uom, mtrl_cost, effective_from, effective_till, status, updated_by]
+   * Archive one detail line snapshot into history_bom — written at approval
+   * time for EVERY approved BOM version (both "new-version" and the legacy
+   * "update-existing" in-place edit), so the History page has a full
+   * line-level record of every edit, per SKU, regardless of mode.
+   * updated_by is the user who SUBMITTED this edit; approved_by/approved_on
+   * are the user/time it was approved (same transaction as the approval).
+   * Parameters: [bom_id, mtrl_type, mtrl_id, amount, uom, mtrl_cost, effective_from, effective_till, status, updated_by, approved_by]
    */
   archiveDetailLineToHistory: `
     INSERT INTO history_bom
-      (bom_id, mtrl_type, mtrl_id, amount, uom, mtrl_cost, effective_from, effective_till, status, updated_by, last_updated)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      (bom_id, mtrl_type, mtrl_id, amount, uom, mtrl_cost, effective_from, effective_till, status, updated_by, last_updated, approved_by, approved_on)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW())
   `,
 
   /**
@@ -331,63 +340,77 @@ export const bom = {
   `,
 
   /**
-   * Flip every OTHER active BOM for the same sku_id to inactive — enforces
-   * "only one active BOM per SKU" after a new/updated BOM is activated.
-   * Parameters: [sku_id, keep_bom_id]
+   * Flip every OTHER active BOM for the same sku_id to discontinued —
+   * enforces "only one active BOM per SKU" after a new/updated BOM is
+   * activated, marks the superseded formulation as retired rather than
+   * merely inactive, and stamps its effective_till to today (the date it's
+   * being superseded). Parameters: [sku_id, keep_bom_id]
    */
-  deactivateOtherActiveBomsForSku: `
+  discontinueOtherActiveBomsForSku: `
     UPDATE master_bom
-    SET status = 'inactive', updated_at = NOW()
+    SET status = 'discontinued', effective_till = CURDATE(), updated_at = NOW()
     WHERE sku_id = ? AND id <> ? AND status = 'active'
   `,
 
   // ============ HISTORY QUERIES (read-only "BOM History" page) ============
-  // history_bom only ever gets rows written by bomHandler.applyAndArchive
-  // (see lib/approvals/module-handlers.ts) when an "update existing BOM"
-  // approval is applied — it snapshots the full line set that's about to be
-  // overwritten. A BOM with no history_bom rows has never been revised.
+  // history_bom gets rows written by bomHandler.applyAndArchive (see
+  // lib/approvals/module-handlers.ts) at approval time for EVERY approved BOM
+  // version (new-version and the legacy update-existing in-place edit alike)
+  // — a BOM with no history_bom rows has never been through an approval yet.
+  // Grouped SKU-wise: every version of a SKU's BOM sorts together, oldest
+  // first, so the full edit lineage reads top-to-bottom per SKU.
 
   /**
-   * Paginated listing, one row per BOM header that has at least one archived
-   * line — mirrors selectPaginatedGrouped's shape so the History page can
-   * reuse BomTable/BomListItem as-is.
-   * Params: [like, like, like, LIMIT, OFFSET]
+   * Paginated listing, one row per BOM version (header) that has at least one
+   * archived line, WITH the creating/approving user's name resolved — mirrors
+   * selectPaginatedGrouped's shape (BomListItem-compatible) plus the audit
+   * columns BomHistoryTable needs. Params: [like, like, like, LIMIT, OFFSET]
    */
   selectHistoryPaginatedGrouped: `
     SELECT
-      b.id AS bom_id, b.bom_code, s.sku_code, s.name AS sku_name,
-      b.created_at,
-      MIN(h.effective_from) AS effective_from,
-      MAX(h.effective_till) AS effective_till,
-      b.status AS status
+      b.id AS bom_id, b.bom_code, b.sku_id, s.sku_code, s.name AS sku_name,
+      b.status AS status,
+      b.created_at, b.created_by, MAX(cu.name) AS created_by_name,
+      b.updated_at, b.updated_by, MAX(uu.name) AS updated_by_name,
+      MAX(h.approved_by) AS approved_by, MAX(au.name) AS approved_by_name,
+      MAX(h.approved_on) AS approved_on
     FROM history_bom AS h
     INNER JOIN master_bom AS b ON b.id = h.bom_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
+    LEFT JOIN users cu ON cu.id = b.created_by
+    LEFT JOIN users uu ON uu.id = b.updated_by
+    LEFT JOIN users au ON au.id = h.approved_by
     WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
-    GROUP BY b.id, b.bom_code, s.sku_code, s.name, b.created_at, b.status
-    ORDER BY MAX(h.last_updated) DESC
+    GROUP BY b.id, b.bom_code, b.sku_id, s.sku_code, s.name, b.status,
+             b.created_at, b.created_by, b.updated_at, b.updated_by
+    ORDER BY s.sku_code ASC, b.created_at ASC
     LIMIT ? OFFSET ?
   `,
 
   /**
-   * Fetch ALL matching BOM history headers, grouped (no LIMIT/OFFSET) — feeds
+   * Fetch ALL matching BOM history rows, grouped (no LIMIT/OFFSET) — feeds
    * the fuzzy-search ranking path (lib/fuzzy-search.ts) when a search term is
    * present. Same shape/WHERE as selectHistoryPaginatedGrouped.
    * Params: [like, like, like]
    */
   selectAllFilteredHistoryGrouped: `
     SELECT
-      b.id AS bom_id, b.bom_code, s.sku_code, s.name AS sku_name,
-      b.created_at,
-      MIN(h.effective_from) AS effective_from,
-      MAX(h.effective_till) AS effective_till,
-      b.status AS status
+      b.id AS bom_id, b.bom_code, b.sku_id, s.sku_code, s.name AS sku_name,
+      b.status AS status,
+      b.created_at, b.created_by, MAX(cu.name) AS created_by_name,
+      b.updated_at, b.updated_by, MAX(uu.name) AS updated_by_name,
+      MAX(h.approved_by) AS approved_by, MAX(au.name) AS approved_by_name,
+      MAX(h.approved_on) AS approved_on
     FROM history_bom AS h
     INNER JOIN master_bom AS b ON b.id = h.bom_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
+    LEFT JOIN users cu ON cu.id = b.created_by
+    LEFT JOIN users uu ON uu.id = b.updated_by
+    LEFT JOIN users au ON au.id = h.approved_by
     WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
-    GROUP BY b.id, b.bom_code, s.sku_code, s.name, b.created_at, b.status
-    ORDER BY MAX(h.last_updated) DESC
+    GROUP BY b.id, b.bom_code, b.sku_id, s.sku_code, s.name, b.status,
+             b.created_at, b.created_by, b.updated_at, b.updated_by
+    ORDER BY s.sku_code ASC, b.created_at ASC
   `,
 
   /** Matching COUNT for selectHistoryPaginatedGrouped. Params: [like, like, like] */

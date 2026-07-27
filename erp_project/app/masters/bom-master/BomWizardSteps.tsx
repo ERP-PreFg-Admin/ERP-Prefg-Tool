@@ -108,6 +108,8 @@ function downloadBomCsvTemplate() {
 export function Step4LineEntry({
   bomCode,
   onChangeBomCode,
+  effectiveFrom,
+  onChangeEffectiveFrom,
   entryMethod,
   csvParsed,
   csvErrors,
@@ -123,6 +125,8 @@ export function Step4LineEntry({
 }: {
   bomCode: string
   onChangeBomCode: (v: string) => void
+  effectiveFrom: string
+  onChangeEffectiveFrom: (v: string) => void
   entryMethod: EntryMethod | null
   csvParsed: boolean
   csvErrors: string[]
@@ -138,22 +142,35 @@ export function Step4LineEntry({
 }) {
   return (
     <div className="space-y-4 py-2">
-      <div>
-        <label className="block text-xs font-medium mb-1">
-          BOM Code <span className="text-destructive">*</span>
-        </label>
-        <input
-          type="text"
-          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          value={bomCode}
-          onChange={(e) => onChangeBomCode(e.target.value)}
-        />
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium mb-1">
+            BOM Code <span className="text-destructive">*</span>
+          </label>
+          <input
+            type="text"
+            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            value={bomCode}
+            onChange={(e) => onChangeBomCode(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium mb-1">
+            Effective From <span className="text-destructive">*</span>
+          </label>
+          <input
+            type="date"
+            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            value={effectiveFrom}
+            onChange={(e) => onChangeEffectiveFrom(e.target.value)}
+          />
+        </div>
       </div>
 
       {entryMethod === "csv" && !csvParsed ? (
         <div className="space-y-3">
           <p className="text-3sm text-muted-foreground">
-            Columns required (all mandatory except effective_till):{" "}
+            Columns required (all mandatory):{" "}
             <code className="text-3sm">{CSV_HEADER.join(", ")}</code>
             {" · "}
             <button
@@ -251,6 +268,7 @@ export function Step5Review({
   skus,
   skuId,
   bomCode,
+  effectiveFrom,
   rmRows,
   pmRows,
   rmMaterials,
@@ -259,6 +277,7 @@ export function Step5Review({
   skus: Sku[]
   skuId: number | null
   bomCode: string
+  effectiveFrom: string
   rmRows: BomLineRow[]
   pmRows: BomLineRow[]
   rmMaterials: BomMaterialOption[]
@@ -266,7 +285,7 @@ export function Step5Review({
 }) {
   return (
     <div className="space-y-4 py-2 text-sm">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <div>
           <p className="text-xs text-muted-foreground">SKU</p>
           <p className="font-medium">{skus.find((s) => s.id === skuId)?.sku_code ?? "—"}</p>
@@ -274,6 +293,10 @@ export function Step5Review({
         <div>
           <p className="text-xs text-muted-foreground">BOM Code</p>
           <p className="font-mono font-medium">{bomCode}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Effective From</p>
+          <p className="font-medium">{effectiveFrom || "—"}</p>
         </div>
       </div>
 

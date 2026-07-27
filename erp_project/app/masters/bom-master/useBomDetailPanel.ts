@@ -6,6 +6,10 @@
  * and the shared edit-mode surface used by both "Update Existing BOM" and the
  * listing's per-row Edit button.
  *
+ * Editing here always creates a NEW BOM version (new bom_code, new
+ * effective_from) seeded from the current lines — never an in-place
+ * overwrite. saveEdit() submits mode:"new-version", not "update-existing".
+ *
  * Split out of BOMMasterComponent so the component itself only wires this
  * state into the table + detail panel views.
  */
@@ -15,7 +19,6 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useToast } from "@/components/ui/toast"
 import { isRmTotalValid } from "@/lib/validation/bom"
 import { rmTotal, type BomLineRow } from "./BomLineEditorGrid"
-import { formatDateInput } from "./bom-format"
 import { uploadPendingArtifacts } from "./bom-artifact-upload"
 import type { BomDetailResponse } from "@/types/masters"
 
@@ -38,6 +41,9 @@ export function useBomDetailPanel() {
   const [editSeededFor, setEditSeededFor] = useState<number | null>(null)
   const [editRmRows, setEditRmRows]       = useState<BomLineRow[]>([])
   const [editPmRows, setEditPmRows]       = useState<BomLineRow[]>([])
+  // Effective From for the NEW version being created — defaults to today,
+  // editable before submit. Not seeded from the predecessor's own date.
+  const [editEffectiveFrom, setEditEffectiveFrom] = useState("")
   const [saving, setSaving]               = useState(false)
   const [saveError, setSaveError]         = useState<string | null>(null)
 
@@ -143,12 +149,11 @@ export function useBomDetailPanel() {
       mtrl_id: l.mtrl_id,
       amount: l.amount != null ? String(l.amount) : "",
       uom: l.uom ?? "",
-      effective_from: formatDateInput(l.effective_from),
-      effective_till: formatDateInput(l.effective_till),
     })
     setEditRmRows(detail.lines.filter((l) => l.mtrl_type === "rm").map(toRow))
     setEditPmRows(detail.lines.filter((l) => l.mtrl_type === "pm").map(toRow))
     setEditStatus(detail.status ?? "")
+    setEditEffectiveFrom(new Date().toISOString().slice(0, 10))
     setStatusError(null)
     setEditSeededFor(detail.bom_id)
   }, [editMode, detail, editSeededFor])
@@ -220,7 +225,7 @@ export function useBomDetailPanel() {
     // by openEditMode's effect.
     let bomId = detail?.bom_id ?? null
     let skuId = detail?.sku_id ?? null
-    let bomCode = detail?.bom_code ?? null
+    let skuCode = detail?.sku_code ?? null
     if (bomId == null || skuId == null) {
       if (selectedBomId == null) {
         setSaveError("No BOM selected.")
@@ -236,13 +241,17 @@ export function useBomDetailPanel() {
       setDetail(fresh)
       bomId = fresh.bom_id
       skuId = fresh.sku_id
-      bomCode = fresh.bom_code
+      skuCode = fresh.sku_code
       if (bomId == null || skuId == null) {
         setSaveError("This BOM is missing its SKU link and cannot be submitted for approval.")
         return
       }
     }
 
+    if (!editEffectiveFrom.trim()) {
+      setSaveError("Effective From is required.")
+      return
+    }
     if (editRmRows.length === 0) {
       setSaveError("At least one RM line is required.")
       return
@@ -252,17 +261,29 @@ export function useBomDetailPanel() {
       return
     }
     for (const r of [...editRmRows, ...editPmRows]) {
-      if (!r.mtrl_id || !r.amount || !r.effective_from) {
-        setSaveError("Every line requires a material, amount, and effective-from date.")
+      if (!r.mtrl_id || !r.amount) {
+        setSaveError("Every line requires a material and an amount.")
         return
       }
     }
 
     setSaving(true)
     try {
+      // Editing an existing BOM always creates a NEW version — compute its
+      // code with the same convention used everywhere else (wizard,
+      // BOM_BULK): `${sku_code}-BOM-V${count+1}`.
+      const checkRes = await fetch("/api/masters/bom-master", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check-existing", sku_id: skuId }),
+      })
+      const checkData = await checkRes.json()
+      if (!checkRes.ok) throw new Error(checkData.error || "Failed to determine the next BOM version.")
+      const newBomCode = skuCode ? `${skuCode}-BOM-V${(checkData.bom_count ?? 0) + 1}` : `BOM-V${(checkData.bom_count ?? 0) + 1}`
+
       const artifactAdds = await uploadPendingArtifacts(
         pendingArtifactFiles,
-        `boms/${bomId}/${Date.now()}`
+        `boms/tmp/${crypto.randomUUID()}`
       )
 
       const toLine = (r: BomLineRow) => ({
@@ -270,17 +291,16 @@ export function useBomDetailPanel() {
         mtrl_id: r.mtrl_id,
         amount: Number(r.amount),
         uom: r.uom || null,
-        effective_from: r.effective_from,
-        effective_till: r.effective_till || null,
       })
       const res = await fetch("/api/masters/bom-master", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "create-full",
-          mode: "update-existing",
+          mode: "new-version",
           sku_id: skuId,
-          bom_id: bomId,
+          bom_code: newBomCode,
+          effective_from: editEffectiveFrom.trim(),
           source: "manual",
           rm_lines: editRmRows.map(toLine),
           pm_lines: editPmRows.map(toLine),
@@ -289,18 +309,25 @@ export function useBomDetailPanel() {
         }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Failed to submit BOM update")
+      if (!res.ok) throw new Error(data.error || "Failed to submit new BOM version")
       setEditMode(false)
       setEditSeededFor(null)
       setPendingArtifactFiles([])
       setPendingArtifactRemoveIds([])
-      fetchDetail(bomId, { skipCache: true }).then(setDetail).catch(() => {})
-      toast({ title: "BOM update submitted for approval", description: bomCode ?? undefined, variant: "success" })
+      // Switch the panel over to the newly created version, not the
+      // predecessor it's replacing.
+      const newBomId: number = data.bom_id
+      setSelectedBomId(newBomId)
+      fetchDetail(newBomId, { skipCache: true }).then(setDetail).catch(() => {})
+      const params = new URLSearchParams(searchParams.toString())
+      params.set("bomId", String(newBomId))
+      router.push(`${pathname}?${params.toString()}`, { scroll: false })
+      toast({ title: "New BOM version submitted for approval", description: newBomCode, variant: "success" })
       router.refresh()
     } catch (e: any) {
       const message = e.message || "An error occurred"
       setSaveError(message)
-      toast({ title: "Failed to submit BOM update", description: message, variant: "error" })
+      toast({ title: "Failed to submit new BOM version", description: message, variant: "error" })
     } finally {
       setSaving(false)
     }
@@ -347,6 +374,8 @@ export function useBomDetailPanel() {
     setEditRmRows,
     editPmRows,
     setEditPmRows,
+    editEffectiveFrom,
+    setEditEffectiveFrom,
     saving,
     saveError,
     editStatus,

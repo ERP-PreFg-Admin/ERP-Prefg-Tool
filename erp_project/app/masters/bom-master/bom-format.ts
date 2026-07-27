@@ -10,6 +10,14 @@ export function formatDate(val: Date | string | null) {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
 }
 
+/** Date + time, for audit-trail displays (History page) where the date alone isn't enough. */
+export function formatDateTime(val: Date | string | null) {
+  if (!val) return "—"
+  const d = typeof val === "string" ? new Date(val) : val
+  if (Number.isNaN(d.getTime())) return "—"
+  return d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+}
+
 /** yyyy-mm-dd for <input type="date">. */
 export function formatDateInput(val: Date | string | null) {
   if (!val) return ""

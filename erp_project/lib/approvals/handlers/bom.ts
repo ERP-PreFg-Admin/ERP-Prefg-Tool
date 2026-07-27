@@ -117,6 +117,7 @@ export const bomHandler: ModuleHandler = {
         await conn.execute(bomSql.archiveDetailLineToHistory, [
           cur.bom_id, cur.mtrl_type, cur.mtrl_id, cur.amount, cur.uom, null,
           cur.effective_from, cur.effective_till, cur.status, cur.updated_by ?? approverId,
+          approverId,
         ])
       }
       // 2. Wipe current lines; the new set (minus removed ones) is reinserted below.
@@ -127,14 +128,22 @@ export const bomHandler: ModuleHandler = {
       if (line.removed) continue // update-existing only: line dropped, don't reinsert
       const key = `${line.mtrlType}:${line.mtrlId}`
       const cur = currentByKey.get(key)
+      const amount = Number(line.fields.amount ?? cur?.amount ?? 0)
+      const uom = line.fields.uom ?? cur?.uom ?? null
       await conn.execute(bomSql.insertDetailLine, [
-        entityId, line.mtrlType, line.mtrlId,
-        Number(line.fields.amount ?? cur?.amount ?? 0),
-        line.fields.uom ?? cur?.uom ?? null,
-        line.fields.effective_from ?? cur?.effective_from ?? null,
-        line.fields.effective_till ?? cur?.effective_till ?? null,
-        "active", approverId,
+        entityId, line.mtrlType, line.mtrlId, amount, uom, "active", approverId,
       ])
+      // new-version: no prior line-state to snapshot (that's what
+      // update-existing's step 1 above does) — instead, archive THIS
+      // version's own lines as they're approved, so history_bom ends up
+      // with a full line-level record of every BOM version, grouped by SKU
+      // via master_bom, not just in-place overwrites.
+      if (mode === "new-version") {
+        await conn.execute(bomSql.archiveDetailLineToHistory, [
+          entityId, line.mtrlType, line.mtrlId, amount, uom, null,
+          null, null, "active", header.created_by, approverId,
+        ])
+      }
     }
 
     // 3. Artifacts (bom_artifacts) — only ever written/deleted here, at
@@ -173,10 +182,10 @@ export const bomHandler: ModuleHandler = {
       const siblingIds = (siblingRows as any[]).map((r) => r.id)
 
       if (siblingIds.length > 0) {
-        await conn.execute(bomSql.deactivateOtherActiveBomsForSku, [header.sku_id, entityId])
+        await conn.execute(bomSql.discontinueOtherActiveBomsForSku, [header.sku_id, entityId])
         for (const siblingId of siblingIds) {
           const bomDeactivateEventId = makeEventId("BOM", "deactivate", siblingId)
-          logger.info({ module: "BOM", eventId: bomDeactivateEventId, bomId: siblingId, skuId: header.sku_id, supersededBy: entityId, message: "BOM deactivated (superseded)" })
+          logger.info({ module: "BOM", eventId: bomDeactivateEventId, bomId: siblingId, skuId: header.sku_id, supersededBy: entityId, message: "BOM discontinued (superseded)" })
           recordProcessedEvent("BOM", bomDeactivateEventId, { bomId: siblingId, skuId: header.sku_id, supersededBy: entityId })
         }
       }
@@ -214,7 +223,7 @@ export const bomBulkHandler: ModuleHandler = {
         if (!sku) { groupsSkipped++; skipReasons.push(`${skuCode}: SKU not found`); continue }
         if (sku.status !== STATUS.ACTIVE) { groupsSkipped++; skipReasons.push(`${skuCode}: SKU is not active`); continue }
 
-        const lines: { mtrl_type: "rm" | "pm"; mtrl_id: number; amount: number; uom: string | null; effective_from: string; effective_till: string | null }[] = []
+        const lines: { mtrl_type: "rm" | "pm"; mtrl_id: number; amount: number; uom: string | null }[] = []
         let groupError: string | null = null
 
         for (const row of groupRows) {
@@ -229,18 +238,17 @@ export const bomBulkHandler: ModuleHandler = {
 
           const amount = Number(row.amount)
           if (!Number.isFinite(amount) || amount <= 0) { groupError = `invalid amount "${row.amount}"`; break }
-          if (!row.effective_from?.trim()) { groupError = "missing effective_from"; break }
 
           lines.push({
             mtrl_type: mtrlType,
             mtrl_id: material.id,
             amount,
             uom: row.uom?.trim() || material.uom || null,
-            effective_from: row.effective_from.trim(),
-            effective_till: row.effective_till?.trim() || null,
           })
         }
         if (groupError) { groupsSkipped++; skipReasons.push(`${skuCode}: ${groupError}`); continue }
+        const effectiveFrom = groupRows[0].effective_from?.trim()
+        if (!effectiveFrom) { groupsSkipped++; skipReasons.push(`${skuCode}: missing effective_from`); continue }
 
         const rmTotal = lines.filter((l) => l.mtrl_type === "rm").reduce((sum, l) => sum + l.amount, 0)
         if (!isRmTotalValid(rmTotal)) {
@@ -255,13 +263,20 @@ export const bomBulkHandler: ModuleHandler = {
         const [existingBoms] = await conn.execute(bomSql.selectBomsBySkuId, [sku.id])
         const bomCode = providedCode || `${skuCode}-BOM-V${(existingBoms as any[]).length + 1}`
 
-        const [headerResult] = await conn.execute(bomSql.insertBomHeader, [bomCode, sku.id, approverId, STATUS.ACTIVE])
+        const [headerResult] = await conn.execute(bomSql.insertBomHeader, [bomCode, sku.id, approverId, STATUS.ACTIVE, effectiveFrom])
         const bomId = (headerResult as any).insertId
 
         for (const line of lines) {
           await conn.execute(bomSql.insertDetailLine, [
             bomId, line.mtrl_type, line.mtrl_id, line.amount, line.uom,
-            line.effective_from, line.effective_till, "active", approverId,
+            "active", approverId,
+          ])
+          // Same per-line history_bom archive bomHandler writes for the
+          // single-BOM new-version path — keeps the History page's SKU-wise
+          // lineage complete regardless of upload path.
+          await conn.execute(bomSql.archiveDetailLineToHistory, [
+            bomId, line.mtrl_type, line.mtrl_id, line.amount, line.uom, null,
+            null, null, "active", approverId, approverId,
           ])
           linesInserted++
         }
@@ -271,10 +286,10 @@ export const bomBulkHandler: ModuleHandler = {
         const [siblingRows] = await conn.execute(bomSql.selectOtherActiveBomsForSku, [sku.id, bomId])
         const siblingIds = (siblingRows as any[]).map((r) => r.id)
         if (siblingIds.length > 0) {
-          await conn.execute(bomSql.deactivateOtherActiveBomsForSku, [sku.id, bomId])
+          await conn.execute(bomSql.discontinueOtherActiveBomsForSku, [sku.id, bomId])
           for (const siblingId of siblingIds) {
             const deactivateEventId = makeEventId("BOM", "deactivate", siblingId)
-            logger.info({ module: "BOM", eventId: deactivateEventId, bomId: siblingId, skuId: sku.id, supersededBy: bomId, message: "BOM deactivated (superseded by bulk upload)" })
+            logger.info({ module: "BOM", eventId: deactivateEventId, bomId: siblingId, skuId: sku.id, supersededBy: bomId, message: "BOM discontinued (superseded by bulk upload)" })
             recordProcessedEvent("BOM", deactivateEventId, { bomId: siblingId, skuId: sku.id, supersededBy: bomId })
           }
         }

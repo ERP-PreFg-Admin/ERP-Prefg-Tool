@@ -233,6 +233,30 @@ export type BomListItem = {
   status: string | null;
 };
 
+/**
+ * One row per BOM version (header) that has been through an approval, used
+ * by the BOM History page — grouped/sorted SKU-wise (see
+ * bom.selectHistoryPaginatedGrouped), with the creating/approving user's name
+ * already resolved.
+ */
+export type BomHistoryListItem = {
+  bom_id: number | null;
+  bom_code: string | null;
+  sku_id: number | null;
+  sku_code: string | null;
+  sku_name: string | null;
+  status: string | null;
+  created_at: Date | string | null;
+  created_by: number | null;
+  created_by_name: string | null;
+  updated_at: Date | string | null;
+  updated_by: number | null;
+  updated_by_name: string | null;
+  approved_by: number | null;
+  approved_by_name: string | null;
+  approved_on: Date | string | null;
+};
+
 /** BOM detail side-panel payload: header + all material lines. */
 export type BomArtifact = {
   id: number;
@@ -250,6 +274,8 @@ export type BomDetailResponse = {
   sku_code: string | null;
   status: string | null;
   created_at: Date | string | null;
+  effective_from: Date | string | null;
+  effective_till: Date | string | null;
   lines: BOM[];
   artifacts: BomArtifact[];
 };

@@ -76,22 +76,24 @@ function LineTable({
         </p>
       )}
 
-      <div className="rounded-lg border overflow-hidden">
+      {/* overflow-x-auto (not overflow-hidden) — the row's fixed-width columns
+          plus the Material search field can exceed the dialog's width on
+          narrower screens; this keeps the rest of the row reachable by
+          scrolling instead of silently clipping UOM/delete off the edge. */}
+      <div className="rounded-lg border overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="min-w-55">Material</TableHead>
-              <TableHead className="w-28">{mtrlType === "rm" ? "Amount (%)" : "Amount"}</TableHead>
-              <TableHead className="w-24">UOM</TableHead>
-              <TableHead className="w-36">Effective From</TableHead>
-              <TableHead className="w-36">Effective Till</TableHead>
+              <TableHead className="min-w-45">Material</TableHead>
+              <TableHead className="w-24">{mtrlType === "rm" ? "Amount (%)" : "Amount"}</TableHead>
+              <TableHead className="w-20">UOM</TableHead>
               <TableHead className="w-10" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-6 text-sm">
+                <TableCell colSpan={4} className="text-center text-muted-foreground py-6 text-sm">
                   No {mtrlType.toUpperCase()} lines yet.
                 </TableCell>
               </TableRow>
@@ -127,22 +129,6 @@ function LineTable({
                       placeholder="kg"
                       value={row.uom}
                       onChange={(e) => updateRow(i, { uom: e.target.value })}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <input
-                      type="date"
-                      className={cellInputCls}
-                      value={row.effective_from}
-                      onChange={(e) => updateRow(i, { effective_from: e.target.value })}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <input
-                      type="date"
-                      className={cellInputCls}
-                      value={row.effective_till}
-                      onChange={(e) => updateRow(i, { effective_till: e.target.value })}
                     />
                   </TableCell>
                   <TableCell>

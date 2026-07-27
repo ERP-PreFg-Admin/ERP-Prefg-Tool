@@ -17,6 +17,11 @@ export const BOM_BULK_CSV_FIELDS: MasterField[] = [
   { key: "sku_code", label: "SKU Code", required: true, placeholder: "e.g. SKU-001", sample: "SKU-001" },
   { key: "bom_code", label: "BOM Code", placeholder: "Auto-generated if blank", sample: "" },
   {
+    key: "effective_from", label: "Effective From", required: true,
+    placeholder: "YYYY-MM-DD (once per SKU group)", sample: "2026-01-01",
+    validate: validateDateStr,
+  },
+  {
     key: "mtrl_type", label: "Material Type", type: "select", required: true, sample: "rm",
     options: [
       { value: "rm", label: "RM" },
@@ -32,12 +37,4 @@ export const BOM_BULK_CSV_FIELDS: MasterField[] = [
       Number.isFinite(Number(raw)) && Number(raw) > 0 ? null : `must be a positive number (got "${raw}")`,
   },
   { key: "uom", label: "UOM", placeholder: "e.g. kg", sample: "kg" },
-  {
-    key: "effective_from", label: "Effective From", required: true, placeholder: "YYYY-MM-DD", sample: "2026-01-01",
-    validate: validateDateStr,
-  },
-  {
-    key: "effective_till", label: "Effective Till", placeholder: "YYYY-MM-DD", sample: "",
-    validate: validateDateStr,
-  },
 ]

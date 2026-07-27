@@ -5,6 +5,10 @@
  * Edit button — separated from the detail side panel (which was getting
  * cluttered mixing read-only detail + inline editing). Uses the table-form
  * BomLineEditorTable for a denser view of many RM/PM lines at once.
+ *
+ * Saving here always creates a NEW BOM version (see useBomDetailPanel's
+ * saveEdit) — the Effective From entered below applies to that new version,
+ * not the one currently being viewed.
  */
 
 import { AlertTriangle } from "lucide-react"
@@ -32,6 +36,8 @@ export function BomEditDialog({
   pmRows,
   onChangeRm,
   onChangePm,
+  effectiveFrom,
+  onChangeEffectiveFrom,
   rmMaterials,
   pmMaterials,
   saveError,
@@ -55,6 +61,9 @@ export function BomEditDialog({
   pmRows: BomLineRow[]
   onChangeRm: (rows: BomLineRow[]) => void
   onChangePm: (rows: BomLineRow[]) => void
+  /** Effective From for the NEW version this save will create. */
+  effectiveFrom: string
+  onChangeEffectiveFrom: (v: string) => void
   rmMaterials: BomMaterialOption[]
   pmMaterials: BomMaterialOption[]
   saveError: string | null
@@ -97,6 +106,19 @@ export function BomEditDialog({
               around the line edit" rather than part of it, so they're grouped
               together and kept out of the line editor's vertical space. */}
           <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-muted-foreground shrink-0">Effective From</label>
+              <input
+                type="date"
+                className="rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                value={effectiveFrom}
+                onChange={(e) => onChangeEffectiveFrom(e.target.value)}
+                disabled={saving}
+              />
+            </div>
+
+            <div className="w-px self-stretch bg-border" />
+
             <div className="flex items-center gap-2">
               <label className="text-xs font-medium text-muted-foreground shrink-0">Status</label>
               <select
@@ -157,7 +179,7 @@ export function BomEditDialog({
             Cancel
           </Button>
           <Button size="sm" onClick={onSave} disabled={saving}>
-            {saving ? "Submitting…" : "Save for Approval"}
+            {saving ? "Submitting…" : "Submit as New Version"}
           </Button>
         </div>
       </DialogContent>

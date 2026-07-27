@@ -13,10 +13,10 @@ import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import { MasterToolbar, MasterToolbarActions } from "@/components/masters/MasterToolbar"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { BomTable } from "../BomTable"
+import { BomHistoryTable } from "./BomHistoryTable"
 import { BomDetailPanel } from "../BomDetailPanel"
 import { useBomHistoryPanel } from "./useBomHistoryPanel"
-import type { BomListItem } from "@/types/masters"
+import type { BomHistoryListItem } from "@/types/masters"
 
 export default function BomHistoryClient({
   rows,
@@ -25,7 +25,7 @@ export default function BomHistoryClient({
   pageSize,
   currentSearch,
 }: {
-  rows: BomListItem[]
+  rows: BomHistoryListItem[]
   total: number
   page: number
   pageSize: number
@@ -78,18 +78,16 @@ export default function BomHistoryClient({
             panel.selectedBomId != null ? "w-[58%] shrink-0" : "w-full"
           )}
         >
-          <BomTable
+          <BomHistoryTable
             rows={rows}
             total={total}
             page={page}
             pageSize={pageSize}
             hasFilters={hasFilters}
             onClearFilters={() => navigate({ search: "" })}
-            canEdit={false}
             selectedBomId={panel.selectedBomId}
             onRowClick={panel.handleRowClick}
             onPrefetch={panel.prefetchDetail}
-            onEdit={() => {}}
           />
         </div>
 

@@ -50,6 +50,7 @@ export function useBomWizard({
   const [existingBomCode, setExistingBomCode] = useState<string | null>(null)
   const [bomCount, setBomCount] = useState(0)
   const [bomCode, setBomCode] = useState("")
+  const [effectiveFrom, setEffectiveFrom] = useState("")
   const [entryMethod, setEntryMethod] = useState<EntryMethod | null>(null)
   const [csvParsed, setCsvParsed] = useState(false)
   const [csvErrors, setCsvErrors] = useState<string[]>([])
@@ -68,6 +69,7 @@ export function useBomWizard({
     setExistingBomCode(null)
     setBomCount(0)
     setBomCode("")
+    setEffectiveFrom("")
     setEntryMethod(null)
     setCsvParsed(false)
     setCsvErrors([])
@@ -159,22 +161,24 @@ export function useBomWizard({
   }
 
   const rmValid = rmRows.length > 0 && isRmTotalValid(rmTotal(rmRows))
-  const allRmFieldsFilled = rmRows.every((r) => r.mtrl_id && r.amount && r.effective_from)
-  const allPmFieldsFilled = pmRows.every((r) => r.mtrl_id && r.amount && r.effective_from)
-  const canProceedFromLines = rmValid && allRmFieldsFilled && allPmFieldsFilled && bomCode.trim().length > 0
+  const allRmFieldsFilled = rmRows.every((r) => r.mtrl_id && r.amount)
+  const allPmFieldsFilled = pmRows.every((r) => r.mtrl_id && r.amount)
+  const canProceedFromLines =
+    rmValid && allRmFieldsFilled && allPmFieldsFilled && bomCode.trim().length > 0 && effectiveFrom.trim().length > 0
 
   async function handleSubmit() {
     setError(null)
     if (!skuId) { setError("Select a SKU first."); return }
     if (!bomCode.trim()) { setError("BOM code is required."); return }
+    if (!effectiveFrom.trim()) { setError("Effective From is required."); return }
     if (rmRows.length === 0) { setError("At least one RM line is required."); return }
     if (!isRmTotalValid(rmTotal(rmRows))) {
       setError(`RM percentages must total between 99.9% and 100.1% (currently ${rmTotal(rmRows).toFixed(2)}%).`)
       return
     }
     for (const r of [...rmRows, ...pmRows]) {
-      if (!r.mtrl_id || !r.amount || !r.effective_from) {
-        setError("Every line requires a material, amount, and effective-from date.")
+      if (!r.mtrl_id || !r.amount) {
+        setError("Every line requires a material and an amount.")
         return
       }
     }
@@ -191,8 +195,6 @@ export function useBomWizard({
         mtrl_id: r.mtrl_id,
         amount: Number(r.amount),
         uom: r.uom || null,
-        effective_from: r.effective_from,
-        effective_till: r.effective_till || null,
       })
       const res = await fetch("/api/masters/bom-master", {
         method: "POST",
@@ -202,6 +204,7 @@ export function useBomWizard({
           mode: "new-version",
           sku_id: skuId,
           bom_code: bomCode.trim(),
+          effective_from: effectiveFrom.trim(),
           source: entryMethod === "csv" ? "csv" : "manual",
           rm_lines: rmRows.map(toLine),
           pm_lines: pmRows.map(toLine),
@@ -234,6 +237,8 @@ export function useBomWizard({
     existingBomCode,
     bomCode,
     setBomCode,
+    effectiveFrom,
+    setEffectiveFrom,
     entryMethod,
     csvParsed,
     csvErrors,

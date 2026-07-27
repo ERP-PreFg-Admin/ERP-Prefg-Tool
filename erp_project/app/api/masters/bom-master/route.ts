@@ -75,7 +75,7 @@ export const POST = withGateway({
 
         if (body.mode === "new-version") {
           const [result] = await conn.execute(bomSql.insertBomHeader, [
-            body.bom_code!.trim(), body.sku_id, userId, BOM_STATUS_IN_REVIEW,
+            body.bom_code!.trim(), body.sku_id, userId, BOM_STATUS_IN_REVIEW, body.effective_from!.trim(),
           ])
           bomId = (result as any).insertId
         } else {
@@ -127,8 +127,6 @@ export const POST = withGateway({
           const fieldVals: [string, string][] = [
             ["amount", String(line.amount)],
             ["uom", line.uom ?? ""],
-            ["effective_from", line.effective_from],
-            ["effective_till", line.effective_till ?? ""],
           ]
           for (const [field, newVal] of fieldVals) {
             const oldVal = cur ? String(cur[field] ?? "") : ""
@@ -207,10 +205,10 @@ export const POST = withGateway({
           const [siblingRows] = await conn.execute(bomSql.selectOtherActiveBomsForSku, [cur.sku_id, bom_id])
           const siblingIds = (siblingRows as any[]).map((r) => r.id)
           if (siblingIds.length > 0) {
-            await conn.execute(bomSql.deactivateOtherActiveBomsForSku, [cur.sku_id, bom_id])
+            await conn.execute(bomSql.discontinueOtherActiveBomsForSku, [cur.sku_id, bom_id])
             for (const siblingId of siblingIds) {
               const deactivateEventId = makeEventId("BOM", "deactivate", siblingId)
-              logger.info({ module: "BOM", eventId: deactivateEventId, bomId: siblingId, skuId: cur.sku_id, supersededBy: bom_id, message: "BOM deactivated (superseded by manual status change)" })
+              logger.info({ module: "BOM", eventId: deactivateEventId, bomId: siblingId, skuId: cur.sku_id, supersededBy: bom_id, message: "BOM discontinued (superseded by manual status change)" })
               recordProcessedEvent("BOM", deactivateEventId, { bomId: siblingId, skuId: cur.sku_id, supersededBy: bom_id })
             }
           }
@@ -332,6 +330,21 @@ export const POST = withGateway({
         }
         if (codes.size > 1) {
           const msg = `Inconsistent bom_code for SKU ${skuCode}: found ${[...codes].map((c) => `"${c}"`).join(", ")} — a SKU group can only produce one BOM`
+          for (const i of indices) (duplicates[i] ??= []).push(msg)
+        }
+      }
+
+      // Inconsistent effective_from within one SKU group — same rationale as
+      // bom_code above: a group produces one BOM header, so applyAndArchive
+      // only reads the first row's effective_from.
+      for (const [skuCode, indices] of groups) {
+        const dates = new Set<string>()
+        for (const i of indices) {
+          const d = String(rows[i].effective_from ?? "").trim()
+          if (d) dates.add(d)
+        }
+        if (dates.size > 1) {
+          const msg = `Inconsistent effective_from for SKU ${skuCode}: found ${[...dates].map((d) => `"${d}"`).join(", ")} — a SKU group can only have one effective_from`
           for (const i of indices) (duplicates[i] ??= []).push(msg)
         }
       }

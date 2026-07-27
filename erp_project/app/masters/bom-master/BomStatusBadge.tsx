@@ -7,6 +7,9 @@ export function BomStatusBadge({ status }: { status: string | null }) {
   if (status === "draft") {
     return <Badge variant="secondary" className="capitalize">Draft</Badge>
   }
+  if (status === "discontinued") {
+    return <Badge variant="warning" className="capitalize">Discontinued</Badge>
+  }
   return (
     <Badge variant={status === "active" ? "success" : "secondary"} className="capitalize">
       {status ?? "—"}

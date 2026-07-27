@@ -110,6 +110,8 @@ export function BomCreationWizard({
                   <Step4LineEntry
                     bomCode={wizard.bomCode}
                     onChangeBomCode={wizard.setBomCode}
+                    effectiveFrom={wizard.effectiveFrom}
+                    onChangeEffectiveFrom={wizard.setEffectiveFrom}
                     entryMethod={wizard.entryMethod}
                     csvParsed={wizard.csvParsed}
                     csvErrors={wizard.csvErrors}
@@ -130,6 +132,7 @@ export function BomCreationWizard({
                     skus={skus}
                     skuId={wizard.skuId}
                     bomCode={wizard.bomCode}
+                    effectiveFrom={wizard.effectiveFrom}
                     rmRows={wizard.rmRows}
                     pmRows={wizard.pmRows}
                     rmMaterials={rmMaterials}

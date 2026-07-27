@@ -6,13 +6,13 @@
 
 import type { BomLineRow, BomMaterialOption } from "./BomLineEditorGrid"
 
-export const CSV_HEADER = ["mtrl_type", "mtrl_code", "amount", "uom", "effective_from", "effective_till"]
+export const CSV_HEADER = ["mtrl_type", "mtrl_code", "amount", "uom"]
 
 /** Downloadable template for Step 4's "Upload CSV" entry method — header + one sample row per material type. */
 export function buildBomCsvTemplate(): string {
   const sampleRows = [
-    ["rm", "RM-0001", "10", "kg", "2026-01-01", ""],
-    ["pm", "PM-0001", "5", "pcs", "2026-01-01", ""],
+    ["rm", "RM-0001", "10", "kg"],
+    ["pm", "PM-0001", "5", "pcs"],
   ]
   return [CSV_HEADER, ...sampleRows].map((row) => row.join(",")).join("\n")
 }
@@ -42,8 +42,6 @@ export function parseBomCsv(
     const mtrlCode = cells[colIndex.mtrl_code]
     const amountRaw = cells[colIndex.amount]
     const uom = cells[colIndex.uom]
-    const effectiveFrom = cells[colIndex.effective_from]
-    const effectiveTill = cells[colIndex.effective_till] || ""
 
     if (mtrlType !== "rm" && mtrlType !== "pm") {
       errors.push(`Row ${rowNum}: mtrl_type must be "rm" or "pm" (got "${mtrlType}").`)
@@ -68,18 +66,12 @@ export function parseBomCsv(
       errors.push(`Row ${rowNum}: uom is required.`)
       return
     }
-    if (!effectiveFrom) {
-      errors.push(`Row ${rowNum}: effective_from is required.`)
-      return
-    }
 
     rows.push({
       mtrl_type: mtrlType,
       mtrl_id: material.id,
       amount: String(amount),
       uom,
-      effective_from: effectiveFrom,
-      effective_till: effectiveTill,
     })
   })
 

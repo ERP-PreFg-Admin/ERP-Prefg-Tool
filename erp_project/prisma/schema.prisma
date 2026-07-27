@@ -358,6 +358,8 @@ model history_bom {
   last_updated   DateTime?             @default(now()) @db.Timestamp(0)
   status         history_bom_status?
   updated_by     Int?
+  approved_by    Int?
+  approved_on    DateTime?             @db.DateTime(0)
   master_bom     master_bom            @relation(fields: [bom_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "history_bom_ibfk_1")
 
   @@index([bom_id], map: "bom_id")
@@ -413,6 +415,8 @@ model master_bom {
   sku_id                  Int?
   updated_at              DateTime?                 @db.DateTime(0)
   updated_by              Int?
+  effective_from          DateTime?                 @db.Date
+  effective_till          DateTime?                 @db.Date
   bom_artifacts           bom_artifacts[]
   bom_misc                bom_misc[]
   details_bom             details_bom[]
