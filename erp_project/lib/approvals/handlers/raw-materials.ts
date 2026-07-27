@@ -106,10 +106,7 @@ export const rmBulkHandler: ModuleHandler = {
       for (const row of rows) {
         if (!row.name?.trim()) { skipped++; continue }
         try {
-          await conn.execute(rmSql.insert, await toRmParams(conn, {
-            rm_code: row.rm_code, name: row.name, make: row.make, type: row.type,
-            uom: row.uom, hsn_code: row.hsn_code, inci_name: row.inci_name,
-          }, STATUS.ACTIVE))
+          await conn.execute(rmSql.insert, await toRmParams(conn, row , STATUS.ACTIVE))
           inserted++
         } catch (err: any) {
           if (err.code === "ER_DUP_ENTRY") { skipped++ } else { throw err }
