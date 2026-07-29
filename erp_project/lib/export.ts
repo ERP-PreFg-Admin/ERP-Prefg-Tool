@@ -152,13 +152,13 @@ export function buildCsv(
  *   "number" → default numFmt      (Excel handles number display automatically)
  *   null     → blank cell
  */
-export async function buildXlsx(
+function addXlsxSheet(
+  workbook: ExcelJS.Workbook,
   sheetName: string,
   columns: ExportColumn[],
   rows: Record<string, unknown>[]
-): Promise<ArrayBuffer> {
-  const workbook  = new ExcelJS.Workbook()
-  const ws        = workbook.addWorksheet(sheetName)
+): void {
+  const ws = workbook.addWorksheet(sheetName)
 
   // Define column headers and widths — ExcelJS auto-inserts a header row.
   ws.columns = columns.map((col) => ({
@@ -201,9 +201,31 @@ export async function buildXlsx(
       }
     }
   }
+}
+
+export async function buildXlsx(
+  sheetName: string,
+  columns: ExportColumn[],
+  rows: Record<string, unknown>[]
+): Promise<ArrayBuffer> {
+  const workbook = new ExcelJS.Workbook()
+  addXlsxSheet(workbook, sheetName, columns, rows)
 
   // writeBuffer() returns ExcelJS.Buffer (ArrayBuffer | Buffer).
   // .slice(0) normalizes it to a plain ArrayBuffer with unambiguous TS type.
+  const raw = await workbook.xlsx.writeBuffer()
+  return (raw as ArrayBuffer).slice(0)
+}
+
+/** Same as buildXlsx but writes one workbook with multiple sheets. */
+export async function buildMultiSheetXlsx(
+  sheets: { name: string; columns: ExportColumn[]; rows: Record<string, unknown>[] }[]
+): Promise<ArrayBuffer> {
+  const workbook = new ExcelJS.Workbook()
+  for (const sheet of sheets) {
+    addXlsxSheet(workbook, sheet.name, sheet.columns, sheet.rows)
+  }
+
   const raw = await workbook.xlsx.writeBuffer()
   return (raw as ArrayBuffer).slice(0)
 }

@@ -1,303 +1,26 @@
 "use client"
 
 import {
-  AlertTriangle, ArrowDown, ArrowUp, Ban, ChevronsUpDown,
-  FileText, History, Loader2, MoreVertical, Pencil, Scissors, XCircle,
+  Ban, FileText, History, PackageCheck, Pencil, Scissors, XCircle,
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
-import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
-import { useToast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import type { BadgeVariant, PoRow } from "./po-types"
 import { STATUS_CONFIG } from "./po-types"
 import { fmtDate, fmtInt, fmtMoney, fmtRate, isImpromptu, num } from "./po-utils"
 import PoHistoryDialog from "./PoHistoryDialog"
+import ShortClosePODialog from "./ShortClosePODialog"
+import CancelPODialog from "./CancelPODialog"
+import ReceivePODialog from "./ReceivePODialog"
+import PoActionMenu, { type MenuAction } from "./PoActionMenu"
+import { poTolerance, ProgressCell, SortHead, type SortDir } from "./PoTableCells"
 
-// tolerance = min(100 units, 10% of original qty)
-function poTolerance(qty: number) {
-  return Math.min(100, Math.floor(qty * 0.10))
-}
-
-// ── Progress bar cell ─────────────────────────────────────────────────────────
-function ProgressCell({ value, total }: { value: string | number | null; total: string | number }) {
-  const v = num(value)
-  const t = num(total)
-  const pct = t > 0 ? Math.min(100, Math.round((v / t) * 100)) : 0
-  return (
-    <div className="min-w-18">
-      <div className="text-xs font-medium tabular-nums">{fmtInt(v)}</div>
-      <div className="mt-1 h-1.5 w-full rounded-full bg-muted overflow-hidden">
-        <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  )
-}
-
-// ── Short-close confirmation dialog ──────────────────────────────────────────
-function ShortCloseDialog({
-  open, poId, onClose, onDone,
-}: {
-  open: boolean
-  poId: number
-  onClose: () => void
-  onDone: () => void
-}) {
-  const [loading, setLoading] = useState(false)
-  const { toast } = useToast()
-
-  async function handleConfirm() {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/purchase-orders/${poId}/close`, { method: "POST" })
-      if (res.ok) {
-        toast({ title: "PO short closed", variant: "success" })
-        onDone()
-        onClose()
-      }
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o && !loading) onClose() }}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-amber-600">
-            <Ban className="h-4 w-4" /> Short Close PO?
-          </DialogTitle>
-          <DialogDescription className="pt-1 text-sm text-foreground">
-            This will mark the PO as <strong>Short Closed</strong>. Use this when a significant
-            remaining quantity will not be fulfilled. This action cannot be undone.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <button
-            onClick={onClose}
-            disabled={loading}
-            className="inline-flex items-center justify-center rounded-md border border-input px-3 py-1.5 text-sm hover:bg-accent transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 justify-center rounded-md bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-700 transition-colors disabled:opacity-50"
-          >
-            {loading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Closing…</> : "Confirm Short Close"}
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ── Cancel PO confirmation dialog ────────────────────────────────────────────
-function CancelPoDialog({
-  open, poId, onClose, onDone,
-}: {
-  open: boolean
-  poId: number
-  onClose: () => void
-  onDone: () => void
-}) {
-  const [loading, setLoading] = useState(false)
-  const [reason, setReason] = useState("")
-  const { toast } = useToast()
-
-  async function handleConfirm() {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/purchase-orders/${poId}/cancel`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: reason.trim() || undefined }),
-      })
-      if (res.ok) {
-        toast({ title: "PO cancelled", variant: "success" })
-        onDone()
-        onClose()
-        setReason("")
-      }
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o && !loading) { onClose(); setReason("") } }}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-destructive">
-            <XCircle className="h-4 w-4" /> Cancel PO?
-          </DialogTitle>
-          <DialogDescription className="pt-1 text-sm text-foreground">
-            This will mark the PO as <strong>Cancelled</strong>. This action cannot be undone.
-            Notify the manufacturer separately using the checkbox selection + "Review & Send Mail"
-            in the table toolbar once you're ready.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-1.5">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Reason (optional — for the audit log)
-          </label>
-          <textarea
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            rows={2}
-            disabled={loading}
-            className="flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
-          />
-        </div>
-        <DialogFooter>
-          <button
-            onClick={() => { onClose(); setReason("") }}
-            disabled={loading}
-            className="inline-flex items-center justify-center rounded-md border border-input px-3 py-1.5 text-sm hover:bg-accent transition-colors"
-          >
-            Back
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 justify-center rounded-md bg-destructive px-3 py-1.5 text-sm text-white hover:bg-destructive/90 transition-colors disabled:opacity-50"
-          >
-            {loading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Cancelling…</> : "Confirm Cancellation"}
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ── Three-dot action menu ─────────────────────────────────────────────────────
-type MenuAction = {
-  label: string
-  icon: React.ReactNode
-  onClick: () => void
-  variant?: "default" | "warning" | "destructive"
-  disabled?: boolean
-  disabledReason?: string
-}
-
-function ActionMenu({ actions }: { actions: MenuAction[] }) {
-  const [open, setOpen]         = useState(false)
-  const [openUp, setOpenUp]     = useState(false)
-  const ref                     = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener("mousedown", handler)
-    return () => document.removeEventListener("mousedown", handler)
-  }, [open])
-
-  if (actions.length === 0) return null
-
-  const variantCls: Record<string, string> = {
-    default:     "text-foreground hover:bg-accent",
-    warning:     "text-amber-700 hover:bg-amber-50",
-    destructive: "text-destructive hover:bg-destructive/10",
-  }
-
-  function toggle() {
-    if (!open && ref.current) {
-      // Flip upward when there isn't enough room below (e.g. the last rows
-      // of a table) so the menu doesn't get cut off / hidden behind the
-      // pagination bar.
-      const rect = ref.current.getBoundingClientRect()
-      const estimatedMenuHeight = actions.length * 36 + 16
-      setOpenUp(window.innerHeight - rect.bottom < estimatedMenuHeight)
-    }
-    setOpen((v) => !v)
-  }
-
-  return (
-    <div ref={ref} className="relative inline-block">
-      <button
-        onClick={toggle}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-input hover:bg-accent transition-colors"
-        aria-label="More actions"
-      >
-        <MoreVertical className="h-3.5 w-3.5" />
-      </button>
-
-      {open && (
-        <div
-          className={cn(
-            "absolute right-0 z-50 min-w-45 rounded-md border border-border bg-popover shadow-md",
-            openUp ? "bottom-full mb-1" : "top-full mt-1"
-          )}
-        >
-          {actions.map((action, i) => (
-            action.disabled ? (
-              <div
-                key={i}
-                title={action.disabledReason}
-                className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground cursor-not-allowed opacity-60"
-              >
-                {action.icon}
-                {action.label}
-                <AlertTriangle className="ml-auto h-3 w-3 text-amber-400" />
-              </div>
-            ) : (
-              <button
-                key={i}
-                onClick={() => { setOpen(false); action.onClick() }}
-                className={`flex w-full items-center gap-2 px-3 py-2 text-xs transition-colors ${variantCls[action.variant ?? "default"]}`}
-              >
-                {action.icon}
-                {action.label}
-              </button>
-            )
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Sortable column header ────────────────────────────────────────────────────
-type SortDir = "asc" | "desc"
-
-function SortHead({
-  children, colKey, sortBy, sortDir, onSort, className,
-}: {
-  children: React.ReactNode
-  colKey: string
-  sortBy: string
-  sortDir: SortDir
-  onSort: (key: string) => void
-  className?: string
-}) {
-  const active = sortBy === colKey
-  return (
-    <TableHead className={className}>
-      <button
-        onClick={() => onSort(colKey)}
-        className="inline-flex items-center gap-1 font-medium hover:text-foreground transition-colors whitespace-nowrap"
-      >
-        {children}
-        {active
-          ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)
-          : <ChevronsUpDown className="h-3 w-3 opacity-40" />
-        }
-      </button>
-    </TableHead>
-  )
-}
-
-// ── Main table ────────────────────────────────────────────────────────────────
 export default function PoTable({
   rows,
   sessionUserId,
@@ -327,6 +50,7 @@ export default function PoTable({
   const router                                      = useRouter()
   const [shortCloseTarget, setShortCloseTarget]     = useState<number | null>(null)
   const [cancelTarget, setCancelTarget]             = useState<number | null>(null)
+  const [receiveTarget, setReceiveTarget]           = useState<PoRow | null>(null)
   const [historyTarget, setHistoryTarget]           = useState<PoRow | null>(null)
   const sh = { sortBy, sortDir, onSort }
 
@@ -377,8 +101,9 @@ export default function PoTable({
                     const status = r.status ?? "draft"
                     const cfg    = STATUS_CONFIG[status] ?? { label: status, variant: "secondary" as BadgeVariant }
 
-                    const canEdit  = status === "draft" && r.po_raised_by === sessionUserId
-                    const canSplit = ["draft", "raised", "punched", "partially_received"].includes(status)
+                    const canEdit    = status === "draft" && r.po_raised_by === sessionUserId
+                    const canSplit   = ["draft", "raised", "punched", "partially_received"].includes(status)
+                    const canReceive = ["raised", "punched", "partially_received"].includes(status)
 
                     // Three-dot menu items
                     const originalQty   = num(r.qty)
@@ -510,7 +235,16 @@ export default function PoTable({
                                 <Scissors className="h-3 w-3" />
                               </button>
                             )}
-                            <ActionMenu actions={menuActions} />
+                            {canReceive && (
+                              <button
+                                onClick={() => setReceiveTarget(r)}
+                                title="Receive against PO"
+                                className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent transition-colors"
+                              >
+                                <PackageCheck className="h-3 w-3" />
+                              </button>
+                            )}
+                            <PoActionMenu actions={menuActions} />
                           </div>
                         </TableCell>
                       </TableRow>
@@ -524,7 +258,7 @@ export default function PoTable({
       </Card>
 
       {/* Short close confirmation — rendered outside table to avoid z-index issues */}
-      <ShortCloseDialog
+      <ShortClosePODialog
         open={shortCloseTarget !== null}
         poId={shortCloseTarget ?? 0}
         onClose={() => setShortCloseTarget(null)}
@@ -532,10 +266,18 @@ export default function PoTable({
       />
 
       {/* Cancel PO confirmation — rendered outside table to avoid z-index issues */}
-      <CancelPoDialog
+      <CancelPODialog
         open={cancelTarget !== null}
         poId={cancelTarget ?? 0}
         onClose={() => setCancelTarget(null)}
+        onDone={() => router.refresh()}
+      />
+
+      {/* Receive against PO — rendered outside table to avoid z-index issues */}
+      <ReceivePODialog
+        open={receiveTarget !== null}
+        po={receiveTarget}
+        onClose={() => setReceiveTarget(null)}
         onDone={() => router.refresh()}
       />
 

@@ -61,3 +61,10 @@ export const GMAIL_APP_PASSWORD = required("GMAIL_APP_PASSWORD")
 
 export const GOOGLE_CLIENT_ID     = required("GOOGLE_CLIENT_ID")
 export const GOOGLE_CLIENT_SECRET = required("GOOGLE_CLIENT_SECRET")
+
+// ── App base URL ─────────────────────────────────────────────────────────────
+// Used to build absolute links back into the app (e.g. PO links in emails).
+// Optional — falls back to localhost so a missing var only breaks link
+// correctness, not the feature using it.
+
+export const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"

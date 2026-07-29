@@ -1,10 +1,9 @@
 // POST /api/purchase-orders/[id]/split
-// Split a raised PO into N child POs across (optionally different) manufacturers.
+// Split a raised PO into N child POs (one or more) across (optionally different) manufacturers.
 //
-// Parent PO closing rules (qty is NEVER mutated — it matches the email already sent):
-//   remaining after split <= tolerance (min(100, 10% of qty)) → status = 'received'
-//   remaining after split >  tolerance → status unchanged (remaining bar shrinks)
-//   short_closed is set manually only (for intentional early closure with large remainder)
+// Parent PO qty is reduced by the split total (total_amount recalculated to match);
+// status and received_qty are never touched — a split is not a receiving event.
+// short_closed is set manually only (for intentional early closure with large remainder)
 
 import { NextResponse } from "next/server"
 import type { PoolConnection } from "mysql2/promise"
@@ -74,7 +73,7 @@ export const POST = withGateway({
 
         const [childResult] = await conn.execute(
           purchaseOrdersSql.insertSplit,
-          [childPoNo, mfg_id, po.sku_code, Number(qty), po.expected_on, childStatus, destination || null]
+          [childPoNo, mfg_id, po.sku_code, Number(qty), po.expected_on, childStatus, destination || null, po.po_no]
         )
         const childId = (childResult as any).insertId
 
@@ -97,30 +96,16 @@ export const POST = withGateway({
         }
       }
 
-      // Credit split qty to parent's received_qty — qty is never changed (it was emailed)
-      await conn.execute(purchaseOrdersSql.incrementReceivedQtyBySplit, [splitTotal, poId])
-      const newReceivedQty = Number(po.received_qty ?? 0) + splitTotal
-      const newRemaining   = Number(po.qty) - newReceivedQty
-
-      // Tolerance: min(100 units, 10% of original qty)
-      // If remaining falls within tolerance, consider PO fully received.
-      const originalQty = Number(po.qty)
-      const tolerance   = Math.min(100, Math.floor(originalQty * 0.10))
-
-      let splitType: "full" | "partial"
-      if (newRemaining <= tolerance) {
-        splitType = "full"
-        await conn.execute(purchaseOrdersSql.setStatus, ["received", poId])
-        logger.info({ ...logCtx, parentPoId: poId, newReceivedQty, newRemaining, tolerance, message: "Split within tolerance — parent marked received" })
-      } else {
-        splitType = "partial"
-        logger.info({ ...logCtx, parentPoId: poId, newReceivedQty, newRemaining, tolerance, message: "Partial split — parent status unchanged" })
-      }
+      // Reduce parent qty by the split total — status and received_qty are untouched
+      const newQty         = Number(po.qty) - splitTotal
+      const newTotalAmount = newQty * Number(po.unit_price ?? 0)
+      await conn.execute(purchaseOrdersSql.setQtyAndTotalAfterSplit, [newQty, newTotalAmount, poId])
+      logger.info({ ...logCtx, parentPoId: poId, newQty, newTotalAmount, message: "PO split reduced parent qty" })
 
       await conn.commit()
-      recordProcessedEvent("PO_SPLIT", eventId, { parentPoId: poId, splitsCreated: splits.length, splitType })
-      logger.info({ ...logCtx, parentPoId: poId, splitsCreated: splits.length, splitType, message: "PO split succeeded" })
-      return NextResponse.json({ ok: true, splits_created: splits.length, split_type: splitType })
+      recordProcessedEvent("PO_SPLIT", eventId, { parentPoId: poId, splitsCreated: splits.length })
+      logger.info({ ...logCtx, parentPoId: poId, splitsCreated: splits.length, message: "PO split succeeded" })
+      return NextResponse.json({ ok: true, splits_created: splits.length })
     } catch (err: any) {
       await conn.rollback()
       recordFailedEvent("PO_SPLIT", eventId, { parentPoId: poId, splits }, err.message)
