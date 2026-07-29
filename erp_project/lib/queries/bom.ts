@@ -170,6 +170,16 @@ export const bom = {
   `,
 
   /**
+   * Bulk bom_code + status lookup by id — resolves master_skus.active_bom_id
+   * to a display code for a whole page of SKU rows in one query. Params: [ids[]]
+   */
+  selectBomCodesByIds: `
+    SELECT id, bom_code, status
+    FROM master_bom
+    WHERE id IN (?)
+  `,
+
+  /**
    * All current detail lines for a BOM, raw columns (no name/code joins) —
    * used to snapshot into history_bom and to diff against a proposed line set.
    * Params: [bom_id]

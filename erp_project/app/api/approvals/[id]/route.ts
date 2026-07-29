@@ -20,6 +20,7 @@ import { withGateway } from "@/lib/gateway/with-gateway"
 import { query, pool } from "@/lib/db"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { MODULE_HANDLERS, type DiffItem } from "@/lib/approvals/module-handlers"
+import { resolvePendingHistoryEntry } from "@/lib/master-routes/history-utils"
 import { APPROVAL_STATUS, STATUS } from "@/lib/constants"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
@@ -96,6 +97,9 @@ export const POST = withGateway({
       await conn.execute(approvalsSql.markRejected, [approverId, remarks!.trim(), approvalId])
       logger.info({ ...eventLogCtx, message: "Approval rejected, entity marked as rejected", approverId })
     }
+    // No-op for modules that never call insertHistoryEntry on submit (0 rows
+    // affected) — safe to call unconditionally here rather than per-module.
+    await resolvePendingHistoryEntry(conn, approval.module, approval.entity_id, approverId, action === "approve" ? "approved" : "rejected")
     await conn.commit()
 
     // Manufacturer-scoped rm_mrm_fixed/pm_mrm_fixed rate reads are cached

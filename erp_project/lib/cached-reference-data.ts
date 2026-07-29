@@ -73,6 +73,34 @@ export const getActiveSkuList = unstable_cache(
   { revalidate: REVALIDATE_SECONDS, tags: ["ref:skus"] }
 )
 
+// ── SKU filter-panel dropdown options ───────────────────────────────────────
+// Distinct brand/sku_type/category/subcategory values for the /masters/skus
+// filter panel — small, rarely-changing lists, same caching story as above.
+
+export const getSkuDistinctBrands = unstable_cache(
+  () => timedQuery<{ brand: string }>(skusSql.selectDistinctBrands, [], { label: "skus.selectDistinctBrands (cached)" }),
+  ["ref-sku-brands"],
+  { revalidate: REVALIDATE_SECONDS, tags: ["ref:skus"] }
+)
+
+export const getSkuDistinctSkuTypes = unstable_cache(
+  () => timedQuery<{ sku_type: string }>(skusSql.selectDistinctSkuTypes, [], { label: "skus.selectDistinctSkuTypes (cached)" }),
+  ["ref-sku-types"],
+  { revalidate: REVALIDATE_SECONDS, tags: ["ref:skus"] }
+)
+
+export const getSkuDistinctCategories = unstable_cache(
+  () => timedQuery<{ category: string }>(skusSql.selectDistinctCategories, [], { label: "skus.selectDistinctCategories (cached)" }),
+  ["ref-sku-categories"],
+  { revalidate: REVALIDATE_SECONDS, tags: ["ref:skus"] }
+)
+
+export const getSkuDistinctSubcategories = unstable_cache(
+  () => timedQuery<{ subcategory: string }>(skusSql.selectDistinctSubcategories, [], { label: "skus.selectDistinctSubcategories (cached)" }),
+  ["ref-sku-subcategories"],
+  { revalidate: REVALIDATE_SECONDS, tags: ["ref:skus"] }
+)
+
 export const getActiveRmMaterialOptions = unstable_cache(
   () =>
     timedQuery<{ id: number; rm_code: string | null; name: string; uom: string | null }>(

@@ -1,22 +1,40 @@
 /**
  * SKU Queries
  *
- * Centralised queries for the `skus` table and `sku_history` audit table.
+ * Centralised queries for the `master_skus` table. Edit-history/audit trail
+ * lives in the generic `history_masters_edits` table (module="SKU") —
+ * see lib/queries/history.ts and lib/master-routes/history-utils.ts — not a
+ * per-module `sku_history` table.
  */
+
+/**
+ * Full display column list for `master_skus`, excluding `base_sku_sno` (used
+ * only by the brand+sno grouping query below) and history-only concerns.
+ * Every column is table-qualified because selectPaginated/selectAllFiltered
+ * LEFT JOIN a `vg` derived table that also has a `brand` column — an
+ * unqualified `brand` there is ambiguous (ER_NON_UNIQ_ERROR).
+ */
+const SKU_COLUMNS = `
+  master_skus.id, master_skus.sku_code, master_skus.name, master_skus.brand,
+  master_skus.sku_type, master_skus.category, master_skus.subcategory,
+  master_skus.filling, master_skus.filling_uom, master_skus.mrp, master_skus.gst,
+  master_skus.active_bom_id, master_skus.status,
+  master_skus.created_at, master_skus.created_by, master_skus.updated_by, master_skus.updated_on
+`
 
 export const skus = {
   // ============ SELECT QUERIES ============
 
   /** Get all SKUs — used by CSV / Add wizards that need the full list. */
   selectAll: `
-    SELECT id, sku_code, name, brand, category, status, created_at, created_by
+    SELECT ${SKU_COLUMNS}
     FROM master_skus
     ORDER BY sku_code ASC
   `,
 
   /** Active SKUs only — used to populate the BOM wizard's SKU picker. */
   selectActive: `
-    SELECT id, sku_code, name, brand, category, status
+    SELECT ${SKU_COLUMNS}
     FROM master_skus
     WHERE status = 'active'
     ORDER BY sku_code ASC
@@ -27,7 +45,7 @@ export const skus = {
    * Parameters: [id]
    */
   selectById: `
-    SELECT id, sku_code, name, brand, category, status
+    SELECT ${SKU_COLUMNS}
     FROM master_skus WHERE id = ? LIMIT 1
   `,
   /**
@@ -40,17 +58,29 @@ export const skus = {
   // ============ PAGINATED SELECT QUERIES ============
 
   /**
-   * Paginated SKU list with optional search + status filter.
-   * Params: [like, like, like, like, status, status, LIMIT, OFFSET]
-   *   like   — '%search%' or null (code / name / brand columns)
-   *   status — 'active'|'inactive' or null
+   * Paginated SKU list with optional search + status + brand + sku_type +
+   * category + subcategory filters. Also joins a `variant_count` column
+   * (SKUs sharing this row's brand + base_sku_sno) so the client can decide,
+   * per row, whether the "see variants" row action should be shown
+   * (variant_count > 1).
+   * Params: [like, like, like, like, status, status, brand, brand, sku_type, sku_type, category, category, subcategory, subcategory, LIMIT, OFFSET]
    */
   selectPaginated: `
-    SELECT id, sku_code, name, brand, category, status, created_at, created_by
+    SELECT ${SKU_COLUMNS}, master_skus.base_sku_sno, COALESCE(vg.variant_count, 1) AS variant_count
     FROM master_skus
-    WHERE (? IS NULL OR sku_code LIKE ? OR name LIKE ? OR brand LIKE ?)
-      AND (? IS NULL OR status = ?)
-    ORDER BY sku_code ASC
+    LEFT JOIN (
+      SELECT brand, base_sku_sno, COUNT(*) AS variant_count
+      FROM master_skus
+      WHERE base_sku_sno IS NOT NULL
+      GROUP BY brand, base_sku_sno
+    ) vg ON vg.brand = master_skus.brand AND vg.base_sku_sno = master_skus.base_sku_sno
+    WHERE (? IS NULL OR master_skus.sku_code LIKE ? OR master_skus.name LIKE ? OR master_skus.brand LIKE ?)
+      AND (? IS NULL OR master_skus.status = ?)
+      AND (? IS NULL OR master_skus.brand = ?)
+      AND (? IS NULL OR master_skus.sku_type = ?)
+      AND (? IS NULL OR master_skus.category = ?)
+      AND (? IS NULL OR master_skus.subcategory = ?)
+    ORDER BY master_skus.sku_code ASC
     LIMIT ? OFFSET ?
   `,
 
@@ -58,48 +88,113 @@ export const skus = {
    * Fetch ALL matching SKUs for export (no LIMIT/OFFSET).
    * Same WHERE clause as selectPaginated; call countAll first to enforce the
    * row cap before running this.
-   * Params: [like, like, like, like, status, status]
+   * Params: [like, like, like, like, status, status, brand, brand, sku_type, sku_type, category, category, subcategory, subcategory]
    */
   selectAllFiltered: `
-    SELECT id, sku_code, name, brand, category, status, created_at, created_by
+    SELECT ${SKU_COLUMNS}, master_skus.base_sku_sno, COALESCE(vg.variant_count, 1) AS variant_count
     FROM master_skus
-    WHERE (? IS NULL OR sku_code LIKE ? OR name LIKE ? OR brand LIKE ?)
-      AND (? IS NULL OR status = ?)
+    LEFT JOIN (
+      SELECT brand, base_sku_sno, COUNT(*) AS variant_count
+      FROM master_skus
+      WHERE base_sku_sno IS NOT NULL
+      GROUP BY brand, base_sku_sno
+    ) vg ON vg.brand = master_skus.brand AND vg.base_sku_sno = master_skus.base_sku_sno
+    WHERE (? IS NULL OR master_skus.sku_code LIKE ? OR master_skus.name LIKE ? OR master_skus.brand LIKE ?)
+      AND (? IS NULL OR master_skus.status = ?)
+      AND (? IS NULL OR master_skus.brand = ?)
+      AND (? IS NULL OR master_skus.sku_type = ?)
+      AND (? IS NULL OR master_skus.category = ?)
+      AND (? IS NULL OR master_skus.subcategory = ?)
+    ORDER BY master_skus.sku_code ASC
+  `,
+
+  // ============ GROUPING / VARIANT QUERIES ============
+
+  /**
+   * Groups SKUs that share the same brand + base_sku_sno (i.e. size/variant
+   * families of the same base product). Only groups with more than one
+   * member are returned; each group's SKUs are packed into JSON via
+   * GROUP_CONCAT so a single row represents the whole family.
+   * No params.
+   */
+  selectGroupedByBrandAndSno: `
+    SELECT
+      brand,
+      base_sku_sno,
+      COUNT(*) AS sku_count,
+      GROUP_CONCAT(
+        JSON_OBJECT(
+          'id', id,
+          'sku_code', sku_code,
+          'name', name,
+          'sku_type', sku_type,
+          'category', category,
+          'subcategory', subcategory,
+          'filling', filling,
+          'filling_uom', filling_uom,
+          'mrp', mrp,
+          'status', status
+        )
+      ) AS skus_json
+    FROM master_skus
+    WHERE brand IS NOT NULL AND base_sku_sno IS NOT NULL
+    GROUP BY brand, base_sku_sno
+    HAVING COUNT(*) > 1
+    ORDER BY brand ASC, base_sku_sno ASC
+  `,
+
+  /**
+   * Sibling SKUs sharing one SKU's brand + base_sku_sno — feeds the per-row
+   * "variants" popup (simple row list, not the JSON-packed report above).
+   * Params: [brand, base_sku_sno]
+   */
+  selectVariantsByBrandAndSno: `
+    SELECT id, sku_code, name, sku_type, category, subcategory, filling, filling_uom, mrp, status
+    FROM master_skus
+    WHERE brand = ? AND base_sku_sno = ?
     ORDER BY sku_code ASC
+  `,
+
+  // ============ DISTINCT-VALUE LOOKUPS (filter dropdowns) ============
+
+  selectDistinctBrands: `
+    SELECT DISTINCT brand FROM master_skus WHERE brand IS NOT NULL AND brand <> '' ORDER BY brand ASC
+  `,
+  selectDistinctSkuTypes: `
+    SELECT DISTINCT sku_type FROM master_skus WHERE sku_type IS NOT NULL AND sku_type <> '' ORDER BY sku_type ASC
+  `,
+  selectDistinctCategories: `
+    SELECT DISTINCT category FROM master_skus WHERE category IS NOT NULL AND category <> '' ORDER BY category ASC
+  `,
+  selectDistinctSubcategories: `
+    SELECT DISTINCT subcategory FROM master_skus WHERE subcategory IS NOT NULL AND subcategory <> '' ORDER BY subcategory ASC
   `,
 
   /**
    * Matching COUNT for selectPaginated.
-   * Params: [like, like, like, like, status, status]
+   * Params: [like, like, like, like, status, status, brand, brand, sku_type, sku_type, category, category, subcategory, subcategory]
    */
   countAll: `
     SELECT COUNT(*) AS total
     FROM master_skus
     WHERE (? IS NULL OR sku_code LIKE ? OR name LIKE ? OR brand LIKE ?)
       AND (? IS NULL OR status = ?)
+      AND (? IS NULL OR brand = ?)
+      AND (? IS NULL OR sku_type = ?)
+      AND (? IS NULL OR category = ?)
+      AND (? IS NULL OR subcategory = ?)
   `,
 
   // ============ UPDATE QUERIES ============
 
   /**
    * Update editable SKU fields (sku_code is immutable).
-   * Parameters: [name, brand, category, status, id]
+   * Parameters: [name, brand, category, subcategory, sku_type, mrp, status, id]
    */
   updateSku: `
     UPDATE master_skus
-    SET name = ?, brand = ?, category = ?, status = ?
+    SET name = ?, brand = ?, category = ?, subcategory = ?, sku_type = ?, mrp = ?, status = ?
     WHERE id = ?
-  `,
-
-  // ============ HISTORY QUERIES ============
-
-  /**
-   * Archive the pre-edit snapshot of a SKU to sku_history.
-   * Parameters: [sku_id, sku_code, name, brand, category, status, changed_by]
-   */
-  insertHistory: `
-    INSERT INTO sku_history (sku_id, sku_code, name, brand, category, status, changed_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
   `,
 
   // ============ INSERT QUERIES ============

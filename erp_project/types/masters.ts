@@ -20,7 +20,7 @@
  * server components and "use client" components.
  */
 
-/** `skus` table — Stock Keeping Units. Used by app/masters/skus. */
+/** `master_skus` table — Stock Keeping Units. Used by app/masters/skus. */
 export type Sku = {
   id: number
   sku_code: string
@@ -31,11 +31,52 @@ export type Sku = {
   created_at: Date | null
   /** FK to users.id; optional because not every page selects it. */
   created_by?: number | null
+  /** Native master_skus columns; optional since not every query selects them (e.g. selectByCode). */
+  sku_type?: string | null
+  subcategory?: string | null
+  filling?: number | null
+  filling_uom?: string | null
+  mrp?: number | null
+  gst?: number | null
+  active_bom_id?: number | null
+  updated_by?: number | null
+  updated_on?: Date | null
   /** Below fields come from the SKU data warehouse (mcaff_dwh); optional since master_skus doesn't have them. */
   sub_category?: string | null
-  mrp?: number | null
   hsn?: string | null
   launch_date?: string | null
+  /** Grouping key for the variants popup; only selected by skus.selectPaginated/selectAllFiltered. */
+  base_sku_sno?: number | null
+  /** Joined in by skus.selectPaginated/selectAllFiltered — count of SKUs sharing this row's brand + base_sku_sno. */
+  variant_count?: number
+  /** Resolved server-side (page.tsx) from master_skus.active_bom_id via lib/queries/bom.ts's selectBomCodesByIds. */
+  bom_code?: string | null
+}
+
+/** Shape shared by both variant-listing queries in lib/queries/skus.ts. */
+export type SkuVariantRow = {
+  id: number
+  sku_code: string
+  name: string
+  sku_type: string | null
+  category: string | null
+  subcategory: string | null
+  filling: number | null
+  filling_uom: string | null
+  mrp: number | null
+  status: string | null
+}
+
+/**
+ * One row of `skus.selectGroupedByBrandAndSno` (lib/queries/skus.ts) — a
+ * family of SKUs sharing the same brand + base_sku_sno grouping key.
+ */
+export type SkuGroup = {
+  brand: string
+  base_sku_sno: number
+  sku_count: number
+  /** Parsed from the query's GROUP_CONCAT(JSON_OBJECT(...)) skus_json column. */
+  skus: SkuVariantRow[]
 }
 
 /** `mfgs` table — Manufacturers (MFGs). Used by app/masters/manufacturers. */

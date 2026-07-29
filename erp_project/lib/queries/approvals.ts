@@ -230,4 +230,30 @@ export const approvalsSql = {
       AND (? IS NULL OR a.module = ?)
       AND (? IS NULL OR a.status = ?)
   `,
+
+  /**
+   * Full approval history for ONE entity — pending, approved, and rejected
+   * alike — backing the shared per-row "History" dialog
+   * (components/masters/EntityHistoryDialog.tsx). Unlike listHistory (which
+   * feeds the module-wide /approvals/history page and deliberately excludes
+   * pending rows), this shows the complete lineage for a single record.
+   * Params: [module, entity_id]
+   */
+  listHistoryForEntity: `
+    SELECT
+      a.id,
+      a.module,
+      a.entity_id,
+      a.raised_on,
+      a.status,
+      a.remarks,
+      a.approved_on,
+      u.name  AS raised_by_name,
+      ua.name AS approved_by_name
+    FROM approvals a
+    JOIN users u ON u.id = a.raised_by
+    LEFT JOIN users ua ON ua.id = a.approved_by
+    WHERE a.module = ? AND a.entity_id = ?
+    ORDER BY a.raised_on DESC
+  `,
 }

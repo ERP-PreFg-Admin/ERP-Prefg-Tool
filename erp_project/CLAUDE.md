@@ -133,7 +133,7 @@ try {
 
 | Module code | Entity | Tables touched by applyAndArchive |
 |---|---|---|
-| `SKU` | SKU master | `master_skus` + `sku_history` |
+| `SKU` | SKU master | `master_skus` (audit trail: `history_masters_edits`, module=`SKU` — not `sku_history`, which is legacy/unused) |
 | `RM_RATE` | RM × Mfg rate | `rm_mrm` + `rm_mrm_history` |
 | `PM_RATE` | PM × Mfg rate | `pm_mrm` + history |
 | `RM_VRM` | RM × Vendor rate | `rm_vrm` + `vrm_history` |

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { execute, pool, query } from "@/lib/db"
 import { skus as skuSql } from "@/lib/queries/skus"
 import { approvalsSql } from "@/lib/queries/approvals"
+import { insertHistoryEntry } from "@/lib/master-routes/history-utils"
 import { parseS3Import } from "@/lib/import-s3"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
@@ -105,9 +106,7 @@ export const POST = withGateway({
 
     // ── update (approval flow) ───────────────────────────────────────────────────
     if (body.action === "update") {
-      const { id } = body
-      const name = body.name.trim()
-      const { brand, category, status } = body
+      const { id, category, subcategory, sku_type, mrp, status } = body
 
       const eventId = makeEventId("SKU_UPDATE", "update", id)
       const logCtx = { ...ctx, eventId, module: "SKU_UPDATE" }
@@ -122,8 +121,8 @@ export const POST = withGateway({
         )
       }
 
-      logger.info({ ...logCtx, id, name, message: "SKU update (approval) started" })
-      recordRawEvent("SKU_UPDATE", eventId, { id, name })
+      logger.info({ ...logCtx, id, message: "SKU update (approval) started" })
+      recordRawEvent("SKU_UPDATE", eventId, { id })
 
       const conn = await pool.getConnection()
       await conn.beginTransaction()
@@ -136,16 +135,31 @@ export const POST = withGateway({
           throw new ApiError(404, "not_found", "SKU not found")
         }
 
+        // name/brand aren't part of this edit dialog's fields — fall back to
+        // the current record so they never spuriously show up in the diff.
+        const name = body.name?.trim() || current.name
+        const brand = body.brand?.trim() ?? current.brand ?? ""
+
         const proposed: Record<string, string> = {
           name,
-          brand: brand?.trim() || "",
+          brand: brand || "",
           category: category?.trim() || "",
+          subcategory: subcategory?.trim() || "",
+          sku_type: sku_type?.trim() || "",
+          mrp: mrp != null && mrp !== "" ? String(mrp) : "",
           status: status || "active",
         }
         const diff = Object.entries(proposed).filter(
           ([k, v]) => String(current[k] ?? "") !== String(v ?? "")
         )
-        if (diff.length === 0) {
+
+        // A rejected SKU's fields still hold its pre-rejection values (reject
+        // never applies the diff, only flips status) — so resubmitting the
+        // exact same values legitimately has an empty diff. Without this,
+        // that resubmit would silently no-op instead of raising a fresh
+        // approval. Mirrors vendors/route.ts + manufacturers/route.ts.
+        const isDraftResubmit = diff.length === 0 && current.status === "rejected"
+        if (diff.length === 0 && !isDraftResubmit) {
           await conn.rollback()
           logger.info({ ...logCtx, id, message: "SKU update: no changes detected" })
           return NextResponse.json({ ok: true, message: "No changes detected" })
@@ -154,16 +168,26 @@ export const POST = withGateway({
         const [approvalResult] = await conn.execute(approvalsSql.insertApproval, [userId, "SKU", id, "edit"])
         const approvalId = (approvalResult as { insertId: number }).insertId
 
-        for (const [field, newVal] of diff) {
+        const itemsToRecord = isDraftResubmit
+          ? Object.entries(proposed).filter(([, v]) => v !== "")
+          : diff
+        for (const [field, newVal] of itemsToRecord) {
           await conn.execute(approvalsSql.insertApprovalItem, [
             approvalId,
             field,
-            String(current[field] ?? ""),
+            isDraftResubmit ? "" : String(current[field] ?? ""),
             String(newVal ?? ""),
           ])
         }
 
         await conn.execute(skuSql.setStatus, ["in_review", id])
+        await insertHistoryEntry(conn, {
+          module: "SKU",
+          entityId: Number(id),
+          actionType: "edit",
+          remarks: null,
+          createdBy: userId,
+        })
         await conn.commit()
 
         recordProcessedEvent("SKU_UPDATE", eventId, { id, approvalId })
@@ -173,7 +197,7 @@ export const POST = withGateway({
         const message = err instanceof Error ? err.message : String(err)
         const code = (err as { code?: string })?.code
         await conn.rollback()
-        recordFailedEvent("SKU_UPDATE", eventId, { id, name }, message)
+        recordFailedEvent("SKU_UPDATE", eventId, { id }, message)
         if (err instanceof ApiError) throw err
         logger.error({ ...logCtx, id, error: message, code, message: "SKU update (approval) failed" })
         throw new ApiError(500, "internal", "Database error")
@@ -249,6 +273,13 @@ export const POST = withGateway({
       } finally {
         conn.release()
       }
+    }
+
+    // ── variants (same brand + base_sku_sno family) ──────────────────────────────
+    if (body.action === "variants") {
+      const { brand, base_sku_sno } = body
+      const rows = await query(skuSql.selectVariantsByBrandAndSno, [brand, base_sku_sno])
+      return NextResponse.json({ skus: rows })
     }
 
     logger.warn({...ctx , message: "Invalid action"})
