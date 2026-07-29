@@ -144,7 +144,7 @@ export const POST = withGateway({
         // the VENDOR_BULK handler at approval time, since data may drift
         // between now and then.
         for (const row of rows) {
-          if (!row.name?.trim() || !row.type?.trim()) { skipped++; continue }
+          if (!row.name?.trim() || !row.type?.trim() || !row.registered_name?.trim() || !row.zone?.trim()) { skipped++; continue }
           const dup = await findDuplicateBankingField(conn, vendors, {
             gst_number: row.gst_number, ifsc_number: row.ifsc_number, account_number: row.account_number,
           }, 0)
@@ -306,7 +306,7 @@ export const POST = withGateway({
         for (const row of rawRows) {
           const name = row["name"]?.trim()
           const type = row["type"]?.trim()
-          if (!name || !type) { skipped++; continue }
+          if (!name || !type || !row["registered_name"]?.trim() || !row["zone"]?.trim()) { skipped++; continue }
           const dup = await findDuplicateBankingField(conn, vendors, {
             gst_number: row["gst_number"], ifsc_number: row["ifsc_number"], account_number: row["account_number"],
           }, 0)

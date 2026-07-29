@@ -44,6 +44,22 @@ export type MasterField = {
 
 export type ParsedRow = Record<string, unknown> & { _error?: string; _remarks?: string[] }
 
+/** Fixed zone options shared by vendors + manufacturers (Add form, Edit form, CSV import). */
+export const ZONE_OPTIONS: FieldOption[] = [
+  { value: "North",      label: "North" },
+  { value: "South",      label: "South" },
+  { value: "West",       label: "West" },
+  { value: "North East", label: "North East" },
+  { value: "East",       label: "East" },
+]
+
+const ZONE_LOOKUP = new Map(ZONE_OPTIONS.map((o) => [o.value.toLowerCase(), o.value]))
+
+/** Case-insensitively resolves a raw zone string to its canonical casing, or null if it's not one of ZONE_OPTIONS. */
+export function normalizeZone(raw: string): string | null {
+  return ZONE_LOOKUP.get(raw.trim().toLowerCase()) ?? null
+}
+
 const unquote = (s: string) => s.trim().replace(/^"|"$/g, "")
 
 export function csvFields(fields: MasterField[]) {

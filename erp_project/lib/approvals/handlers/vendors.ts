@@ -78,7 +78,7 @@ export const vendorBulkHandler: ModuleHandler = {
       for (const row of rows) {
         const name = row.name?.trim()
         const type = row.type?.trim()
-        if (!name || !type) { skipped++; continue }
+        if (!name || !type || !row.registered_name?.trim() || !row.zone?.trim()) { skipped++; continue }
 
         const dup = await findDuplicateBankingField(conn, vendorSql, {
           gst_number: row.gst_number, ifsc_number: row.ifsc_number, account_number: row.account_number,

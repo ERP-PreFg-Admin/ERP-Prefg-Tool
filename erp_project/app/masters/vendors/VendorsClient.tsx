@@ -40,13 +40,15 @@ import {
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import type { MasterField } from "@/components/masters/field-config"
+import { ZONE_OPTIONS, normalizeZone } from "@/components/masters/field-config"
 import type { Vendor } from "@/types/masters"
 import { useEffect, useState } from "react"
-import { FileText, Pencil } from "lucide-react"
+import { FileText, Pencil, History as HistoryIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { EditVendorDialog } from "./EditVendorDialog"
 import { AddVendorDialog } from "./AddVendorDialog"
 import { VendorDocumentsDialog } from "./VendorDocumentsDialog"
+import { EntityHistoryDialog } from "@/components/masters/EntityHistoryDialog"
 // Common fields shared by the CSV importer.
 const VENDOR_CSV_FIELDS: MasterField[] = [
   { key: "name",            label: "Name",            required: true, placeholder: "Vendor name",      sample: "Acme Pvt Ltd" },
@@ -58,9 +60,11 @@ const VENDOR_CSV_FIELDS: MasterField[] = [
       { value: "both", label: "BOTH" },
     ],
   },
-  { key: "registered_name", label: "Registered Name", placeholder: "Legal registered name", sample: "Acme Pvt Ltd" },
+  { key: "registered_name", label: "Registered Name", required: true, placeholder: "Legal registered name", sample: "Acme Pvt Ltd" },
   { key: "location",        label: "Location",        placeholder: "e.g. Mumbai",           sample: "Mumbai" },
-  { key: "zone",            label: "Zone",            placeholder: "e.g. West",             sample: "West" },
+  { key: "zone",            label: "Zone",            required: true, type: "select", options: ZONE_OPTIONS, sample: "West",
+    validate: (raw) => (normalizeZone(raw) ? null : `Must be one of: ${ZONE_OPTIONS.map((o) => o.value).join(", ")}`),
+    parse: (raw) => normalizeZone(raw) ?? raw },
   { key: "gst_number",      label: "GST Number",      placeholder: "e.g. 27AAEPM1234C1Z5",  sample: "27AAEPM1234C1Z5" },
   { key: "bank_name",       label: "Bank Name",       placeholder: "e.g. HDFC Bank",        sample: "HDFC Bank" },
   { key: "ifsc_number",     label: "IFSC Number",     placeholder: "e.g. HDFC0001234",      sample: "HDFC0001234" },
@@ -91,6 +95,7 @@ export default function VendorsClient({
   const searchParams = useSearchParams()
   const [editVendor, setEditVendor] = useState<Vendor | null>(null)
   const [docsVendor, setDocsVendor] = useState<Vendor | null>(null)
+  const [historyVendorId, setHistoryVendorId] = useState<number | null>(null)
 
   // Draft filter state — selects only update these locally; the actual
   // server refetch fires only when "Apply" is clicked.
@@ -250,6 +255,14 @@ export default function VendorsClient({
                         >
                           <FileText className="h-4 w-4" />
                         </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setHistoryVendorId(row.vendor_id)}
+                          title="History"
+                        >
+                          <HistoryIcon className="h-4 w-4" />
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -271,6 +284,12 @@ export default function VendorsClient({
         vendor={docsVendor}
         onSuccess={refresh}
         onClose={() => setDocsVendor(null)}
+      />
+      <EntityHistoryDialog
+        module="VENDOR"
+        entityId={historyVendorId}
+        title="Vendor Edit History"
+        onClose={() => setHistoryVendorId(null)}
       />
     </>
   )

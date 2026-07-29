@@ -14,6 +14,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { FileUpload } from "@/components/ui/FileUpload"
+import { ZONE_OPTIONS } from "@/components/masters/field-config"
 import { cn } from "@/lib/utils"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -34,12 +35,18 @@ const EMPTY_DOCS: Record<DocKey, null> = {
   misc_document_key:    null,
 }
 
+const TYPE_OPTIONS = [
+  { value: "rm",   label: "RM"   },
+  { value: "pm",   label: "PM"   },
+  { value: "both", label: "BOTH" },
+]
+
 const DETAIL_FIELDS = [
   { key: "name",            label: "Name",            required: true,  colSpan: 1, placeholder: "Vendor name" },
-  { key: "type",            label: "Type",            required: true,  colSpan: 1, isSelect: true },
+  { key: "type",            label: "Type",            required: true,  colSpan: 1, isSelect: true, options: TYPE_OPTIONS },
   { key: "registered_name", label: "Registered Name", required: true, colSpan: 1, placeholder: "Legal registered name" },
   { key: "location",        label: "Location",        required: false, colSpan: 1, placeholder: "e.g. Mumbai" },
-  { key: "zone",            label: "Zone",            required: false, colSpan: 1, placeholder: "e.g. West" },
+  { key: "zone",            label: "Zone",            required: true, colSpan: 1, isSelect: true, options: ZONE_OPTIONS },
   { key: "gst_number",      label: "GST Number",      required: false, colSpan: 1, placeholder: "e.g. 27AAEPM1234C1Z5" },
   { key: "bank_name",       label: "Bank Name",       required: false, colSpan: 1, placeholder: "e.g. HDFC Bank" },
   { key: "ifsc_number",     label: "IFSC Number",     required: false, colSpan: 1, placeholder: "e.g. HDFC0001234" },
@@ -160,16 +167,17 @@ export function AddVendorDialog({ onSuccess }: { onSuccess?: () => void }) {
                     {f.label}
                     {f.required && <span className="text-destructive"> *</span>}
                   </Label>
-                  {f.key === "type" ? (
+                  {"isSelect" in f && f.isSelect ? (
                     <select
                       id={f.key}
-                      value={form[f.key] ?? "rm"}
+                      value={form[f.key] ?? ""}
                       onChange={(e) => setForm((s) => ({ ...s, [f.key]: e.target.value }))}
                       className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     >
-                      <option value="rm">RM</option>
-                      <option value="pm">PM</option>
-                      <option value="both">BOTH</option>
+                      {f.key !== "type" && <option value="">Select…</option>}
+                      {"options" in f && f.options?.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
                     </select>
                   ) : (
                     <Input

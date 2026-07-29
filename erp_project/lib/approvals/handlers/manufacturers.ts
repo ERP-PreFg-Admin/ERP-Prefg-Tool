@@ -76,7 +76,7 @@ export const mfgBulkHandler: ModuleHandler = {
     try {
       for (const row of rows) {
         const name = row.name?.trim()
-        if (!name) { skipped++; continue }
+        if (!name || !row.registered_name?.trim() || !row.gst_number?.trim() || !row.zone?.trim()) { skipped++; continue }
 
         const dup = await findDuplicateBankingField(conn, mfgSql, {
           gst_number: row.gst_number, ifsc_number: row.ifsc_number, account_number: row.account_number,

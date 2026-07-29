@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ZONE_OPTIONS } from "@/components/masters/field-config"
 import type { Mfg } from "@/types/masters"
 
 type RejectionInfo = {
@@ -163,7 +164,17 @@ export function EditMfgDialog({
             </div>
             <div className="grid gap-1">
               <Label>Zone</Label>
-              <Input value={form.zone} onChange={(e) => set("zone", e.target.value)} disabled={isInReview || !canEdit} />
+              <select
+                value={form.zone}
+                onChange={(e) => set("zone", e.target.value)}
+                disabled={isInReview || !canEdit}
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm disabled:opacity-50"
+              >
+                <option value="">Select…</option>
+                {ZONE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
             </div>
             <div className="grid gap-1">
               <Label>GST Number</Label>

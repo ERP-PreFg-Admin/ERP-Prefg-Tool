@@ -14,6 +14,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { FileUpload } from "@/components/ui/FileUpload"
+import { ZONE_OPTIONS } from "@/components/masters/field-config"
 import { cn } from "@/lib/utils"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -38,7 +39,7 @@ const DETAIL_FIELDS = [
   { key: "name",            label: "Name",            required: true,  colSpan: 2, placeholder: "Manufacturer name" },
   { key: "registered_name", label: "Registered Name", required: true, colSpan: 1, placeholder: "Legal registered name" },
   { key: "location",        label: "Location",        required: false, colSpan: 1, placeholder: "e.g. Mumbai" },
-  { key: "zone",            label: "Zone",            required: false, colSpan: 1, placeholder: "e.g. West" },
+  { key: "zone",            label: "Zone",            required: true, colSpan: 1, isSelect: true, options: ZONE_OPTIONS },
   { key: "gst_number",      label: "GST Number",      required: true, colSpan: 1, placeholder: "e.g. 27AAEPM1234C1Z5" },
   { key: "bank_name",       label: "Bank Name",       required: false, colSpan: 1, placeholder: "e.g. HDFC Bank" },
   { key: "ifsc_number",     label: "IFSC Number",     required: false, colSpan: 1, placeholder: "e.g. HDFC0001234" },
@@ -160,13 +161,27 @@ export function AddMfgDialog({ onSuccess }: { onSuccess?: () => void }) {
                     {f.label}
                     {f.required && <span className="text-destructive"> *</span>}
                   </Label>
-                  <Input
-                    id={f.key}
-                    type={"type" in f ? f.type : "text"}
-                    placeholder={f.placeholder}
-                    value={form[f.key] ?? ""}
-                    onChange={(e) => setForm((s) => ({ ...s, [f.key]: e.target.value }))}
-                  />
+                  {"isSelect" in f && f.isSelect ? (
+                    <select
+                      id={f.key}
+                      value={form[f.key] ?? ""}
+                      onChange={(e) => setForm((s) => ({ ...s, [f.key]: e.target.value }))}
+                      className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="">Select…</option>
+                      {"options" in f && f.options?.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <Input
+                      id={f.key}
+                      type={"type" in f ? f.type : "text"}
+                      placeholder={"placeholder" in f ? f.placeholder : undefined}
+                      value={form[f.key] ?? ""}
+                      onChange={(e) => setForm((s) => ({ ...s, [f.key]: e.target.value }))}
+                    />
+                  )}
                 </div>
               ))}
             </div>

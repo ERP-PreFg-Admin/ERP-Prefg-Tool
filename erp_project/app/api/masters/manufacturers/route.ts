@@ -147,7 +147,7 @@ export const POST = withGateway({
       let skipped = 0
       try {
         for (const row of rows) {
-          if (!row.name?.trim()) { skipped++; continue }
+          if (!row.name?.trim() || !row.registered_name?.trim() || !row.gst_number?.trim() || !row.zone?.trim()) { skipped++; continue }
           const dup = await findDuplicateBankingField(conn, manufacturers, {
             gst_number: row.gst_number, ifsc_number: row.ifsc_number, account_number: row.account_number,
           }, 0)
@@ -398,7 +398,7 @@ export const POST = withGateway({
       try {
         for (const row of rawRows) {
           const name = row["name"]?.trim()
-          if (!name) { skipped++; continue }
+          if (!name || !row["registered_name"]?.trim() || !row["gst_number"]?.trim() || !row["zone"]?.trim()) { skipped++; continue }
           const dup = await findDuplicateBankingField(conn, manufacturers, {
             gst_number: row["gst_number"], ifsc_number: row["ifsc_number"], account_number: row["account_number"],
           }, 0)
