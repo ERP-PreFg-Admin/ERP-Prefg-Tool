@@ -9,7 +9,7 @@
 
 import { useState } from "react"
 import { GitCompare, Pencil } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { StatusBadge } from "@/components/masters/StatusBadge"
 import type { RMByMfg, Vendor, Mfg } from "@/types/masters"
 import {
   RmRateTable,
@@ -21,13 +21,7 @@ import { MfgDetailDialog } from "./MfgDetailDialog"
 import { EditRmMfgRateDialog } from "./EditRmMfgRateDialog"
 
 // Renders the rate-row status (rmm.status), not the base RM status.
-const rateStatusBadge = (row: AnyRow) => {
-  const s = row.rate_status as string | null
-  if (s === "in_review") return <Badge variant="warning"  className="capitalize">In Review</Badge>
-  if (s === "rejected")  return <Badge variant="destructive" className="capitalize">Rejected</Badge>
-  if (s === "draft")     return <Badge variant="secondary" className="capitalize">Draft</Badge>
-  return <Badge variant={s === "active" ? "success" : "secondary"} className="capitalize">{s ?? "—"}</Badge>
-}
+const rateStatusBadge = (row: AnyRow) => <StatusBadge status={row.rate_status as string | null} />
 
 function buildMfgColumns(vendors: Vendor[], manufacturers: Mfg[]): ColumnDef[] {
   const nameByVendorId = new Map(vendors.map((v) => [v.vendor_id, v.name]))

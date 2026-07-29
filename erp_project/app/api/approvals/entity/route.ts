@@ -14,13 +14,13 @@ export const GET = withGateway({
   access: { pageSlug: "/approvals", level: "viewer" },
   handler: async ({ req, session, ctx }) => {
   const { searchParams } = new URL(req.url)
-  const module = searchParams.get("module")
+  const moduleName = searchParams.get("module")
   const entityId = searchParams.get("entity_id")
 
   const logCtx = { ...ctx, route: "/api/approvals/entity", module: "GET_APPROVAL_ENTITY" }
-  logger.info({ ...logCtx, queryModule: module, entityId, message: "Approval entity search started" })
-  if (!module || !entityId || isNaN(Number(entityId))) {
-    logger.warn({ ...logCtx, queryModule: module, entityId, message: "Validation failed. module and entity_id are required" })
+  logger.info({ ...logCtx, queryModule: moduleName, entityId, message: "Approval entity search started" })
+  if (!moduleName || !entityId || isNaN(Number(entityId))) {
+    logger.warn({ ...logCtx, queryModule: moduleName, entityId, message: "Validation failed. module and entity_id are required" })
     return NextResponse.json(
       { error: "module and entity_id are required" },
       { status: 400 }
@@ -28,14 +28,17 @@ export const GET = withGateway({
   }
 
   try {
-    const rows = await query<any>( approvalsSql.selectLatestRejection, [module, Number(entityId)] )
-    logger.info({ ...logCtx, queryModule: module, entityId: Number(entityId), found: rows.length > 0, message: "Approval entity fetched successfully" })
+    type RejectionRow = { raised_by: number; remarks: string | null; rejected_on: string; raised_by_name: string | null; rejected_by_name: string | null }
+    const rows = await query<RejectionRow>( approvalsSql.selectLatestRejection, [moduleName, Number(entityId)] )
+    logger.info({ ...logCtx, queryModule: moduleName, entityId: Number(entityId), found: rows.length > 0, message: "Approval entity fetched successfully" })
     return NextResponse.json({
       rejection: rows[0] ?? null,
       current_user_id: parseInt(session.user.id),
     })
-  } catch (err: any) {
-    logger.error({ ...logCtx, queryModule: module, entityId, err: err.message, stack: err.stack, message: "Failed to fetch approval entity" })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    const stack = err instanceof Error ? err.stack : undefined
+    logger.error({ ...logCtx, queryModule: moduleName, entityId, err: message, stack, message: "Failed to fetch approval entity" })
     return NextResponse.json(
       { error: "Database error" },
       { status: 500 }

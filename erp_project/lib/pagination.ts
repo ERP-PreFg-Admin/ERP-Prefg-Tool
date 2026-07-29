@@ -60,9 +60,9 @@ export function parsePaginationParams(
  */
 export async function paginate<T>(
   dataQuery:   string,
-  dataParams:  any[],
+  dataParams:  unknown[],
   countQuery:  string,
-  countParams: any[],
+  countParams: unknown[],
   page:        number,
   size:        number
 ): Promise<PageResult<T>> {

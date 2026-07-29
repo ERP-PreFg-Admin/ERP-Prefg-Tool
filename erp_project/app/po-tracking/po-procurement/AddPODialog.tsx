@@ -126,6 +126,7 @@ export default function AddPODialog({
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets form state each time the dialog is opened
       setPoType("normal")
       setMfgId("")
       setRows([])

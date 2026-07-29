@@ -115,13 +115,9 @@ export default function BOMMasterComponent({
           <option value="discontinued">Discontinued</option>
         </select>
 
-        <button
-          onClick={() => navigate({ status: draftStatus })}
-          disabled={!draftDirty}
-          className="h-9 rounded-lg border border-input bg-background px-3 text-sm font-medium hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
+        <Button variant="outline" size="lg" onClick={() => navigate({ status: draftStatus })} disabled={!draftDirty}>
           Apply
-        </button>
+        </Button>
 
         <MasterToolbarActions>
           <Button

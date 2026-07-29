@@ -22,7 +22,7 @@
 // columns (broken against the real schema — see lib/queries/bom.ts).
 
 import { NextResponse } from "next/server"
-import type { PoolConnection } from "mysql2/promise"
+import type { PoolConnection, ResultSetHeader } from "mysql2/promise"
 import { pool, query } from "@/lib/db"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
@@ -36,6 +36,16 @@ import { STATUS } from "@/lib/constants"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { stageBulkUploadApproval, uploadRowsAsCsv } from "@/lib/master-routes/bulk-approval"
+
+type BomHeaderRow = { id: number; bom_code: string; sku_id: number; status: string; created_by: number }
+type BomDetailLineRow = {
+  id: number; bom_id: number; mtrl_type: string; mtrl_id: number
+  amount: number; uom: string | null; effective_from: string; effective_till: string | null
+  status: string; updated_by: number
+  [key: string]: unknown
+}
+type SkuLookupRow = { id: number; sku_code: string; status: string }
+type MaterialLookupRow = { id: number; uom: string; status: string }
 
 export const POST = withGateway({
   schema: bomActionSchema,
@@ -77,11 +87,11 @@ export const POST = withGateway({
           const [result] = await conn.execute(bomSql.insertBomHeader, [
             body.bom_code!.trim(), body.sku_id, userId, BOM_STATUS_IN_REVIEW, body.effective_from!.trim(),
           ])
-          bomId = (result as any).insertId
+          bomId = (result as ResultSetHeader).insertId
         } else {
           bomId = body.bom_id!
           const [rows] = await conn.execute(bomSql.selectBomHeaderRawById, [bomId])
-          const cur = (rows as any[])[0]
+          const cur = (rows as BomHeaderRow[])[0]
           if (!cur) throw new ApiError(404, "not_found", "BOM not found.")
           if (cur.sku_id !== body.sku_id) {
             throw new ApiError(400, "sku_mismatch", "This BOM does not belong to the selected SKU.")
@@ -96,17 +106,17 @@ export const POST = withGateway({
         // Diff against the CURRENT lines for update-existing (real old values,
         // rmVrmHandler-style); for new-version there is no prior state, so
         // every field's old_value is "" (MFG "diff from nothing" style).
-        let currentByKey = new Map<string, any>()
+        let currentByKey = new Map<string, BomDetailLineRow>()
         if (body.mode === "update-existing") {
           const [curRows] = await conn.execute(bomSql.selectDetailLinesRawByBomId, [bomId])
-          currentByKey = new Map((curRows as any[]).map((r) => [`${r.mtrl_type}:${r.mtrl_id}`, r]))
+          currentByKey = new Map((curRows as BomDetailLineRow[]).map((r) => [`${r.mtrl_type}:${r.mtrl_id}`, r]))
         }
 
         const [approvalResult] = await conn.execute(
           approvalsSql.insertApproval,
           [userId, "BOM", bomId, body.mode === "new-version" ? "create" : "edit"]
         )
-        const approvalId = (approvalResult as any).insertId
+        const approvalId = (approvalResult as ResultSetHeader).insertId
         await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "__mode__", "", body.mode])
 
         const allLines = [...body.rm_lines, ...body.pm_lines]
@@ -166,12 +176,13 @@ export const POST = withGateway({
         logger.info({ ...logCtx, bomId, approvalId, message: "BOM submitted for approval" })
         recordProcessedEvent("BOM", eventId, { bomId, approvalId, skuId: body.sku_id, mode: body.mode })
         return NextResponse.json({ ok: true, bom_id: bomId, approval_id: approvalId })
-      } catch (err: any) {
+      } catch (err: unknown) {
         await conn.rollback()
-        recordFailedEvent("BOM", eventId, { skuId: body.sku_id, mode: body.mode }, err.message)
-        logger.error({ ...logCtx, err: err.message, message: "BOM submit failed" })
+        const message = err instanceof Error ? err.message : String(err)
+        recordFailedEvent("BOM", eventId, { skuId: body.sku_id, mode: body.mode }, message)
+        logger.error({ ...logCtx, err: message, message: "BOM submit failed" })
         if (err instanceof ApiError) throw err
-        throw new ApiError(500, "internal", "Database error: " + err.message)
+        throw new ApiError(500, "internal", "Database error: " + message)
       } finally {
         conn.release()
       }
@@ -192,7 +203,7 @@ export const POST = withGateway({
       await conn.beginTransaction()
       try {
         const [rows] = await conn.execute(bomSql.selectBomHeaderRawById, [bom_id])
-        const cur = (rows as any[])[0]
+        const cur = (rows as BomHeaderRow[])[0]
         if (!cur) throw new ApiError(404, "not_found", "BOM not found.")
 
         await conn.execute(bomSql.setBomStatusWithUpdater, [status, userId, bom_id])
@@ -203,7 +214,7 @@ export const POST = withGateway({
         // join details_bom on status='active' assuming a single row break.
         if (status === "active" && cur.sku_id) {
           const [siblingRows] = await conn.execute(bomSql.selectOtherActiveBomsForSku, [cur.sku_id, bom_id])
-          const siblingIds = (siblingRows as any[]).map((r) => r.id)
+          const siblingIds = (siblingRows as { id: number }[]).map((r) => r.id)
           if (siblingIds.length > 0) {
             await conn.execute(bomSql.discontinueOtherActiveBomsForSku, [cur.sku_id, bom_id])
             for (const siblingId of siblingIds) {
@@ -218,12 +229,13 @@ export const POST = withGateway({
         logger.info({ ...logCtx, bomId: bom_id, status, message: "BOM status updated manually" })
         recordProcessedEvent("BOM", eventId, { bomId: bom_id, status })
         return NextResponse.json({ ok: true })
-      } catch (err: any) {
+      } catch (err: unknown) {
         await conn.rollback()
-        recordFailedEvent("BOM", eventId, { bomId: bom_id, status }, err.message)
-        logger.error({ ...logCtx, err: err.message, message: "BOM status update failed" })
+        const message = err instanceof Error ? err.message : String(err)
+        recordFailedEvent("BOM", eventId, { bomId: bom_id, status }, message)
+        logger.error({ ...logCtx, err: message, message: "BOM status update failed" })
         if (err instanceof ApiError) throw err
-        throw new ApiError(500, "internal", "Database error: " + err.message)
+        throw new ApiError(500, "internal", "Database error: " + message)
       } finally {
         conn.release()
       }
@@ -246,12 +258,12 @@ export const POST = withGateway({
 
       // Cache resolved codes so a code repeated across many rows/lines only
       // hits the DB once.
-      const skuCache = new Map<string, any>()
-      const rmCache = new Map<string, any>()
-      const pmCache = new Map<string, any>()
+      const skuCache = new Map<string, SkuLookupRow | null>()
+      const rmCache = new Map<string, MaterialLookupRow | null>()
+      const pmCache = new Map<string, MaterialLookupRow | null>()
       async function resolveSku(code: string) {
         if (!skuCache.has(code)) {
-          const found = await query<any>(skuSql.selectByCode, [code])
+          const found = await query<SkuLookupRow>(skuSql.selectByCode, [code])
           skuCache.set(code, found[0] ?? null)
         }
         return skuCache.get(code)
@@ -259,7 +271,7 @@ export const POST = withGateway({
       async function resolveMaterial(type: "rm" | "pm", code: string) {
         const cache = type === "rm" ? rmCache : pmCache
         if (!cache.has(code)) {
-          const found = await query<any>(type === "rm" ? rmSql.selectByCode : pmSql.selectByCode, [code])
+          const found = await query<MaterialLookupRow>(type === "rm" ? rmSql.selectByCode : pmSql.selectByCode, [code])
           cache.set(code, found[0] ?? null)
         }
         return cache.get(code)
@@ -398,11 +410,12 @@ export const POST = withGateway({
         logger.info({ ...logCtx, approvalId, message: "BOM bulk upload staged for approval" })
         recordProcessedEvent("BOM_BULK", eventId, { rowCount: rows.length, source: "csv", approvalId })
         return NextResponse.json({ ok: true, approval_id: approvalId, staged: rows.length, skipped: 0 })
-      } catch (err: any) {
+      } catch (err: unknown) {
         await conn.rollback()
-        recordFailedEvent("BOM_BULK", eventId, { rowCount: rows.length, source: "csv" }, err.message)
-        logger.error({ ...logCtx, err: err.message, message: "BOM bulk upload failed" })
-        throw new ApiError(500, "internal", "Bulk upload failed: " + err.message)
+        const message = err instanceof Error ? err.message : String(err)
+        recordFailedEvent("BOM_BULK", eventId, { rowCount: rows.length, source: "csv" }, message)
+        logger.error({ ...logCtx, err: message, message: "BOM bulk upload failed" })
+        throw new ApiError(500, "internal", "Bulk upload failed: " + message)
       } finally {
         conn.release()
       }

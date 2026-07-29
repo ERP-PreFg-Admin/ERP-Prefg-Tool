@@ -17,9 +17,20 @@ const SKIP = new Set(["service", "stack", "splat", "pid"]);
 
 // ── pretty format (console only) ──────────────────────────────────────────
 
+interface PrettyLogInfo {
+  timestamp?: string | number
+  level: string
+  message: unknown
+  requestId?: unknown
+  module?: unknown
+  deltaMs?: number
+  stack?: string
+  [key: string]: unknown
+}
+
 const prettyFormat = winston.format.printf(({ timestamp, level, message, requestId, module, deltaMs, stack, ...meta
-}: any) => {
-  const ts    = new Date(timestamp).toISOString().substring(11, 23);
+}: PrettyLogInfo) => {
+  const ts    = new Date(timestamp ?? Date.now()).toISOString().substring(11, 23);
   const req   = requestId ? String(requestId).substring(0, 8) : "--------";
   const delta = deltaMs != null ? `+${deltaMs}ms`.padEnd(8) : " ".repeat(8);
   const mod   = `[${String(module ?? "APP")}]`.padEnd(16);

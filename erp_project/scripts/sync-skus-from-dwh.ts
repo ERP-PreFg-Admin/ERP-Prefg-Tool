@@ -66,12 +66,13 @@ async function main() {
   try {
     await conn.beginTransaction()
 
-    const [[{ n: candidateCount }]]: any = await conn.query(
+    const [countRows] = await conn.query(
       `SELECT COUNT(*) AS n FROM ${CURRENT_SKU_SUBQUERY} current_sku`
     )
+    const candidateCount = (countRows as { n: number }[])[0].n
     console.log(`Candidate SKUs from DWH: ${candidateCount}`)
 
-    const [skuResult]: any = await conn.query(`
+    const [skuResultRaw] = await conn.query(`
       INSERT INTO master_skus (sku_code, name, brand, category, status)
       SELECT sku_code, LEFT(name, 200), brand, category, status
       FROM ${CURRENT_SKU_SUBQUERY} current_sku
@@ -82,9 +83,10 @@ async function main() {
         -- Never clobber a SKU that's mid-approval (locked in_review).
         status   = IF(master_skus.status = 'in_review', master_skus.status, VALUES(status))
     `)
+    const skuResult = skuResultRaw as { affectedRows: number }
     console.log(`master_skus affected rows: ${skuResult.affectedRows} (MySQL counts an update as 2)`)
 
-    const [detailsResult]: any = await conn.query(`
+    const [detailsResultRaw] = await conn.query(`
       INSERT INTO details_sku (sku_id, sku_type, mrp, hsn_code)
       SELECT ms.id, src.sku_type, src.mrp, src.hsn
       FROM ${CURRENT_SKU_SUBQUERY} src
@@ -96,6 +98,7 @@ async function main() {
         mrp      = COALESCE(VALUES(mrp), details_sku.mrp),
         hsn_code = COALESCE(VALUES(hsn_code), details_sku.hsn_code)
     `)
+    const detailsResult = detailsResultRaw as { affectedRows: number }
     console.log(`details_sku affected rows: ${detailsResult.affectedRows} (MySQL counts an update as 2)`)
 
     await conn.commit()

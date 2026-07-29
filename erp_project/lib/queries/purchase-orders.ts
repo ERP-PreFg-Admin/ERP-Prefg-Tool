@@ -172,8 +172,20 @@ export const purchaseOrdersSql = {
   /** Set status on a purchase_orders row. Parameters: [status, id] */
   setStatus: `UPDATE purchase_orders SET status = ? WHERE id = ?`,
 
-  /** Credit split qty back to the parent as received_qty (never mutates qty). Parameters: [splitTotal, id] */
-  incrementReceivedQtyBySplit: `UPDATE purchase_orders SET received_qty = COALESCE(received_qty, 0) + ? WHERE id = ?`,
+  /** Credit a manual goods-receipt qty to received_qty. Parameters: [qty, id] */
+  incrementReceivedQtyManual: `UPDATE purchase_orders SET received_qty = COALESCE(received_qty, 0) + ? WHERE id = ?`,
+
+  /**
+   * Set the parent's qty and total_amount after a split (caller computes both
+   * from the pre-split values so this statement doesn't need to re-derive
+   * anything from the row it's updating). status and received_qty are
+   * untouched — split is not a receiving event. Parameters: [newQty, newTotalAmount, id]
+   */
+  setQtyAndTotalAfterSplit: `
+    UPDATE purchase_orders
+    SET qty = ?, total_amount = ?
+    WHERE id = ?
+  `,
 
   /** Fetch MFG name for readable approval diff. Parameters: [id] */
   selectById: `
@@ -222,14 +234,21 @@ export const purchaseOrdersSql = {
 
   /** Full PO row for split operations. Parameters: [id] */
   selectForSplit: `
-    SELECT id, po_no, mfg_id, sku_code, qty, received_qty, expected_on, status
+    SELECT id, po_no, mfg_id, sku_code, qty, unit_price, received_qty, expected_on, status
     FROM purchase_orders WHERE id = ? LIMIT 1
   `,
 
-  /** Insert a split child PO with an explicit status. Parameters: [po_no, mfg_id, sku_code, qty, expected_on, status, destination] */
+  /** Full PO row for a manual receive operation. Parameters: [id] */
+  /** Same as selectForReceive but locks the row for the duration of the transaction — prevents two concurrent receives from both reading a stale received_qty. Parameters: [id] */
+  selectForReceiveLocked: `
+    SELECT id, po_no, qty, received_qty, status
+    FROM purchase_orders WHERE id = ? LIMIT 1 FOR UPDATE
+  `,
+
+  /** Insert a split child PO with an explicit status. Parameters: [po_no, mfg_id, sku_code, qty, expected_on, status, destination, reference_po] */
   insertSplit: `
-    INSERT INTO purchase_orders (po_no, mfg_id, date, sku_code, qty, expected_on, status, destination)
-    VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?)
+    INSERT INTO purchase_orders (po_no, mfg_id, date, sku_code, qty, expected_on, status, destination, reference_po, po_type)
+    VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, ?, 'normal')
   `,
 
   /**

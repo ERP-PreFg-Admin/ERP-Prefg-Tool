@@ -33,7 +33,7 @@ async function explain(label: string, sql: string, params: unknown[]) {
 
 async function countRows(table: string) {
   const [rows] = await pool.query(`SELECT COUNT(*) AS n FROM ${table}`)
-  const n = (rows as any[])[0].n
+  const n = (rows as { n: number }[])[0].n
   console.log(`${table}: ${n} rows`)
 }
 

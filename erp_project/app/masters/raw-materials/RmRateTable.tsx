@@ -15,11 +15,13 @@
  * Client-side sort applies on top of that to order within the current page.
  */
 
-import { useMemo, useState, useEffect, useRef, type ReactNode } from "react"
+import { useMemo, useState, useEffect, type ReactNode } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
-import { ArrowUp, ArrowDown, ChevronsUpDown, SlidersHorizontal, X } from "lucide-react"
+import { ArrowUp, ArrowDown, ChevronsUpDown, Filter, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
 import {
   Table,
   TableBody,
@@ -36,6 +38,7 @@ import {
 } from "@/components/masters/MasterToolbar"
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { DownloadButton } from "@/components/masters/DownloadButton"
+import { cn } from "@/lib/utils"
 import { AddRawMaterialWizard } from "./AddRawMaterialWizard"
 import { RM_VRM_BULK_FIELDS } from "./rm-vrm-bulk-fields"
 import { RM_MRM_BULK_FIELDS } from "./rm-mrm-bulk-fields"
@@ -139,18 +142,6 @@ export function RmRateTable({
 
   // Filter panel open/close.
   const [showFilters, setShowFilters] = useState(false)
-  const panelRef = useRef<HTMLDivElement>(null)
-
-  // Close panel on outside click.
-  useEffect(() => {
-    function onMouseDown(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setShowFilters(false)
-      }
-    }
-    if (showFilters) document.addEventListener("mousedown", onMouseDown)
-    return () => document.removeEventListener("mousedown", onMouseDown)
-  }, [showFilters])
 
   // Draft filter state — every filter control below only updates these
   // locally; the actual server refetch fires only when "Apply" is clicked.
@@ -163,12 +154,19 @@ export function RmRateTable({
   const [draftEffectiveFrom, setDraftEffectiveFrom] = useState(currentEffectiveFrom ?? "")
 
   // Sync draft state when URL-driven prop changes (e.g. Clear filters).
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven vendor code filter changes
   useEffect(() => { setLocalVendorCode(currentVendorCode ?? "") }, [currentVendorCode])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven rate-min filter changes
   useEffect(() => { setLocalRateMin(currentRateMin ?? "") }, [currentRateMin])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven rate-max filter changes
   useEffect(() => { setLocalRateMax(currentRateMax ?? "") }, [currentRateMax])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven status filter changes
   useEffect(() => { setDraftStatus(currentStatus ?? "") }, [currentStatus])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven type filter changes
   useEffect(() => { setDraftType(currentType ?? "") }, [currentType])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven make filter changes
   useEffect(() => { setDraftMake(currentMake ?? "") }, [currentMake])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven effective-from filter changes
   useEffect(() => { setDraftEffectiveFrom(currentEffectiveFrom ?? "") }, [currentEffectiveFrom])
 
   // Draft state for mfg filter inputs.
@@ -176,9 +174,13 @@ export function RmRateTable({
   const [localMfgRateMin, setLocalMfgRateMin] = useState(currentMfgRateMin ?? "")
   const [localMfgRateMax, setLocalMfgRateMax] = useState(currentMfgRateMax ?? "")
   const [draftMfgEffectiveFrom, setDraftMfgEffectiveFrom] = useState(currentMfgEffectiveFrom ?? "")
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven mfg code filter changes
   useEffect(() => { setLocalMfgCode(currentMfgCode ?? "") }, [currentMfgCode])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven mfg rate-min filter changes
   useEffect(() => { setLocalMfgRateMin(currentMfgRateMin ?? "") }, [currentMfgRateMin])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven mfg rate-max filter changes
   useEffect(() => { setLocalMfgRateMax(currentMfgRateMax ?? "") }, [currentMfgRateMax])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven mfg effective-from filter changes
   useEffect(() => { setDraftMfgEffectiveFrom(currentMfgEffectiveFrom ?? "") }, [currentMfgEffectiveFrom])
 
   // Click a header: same column → flip direction; new column → sort ascending.
@@ -298,208 +300,21 @@ export function RmRateTable({
           placeholder="Search by code, name, make…"
         />
 
-        {/* ── Filters button + floating panel ── */}
-        <div ref={panelRef} className="relative">
-          <button
-            onClick={() => setShowFilters((v) => !v)}
-            className={`inline-flex items-center gap-2 backdrop-blur-xs h-9 px-3 rounded-lg border text-sm font-medium transition-colors
-              ${showFilters || activeFilterCount > 0
-                ? "border-primary bg-primary/5 text-primary"
-                : "border-input bg-background text-foreground hover:bg-muted"
-              }`}
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-            Filters
-            {activeFilterCount > 0 && (
-              <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-primary text-primary-foreground text-[11px] font-semibold">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
-
-          {showFilters && (
-            <div className="absolute left-0 top-11 z-50 w-72 rounded-xl border border-border bg-background shadow-lg ring-1 ring-black/5">
-              {/* Panel header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-                <span className="text-sm font-semibold">Filters</span>
-                <div className="flex items-center gap-2">
-                  {activeFilterCount > 0 && (
-                    <button
-                      onClick={clearAllFilters}
-                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      Clear all
-                    </button>
-                  )}
-                  <button onClick={() => setShowFilters(false)} className="text-muted-foreground hover:text-foreground transition-colors">
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-4 space-y-4">
-                {/* Status */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</label>
-                  <select
-                    value={draftStatus || "all"}
-                    onChange={(e) => setDraftStatus(e.target.value === "all" ? "" : e.target.value)}
-                    className={selectCls}
-                  >
-                    <option value="all">All Status</option>
-                    <option value="active">Active</option>
-                    <option value="discontinued">Discontinued</option>
-                  </select>
-                </div>
-
-                {/* Type filter — visible in both vendor and mfg views */}
-                {types !== undefined && types.length > 0 && (
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Type</label>
-                    <select
-                      value={draftType || "all"}
-                      onChange={(e) => setDraftType(e.target.value === "all" ? "" : e.target.value)}
-                      className={selectCls}
-                    >
-                      <option value="all">All Types</option>
-                      {types.map((t) => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {/* Vendor-only filters */}
-                {makes !== undefined && (
-                  <>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Make</label>
-                      <select
-                        value={draftMake || "all"}
-                        onChange={(e) => setDraftMake(e.target.value === "all" ? "" : e.target.value)}
-                        className={selectCls}
-                      >
-                        <option value="all">All Makes</option>
-                        {makes.map((m) => (
-                          <option key={m} value={m}>{m}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Vendor Code</label>
-                      <input
-                        type="text"
-                        value={localVendorCode}
-                        placeholder="e.g. VEN-001"
-                        onChange={(e) => setLocalVendorCode(e.target.value)}
-                        className={inputCls}
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Rate Range (₹)</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          value={localRateMin}
-                          placeholder="Min"
-                          min={0}
-                          onChange={(e) => setLocalRateMin(e.target.value)}
-                          className={inputCls}
-                        />
-                        <span className="text-muted-foreground text-sm">–</span>
-                        <input
-                          type="number"
-                          value={localRateMax}
-                          placeholder="Max"
-                          min={0}
-                          onChange={(e) => setLocalRateMax(e.target.value)}
-                          className={inputCls}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Effective From</label>
-                      <input
-                        type="date"
-                        value={draftEffectiveFrom}
-                        onChange={(e) => setDraftEffectiveFrom(e.target.value)}
-                        className={inputCls}
-                      />
-                    </div>
-                  </>
-                )}
-
-                {/* Mfg-only filters */}
-                {currentMfgCode !== undefined && (
-                  <>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">MFG Code</label>
-                      <input
-                        type="text"
-                        value={localMfgCode}
-                        placeholder="e.g. MFG-001"
-                        onChange={(e) => setLocalMfgCode(e.target.value)}
-                        className={inputCls}
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Rate Range (₹)</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          value={localMfgRateMin}
-                          placeholder="Min"
-                          min={0}
-                          onChange={(e) => setLocalMfgRateMin(e.target.value)}
-                          className={inputCls}
-                        />
-                        <span className="text-muted-foreground text-sm">–</span>
-                        <input
-                          type="number"
-                          value={localMfgRateMax}
-                          placeholder="Max"
-                          min={0}
-                          onChange={(e) => setLocalMfgRateMax(e.target.value)}
-                          className={inputCls}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Effective From</label>
-                      <input
-                        type="date"
-                        value={draftMfgEffectiveFrom}
-                        onChange={(e) => setDraftMfgEffectiveFrom(e.target.value)}
-                        className={inputCls}
-                      />
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Panel footer */}
-              <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
-                <button
-                  onClick={() => setShowFilters(false)}
-                  className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-3 text-xs hover:bg-accent transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={applyFilters}
-                  className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs text-primary-foreground hover:bg-primary/90 transition-colors"
-                >
-                  Apply
-                </button>
-              </div>
-            </div>
+        {/* ── Filters toggle ── */}
+        <Button
+          variant="outline"
+          size="lg"
+          onClick={() => setShowFilters((v) => !v)}
+          className={cn(activeFilterCount > 0 && "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300")}
+        >
+          <Filter className="h-3.5 w-3.5" />
+          Filters
+          {activeFilterCount > 0 && (
+            <span className="ml-0.5 rounded-full bg-blue-600 px-1.5 py-0 text-[10px] text-white">
+              {activeFilterCount}
+            </span>
           )}
-        </div>
+        </Button>
 
         <MasterToolbarActions>
           <DownloadButton
@@ -536,6 +351,167 @@ export function RmRateTable({
           />
         </MasterToolbarActions>
       </MasterToolbar>
+
+      {/* ── Filter panel ── */}
+      {showFilters && (
+        <Card className="border-blue-200 mb-5">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-medium">Filters</span>
+              <button onClick={() => setShowFilters(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid gap-1.5">
+                <Label className="text-xs">Status</Label>
+                <select
+                  value={draftStatus || "all"}
+                  onChange={(e) => setDraftStatus(e.target.value === "all" ? "" : e.target.value)}
+                  className={selectCls}
+                >
+                  <option value="all">All Status</option>
+                  <option value="active">Active</option>
+                  <option value="discontinued">Discontinued</option>
+                </select>
+              </div>
+
+              {/* Type filter — visible in both vendor and mfg views */}
+              {types !== undefined && types.length > 0 && (
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">Type</Label>
+                  <select
+                    value={draftType || "all"}
+                    onChange={(e) => setDraftType(e.target.value === "all" ? "" : e.target.value)}
+                    className={selectCls}
+                  >
+                    <option value="all">All Types</option>
+                    {types.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Vendor-only filters */}
+              {makes !== undefined && (
+                <>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">Make</Label>
+                    <select
+                      value={draftMake || "all"}
+                      onChange={(e) => setDraftMake(e.target.value === "all" ? "" : e.target.value)}
+                      className={selectCls}
+                    >
+                      <option value="all">All Makes</option>
+                      {makes.map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">Vendor Code</Label>
+                    <input
+                      type="text"
+                      value={localVendorCode}
+                      placeholder="e.g. VEN-001"
+                      onChange={(e) => setLocalVendorCode(e.target.value)}
+                      className={inputCls}
+                    />
+                  </div>
+
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">Rate Range (₹)</Label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={localRateMin}
+                        placeholder="Min"
+                        min={0}
+                        onChange={(e) => setLocalRateMin(e.target.value)}
+                        className={inputCls}
+                      />
+                      <span className="text-muted-foreground text-sm">–</span>
+                      <input
+                        type="number"
+                        value={localRateMax}
+                        placeholder="Max"
+                        min={0}
+                        onChange={(e) => setLocalRateMax(e.target.value)}
+                        className={inputCls}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">Effective From</Label>
+                    <input
+                      type="date"
+                      value={draftEffectiveFrom}
+                      onChange={(e) => setDraftEffectiveFrom(e.target.value)}
+                      className={inputCls}
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* Mfg-only filters */}
+              {currentMfgCode !== undefined && (
+                <>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">MFG Code</Label>
+                    <input
+                      type="text"
+                      value={localMfgCode}
+                      placeholder="e.g. MFG-001"
+                      onChange={(e) => setLocalMfgCode(e.target.value)}
+                      className={inputCls}
+                    />
+                  </div>
+
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">Rate Range (₹)</Label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={localMfgRateMin}
+                        placeholder="Min"
+                        min={0}
+                        onChange={(e) => setLocalMfgRateMin(e.target.value)}
+                        className={inputCls}
+                      />
+                      <span className="text-muted-foreground text-sm">–</span>
+                      <input
+                        type="number"
+                        value={localMfgRateMax}
+                        placeholder="Max"
+                        min={0}
+                        onChange={(e) => setLocalMfgRateMax(e.target.value)}
+                        className={inputCls}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">Effective From</Label>
+                    <input
+                      type="date"
+                      value={draftMfgEffectiveFrom}
+                      onChange={(e) => setDraftMfgEffectiveFrom(e.target.value)}
+                      className={inputCls}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" size="sm" onClick={clearAllFilters}>Clear</Button>
+              <Button size="sm" onClick={applyFilters}>Apply</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── Table card ── */}
       <Card>

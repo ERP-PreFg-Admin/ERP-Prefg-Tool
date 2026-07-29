@@ -12,11 +12,15 @@ export const poSplitRowSchema = z.object({
 })
 
 export const poSplitSchema = z.object({
-  splits: z.array(poSplitRowSchema).min(2, "At least 2 split rows are required."),
+  splits: z.array(poSplitRowSchema).min(1, "At least 1 split row is required."),
 })
 
 export const poCancelSchema = z.object({
   reason: z.string().trim().max(1000, "Reason must be 1000 characters or fewer.").optional(),
+})
+
+export const poReceiveSchema = z.object({
+  qty: z.coerce.number().positive("Received quantity must be greater than 0."),
 })
 
 export const quoteRateQuerySchema = z.object({
@@ -31,5 +35,6 @@ export const mfgSkusQuerySchema = z.object({
 export type PoIdParam = z.infer<typeof poIdParamSchema>
 export type PoSplit = z.infer<typeof poSplitSchema>
 export type PoCancel = z.infer<typeof poCancelSchema>
+export type PoReceive = z.infer<typeof poReceiveSchema>
 export type QuoteRateQuery = z.infer<typeof quoteRateQuerySchema>
 export type MfgSkusQuery = z.infer<typeof mfgSkusQuerySchema>

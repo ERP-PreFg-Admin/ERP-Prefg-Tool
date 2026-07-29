@@ -7,6 +7,16 @@ import { query } from "@/lib/db"
 import { approvalsSql, entityLabelSql } from "@/lib/queries/approvals"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import logger from "@/lib/logger"
+import type { DiffItem } from "@/lib/approvals/module-handlers"
+
+type PendingRow = {
+  id: number
+  module: string
+  entity_id: number
+  raised_on: string
+  raised_by_name: string | null
+}
+type EntityLabelRow = { code: string | null; name: string | null; secondary_code: string | null; secondary_name: string | null }
 
 export const GET = withGateway({
   access: { pageSlug: "/approvals", level: "viewer" },
@@ -21,14 +31,14 @@ export const GET = withGateway({
   })
 
   try {
-    const rows = await query<any>(approvalsSql.listPending, [])
+    const rows = await query<PendingRow>(approvalsSql.listPending, [])
 
     const approvals = await Promise.all(
       rows.map(async (a) => {
         const [items, labelRows] = await Promise.all([
-          query<any>(approvalsSql.getItems, [a.id]),
+          query<DiffItem>(approvalsSql.getItems, [a.id]),
           entityLabelSql[a.module]
-            ? query<any>(entityLabelSql[a.module], [a.entity_id])
+            ? query<EntityLabelRow>(entityLabelSql[a.module], [a.entity_id])
             : Promise.resolve([]),
         ])
         const label = labelRows[0] ?? {}
@@ -46,8 +56,10 @@ export const GET = withGateway({
     logger.info({ ...logCtx, approvalCount: approvals.length, message: "Pending approvals fetched successfully" })
 
     return NextResponse.json(approvals)
-  } catch (err: any) {
-    logger.error({ ...logCtx, err: err.message, stack: err.stack, message: "Failed to fetch pending approvals" })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    const stack = err instanceof Error ? err.stack : undefined
+    logger.error({ ...logCtx, err: message, stack, message: "Failed to fetch pending approvals" })
     return NextResponse.json(
       { error: "Database error" },
       { status: 500 }

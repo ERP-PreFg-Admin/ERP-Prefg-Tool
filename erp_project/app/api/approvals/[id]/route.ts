@@ -50,7 +50,8 @@ export const POST = withGateway({
 
   const approverId = parseInt(session.user.id)
 
-  const [approval] = await query<any>(approvalsSql.getById, [approvalId])
+  type ApprovalRow = { id: number; module: string; entity_id: number; raised_by: number; status: string }
+  const [approval] = await query<ApprovalRow>(approvalsSql.getById, [approvalId])
   if (!approval) {
     logger.warn({ ...logCtx, message: "Approval not found" })
     return NextResponse.json({ error: "Approval not found" }, { status: 404 })
@@ -110,15 +111,17 @@ export const POST = withGateway({
     })
 
     return NextResponse.json({ ok: true })
-  } catch (err: any) {
+  } catch (err: unknown) {
     await conn.rollback()
 
-    logger.error({ ...eventLogCtx, message: "Approval transaction failed", approverId, error: err.message, code: err.code })
+    const message = err instanceof Error ? err.message : String(err)
+    const code = (err as { code?: string })?.code
+    logger.error({ ...eventLogCtx, message: "Approval transaction failed", approverId, error: message, code })
     recordFailedEvent("APPROVAL", eventId, {
       approvalId, module: approval.module, entityId: approval.entity_id, action,
-    }, err.message)
+    }, message)
 
-    return NextResponse.json({ error: "Database error: " + err.message }, { status: 500 })
+    return NextResponse.json({ error: "Database error: " + message }, { status: 500 })
   } finally {
     conn.release()
   }

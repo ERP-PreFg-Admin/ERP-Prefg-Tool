@@ -1,9 +1,10 @@
 import nodemailer from "nodemailer"
-import { GMAIL_USER, GMAIL_APP_PASSWORD } from "@/lib/env"
+import { GMAIL_USER, GMAIL_APP_PASSWORD, APP_URL } from "@/lib/env"
 import { query } from "@/lib/db"
 import { generatePoPdf, type PoEmailData } from "@/lib/pdf/po-document"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { entityEmails } from "@/lib/queries/entity-emails"
+import { buildMultiSheetXlsx, type ExportColumn } from "@/lib/export"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import crypto from "crypto"
@@ -22,8 +23,28 @@ const ctx = {
   requestId: crypto.randomUUID(),
 }
 
+type PoEmailRow = {
+  po_no: string
+  date: string | null
+  expected_on: string | null
+  destination: string | null
+  dest_location: string | null
+  sku_code: string
+  sku_name: string | null
+  qty: number | string
+  unit_price: number | string | null
+  total_amount: number | string | null
+  mfg_name: string
+  mfg_code: string
+  registered_name: string | null
+  gst_number: string | null
+  location: string | null
+  mfg_email: string | null
+  raised_by_name: string | null
+}
+
 export async function fetchPoData(poId: number): Promise<PoEmailData | null> {
-  const rows = await query<any>(purchaseOrdersSql.selectForEmail, [poId])
+  const rows = await query<PoEmailRow>(purchaseOrdersSql.selectForEmail, [poId])
   const po = rows[0]
   if (!po) return null
   return {
@@ -76,26 +97,7 @@ type OngoingPoLine = { po_no: string; sku_code: string; sku_name: string | null;
 // etc.) just show up in the summary table with no attachment.
 const ATTACHABLE_STATUSES = new Set(["raised", "cancelled"])
 
-const STATUS_LABELS: Record<string, string> = {
-  draft: "Draft", raised: "Raised", punched: "Inward", short_closed: "Short Closed",
-  partially_received: "Partially Received", received: "Received", cancelled: "Cancelled",
-}
-
-function selectedPoRows(lines: SelectedPoLine[]): string {
-  return lines
-    .map(
-      (l) => `
-        <tr>
-          <td style="padding:6px 12px;border-bottom:1px solid #eee">${l.po_no}</td>
-          <td style="padding:6px 12px;border-bottom:1px solid #eee">${l.sku_code}${l.sku_name ? " — " + l.sku_name : ""}</td>
-          <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${Number(l.qty).toLocaleString("en-IN")}</td>
-          <td style="padding:6px 12px;border-bottom:1px solid #eee">${STATUS_LABELS[l.status] ?? l.status}</td>
-        </tr>`
-    )
-    .join("")
-}
-
-function ongoingPoRows(lines: OngoingPoLine[]): string {
+function poTableRows(lines: { po_no: string; sku_code: string; sku_name: string | null; qty: number }[]): string {
   return lines
     .map(
       (l) => `
@@ -106,6 +108,35 @@ function ongoingPoRows(lines: OngoingPoLine[]): string {
         </tr>`
     )
     .join("")
+}
+
+function poSection(title: string, lines: { po_no: string; sku_code: string; sku_name: string | null; qty: number }[]): string {
+  if (lines.length === 0) return ""
+  return `
+    <h3 style="margin:20px 0 4px;font-size:14px">${title}</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <tr style="background:#f5f5f5">
+        <td style="padding:6px 12px;font-weight:600">PO No.</td>
+        <td style="padding:6px 12px;font-weight:600">SKU</td>
+        <td style="padding:6px 12px;font-weight:600;text-align:right">Quantity</td>
+      </tr>
+      ${poTableRows(lines)}
+    </table>`
+}
+
+const PO_SHEET_COLUMNS: ExportColumn[] = [
+  { key: "po_no", label: "PO No.", type: "text" },
+  { key: "sku_code", label: "SKU Code", type: "text" },
+  { key: "sku_name", label: "SKU Name", type: "text" },
+  { key: "qty", label: "Quantity", type: "number" },
+  { key: "link", label: "PO Link", type: "text" },
+]
+
+function toSheetRows(lines: { po_no: string; sku_code: string; sku_name: string | null; qty: number }[]): Record<string, unknown>[] {
+  return lines.map((l) => ({
+    ...l,
+    link: `${APP_URL}/po-tracking/po-procurement?search=${encodeURIComponent(l.po_no)}`,
+  }))
 }
 
 /**
@@ -140,12 +171,18 @@ export async function sendMfgSelectionEmail(
     return false
   }
 
-  const ongoing = await query<any>(purchaseOrdersSql.ongoingByMfg, [mfgId])
+  const ongoing = await query<{ id: number; po_no: string; sku_code: string; sku_name: string | null; qty: number; expected_on: string | null; status: string }>(purchaseOrdersSql.ongoingByMfg, [mfgId])
   const openLines: OngoingPoLine[] = ongoing.map((r) => ({
     po_no: r.po_no, sku_code: r.sku_code, sku_name: r.sku_name, qty: Number(r.qty),
   }))
 
+  // Selected lines split into the three tables the summary shows — any other
+  // selected status (e.g. punched, received) isn't part of this summary.
+  const raisedLines    = selected.filter((l) => l.status === "raised")
+  const cancelledLines = selected.filter((l) => l.status === "cancelled")
+
   const attachments: { filename: string; content: Buffer }[] = []
+  let pdfsAttached = 0
   for (const line of selected) {
     if (!ATTACHABLE_STATUSES.has(line.status)) continue
     try {
@@ -153,10 +190,19 @@ export async function sendMfgSelectionEmail(
       if (!data) continue
       const pdfBuffer = await generatePoPdf(data)
       attachments.push({ filename: `PO-${line.po_no}.pdf`, content: pdfBuffer as unknown as Buffer })
-    } catch (err: any) {
-      logger.error({ ...ctx, poId: line.id, po_no: line.po_no, error: err.message, message: "PO PDF generation failed for selection email — sending without this attachment" })
+      pdfsAttached++
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      logger.error({ ...ctx, poId: line.id, po_no: line.po_no, error: message, message: "PO PDF generation failed for selection email — sending without this attachment" })
     }
   }
+
+  const xlsxBuffer = await buildMultiSheetXlsx([
+    { name: "Raised",    columns: PO_SHEET_COLUMNS, rows: toSheetRows(raisedLines) },
+    { name: "Cancelled", columns: PO_SHEET_COLUMNS, rows: toSheetRows(cancelledLines) },
+    { name: "Open",      columns: PO_SHEET_COLUMNS, rows: toSheetRows(openLines) },
+  ])
+  attachments.push({ filename: `PO-Summary-${mfg.code}.xlsx`, content: Buffer.from(xlsxBuffer) })
 
   const eventId = makeEventId("PO_SELECTION_EMAIL", "send", mfgId)
   recordRawEvent("PO_SELECTION_EMAIL", eventId, {
@@ -171,27 +217,10 @@ export async function sendMfgSelectionEmail(
       html: `
         <div style="font-family:sans-serif;max-width:620px;margin:auto;color:#111">
           <h2 style="margin-bottom:4px">PO Update: ${mfg.name}</h2>
-          <p style="color:#555;margin-top:0">Please find the latest status of the following purchase orders${attachments.length > 0 ? " (PDFs attached for raised/cancelled POs)" : ""}.</p>
-          <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px">
-            <tr style="background:#f5f5f5">
-              <td style="padding:6px 12px;font-weight:600">PO No.</td>
-              <td style="padding:6px 12px;font-weight:600">SKU</td>
-              <td style="padding:6px 12px;font-weight:600;text-align:right">Quantity</td>
-              <td style="padding:6px 12px;font-weight:600">Status</td>
-            </tr>
-            ${selectedPoRows(selected)}
-          </table>
-          ${openLines.length > 0 ? `
-            <h3 style="margin:20px 0 4px;font-size:14px">Currently Open Purchase Orders</h3>
-            <table style="width:100%;border-collapse:collapse;font-size:13px">
-              <tr style="background:#f5f5f5">
-                <td style="padding:6px 12px;font-weight:600">PO No.</td>
-                <td style="padding:6px 12px;font-weight:600">SKU</td>
-                <td style="padding:6px 12px;font-weight:600;text-align:right">Quantity</td>
-              </tr>
-              ${ongoingPoRows(openLines)}
-            </table>
-          ` : ""}
+          <p style="color:#555;margin-top:0">Please find the latest status of the following purchase orders${pdfsAttached > 0 ? " (PDFs attached for raised/cancelled POs; full details in the attached Excel)" : " (full details in the attached Excel)"}.</p>
+          ${poSection("Newly Raised Purchase Orders", raisedLines)}
+          ${poSection("Cancelled Purchase Orders", cancelledLines)}
+          ${poSection("Remaining Open Purchase Orders", openLines)}
           <p style="font-size:12px;color:#888;margin-top:20px">
             This is an auto-generated email from the mcaffeine ERP system.
             Please confirm receipt by replying to this email.
@@ -200,9 +229,11 @@ export async function sendMfgSelectionEmail(
       `,
       attachments: attachments.length > 0 ? attachments : undefined,
     })
-  } catch (sendErr: any) {
-    logger.error({ ...ctx, eventId, err: sendErr.message, stack: sendErr.stack, message: "PO selection email send failed" })
-    recordFailedEvent("PO_SELECTION_EMAIL", eventId, { mfgId, mfg_name: mfg.name }, sendErr.message)
+  } catch (sendErr: unknown) {
+    const message = sendErr instanceof Error ? sendErr.message : String(sendErr)
+    const stack = sendErr instanceof Error ? sendErr.stack : undefined
+    logger.error({ ...ctx, eventId, err: message, stack, message: "PO selection email send failed" })
+    recordFailedEvent("PO_SELECTION_EMAIL", eventId, { mfgId, mfg_name: mfg.name }, message)
     throw sendErr
   }
 

@@ -9,7 +9,7 @@
 
 import { useState } from "react"
 import { GitCompare, Pencil } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { StatusBadge } from "@/components/masters/StatusBadge"
 import type { PMByMfg, Vendor, Mfg } from "@/types/masters"
 import {
   PmRateTable,
@@ -21,13 +21,7 @@ import { MfgPMDetailDialog } from "./MfgPMDetailDialog"
 import { EditPmMfgRateDialog } from "./EditPmMfgRateDialog"
 
 // For PM the rate status is stored directly as `status` (pmm.status).
-const rateStatusBadge = (row: AnyRow) => {
-  const s = row.status as string | null
-  if (s === "in_review") return <Badge variant="warning"  className="capitalize">In Review</Badge>
-  if (s === "rejected")  return <Badge variant="destructive" className="capitalize">Rejected</Badge>
-  if (s === "draft")     return <Badge variant="secondary" className="capitalize">Draft</Badge>
-  return <Badge variant={s === "active" ? "success" : "secondary"} className="capitalize">{s ?? "—"}</Badge>
-}
+const rateStatusBadge = (row: AnyRow) => <StatusBadge status={row.status as string | null} />
 
 function buildMfgColumns(manufacturers: Mfg[]): ColumnDef[] {
   const nameByMfgId = new Map(manufacturers.map((m) => [m.mfg_id, m.name]))

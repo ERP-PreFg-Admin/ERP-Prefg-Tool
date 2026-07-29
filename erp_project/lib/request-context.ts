@@ -7,7 +7,7 @@ export function createRequestContext(
 ) {
   return {
     requestId: crypto.randomUUID(),
-    userId,
+    userId: userId ?? null,
     method: req.method,
     path: req.nextUrl.pathname,
     startTime: Date.now(),

@@ -18,6 +18,9 @@ import { stageBulkUploadApproval, uploadRowsAsCsv } from "@/lib/master-routes/bu
 
 const looseRow = z.record(z.string(), z.unknown())
 
+type PmLookupRow = { id: number; uom: string; status: string }
+type VendorLookupRow = { id: number; code: string; name: string; type: string; status: string }
+
 const bodySchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("check_duplicates"), rows: z.array(looseRow) }),
   z.object({ action: z.literal("bulk"), rows: z.array(looseRow) }),
@@ -33,14 +36,14 @@ export const POST = withGateway({
       const { rows } = body
       const duplicates: Record<number, string[]> = {}
 
-      const pmCache = new Map<string, any>()
-      const vendorCache = new Map<string, any>()
+      const pmCache = new Map<string, PmLookupRow | null>()
+      const vendorCache = new Map<string, VendorLookupRow | null>()
       async function resolvePm(code: string) {
-        if (!pmCache.has(code)) pmCache.set(code, (await query<any>(pmSql.selectByCode, [code]))[0] ?? null)
+        if (!pmCache.has(code)) pmCache.set(code, (await query<PmLookupRow>(pmSql.selectByCode, [code]))[0] ?? null)
         return pmCache.get(code)
       }
       async function resolveVendor(code: string) {
-        if (!vendorCache.has(code)) vendorCache.set(code, (await query<any>(vendorSql.selectByCode, [code]))[0] ?? null)
+        if (!vendorCache.has(code)) vendorCache.set(code, (await query<VendorLookupRow>(vendorSql.selectByCode, [code]))[0] ?? null)
         return vendorCache.get(code)
       }
 
@@ -96,11 +99,12 @@ export const POST = withGateway({
       logger.info({ ...logCtx, approvalId, message: "PM vendor-rate bulk upload staged for approval" })
       recordProcessedEvent("PM_VRM_BULK", eventId, { rowCount: rows.length, source: "csv", approvalId })
       return NextResponse.json({ ok: true, approval_id: approvalId, staged: rows.length, skipped: 0 })
-    } catch (err: any) {
+    } catch (err: unknown) {
       await conn.rollback()
-      recordFailedEvent("PM_VRM_BULK", eventId, { rowCount: rows.length, source: "csv" }, err.message)
-      logger.error({ ...logCtx, err: err.message, message: "PM vendor-rate bulk upload failed" })
-      throw new ApiError(500, "internal", "Bulk upload failed: " + err.message)
+      const message = err instanceof Error ? err.message : String(err)
+      recordFailedEvent("PM_VRM_BULK", eventId, { rowCount: rows.length, source: "csv" }, message)
+      logger.error({ ...logCtx, err: message, message: "PM vendor-rate bulk upload failed" })
+      throw new ApiError(500, "internal", "Bulk upload failed: " + message)
     } finally {
       conn.release()
     }

@@ -11,7 +11,7 @@ const LABELS: Record<string, string> = {
   "/masters/manufacturers":     "Manufacturers",
   "/masters/vendors":           "Vendors",
   "/masters/raw-materials":     "Raw Materials",
-  "/masters/packing-materials": "Packing Materials",
+  "/masters/packing-materials": "Packaging Material",
   "/manufacturing":             "Manufacturing",
   "/finance":                   "Finance & Accounting",
   "/hr-payroll":                "HR & Payroll",

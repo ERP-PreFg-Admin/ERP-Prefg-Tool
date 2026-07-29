@@ -20,6 +20,10 @@ import { stageBulkUploadApproval, uploadRowsAsCsv } from "@/lib/master-routes/bu
 
 const looseRow = z.record(z.string(), z.unknown())
 
+type RmLookupRow = { id: number; uom: string; status: string }
+type MfgLookupRow = { id: number; code: string; name: string; status: string }
+type VendorLookupRow = { id: number; code: string; name: string; type: string; status: string }
+
 const bodySchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("check_duplicates"), rows: z.array(looseRow) }),
   z.object({ action: z.literal("bulk"), rows: z.array(looseRow) }),
@@ -35,19 +39,19 @@ export const POST = withGateway({
       const { rows } = body
       const duplicates: Record<number, string[]> = {}
 
-      const rmCache = new Map<string, any>()
-      const mfgCache = new Map<string, any>()
-      const vendorCache = new Map<string, any>()
+      const rmCache = new Map<string, RmLookupRow | null>()
+      const mfgCache = new Map<string, MfgLookupRow | null>()
+      const vendorCache = new Map<string, VendorLookupRow | null>()
       async function resolveRm(code: string) {
-        if (!rmCache.has(code)) rmCache.set(code, (await query<any>(rmSql.selectByCode, [code]))[0] ?? null)
+        if (!rmCache.has(code)) rmCache.set(code, (await query<RmLookupRow>(rmSql.selectByCode, [code]))[0] ?? null)
         return rmCache.get(code)
       }
       async function resolveMfg(code: string) {
-        if (!mfgCache.has(code)) mfgCache.set(code, (await query<any>(mfgSql.selectByCode, [code]))[0] ?? null)
+        if (!mfgCache.has(code)) mfgCache.set(code, (await query<MfgLookupRow>(mfgSql.selectByCode, [code]))[0] ?? null)
         return mfgCache.get(code)
       }
       async function resolveVendor(code: string) {
-        if (!vendorCache.has(code)) vendorCache.set(code, (await query<any>(vendorSql.selectByCode, [code]))[0] ?? null)
+        if (!vendorCache.has(code)) vendorCache.set(code, (await query<VendorLookupRow>(vendorSql.selectByCode, [code]))[0] ?? null)
         return vendorCache.get(code)
       }
 
@@ -108,11 +112,12 @@ export const POST = withGateway({
       logger.info({ ...logCtx, approvalId, message: "RM manufacturer-rate bulk upload staged for approval" })
       recordProcessedEvent("RM_RATE_BULK", eventId, { rowCount: rows.length, source: "csv", approvalId })
       return NextResponse.json({ ok: true, approval_id: approvalId, staged: rows.length, skipped: 0 })
-    } catch (err: any) {
+    } catch (err: unknown) {
       await conn.rollback()
-      recordFailedEvent("RM_RATE_BULK", eventId, { rowCount: rows.length, source: "csv" }, err.message)
-      logger.error({ ...logCtx, err: err.message, message: "RM manufacturer-rate bulk upload failed" })
-      throw new ApiError(500, "internal", "Bulk upload failed: " + err.message)
+      const message = err instanceof Error ? err.message : String(err)
+      recordFailedEvent("RM_RATE_BULK", eventId, { rowCount: rows.length, source: "csv" }, message)
+      logger.error({ ...logCtx, err: message, message: "RM manufacturer-rate bulk upload failed" })
+      throw new ApiError(500, "internal", "Bulk upload failed: " + message)
     } finally {
       conn.release()
     }

@@ -40,9 +40,11 @@ export const POST = withGateway({
         logger.info({ ...logCtx, id: result.insertId, message: "Misc. cost line created" })
         recordProcessedEvent("MFG_MISC_COST", eventId, { id: result.insertId, mfgId: body.mfg_id, bomId: body.bom_id, type: body.type })
         return NextResponse.json({ ok: true, id: result.insertId })
-      } catch (err: any) {
-        recordFailedEvent("MFG_MISC_COST", eventId, { mfgId: body.mfg_id, bomId: body.bom_id, type: body.type }, err.message)
-        logger.error({ ...logCtx, err: err.message, stack: err.stack, message: "Misc. cost line create failed" })
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        const stack = err instanceof Error ? err.stack : undefined
+        recordFailedEvent("MFG_MISC_COST", eventId, { mfgId: body.mfg_id, bomId: body.bom_id, type: body.type }, message)
+        logger.error({ ...logCtx, err: message, stack, message: "Misc. cost line create failed" })
         throw new ApiError(500, "internal", "Database error")
       }
     }
@@ -71,9 +73,11 @@ export const POST = withGateway({
         logger.info({ ...logCtx, id: body.id, message: "Misc. cost line updated" })
         recordProcessedEvent("MFG_MISC_COST_UPDATE", eventId, { id: body.id })
         return NextResponse.json({ ok: true })
-      } catch (err: any) {
-        recordFailedEvent("MFG_MISC_COST_UPDATE", eventId, { id: body.id }, err.message)
-        logger.error({ ...logCtx, err: err.message, stack: err.stack, message: "Misc. cost line update failed" })
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        const stack = err instanceof Error ? err.stack : undefined
+        recordFailedEvent("MFG_MISC_COST_UPDATE", eventId, { id: body.id }, message)
+        logger.error({ ...logCtx, err: message, stack, message: "Misc. cost line update failed" })
         throw new ApiError(500, "internal", "Database error")
       }
     }

@@ -35,6 +35,7 @@ export default function AddEntityEmailDialog({
 
   useEffect(() => {
     if (!open) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resets form state each time the dialog is opened
     setEntityType("mfg")
     setEntityCode("")
     setRows([emptyRow()])

@@ -73,6 +73,7 @@ model purchase_orders {
   po_type        purchase_orders_type?   @default(impromptu)
   csv_source_key String?                 @db.VarChar(500)
   email_sent_at  DateTime?               @db.DateTime(0)
+  reference_po   String?                 @db.VarChar(50)
   mfgs           master_mfgs             @relation(fields: [mfg_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_ibfk_1")
   bom            master_bom?             @relation(fields: [bom_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_ibfk_2")
   history_pos    history_pos[]
