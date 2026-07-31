@@ -117,11 +117,13 @@ export async function POST(req: Request) {
     try {
       const res = await execute(inventory.insert, [item_code, name, quantity, body.location ?? null, body.status ?? "active", Number(session.user.id)]);
       return NextResponse.json({ id: res.insertId });
-    } catch (e: any) {
-      if (e?.code === "ER_DUP_ENTRY") {
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      if (code === "ER_DUP_ENTRY") {
         return NextResponse.json({ error: "Item code already exists" }, { status: 409 });
       }
-      return NextResponse.json({ error: "Database error" }, { status: 500 });
+      const message = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: "Database error: " + message }, { status: 500 });
     }
   }
 
@@ -143,9 +145,10 @@ try {
   await conn.execute("INSERT INTO ...", [result.insertId, ...]);
   await conn.commit();
   return NextResponse.json({ id: (result as any).insertId });
-} catch (e) {
+} catch (err: unknown) {
   await conn.rollback();
-  throw e;
+  const message = err instanceof Error ? err.message : String(err);
+  return NextResponse.json({ error: "Database error: " + message }, { status: 500 });
 } finally {
   conn.release();
 }
@@ -153,7 +156,7 @@ try {
 
 **2.2 Register the module in the approval handler (if it needs approvals)**
 
-If records in this module go through the edit-approval flow, add a handler object to `lib/approvals/module-handlers.ts`. Each handler implements two methods:
+If records in this module go through the edit-approval flow, add a handler object to `lib/approvals/handlers/<domain>.ts` — handlers are split by domain (`sku.ts`, `raw-materials.ts`, `packing-materials.ts`, `vendors.ts`, `manufacturers.ts`, `purchase-orders.ts`, `bom.ts`), mirroring `lib/queries/`'s layout. Create a new domain file (e.g. `lib/approvals/handlers/inventory.ts`) if the module doesn't fit an existing one. Each handler implements two methods (the shared `ModuleHandler`/`DiffItem` types and `buildFieldMap`/`s3KeyOf` helpers live in `lib/approvals/handlers/types.ts`):
 
 | Method | Called when | What it does |
 |--------|------------|--------------|
@@ -163,11 +166,13 @@ If records in this module go through the edit-approval flow, add a handler objec
 Both methods receive the caller's open `PoolConnection` — **do not call `beginTransaction`, `commit`, or `rollback` inside them**; the route handler owns the transaction.
 
 ```ts
-// lib/approvals/module-handlers.ts — add to MODULE_HANDLERS at the bottom
+// lib/approvals/handlers/inventory.ts — the handler logic lives here, per domain
 
 import { inventory as inventorySql } from "@/lib/queries/inventory"
+import { STATUS } from "@/lib/constants"
+import { buildFieldMap, type ModuleHandler } from "./types"
 
-const inventoryHandler: ModuleHandler = {
+export const inventoryHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
     await conn.execute(inventorySql.setStatus, [status, entityId])
   },
@@ -186,6 +191,14 @@ const inventoryHandler: ModuleHandler = {
     ])
   },
 }
+```
+
+```ts
+// lib/approvals/module-handlers.ts — import the new handler and register it
+// in MODULE_HANDLERS; this top-level file only wires domain handlers together,
+// it doesn't contain any handler logic itself
+
+import { inventoryHandler } from "./handlers/inventory"
 
 export const MODULE_HANDLERS: Record<string, ModuleHandler> = {
   // existing entries …
@@ -195,7 +208,11 @@ export const MODULE_HANDLERS: Record<string, ModuleHandler> = {
 
 Then in the API route that submits edits for approval, use the shared `approvalsSql.insertApproval` + `approvalsSql.insertApprovalItem` queries with your module code (`"INVENTORY"`), exactly like `app/api/masters/skus/route.ts` does with `"SKU"`. The approve/reject route (`app/api/approvals/[id]/route.ts`) picks up the new handler automatically.
 
-Also add the required SQL helpers (`setStatus`, `selectById`, `update`) to `lib/queries/<module>.ts` — the `RM_MAT` and `PM_MAT` entries in `module-handlers.ts` are the simplest reference implementations.
+Also add the required SQL helpers (`setStatus`, `selectById`, `update`) to `lib/queries/<module>.ts` — the `RM_MAT` and `PM_MAT` entries in `lib/approvals/handlers/raw-materials.ts` / `packing-materials.ts` are the simplest reference implementations.
+
+**Bulk CSV variant:** if the module also needs a bulk upload (see `RM_BULK`, `PM_BULK`, `VENDOR_BULK`, `MFG_BULK`, `BOM_BULK`, `PO_BULK` in the registry), register a second `<MODULE>_BULK` handler in the same domain file. Its `applyAndArchive` parses the uploaded file from S3 via `parseS3Import` (using `s3KeyOf(items, "<MODULE>_BULK")` from `types.ts` to pull the staged file's S3 key out of the approval items) and inserts one row per valid CSV row, skipping and reporting invalid ones — see `lib/approvals/handlers/bom.ts`'s `bomBulkHandler` for the fullest example, including per-group partial success.
+
+**History/audit trail:** if the module should show up on its master page's history view, call `insertHistoryEntry` (from `lib/master-routes/history-utils.ts`) alongside the approval insert when submitting an edit — the shared approve/reject route resolves the pending row automatically via `resolvePendingHistoryEntry`. See `app/api/masters/vendors/history/route.ts` or `raw-materials/mrm-history` for reference read-side implementations.
 
 **2.3 Seed permissions for the new page slug**
 
@@ -384,7 +401,9 @@ Test the following scenarios in the browser:
 | Simple API route pattern | `app/api/masters/skus/route.ts` |
 | Transactional multi-table route | `app/api/masters/vendors/route.ts` |
 | Complex multi-action route | `app/api/masters/raw-materials/route.ts` |
-| Approval handler registry | `lib/approvals/module-handlers.ts` |
+| Approval handler registry (wiring) | `lib/approvals/module-handlers.ts` |
+| Approval handler logic (per domain) | `lib/approvals/handlers/<domain>.ts` (e.g. `raw-materials.ts`, `bom.ts`), shared types in `lib/approvals/handlers/types.ts` |
+| History/audit trail helpers | `lib/queries/history.ts`, `lib/master-routes/history-utils.ts` |
 | Approval route (approve / reject) | `app/api/approvals/[id]/route.ts` |
 | Status and approval status constants | `lib/constants.ts` |
 | Server page pattern | `app/masters/skus/page.tsx` |

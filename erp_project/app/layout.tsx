@@ -30,7 +30,7 @@ const SIDEBAR_SLUGS = [
   "/po-tracking/mfg-overview",
   "/po-tracking/po-procurement",
   "/po-tracking/rm-pm-procurement",
-  "/po-tracking/dispatch-calendar",
+  "/po-tracking/po-inwarding",
   "/approvals",
 ] as const;
 

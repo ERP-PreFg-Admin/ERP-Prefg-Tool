@@ -30,7 +30,7 @@
 Next.js 16 (App Router) · React 19 · TypeScript 6 (strict) · Tailwind v4 · shadcn/ui + Radix · mysql2 3 (runtime DB access) · Prisma 7 (schema/migrations only — client at `app/generated/prisma/`, never imported at runtime) · MariaDB on AWS RDS · NextAuth v5-beta (Google OAuth, JWT) · Winston + winston-daily-rotate-file · AWS SDK S3 client (two buckets: `AWS_S3_BUCKET_FILES`, `AWS_S3_BUCKET_EVENTS`) · nodemailer via Gmail SMTP for PO emails (Resend present in `.env` but commented out, unused) · @react-pdf/renderer (PO PDFs) · exceljs (CSV/XLSX import-export) · Zod (pilot — see the BOM correction in §9: it now covers **two** routes, SKU and BOM, not one).
 
 ### Project structure
-- `app/` — pages + API routes. Live business pages: `masters/` (skus, vendors, manufacturers, raw-materials, packing-materials, material-master, bom-master), `po-tracking/` (**3 sub-pages**, not 1 — `po-procurement`, `rm-pm-procurement`, `dispatch-calendar`; only `po-procurement` has real API routes today), `approvals/` + `approvals/history/`, `auth/`. Page shells with no route logic yet: `inventory/`, `manufacturing/`, `finance/`, `sales-crm/`, `hr-payroll/`, `reports/`, `sheet-viewer/`.
+- `app/` — pages + API routes. Live business pages: `masters/` (skus, vendors, manufacturers, raw-materials, packing-materials, material-master, bom-master), `po-tracking/` (**3 sub-pages**, not 1 — `po-procurement`, `rm-pm-procurement`, `po-inwarding`; only `po-procurement` has real API routes of its own — `po-inwarding` reuses them), `approvals/` + `approvals/history/`, `auth/`. Page shells with no route logic yet: `inventory/`, `manufacturing/`, `finance/`, `sales-crm/`, `hr-payroll/`, `reports/`, `sheet-viewer/`.
 - `app/api/` — `masters/`, `purchase-orders/`, `approvals/`, `admin/`, `auth/`, `upload/`, `files/`, `google-sheet/`.
 - `lib/` — `db.ts`, `auth.ts`, `permissions.ts`, `logger.ts`, `events.ts`, `s3.ts`, `constants.ts`, `request-context.ts`, `query-timing.ts` (new, see below), `gateway/` (pilot), `validation/` (Zod, SKU only), `approvals/` (strategy-pattern module handlers), `master-routes/`, `pdf/`, `queries/`.
 - `prisma/schema.prisma` — schema source of truth; model names diverge from real MariaDB table names (mapping table in `CLAUDE.md`).
@@ -968,7 +968,7 @@ Coverage is uneven: some domains (SKU, Vendor, Manufacturer, RM, PM) are richly 
 
 ### 7.5 Non-goals
 
-Does not propose fixes for the gaps above (see §8, the punch list below, for that); does not touch the future domain-event bus design (§5); does not cover RM/PM Procurement or Dispatch Calendar pages (`app/po-tracking/rm-pm-procurement`, `app/po-tracking/dispatch-calendar`) — no dedicated API routes or instrumentation exist there to document.
+Does not propose fixes for the gaps above (see §8, the punch list below, for that); does not touch the future domain-event bus design (§5); does not cover the RM/PM Procurement page (`app/po-tracking/rm-pm-procurement`) — no dedicated API routes or instrumentation exist there to document. PO Inwarding (`app/po-tracking/po-inwarding`, formerly the Dispatch Calendar stub) has no routes of its own either: it calls the same PO routes documented in §6.9.
 
 ---
 

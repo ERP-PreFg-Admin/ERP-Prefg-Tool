@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer"
-import { GMAIL_USER, GMAIL_APP_PASSWORD, APP_URL } from "@/lib/env"
+import { GMAIL_USER, GMAIL_APP_PASSWORD } from "@/lib/env"
 import { query } from "@/lib/db"
 import { generatePoPdf, type PoEmailData } from "@/lib/pdf/po-document"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
@@ -129,14 +129,10 @@ const PO_SHEET_COLUMNS: ExportColumn[] = [
   { key: "sku_code", label: "SKU Code", type: "text" },
   { key: "sku_name", label: "SKU Name", type: "text" },
   { key: "qty", label: "Quantity", type: "number" },
-  { key: "link", label: "PO Link", type: "text" },
 ]
 
 function toSheetRows(lines: { po_no: string; sku_code: string; sku_name: string | null; qty: number }[]): Record<string, unknown>[] {
-  return lines.map((l) => ({
-    ...l,
-    link: `${APP_URL}/po-tracking/po-procurement?search=${encodeURIComponent(l.po_no)}`,
-  }))
+  return lines.map((l) => ({ ...l }))
 }
 
 /**

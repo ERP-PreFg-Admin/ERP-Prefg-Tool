@@ -46,3 +46,6 @@ node_modules
 
 #Logs
 logs/*
+
+#Invoices
+/Invoices

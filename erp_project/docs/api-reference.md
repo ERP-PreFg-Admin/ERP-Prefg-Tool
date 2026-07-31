@@ -12,6 +12,8 @@ All mutation endpoints follow this pattern:
 - **Success shape:** Varies per action (documented below)
 
 > **No Zod validation yet.** Fields are validated with manual `if (!x?.trim())` guards. The planned `withGateway()` layer in [docs/architecture-evolution.md](./architecture-evolution.md) will centralise validation and error formatting.
+>
+> **Update:** `withGateway()` (in `lib/gateway/with-gateway.ts`) plus Zod schemas have since landed and are used by the Purchase Order detail routes (`split`, `receive`, `cancel`, `send-mail`, `export`, `history`, `mfg-skus`), the manufacturing cost-master exports, and the bulk CSV rate-upload routes documented below. Routes on this layer have a slightly different error shape than the pattern above: `{ error: string, code: string, details?: unknown, requestId: string }`, and auth/access-check failures return `401`/`403` automatically. Routes not yet migrated still follow the plain `{ error: string }` shape described above.
 
 ---
 
@@ -153,6 +155,26 @@ Process: Transaction — UPDATE `master_vendors`, then UPDATE `vendor_details`.
 
 ---
 
+### `GET /api/masters/vendors/history`
+
+**File:** `app/api/masters/vendors/history/route.ts`
+
+Full audit trail (create/edit + approve/reject resolution) for one vendor from `history_masters_edits`, newest first. Backs the "Edit History" dialog on the vendors table.
+
+```
+GET /api/masters/vendors/history?vendor_id=12
+```
+
+```json
+// Response 200
+{ "history": [ { "id": 9, "entity_id": 12, "action": "edit", "field": "location", "old_value": "Mumbai", "new_value": "Delhi", "resolved_at": "2026-06-01T00:00:00Z" } ] }
+
+// 400 — missing/invalid vendor_id
+{ "error": "vendor_id is required" }
+```
+
+---
+
 ### `POST /api/masters/manufacturers`
 
 **File:** `app/api/masters/manufacturers/route.ts`
@@ -211,6 +233,26 @@ Process: Transaction — UPDATE `master_mfgs`, then UPDATE `mfg_details`.
 { "action": "bulk", "rows": [...] }
 // Response 200
 { "inserted": 2, "skipped": 0 }
+```
+
+---
+
+### `GET /api/masters/manufacturers/history`
+
+**File:** `app/api/masters/manufacturers/history/route.ts`
+
+Same shape as `GET /api/masters/vendors/history`, keyed by `mfg_id`.
+
+```
+GET /api/masters/manufacturers/history?mfg_id=5
+```
+
+```json
+// Response 200
+{ "history": [ { "id": 4, "entity_id": 5, "action": "edit", "field": "status", "old_value": "active", "new_value": "inactive", "resolved_at": "2026-06-01T00:00:00Z" } ] }
+
+// 400 — missing/invalid mfg_id
+{ "error": "mfg_id is required" }
 ```
 
 ---
@@ -372,6 +414,64 @@ At least one of `vendors` or `manufacturers` must be non-empty. Each entry is up
 
 ---
 
+### `GET /api/masters/raw-materials/mrm-history` · `GET /api/masters/raw-materials/vrm-history`
+
+**Files:** `app/api/masters/raw-materials/mrm-history/route.ts`, `.../vrm-history/route.ts`
+
+Full rate-change history for one RM×Manufacturer (`history_mrm`) or RM×Vendor (`history_vrm`) pair, newest first. Backs the "Rate History" dialog on the RM Rate Master.
+
+```
+GET /api/masters/raw-materials/mrm-history?rm_id=1&mfg_id=2
+GET /api/masters/raw-materials/vrm-history?rm_id=1&vendor_id=2
+```
+
+```json
+// Response 200
+{ "history": [ { "id": 1, "rm_id": 1, "mfg_id": 2, "curr_rate": 150.00, "changed_at": "2026-06-01T00:00:00Z" } ] }
+
+// 400 — missing/invalid ids
+{ "error": "rm_id and mfg_id are required" }
+```
+
+---
+
+### `POST /api/masters/raw-materials/mrm-bulk` · `POST /api/masters/raw-materials/vrm-bulk`
+
+**Files:** `app/api/masters/raw-materials/mrm-bulk/route.ts`, `.../vrm-bulk/route.ts`
+
+Bulk CSV upload for RM × Manufacturer rates (`mrm-bulk`, module `RM_RATE_BULK`) and RM × Vendor rates (`vrm-bulk`, module `RM_VRM_BULK`). Separate endpoints from `POST /api/masters/raw-materials` so `CsvImportDialog`'s fixed `"bulk"` / `"check_duplicates"` action names don't collide with that route's own (unrelated) base-material bulk upload.
+
+#### action: `"check_duplicates"` — CSV preview-time validation
+
+```json
+// mrm-bulk
+{ "action": "check_duplicates", "rows": [ { "rm_code": "RM001", "mfg_code": "MFG001", "approved_vendor_code": "VEN001" } ] }
+// vrm-bulk
+{ "action": "check_duplicates", "rows": [ { "rm_code": "RM001", "vendor_code": "VEN001", "mfg_code": "MFG001" } ] }
+```
+
+Resolves each row's `rm_code` (must exist and be `active`), `mfg_code`/`vendor_code` against the DB, and flags duplicate RM+Manufacturer / RM+Vendor pairs repeated within the file.
+
+```json
+// Response 200
+{ "duplicates": { "0": ["RM code \"RM001\" is not active"] } }
+```
+
+#### action: `"bulk"` — Stage the whole file as one pending approval
+
+```json
+{ "action": "bulk", "rows": [...] }
+```
+
+Process: uploads rows as CSV to S3 (`imports/rm-mrm-bulk/YYYY-MM/...` or `imports/rm-vrm-bulk/YYYY-MM/...`) and stages ONE approval (`RM_RATE_BULK` or `RM_VRM_BULK`). Nothing is written to `rm_mrm`/`rm_vrm` here — the insert happens in the matching module handler's `applyAndArchive` once approved.
+
+```json
+// Response 200
+{ "ok": true, "approval_id": 44, "staged": 12, "skipped": 0 }
+```
+
+---
+
 ### `POST /api/masters/packing-materials`
 
 **File:** `app/api/masters/packing-materials/route.ts`
@@ -510,6 +610,47 @@ If `pm_id` is omitted, falls back to looking up the PM by `name + type` (same as
 
 ---
 
+### `GET /api/masters/packing-materials/mrm-history` · `GET /api/masters/packing-materials/vrm-history`
+
+**Files:** `app/api/masters/packing-materials/mrm-history/route.ts`, `.../vrm-history/route.ts`
+
+Same shape as the RM history endpoints above, keyed by `pm_id` instead of `rm_id`.
+
+```
+GET /api/masters/packing-materials/mrm-history?pm_id=1&mfg_id=2
+GET /api/masters/packing-materials/vrm-history?pm_id=1&vendor_id=2
+```
+
+```json
+// Response 200
+{ "history": [ { "id": 1, "pm_id": 1, "vendor_id": 2, "curr_rate": 3.50, "changed_at": "2026-06-01T00:00:00Z" } ] }
+
+// 400 — missing/invalid ids
+{ "error": "pm_id and vendor_id are required" }
+```
+
+---
+
+### `POST /api/masters/packing-materials/mrm-bulk` · `POST /api/masters/packing-materials/vrm-bulk`
+
+**Files:** `app/api/masters/packing-materials/mrm-bulk/route.ts`, `.../vrm-bulk/route.ts`
+
+Same `"check_duplicates"` / `"bulk"` action pair and staged-approval behaviour as the RM bulk rate endpoints above (modules `PM_RATE_BULK` / `PM_VRM_BULK`), keyed by `pm_code` instead of `rm_code`. `mrm-bulk` does not check an `approved_vendor_code` column (PM manufacturer rates have no vendor-approval field).
+
+```json
+// mrm-bulk
+{ "action": "check_duplicates", "rows": [ { "pm_code": "PM001", "mfg_code": "MFG001" } ] }
+// vrm-bulk
+{ "action": "check_duplicates", "rows": [ { "pm_code": "PM001", "vendor_code": "VEN001" } ] }
+```
+
+```json
+// Response 200 (bulk)
+{ "ok": true, "approval_id": 45, "staged": 8, "skipped": 0 }
+```
+
+---
+
 ### `POST /api/masters/material-master`
 
 **File:** `app/api/masters/material-master/route.ts`
@@ -580,44 +721,93 @@ Unified endpoint for the Material Master page. Inserts a base material record on
 
 **File:** `app/api/masters/bom-master/route.ts`
 
-#### action: `"create"` — Create a BOM with detail lines
+> Rewritten (commit `449b4a0`) to go through the approval flow and support bulk CSV upload. The old `action: "create"` / `"bulk"` pair (direct insert, no approval, and a `mfg_id`/`sku_code` shape that didn't match the real `master_bom`/`details_bom` schema) no longer exists. Uses `withGateway` — see the note in [Design Pattern](#design-pattern-current-implementation).
+
+Backs the BOM creation wizard (`BomCreationWizard.tsx`). Five actions:
+
+#### action: `"check-existing"` — Dry-run duplicate check (Step 1)
+
+```json
+{ "action": "check-existing", "sku_id": 12 }
+```
+
+```json
+// Response 200
+{ "hasActive": true, "bom_id": 31, "bom_code": "BOM001", "bom_count": 2 }
+```
+
+#### action: `"create-full"` — Single atomic submit (manual entry or CSV step)
+
+Handles both `"new-version"` and `"update-existing"` modes. Runs in a **transaction**: inserts/locks the `master_bom` header (status → `in_review`) and raises one `BOM` approval encoding the full RM/PM line diff plus any staged artifact add/remove as `approval_items`. `details_bom` and `bom_artifacts` are only written when the approval is approved (see `bomHandler.applyAndArchive` in `lib/approvals/module-handlers.ts`).
 
 ```json
 {
-  "action": "create",
-  "bom_code": "BOM001",
-  "sku_code": "SKU001",
-  "mfg_id": 2,
-  "status": "draft",
-  "details": [
-    {
-      "mtrl_type": "rm",
-      "mtrl_id": 23,
-      "amount": 5.0,
-      "uom": "kg",
-      "mtrl_cost": 750.00,
-      "effective_from": "2025-01-01"
-    }
-  ]
+  "action": "create-full",
+  "mode": "new-version",
+  "sku_id": 12,
+  "bom_code": "BOM002",
+  "effective_from": "2025-01-01",
+  "rm_lines": [ { "mtrl_type": "rm", "mtrl_id": 23, "amount": 5.0, "uom": "kg" } ],
+  "pm_lines": [ { "mtrl_type": "pm", "mtrl_id": 8, "amount": 1, "uom": "pcs" } ],
+  "artifact_adds": [],
+  "artifact_removes": [],
+  "source": "manual"
 }
 ```
 
-Process: Transaction — INSERT into `bom`, then INSERT each `details` row into `bom_details`. Validates that `bom_code + sku_code` is not a duplicate.
+For `"update-existing"`, pass `bom_id` instead of `bom_code`/`effective_from`; the diff is computed against the BOM's current lines instead of "nothing".
 
 ```json
 // Response 200
-{ "id": 31 }
+{ "ok": true, "bom_id": 31, "approval_id": 57 }
 
-// Response 409 — duplicate BOM
-{ "error": "BOM already exists for this SKU and BOM code" }
+// 400 — sku_id mismatch on update-existing
+{ "error": "This BOM does not belong to the selected SKU." }
+
+// 409 — another approval already pending on this BOM
+{ "error": "This BOM already has a pending approval." }
 ```
 
-#### action: `"bulk"`
+#### action: `"update-status"` — Direct status change (no approval gate)
+
+Used by the Edit BOM dialog. Blocked only while an approval is already pending for this BOM. Setting `status: "active"` also discontinues any other active BOM for the same SKU (same invariant `bomHandler.applyAndArchive` enforces on approval).
+
+```json
+{ "action": "update-status", "bom_id": 31, "status": "active" }
+```
+
+```json
+// Response 200
+{ "ok": true }
+
+// 409 — pending approval blocks a direct status change
+{ "error": "This BOM has a pending approval — resolve it before changing status directly." }
+```
+
+#### action: `"check_duplicates"` — CSV preview-time validation
+
+Reused by `CsvImportDialog` before the bulk submit is allowed. Re-runs the same checks `BOM_BULK`'s `applyAndArchive` performs at approval time: SKU exists & active, RM/PM material codes resolve & active, per-SKU RM total is within `RM_TOTAL_MIN`–`RM_TOTAL_MAX`%, no duplicate material line within a SKU group, and no inconsistent `bom_code`/`effective_from` within a SKU group. `CsvImportDialog` is wired with `requireAllValid` for BOM, so any flagged row blocks the whole upload.
+
+```json
+{ "action": "check_duplicates", "rows": [ { "sku_code": "SKU001", "mtrl_type": "rm", "mtrl_code": "RM001", "amount": 5, "bom_code": "BOM001", "effective_from": "2025-01-01" } ] }
+```
+
+```json
+// Response 200
+{ "duplicates": { "0": ["SKU \"SKU001\" is not active"] } }
+```
+
+#### action: `"bulk"` — Stage the whole CSV as one pending approval
 
 ```json
 { "action": "bulk", "rows": [...] }
+```
+
+Process: uploads the rows as a CSV to S3 (`imports/bom-bulk/YYYY-MM/...`) and stages ONE `BOM_BULK` approval referencing that file. Nothing is inserted into `master_bom`/`details_bom` here — the real per-SKU grouping, validation, and insert happens in `BOM_BULK`'s `applyAndArchive` once an admin approves.
+
+```json
 // Response 200
-{ "inserted": 3, "skipped": 1 }
+{ "ok": true, "approval_id": 61, "staged": 40, "skipped": 0 }
 ```
 
 ---
@@ -767,7 +957,9 @@ Update the S3 attachment key on a PO. If a previous key exists it is deleted fro
 
 **File:** `app/api/purchase-orders/[id]/split/route.ts`
 
-Split a PO into N child POs, each optionally destined for a different manufacturer and warehouse. At least 2 split rows are required.
+> Reworked (commit `3ae9bc5`). Now uses `withGateway` (see [Design Pattern](#design-pattern-current-implementation)); only 1 split row is required (previously 2), the parent's `qty`/`total_amount` is now reduced by the split total instead of `received_qty` being credited, and the response no longer includes `split_type`.
+
+Split a PO into N child POs, each optionally destined for a different manufacturer and warehouse. Splittable statuses: `draft`, `raised`, `punched`, `partially_received`.
 
 ```json
 // Request body
@@ -781,32 +973,56 @@ Split a PO into N child POs, each optionally destined for a different manufactur
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `splits` | Yes | array, min 2 entries |
+| `splits` | Yes | array, min 1 entry |
 | `splits[].mfg_id` | Yes | manufacturer for this child PO |
 | `splits[].qty` | Yes | > 0 |
 | `splits[].destination` | No | warehouse name |
 
-**Parent PO closing rules** (the parent's `qty` is never changed — it matches the email already sent):
+**Parent PO effect** — the parent's `qty` (and `total_amount`, recalculated from `unit_price`) is reduced by the split total; `status` and `received_qty` are left untouched — a split is not a receiving event. `short_closed` is now set only manually (e.g. via a separate Close action), never automatically by splitting.
 
-| Condition | Result |
-|-----------|--------|
-| `splitTotal >= remaining` | `received_qty += splitTotal` → status → `short_closed` |
-| `splitTotal < remaining` | `received_qty += splitTotal` → status unchanged (partial split) |
-
-Child PO statuses mirror the parent: `draft` parents → `draft` children; raised/punched parents → `raised` children. Child PO numbers: `{parent_po_no}-S1`, `{parent_po_no}-S2`, …
+Child PO statuses mirror the parent: `draft` parent → `draft` children; any other parent status → `raised` children. Child PO numbers: `{parent_po_no}-S001`, `{parent_po_no}-S002`, … If the parent was `draft`, each child additionally gets its own `PO` approval record (create) with a full field diff. Splitting a parent that isn't `draft` inserts the children directly, same as a normal raise.
 
 ```json
 // Response 200
-{ "ok": true, "splits_created": 2, "split_type": "full" }
-// split_type: "full" (parent short_closed) | "partial" (parent status unchanged)
+{ "ok": true, "splits_created": 2 }
 
-// 400 — validation failures
-{ "error": "At least 2 split rows are required." }
+// 400 — validation / over-limit
 { "error": "Each split row must have a manufacturer selected." }
-{ "error": "Split total (350) exceeds remaining quantity (300)." }
+{ "error": "Split total (350) exceeds remaining qty (300)." }
+
+// 404
+{ "error": "PO not found." }
 
 // 409 — PO status prevents splitting
-{ "error": "PO status 'received' cannot be split." }
+{ "error": "Cannot split a PO with status 'received'. Allowed: draft, raised, punched, partially_received." }
+```
+
+---
+
+### `POST /api/purchase-orders/[id]/receive`
+
+**File:** `app/api/purchase-orders/[id]/receive/route.ts` (new)
+
+Record a manual goods receipt against a PO. Credits `qty` to `received_qty` and auto-marks the PO `received` once the remainder falls within tolerance (`min(100, 10% of qty)` — same rule the old Split flow used). Receivable statuses: `raised`, `punched`, `partially_received`. Row-locks the PO for the duration of the transaction so two concurrent receipts on the same PO serialize instead of racing on a stale `received_qty`.
+
+```json
+// Request body
+{ "qty": 150 }
+```
+
+```json
+// Response 200
+{ "ok": true, "received_qty": 350, "status": "partially_received" }
+// status is "received" once the remainder is within tolerance
+
+// 400 — over-limit
+{ "error": "Received qty (500) exceeds remaining qty (300)." }
+
+// 404
+{ "error": "PO id=42 not found" }
+
+// 409 — PO status prevents receiving
+{ "error": "Cannot receive against a PO with status 'draft'. Allowed: raised, punched, partially_received." }
 ```
 
 ---
@@ -823,20 +1039,212 @@ GET /api/purchase-orders/42/preview-pdf
 
 ---
 
-### `POST /api/purchase-orders/[id]/send-email`
+### `POST /api/purchase-orders/[id]/cancel`
 
-Manually (re-)send the PO email to the manufacturer. Can be called on any `raised` PO. Stamps `email_sent_at` on first send only (subsequent calls do not overwrite it).
+**File:** `app/api/purchase-orders/[id]/cancel/route.ts`
+
+> Changed: now uses `withGateway`, accepts an optional `reason`, and **no longer sends an email**. Notifying the manufacturer is a separate, explicit step — select the (now-cancelled) PO in the PO Procurement table's checkbox selection and use "Review & Send Mail" (`POST /api/purchase-orders/send-mail`).
+
+Fully cancel a PO — distinct from Short Close, which accepts partial fulfillment as final. Cancellable statuses: `raised`, `punched`, `partially_received`.
+
+```json
+// Request body
+{ "reason": "Vendor unable to fulfil" }
+// reason is optional, max 1000 characters
+```
 
 ```json
 // Response 200
 { "ok": true }
 
 // 404
-{ "error": "PO not found." }
+{ "error": "PO id=42 not found" }
 
-// 500 — email or PDF generation failure
-{ "error": "Failed to send email." }
+// 409 — PO status prevents cancelling
+{ "error": "Cannot cancel a PO with status 'draft'. Allowed: raised, punched, partially_received." }
 ```
+
+---
+
+### `POST /api/purchase-orders/send-mail`
+
+**File:** `app/api/purchase-orders/send-mail/route.ts` (new — replaces the removed `POST /api/purchase-orders/[id]/send-email`)
+
+Consolidated notification send from the PO Procurement table's checkbox selection: pick any set of POs (any status, any manufacturer), group them by manufacturer, and send **one email per manufacturer** (`sendMfgSelectionEmail` in `lib/mailer.ts`) listing all the selected POs for that manufacturer. Not gated by approval and does not mutate any PO's status — it only notifies; status changes (raise/split/cancel) already happened through their own flows before this step.
+
+```json
+// Request body
+{ "po_ids": [12, 13, 14] }
+```
+
+```json
+// Response 200 — per-manufacturer send report
+{
+  "ok": true,
+  "results": [
+    { "mfg_id": 3, "mfg_name": "Plant A", "sent": true },
+    { "mfg_id": 5, "mfg_name": "Plant B", "sent": false, "error": "SMTP timeout" }
+  ]
+}
+```
+
+Note: the endpoint always returns `200` with `ok: true` — check each entry's `sent` flag for per-manufacturer failures.
+
+---
+
+### `GET /api/purchase-orders/export`
+
+**File:** `app/api/purchase-orders/export/route.ts` (new)
+
+Exports every PO matching the PO Procurement page's current filters/search/sort as CSV or Excel — same `WHERE` clause and columns as `PoTable.tsx`, just unpaginated.
+
+```
+GET /api/purchase-orders/export?format=csv&status=raised&mfgCode=MFG003&sortBy=date&sortDir=desc
+```
+
+| Query param | Required | Notes |
+|-------------|----------|-------|
+| `format` | No | `"csv"` (default) \| `"xlsx"` |
+| `search` | No | matches PO No. / Mfg code / Mfg name / SKU code / SKU name |
+| `status` | No | PO status tab |
+| `mfgCode` | No | exact manufacturer code |
+| `poType` | No | `"normal"` \| `"impromptu"` |
+| `dateFrom`, `dateTo` | No | PO date range |
+| `sku` | No | exact SKU code |
+| `destination` | No | exact destination/warehouse name |
+| `sortBy` | No | column key, default `"date"` |
+| `sortDir` | No | `"asc"` \| `"desc"`, default `"desc"` |
+
+**Response:** `200` — file attachment (`Content-Disposition: attachment`). `413` if the filtered result exceeds 50,000 rows — narrow the filters and retry.
+
+```json
+// 413 — result set too large
+{ "error": "Export limited to 50,000 rows. Query returned 62,481. Apply filters to narrow the result." }
+```
+
+---
+
+### `GET /api/purchase-orders/history`
+
+**File:** `app/api/purchase-orders/history/route.ts` (new)
+
+Returns the `history_pos` audit trail for one PO — every create/update the PO bulk CSV flow recorded against it — newest first. Shown from `PoTable`'s Actions menu via `PoHistoryDialog.tsx`.
+
+```
+GET /api/purchase-orders/history?po_id=42
+```
+
+```json
+// Response 200
+{ "history": [ { "id": 1, "po_id": 42, "action": "update", "field": "received_qty", "old_value": "0", "new_value": "150", "changed_at": "2026-06-01T00:00:00Z" } ] }
+
+// 400 — missing/invalid po_id
+{ "error": "po_id is required" }
+```
+
+---
+
+### `GET /api/purchase-orders/mfg-skus`
+
+**File:** `app/api/purchase-orders/mfg-skus/route.ts` (new)
+
+Active SKUs one manufacturer currently produces — populates the "Add PO" dialog's SKU rows once a manufacturer is picked (`AddPODialog.tsx`).
+
+```
+GET /api/purchase-orders/mfg-skus?mfg_id=3
+```
+
+```json
+// Response 200
+{ "skus": [ { "sku_code": "SKU001", "sku_name": "Face Wash" } ] }
+```
+
+---
+
+## Manufacturing Endpoints
+
+### `POST /api/manufacturing/misc-costs`
+
+**File:** `app/api/manufacturing/misc-costs/route.ts`
+
+Create, update, or bulk-import a `bom_misc` line — a manufacturer's per-SKU Job Work / Shrink Wrap / Shipper / Wastage cost. No approval flow.
+
+#### action: `"create-misc"`
+
+```json
+{
+  "action": "create-misc",
+  "bom_id": 31,
+  "mfg_id": 3,
+  "type": "job_work",
+  "cost": 12.5,
+  "effective_from": "2026-01-01",
+  "effective_till": null,
+  "status": "active"
+}
+```
+
+```json
+// Response 200
+{ "ok": true, "id": 9 }
+```
+
+#### action: `"update-misc"`
+
+```json
+{ "action": "update-misc", "id": 9, "cost": 13.0, "effective_from": "2026-01-01", "effective_till": null, "status": "active" }
+```
+
+```json
+// Response 200
+{ "ok": true }
+
+// 404
+{ "error": "Cost line not found." }
+```
+
+#### action: `"bulk"` — CSV import, scoped to one manufacturer
+
+Requires a `mfg_id` query param — every `bom_misc` row belongs to one manufacturer, which the page already knows, so it's passed once instead of per row.
+
+```
+POST /api/manufacturing/misc-costs?mfg_id=3
+```
+```json
+{ "action": "bulk", "rows": [ { "sku_code": "SKU001", "type": "job_work", "cost": "12.5", "effective_from": "2026-01-01", "effective_till": "", "status": "active" } ] }
+```
+
+Each row is resolved to a `bom_misc` line via `sku_code` + `mfg_id`; rows with a missing/invalid field, an unrecognised `type`, or a `sku_code` not linked to this manufacturer are skipped (with a reason) rather than failing the whole batch.
+
+```json
+// Response 200
+{ "ok": true, "inserted": 8, "skipped": 1 }
+
+// 400 — missing mfg_id query param
+{ "error": "Missing or invalid mfg_id query param" }
+```
+
+---
+
+### Cost-master export endpoints
+
+**Files:** `app/api/manufacturing/[mfgId]/agreed-rates/export/route.ts`, `.../approved-rates/export/route.ts`, `.../approved-rates/history/export/route.ts`, `.../misc-costs/export/route.ts`
+
+Export the manufacturer cost-master tabs (Agreed Rates, Approved Procurement Rates, Approved Rates history, Misc. Costs) as CSV or Excel — same rows/queries as the corresponding client component, so the export always matches what's on screen.
+
+```
+GET /api/manufacturing/3/agreed-rates/export?mode=rm&format=csv
+GET /api/manufacturing/3/approved-rates/export?mode=pm&format=xlsx
+GET /api/manufacturing/3/approved-rates/history/export?mode=rm&format=csv
+GET /api/manufacturing/3/misc-costs/export?format=xlsx
+```
+
+| Query param | Required | Notes |
+|-------------|----------|-------|
+| `mode` | No | `"rm"` (default) \| `"pm"` — not applicable to `misc-costs/export` (all 4 cost types are exported together, distinguished by a `Type` column) |
+| `format` | No | `"csv"` (default) \| `"xlsx"` |
+
+**Response:** `200` — file attachment. `400` if `mfgId` is invalid; `401`/`403` per the usual auth/access rules; `500` on a server error.
 
 ---
 

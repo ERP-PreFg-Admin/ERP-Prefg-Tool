@@ -131,6 +131,16 @@ erDiagram
         int created_by FK
         datetime created_at
         enum status
+        date effective_from
+        date effective_till
+    }
+    bom_artifacts {
+        int id PK
+        int bom_id FK
+        string s3_key
+        string file_name
+        int uploaded_by FK
+        datetime uploaded_at
     }
     bom_details {
         int id PK
@@ -157,6 +167,8 @@ erDiagram
         date effective_till
         datetime last_updated
         enum status
+        int approved_by FK
+        datetime approved_on
     }
     bom_misc {
         int id PK
@@ -177,24 +189,29 @@ erDiagram
     bom ||--o{ bom_details : "contains materials"
     bom ||--o{ bom_history : "audit trail"
     bom ||--o{ bom_misc : "misc costs"
+    bom ||--o{ bom_artifacts : "supporting files"
     sku_details }o--o| bom : "current BOM"
 ```
 
+> **Actual SQL table names:** `skus` → `master_skus`, `sku_details` → `details_sku`, `bom` → `master_bom`, `bom_details` → `details_bom`, `bom_history` → `history_bom`; `bom_misc` and `bom_artifacts` are literal table names. Check `lib/queries/bom.ts` / `lib/queries/skus.ts` for exact usage.
+
 ### Table descriptions
 
-**`skus`** — Stock Keeping Units. `sku_code` is the human-readable business key (unique). `status` enum: `active`, `discontinued`, `new_launch`, `inactive`.
+**`skus`** — Stock Keeping Units. `sku_code` is the human-readable business key (unique). `status` enum: `active`, `inactive`, `discontinued`, `new_launch`, `in_review`, `draft`, `rejected` (the last three are approval-flow states).
 
 **`sku_details`** — Extended product attributes (dimensions, MRP, EAN code, GST). One-to-one with `skus`. `curr_bom_id` points to the currently active BOM. `demand_type` enum: `A`, `B`, `C`, `NPL` (New Product Launch).
 
 **`sku_variants`** — Hierarchical relationships between SKU sizes. Composite unique key `(parent_sku_id, variant_sku_id)`.
 
-**`bom`** (Bill of Materials) — A recipe linking an SKU to a manufacturing site with a versioned BOM code. `status` enum: `draft`, `active`, `inactive`, `in_review`, `discontinued`.
+**`bom`** (Bill of Materials) — A recipe linking an SKU to a manufacturing site with a versioned BOM code. `status` enum: `draft`, `active`, `inactive`, `in_review`, `discontinued`, `rejected`. `effective_from` / `effective_till` bound the date range the recipe version is valid for.
 
 **`bom_details`** — Individual material line items within a BOM. `mtrl_type` is either `rm` (raw material) or `pm` (packing material); `mtrl_id` is the FK to the respective `rm` or `pm` table. `status` enum: `active`, `inactive`, `discontinued`.
 
-**`bom_history`** — Immutable audit trail of every material line that was ever in a BOM. Written when a BOM detail is modified.
+**`bom_history`** — Immutable audit trail of every material line that was ever in a BOM. Written when a BOM detail is modified. `approved_by` / `approved_on` record who approved the change and when.
 
 **`bom_misc`** — Miscellaneous cost lines attached to a BOM at a specific manufacturing site. `type` enum: `jw` (job work), `shrink`, `shipper`, `utility`, `margin`, `rm_loss`, `pm_loss`.
+
+**`bom_artifacts`** — Supporting files (specs, images, etc.) attached to a BOM. `s3_key` + `file_name` identify the uploaded object; `uploaded_by` FKs to `users`. Deleting the parent BOM cascades to its artifacts.
 
 ---
 
@@ -324,21 +341,21 @@ erDiagram
     history_mrm }o--o| pm_mrm : "pm mfg history"
 ```
 
-> **Actual SQL table names** differ from Prisma model names. The raw SQL queries in `lib/queries/` use: `master_rm`, `master_pm`, `rm_vrm_dynamic`, `rm_mrm_fixed`, `pm_vrm_dynamic`, `pm_mrm_fixed`, `master_vendors`, `vendor_details`, `master_mfgs`, `mfg_details`. The Prisma model names above are the logical names used in schema definitions.
+> **Actual SQL table names** differ from Prisma model names. The raw SQL queries in `lib/queries/` use: `master_rm`, `master_pm`, `rm_vrm_dynamic`, `rm_mrm_fixed`, `pm_vrm_dynamic`, `pm_mrm_fixed`, `master_vendors`, `details_vendor`, `master_mfgs`, `details_mfg`. The Prisma model names above are the logical names used in schema definitions.
 
 ### Table descriptions
 
-**`rm`** (Raw Materials) — Raw material master. `rm_code` is the business key. `inci_name` is the INCI (International Nomenclature of Cosmetic Ingredients) name. `status` enum: `active`, `discontinued`.
+**`rm`** (Raw Materials) — Raw material master. `rm_code` is the business key. `inci_name` is the INCI (International Nomenclature of Cosmetic Ingredients) name. `status` enum: `active`, `inactive`, `discontinued`, `in_review`, `draft`, `rejected`.
 
-**`pm`** (Packing Materials) — Packing material master. `pm_code` is the business key. `status` enum: `active`, `discontinued`.
+**`pm`** (Packing Materials) — Packing material master. `pm_code` is the business key. `status` enum: `active`, `inactive`, `discontinued`, `in_review`, `draft`, `rejected`.
 
-**`rm_vrm`** (`rm_vrm_dynamic`) — Raw Material Vendor Rate Master. The current vendor price for a raw material. `moq` = minimum order quantity. `status` enum: `active`, `inactive`, `discontinued`.
+**`rm_vrm`** (`rm_vrm_dynamic`) — Raw Material Vendor Rate Master. The current vendor price for a raw material. `moq` = minimum order quantity. `status` enum: `active`, `inactive`, `discontinued`, `in_review`, `draft`, `rejected`.
 
-**`rm_mrm`** (`rm_mrm_fixed`) — Raw Material Manufacturer Rate Master. Links a raw material to the manufacturing site that uses it. Stores `approved_vendor_id` — the preferred vendor for that material-site combination.
+**`rm_mrm`** (`rm_mrm_fixed`) — Raw Material Manufacturer Rate Master. Links a raw material to the manufacturing site that uses it. Stores `approved_vendor_id` — the preferred vendor for that material-site combination. `status` enum: `active`, `inactive`, `discontinued`, `in_review`, `draft`, `rejected`.
 
-**`pm_vrm`** (`pm_vrm_dynamic`) — Packing Material Vendor Rate Master. Same pattern as `rm_vrm` but for packing materials.
+**`pm_vrm`** (`pm_vrm_dynamic`) — Packing Material Vendor Rate Master. Same pattern as `rm_vrm` but for packing materials. Same `status` enum as `rm_vrm`.
 
-**`pm_mrm`** (`pm_mrm_fixed`) — Packing Material Manufacturer Rate Master.
+**`pm_mrm`** (`pm_mrm_fixed`) — Packing Material Manufacturer Rate Master. `status` enum: `active`, `inactive`, `discontinued`, `in_review`, `draft`, `rejected`.
 
 **`vrm_history`** — Legacy append-only archive of superseded RM vendor rates. Written by `archiveVendorRate` when an `rm_vrm` row is overwritten. `mtrl_type` distinguishes `rm` vs `pm`.
 
@@ -376,6 +393,9 @@ erDiagram
         int vendor_id FK
         string location
         string gst_number
+        string bank_name
+        string ifsc_number
+        string account_number
         enum status
     }
     purchase_orders {
@@ -391,7 +411,32 @@ erDiagram
         date expected_on
         decimal received_qty
         string invoice_no
+        string destination
         enum status
+        enum po_type
+        string reference_po
+        string csv_source_key
+        datetime email_sent_at
+    }
+    history_pos {
+        int id PK
+        int po_id FK
+        string po_no
+        enum action_type
+        string field_name
+        string old_value
+        string new_value
+        string s3_key
+        int changed_by FK
+        datetime changed_on
+    }
+    entity_emails {
+        int id PK
+        string entity_type
+        string entity_code
+        string email
+        string purpose
+        datetime created_at
     }
     approvals {
         int id PK
@@ -417,28 +462,36 @@ erDiagram
     vendors ||--o{ vendor_details : "has details"
     mfgs ||--o{ purchase_orders : "manufactures for"
     bom ||--o| purchase_orders : "ordered against"
+    purchase_orders ||--o{ history_pos : "audit trail"
+    users ||--o{ history_pos : "changed by"
     users ||--o{ approvals : "raised by"
     users ||--o{ approvals : "approved by"
     approvals ||--o{ approval_items : "field changes"
 ```
 
+> **Actual SQL table names:** `mfgs` → `master_mfgs`, `mfg_details` → `details_mfg`, `vendors` → `master_vendors`, `vendor_details` → `details_vendor`. `purchase_orders`, `history_pos`, `entity_emails`, `approvals`, and `approval_items` are literal table names.
+
 ### Table descriptions
 
 **`mfgs`** — Manufacturing sites (internal plants or contract manufacturers). `code` is unique. `status` enum: `active`, `inactive`.
 
-**`mfg_details`** — Location and GST number for a manufacturer. `status` enum: `active`, `inactive`.
+**`mfg_details`** — Location, GST number, and banking details (`bank_name`, `ifsc_number`, `account_number`) for a manufacturer. `status` enum: `active`, `inactive`, `in_review`, `draft`, `rejected` (the last three are approval-flow states).
 
 **`vendors`** — Supplier master. `code` is unique. `type` enum: `rm` (raw material supplier), `pm` (packing material supplier), `both`.
 
-**`vendor_details`** — Location and GST number for a vendor. `status` enum: `active`, `inactive`, `blacklisted`, `discontinued`.
+**`vendor_details`** — Location, GST number, and banking details (`bank_name`, `ifsc_number`, `account_number`) for a vendor. `status` enum: `active`, `inactive`, `in_review`, `draft`, `rejected`.
 
-**`purchase_orders`** — Purchase orders issued to manufacturers. `po_no` is unique. `received_qty` defaults to 0. `status` lifecycle: `draft` → `raised` → `punched` → `partially_received` → `received` (or `short_closed` / `cancelled`).
+**`purchase_orders`** — Purchase orders issued to manufacturers. `po_no` is unique. `received_qty` defaults to 0. `status` enum: `draft`, `raised`, `punched`, `partially_received`, `received`, `short_closed`, `cancelled`, `rejected`; typical lifecycle is `draft` → `raised` → `punched` → `partially_received` → `received` (or `short_closed` / `cancelled` / `rejected`). `po_type` enum: `normal`, `impromptu` (default) — set to `normal` on both manual bulk-CSV creates and PO splits. `reference_po` links a split-off child PO back to its parent `po_no` (splitting adjusts the parent's `qty`/`total_amount` directly and does not touch `status`/`received_qty`, since a split is not a receiving event). `csv_source_key` records the S3 key of the bulk-upload CSV a row was created from. `email_sent_at` timestamps the vendor notification email.
+
+**`history_pos`** — Audit trail for the PO bulk-CSV create/update flow. One row per changed field for an `update` action; a single summary row (`field_name`/`old_value`/`new_value` all null) for a `create` action — mirrors the `approval_items` diff-per-field convention. `action_type` enum: `create`, `update`.
+
+**`entity_emails`** — Per-vendor/manufacturer email addresses used by the PO email flow (e.g. multiple recipients per `purpose`). Looked up by `(entity_type, entity_code)`.
 
 **`approvals`** — Generic approval request header. `module` and `entity_id` identify what is being approved. `status` enum: `pending`, `approved`, `rejected`, `withdrawn`.
 
 **`approval_items`** — Individual field-level changes within an approval request. Stores `old_value` and `new_value` as strings for any field type.
 
-> **Note:** The `approvals` table and workflow exist in the schema and database but approval logic is not yet wired into the application UI. See [docs/architecture-evolution.md](./architecture-evolution.md) §5.3 for the planned event-driven approval integration.
+> **Note:** The approval workflow (`approvals` + `approval_items` + the Strategy-pattern module handlers in `lib/approvals/module-handlers.ts`) is fully wired into the application — see the "Approval Flow" section of `CLAUDE.md` for the current list of registered modules (SKU, RM_RATE, PM_RATE, RM_VRM, PM_VRM, RM_MAT, PM_MAT, VENDOR, MFG, PO, PO_BULK).
 
 ---
 

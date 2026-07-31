@@ -119,6 +119,17 @@ The dialog:
 
 For entities that need custom forms (like Raw Materials' multi-step wizard), build a custom component that follows the same POST + `router.refresh()` pattern.
 
+### Bulk CSV Import Dialog
+
+`components/masters/CsvImportDialog.tsx` is the shared bulk-upload dialog, reused across vendors, manufacturers, RM/PM rates, material master, and BOM master. It takes a declarative `fields: MasterField[]` (same shape as the single-record form fields) plus an `endpoint`, and handles:
+
+1. Client-side CSV parsing and preview (with per-row validation/remarks), or optional client-side `.xlsx` parsing via `previewExcel` (large Excel files fall back to an upload-to-S3-then-server-parses path)
+2. An optional `enableDuplicateCheck` round-trip that POSTs `{ action: "check_duplicates", rows }` to `endpoint` and merges warnings into the preview
+3. Downloadable CSV template (`downloadTemplate`) and a "download flagged rows" export for fixing invalid rows
+4. Upload via `{ action: "bulk", rows: valid }` (or `bulk_from_s3` for the legacy Excel path); a response carrying `approval_id` means the whole batch was staged as one pending approval rather than inserted directly (bulk-approval masters), otherwise `{ inserted, skipped }` is shown
+
+Use this component instead of building a new upload dialog whenever an entity needs CSV/Excel bulk import — extend `fields`/`endpoint` rather than forking the component.
+
 ## Table Rendering
 
 All master tables are plain HTML `<table>` elements styled with Tailwind. The shadcn/ui `Table`, `TableHeader`, `TableBody`, `TableRow`, `TableCell` components are wrappers around these.
@@ -131,6 +142,34 @@ All master tables are plain HTML `<table>` elements styled with Tailwind. The sh
 | Column sorting | Not implemented |
 
 The client component holds the full dataset in memory and filters it on each search keystroke. This is acceptable for master data where row counts are in the hundreds, not millions.
+
+### Splitting a Large Data Table
+
+Once a table's row-renderer grows past a few hundred lines (row actions, a three-dot menu, several per-action dialogs), split it the way `app/po-tracking/po-procurement/PoTable.tsx` does rather than let one file keep growing:
+
+| Piece | File | Responsibility |
+|-------|------|----------------|
+| Table shell | `PoTable.tsx` | Owns column layout, row mapping, `useState` for "which dialog is open," renders per-row action buttons |
+| Reusable cell renderers | `PoTableCells.tsx` | Small presentational pieces used across rows/columns — e.g. `ProgressCell`, `SortHead` (a sortable `<TableHead>`) |
+| Row-level overflow menu | `PoActionMenu.tsx` | Generic `{ label, icon, onClick, variant, disabled }[]` menu — the table builds the `actions` array per row, the menu only renders it |
+| Per-action dialogs | `CancelPODialog.tsx`, `ReceivePODialog.tsx`, `ShortClosePODialog.tsx`, `SplitPODialog.tsx` | One dialog component per destructive/complex action, each owning its own form state and API call |
+
+The table shell holds only the "which row is this dialog targeting" state (e.g. `const [cancelTarget, setCancelTarget] = useState<number | null>(null)`) and renders each dialog once, outside the `<table>`, controlled by that state — not one dialog instance per row. This keeps the table itself close to a plain row-mapping function and pushes all non-trivial logic into single-purpose files.
+
+### Lifting Selection State to the Parent
+
+For a Gmail-style "select rows across the whole table, then act on the selection" flow (see `PoProcurementClient.tsx` + `PoTable.tsx` + `PoSelectionBar.tsx`), selection state (`selectedIds: Set<number>`) lives in the parent client component, not the table:
+
+```ts
+// PoProcurementClient.tsx
+const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+```
+
+The table receives `selectedIds`, `onToggleRow`, `onToggleAll` as props and only renders checkboxes — it has no selection logic of its own. A separate floating bar component (`PoSelectionBar.tsx`) reads the same `selectedIds` (resolved to full rows by the parent) and renders the bulk action plus a review/confirm dialog. This mirrors the Server/Client split rule above: state that outlives a single component's render (here, state shared between the table and a floating bar) belongs one level up, not duplicated.
+
+### History Dialogs
+
+`EditHistoryDialog.tsx` (vendors, manufacturers), `RmRateHistoryDialog.tsx`, `PmRateHistoryDialog.tsx`, and `BomHistoryTable.tsx`/`BomHistoryClient.tsx` all share the same shape: a read-only `Dialog` that takes a nullable `row`/id prop (`null` closes it), fetches its own history rows from a dedicated `*-history` endpoint in a `useEffect` keyed on that prop, and renders a plain table of past values with a status badge per entry. There is no shared base component — each is a small, independent copy of the same pattern — but new "view history for X" dialogs should follow this shape rather than invent a new one.
 
 ## Font Setup
 
