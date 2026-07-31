@@ -8,6 +8,16 @@
  *     gst_number, bank_name, ifsc_number, account_number)
  */
 
+/** Full-row column list shared by selectByCodeForMatch and its IN (?)-batched
+ *  counterpart below — both need every field the edit-match diff compares.
+ *  `v.id AS id` is included alongside `vendor_id` so the module-agnostic
+ *  edit-match resolver can key off a plain `id` field like every other
+ *  master — both hold the same value. */
+const VENDOR_CANDIDATE_COLUMNS = `
+  v.id AS id, vd.vendor_id, v.code, v.name, v.type, vd.location, vd.zone,
+  vd.registered_name, vd.gst_number, vd.bank_name, vd.ifsc_number, vd.account_number
+`
+
 export const vendors = {
   // ============ SELECT QUERIES ============
 
@@ -175,43 +185,25 @@ export const vendors = {
   setStatus: `UPDATE details_vendor SET status = ? WHERE vendor_id = ?`,
 
   /**
-   * Exact-name lookup (case-insensitive per the table's default collation) —
-   * one of three single-field lookups (name / registered_name / gst_number)
-   * the bulk CSV importer's edit-match scorer (lib/master-routes/edit-match.ts)
-   * unions together to decide whether a row is an edit of an existing record.
-   * `v.id AS id` is included alongside `vendor_id` so the (module-agnostic)
-   * scorer can key off a plain `id` field like every other master. Parameters: [name]
+   * Full-row lookup by business code — the bulk CSV importer's edit-match
+   * resolver (lib/master-routes/edit-match.ts) uses this to decide a CSV
+   * row is an edit of an existing record: only an exact `code` match
+   * counts. Parameters: [code]
    */
-  selectByName: `
-    SELECT
-      v.id AS id, vd.vendor_id, vd.location, vd.status,
-      vd.zone, vd.registered_name, v.code, v.name, v.type,
-      vd.gst_number, vd.bank_name, vd.ifsc_number, vd.account_number
+  selectByCodeForMatch: `
+    SELECT ${VENDOR_CANDIDATE_COLUMNS}
     FROM details_vendor vd
     JOIN master_vendors v ON vd.vendor_id = v.id
-    WHERE v.name = ? LIMIT 1
+    WHERE v.code = ? LIMIT 1
   `,
 
-  /** Same shape as selectByName, keyed on registered_name. Parameters: [registered_name] */
-  selectByRegisteredName: `
-    SELECT
-      v.id AS id, vd.vendor_id, vd.location, vd.status,
-      vd.zone, vd.registered_name, v.code, v.name, v.type,
-      vd.gst_number, vd.bank_name, vd.ifsc_number, vd.account_number
+  /** IN (?)-batched counterpart of selectByCodeForMatch, for the whole
+   *  uploaded file at once — see fetchEditMatchCandidates. Parameters: [codes[]] */
+  selectCandidatesByCodesBatch: `
+    SELECT ${VENDOR_CANDIDATE_COLUMNS}
     FROM details_vendor vd
     JOIN master_vendors v ON vd.vendor_id = v.id
-    WHERE vd.registered_name = ? LIMIT 5
-  `,
-
-  /** Same shape as selectByName, keyed on gst_number. Parameters: [gst_number] */
-  selectByGstNumber: `
-    SELECT
-      v.id AS id, vd.vendor_id, vd.location, vd.status,
-      vd.zone, vd.registered_name, v.code, v.name, v.type,
-      vd.gst_number, vd.bank_name, vd.ifsc_number, vd.account_number
-    FROM details_vendor vd
-    JOIN master_vendors v ON vd.vendor_id = v.id
-    WHERE vd.gst_number = ? LIMIT 5
+    WHERE v.code IN (?)
   `,
 
   // ── Batched duplicate lookups for CSV-preview duplicate checking ──────────
@@ -237,44 +229,6 @@ export const vendors = {
     SELECT v.code, d.account_number AS value FROM details_vendor d
     JOIN master_vendors v ON v.id = d.vendor_id
     WHERE d.account_number IN (?)
-  `,
-
-  /** Parameters: [names[]] */
-  checkDuplicateNameBatch: `
-    SELECT v.id, v.code, v.name AS value FROM master_vendors v
-    WHERE v.name IN (?)
-  `,
-
-  // ── Full-row batch lookups for the CSV-preview edit-match scorer ──────────
-  // Same shape as selectByName/selectByRegisteredName/selectByGstNumber but
-  // IN (?)-batched across the whole uploaded file — see
-  // lib/master-routes/edit-match.ts's fetchEditMatchCandidates.
-
-  /** Parameters: [names[]] */
-  selectCandidatesByNamesBatch: `
-    SELECT v.id AS id, v.code, v.name, vd.location, vd.zone,
-      vd.registered_name, vd.gst_number, vd.bank_name, vd.ifsc_number, vd.account_number
-    FROM details_vendor vd
-    JOIN master_vendors v ON vd.vendor_id = v.id
-    WHERE v.name IN (?)
-  `,
-
-  /** Parameters: [registered_names[]] */
-  selectCandidatesByRegisteredNamesBatch: `
-    SELECT v.id AS id, v.code, v.name, vd.location, vd.zone,
-      vd.registered_name, vd.gst_number, vd.bank_name, vd.ifsc_number, vd.account_number
-    FROM details_vendor vd
-    JOIN master_vendors v ON vd.vendor_id = v.id
-    WHERE vd.registered_name IN (?)
-  `,
-
-  /** Parameters: [gst_numbers[]] */
-  selectCandidatesByGstNumbersBatch: `
-    SELECT v.id AS id, v.code, v.name, vd.location, vd.zone,
-      vd.registered_name, vd.gst_number, vd.bank_name, vd.ifsc_number, vd.account_number
-    FROM details_vendor vd
-    JOIN master_vendors v ON vd.vendor_id = v.id
-    WHERE vd.gst_number IN (?)
   `,
 
   // ── Duplicate checks (banking/tax fields must be unique across vendors) ──────

@@ -3,6 +3,14 @@
  * Centralized queries for manufacturers table (mfgs)
  */
 
+/** Full-row column list shared by selectByCodeForMatch and its IN (?)-batched
+ *  counterpart below — both need every field the edit-match diff compares. */
+const MFG_CANDIDATE_COLUMNS = `
+  mfg.id, mfg.code, mfg.name, mfgd.location, mfgd.gst_number,
+  mfgd.registered_name, mfgd.zone, mfgd.bank_name, mfgd.ifsc_number,
+  mfgd.account_number, mfgd.email
+`
+
 export const manufacturers = {
   // ============ SELECT QUERIES ============
 
@@ -152,45 +160,25 @@ export const manufacturers = {
   selectNameById: `SELECT code, name FROM master_mfgs WHERE id = ? LIMIT 1`,
 
   /**
-   * Exact-name lookup (case-insensitive per the table's default collation) —
-   * one of three single-field lookups (name / registered_name / gst_number)
-   * the bulk CSV importer's edit-match scorer (lib/master-routes/edit-match.ts)
-   * unions together to decide whether a row is an edit of an existing record.
-   * Parameters: [name]
+   * Full-row lookup by business code — the bulk CSV importer's edit-match
+   * resolver (lib/master-routes/edit-match.ts) uses this to decide a CSV
+   * row is an edit of an existing record: only an exact `code` match
+   * counts. Parameters: [code]
    */
-  selectByName: `
-    SELECT
-      mfg.id, mfgd.mfg_id, mfgd.status, mfgd.location,
-      mfgd.gst_number, mfgd.registered_name, mfgd.zone,
-      mfgd.bank_name, mfgd.ifsc_number, mfgd.account_number,
-      mfgd.email, mfg.code, mfg.name
+  selectByCodeForMatch: `
+    SELECT ${MFG_CANDIDATE_COLUMNS}
     FROM master_mfgs AS mfg
     INNER JOIN details_mfg AS mfgd ON mfgd.mfg_id = mfg.id
-    WHERE mfg.name = ? LIMIT 1
+    WHERE mfg.code = ? LIMIT 1
   `,
 
-  /** Same shape as selectByName, keyed on registered_name. Parameters: [registered_name] */
-  selectByRegisteredName: `
-    SELECT
-      mfg.id, mfgd.mfg_id, mfgd.status, mfgd.location,
-      mfgd.gst_number, mfgd.registered_name, mfgd.zone,
-      mfgd.bank_name, mfgd.ifsc_number, mfgd.account_number,
-      mfgd.email, mfg.code, mfg.name
+  /** IN (?)-batched counterpart of selectByCodeForMatch, for the whole
+   *  uploaded file at once — see fetchEditMatchCandidates. Parameters: [codes[]] */
+  selectCandidatesByCodesBatch: `
+    SELECT ${MFG_CANDIDATE_COLUMNS}
     FROM master_mfgs AS mfg
     INNER JOIN details_mfg AS mfgd ON mfgd.mfg_id = mfg.id
-    WHERE mfgd.registered_name = ? LIMIT 5
-  `,
-
-  /** Same shape as selectByName, keyed on gst_number. Parameters: [gst_number] */
-  selectByGstNumber: `
-    SELECT
-      mfg.id, mfgd.mfg_id, mfgd.status, mfgd.location,
-      mfgd.gst_number, mfgd.registered_name, mfgd.zone,
-      mfgd.bank_name, mfgd.ifsc_number, mfgd.account_number,
-      mfgd.email, mfg.code, mfg.name
-    FROM master_mfgs AS mfg
-    INNER JOIN details_mfg AS mfgd ON mfgd.mfg_id = mfg.id
-    WHERE mfgd.gst_number = ? LIMIT 5
+    WHERE mfg.code IN (?)
   `,
 
   // ── Duplicate checks (banking/tax fields must be unique across manufacturers) ─
@@ -249,47 +237,6 @@ export const manufacturers = {
     SELECT mfg.code, d.email AS value FROM details_mfg d
     JOIN master_mfgs mfg ON mfg.id = d.mfg_id
     WHERE d.email IN (?)
-  `,
-
-  /** Parameters: [names[]] */
-  checkDuplicateNameBatch: `
-    SELECT mfg.id, mfg.code, mfg.name AS value FROM master_mfgs mfg
-    WHERE mfg.name IN (?)
-  `,
-
-  // ── Full-row batch lookups for the CSV-preview edit-match scorer ──────────
-  // Same shape as selectByName/selectByRegisteredName/selectByGstNumber but
-  // IN (?)-batched across the whole uploaded file — see
-  // lib/master-routes/edit-match.ts's fetchEditMatchCandidates.
-
-  /** Parameters: [names[]] */
-  selectCandidatesByNamesBatch: `
-    SELECT mfg.id, mfg.code, mfg.name, mfgd.location, mfgd.gst_number,
-      mfgd.registered_name, mfgd.zone, mfgd.bank_name, mfgd.ifsc_number,
-      mfgd.account_number, mfgd.email
-    FROM master_mfgs mfg
-    JOIN details_mfg mfgd ON mfgd.mfg_id = mfg.id
-    WHERE mfg.name IN (?)
-  `,
-
-  /** Parameters: [registered_names[]] */
-  selectCandidatesByRegisteredNamesBatch: `
-    SELECT mfg.id, mfg.code, mfg.name, mfgd.location, mfgd.gst_number,
-      mfgd.registered_name, mfgd.zone, mfgd.bank_name, mfgd.ifsc_number,
-      mfgd.account_number, mfgd.email
-    FROM master_mfgs mfg
-    JOIN details_mfg mfgd ON mfgd.mfg_id = mfg.id
-    WHERE mfgd.registered_name IN (?)
-  `,
-
-  /** Parameters: [gst_numbers[]] */
-  selectCandidatesByGstNumbersBatch: `
-    SELECT mfg.id, mfg.code, mfg.name, mfgd.location, mfgd.gst_number,
-      mfgd.registered_name, mfgd.zone, mfgd.bank_name, mfgd.ifsc_number,
-      mfgd.account_number, mfgd.email
-    FROM master_mfgs mfg
-    JOIN details_mfg mfgd ON mfgd.mfg_id = mfg.id
-    WHERE mfgd.gst_number IN (?)
   `,
 
   /**

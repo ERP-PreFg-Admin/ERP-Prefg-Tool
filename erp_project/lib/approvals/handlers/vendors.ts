@@ -6,6 +6,7 @@ import type { ResultSetHeader } from "mysql2/promise"
 import { vendors as vendorSql } from "@/lib/queries/vendors"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { parseS3Import } from "@/lib/import-s3"
+import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
 import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import { STATUS } from "@/lib/constants"
 import { findDuplicateBankingField, insertVendorWithGeneratedCode } from "@/lib/master-routes/material-utils"
@@ -67,7 +68,7 @@ export const vendorHandler: ModuleHandler = {
 }
 
 type VendorCandidateRow = {
-  id: number; vendor_id: number; code: string; name: string; type: string; location: string | null; status: string
+  id: number; vendor_id: number; code: string; name: string; type: string; location: string | null
   zone: string | null; registered_name: string | null; gst_number: string | null
   bank_name: string | null; ifsc_number: string | null; account_number: string | null
 }
@@ -78,10 +79,14 @@ export type ResolvedVendorRow =
   | { action: "skip"; row: Record<string, string> }
 
 /**
- * Classifies each CSV row as create / edit-of-an-existing-record / skip.
- * Used both by route.ts's "bulk"/"bulk_from_s3" (to decide, per row, whether
- * to submit a real per-record VENDOR edit approval immediately or bundle it
- * into the VENDOR_BULK batch of new records) and by
+ * Classifies each CSV row as create / edit-of-an-existing-record / skip. A
+ * row is an edit only when its `code` cell exactly matches an existing
+ * vendor's business code (e.g. VEN-RM-ACM) — no code means the row is always
+ * a new record, and a code that matches nothing is skipped rather than
+ * silently falling back to a create (the submitter meant to edit a specific
+ * record). Used both by route.ts's "bulk"/"bulk_from_s3" (to decide, per
+ * row, whether to submit a real per-record VENDOR edit approval immediately
+ * or bundle it into the VENDOR_BULK batch of new records) and by
  * vendorBulkHandler.applyAndArchive below (which only ever expects "create"
  * rows, since edits never enter the batch — see route.ts's doc comment).
  */
@@ -94,13 +99,11 @@ export async function resolveVendorBulkRows(
     const name = row.name?.trim()
     if (!name) { resolved.push({ action: "skip", row }); continue }
 
-    const existing = await findEditMatchForRow<VendorCandidateRow>(conn, {
-      selectByName: vendorSql.selectByName,
-      selectByRegisteredName: vendorSql.selectByRegisteredName,
-      selectByGstNumber: vendorSql.selectByGstNumber,
-    }, row)
+    const code = row.code?.trim()
+    if (code) {
+      const existing = await findEditMatchForRow<VendorCandidateRow>(conn, vendorSql.selectByCodeForMatch, row)
+      if (!existing) { resolved.push({ action: "skip", row }); continue } // code doesn't match any vendor
 
-    if (existing) {
       // Remarks are mandatory for edits; blank cells otherwise keep the
       // record's current value (partial update) — see the "edit" consumers.
       if (!row.remarks?.trim()) { resolved.push({ action: "skip", row }); continue }
@@ -180,6 +183,49 @@ export async function submitVendorBulkEdit(
     createdBy: userId,
   })
   return approvalId
+}
+
+/**
+ * Full staging pipeline shared by route.ts's "bulk" and "bulk_from_s3" —
+ * resolves rows, submits each edit as its own real VENDOR approval, and
+ * uploads the remaining new-record rows to S3 as one staged VENDOR_BULK
+ * approval. Must run inside the caller's already-open transaction: per
+ * CLAUDE.md's rule, helpers never call beginTransaction/commit/rollback
+ * themselves.
+ */
+export async function stageVendorBulkRows(
+  conn: PoolConnection,
+  rows: Record<string, string>[],
+  userId: number,
+  s3Folder: string,
+): Promise<{ approvalId: number | null; staged: number; skipped: number }> {
+  const resolved = await resolveVendorBulkRows(conn, rows)
+  const createRows = resolved.filter((r) => r.action === "create").map((r) => r.row)
+  const editEntries = resolved.filter((r) => r.action === "edit")
+  let skipped = resolved.length - createRows.length - editEntries.length
+
+  let editsSubmitted = 0
+  let firstEditApprovalId: number | null = null
+  for (const { row, existing } of editEntries) {
+    const approvalId = await submitVendorBulkEdit(conn, row, existing, userId)
+    if (approvalId == null) { skipped++; continue } // fell back to every current value — nothing actually changed
+    editsSubmitted++
+    firstEditApprovalId ??= approvalId
+  }
+
+  let batchApprovalId: number | null = null
+  if (createRows.length > 0) {
+    const { key, filename } = await uploadRowsAsCsv(createRows, s3Folder, "vendor_bulk")
+    batchApprovalId = await stageBulkUploadApproval(conn, {
+      userId, module: "VENDOR_BULK", s3Key: key, filename, rowCount: createRows.length,
+    })
+  }
+
+  return {
+    approvalId: batchApprovalId ?? firstEditApprovalId,
+    staged: createRows.length + editsSubmitted,
+    skipped,
+  }
 }
 
 // Same shape as every other *_BULK handler — see raw-materials.ts's

@@ -6,6 +6,7 @@ import type { ResultSetHeader } from "mysql2/promise"
 import { manufacturers as mfgSql } from "@/lib/queries/manufacturers"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { parseS3Import } from "@/lib/import-s3"
+import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
 import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import { STATUS } from "@/lib/constants"
 import { findDuplicateBankingField, insertMfgWithGeneratedCode } from "@/lib/master-routes/material-utils"
@@ -67,7 +68,7 @@ export const mfgHandler: ModuleHandler = {
 
 type MfgCandidateRow = {
   id: number; code: string; name: string; location: string | null; gst_number: string | null
-  status: string; registered_name: string | null; zone: string | null
+  registered_name: string | null; zone: string | null
   bank_name: string | null; ifsc_number: string | null; account_number: string | null
   email: string | null
 }
@@ -78,12 +79,16 @@ export type ResolvedMfgRow =
   | { action: "skip"; row: Record<string, string> }
 
 /**
- * Classifies each CSV row as create / edit-of-an-existing-record / skip.
- * Used both by route.ts's "bulk"/"bulk_from_s3" (to decide, per row, whether
- * to submit a real per-record MFG edit approval immediately or bundle it
- * into the MFG_BULK batch of new records) and by mfgBulkHandler.applyAndArchive
- * below (which only ever expects "create" rows, since edits never enter the
- * batch — see route.ts's doc comment on why edits are split out).
+ * Classifies each CSV row as create / edit-of-an-existing-record / skip. A
+ * row is an edit only when its `code` cell exactly matches an existing
+ * manufacturer's business code (e.g. MFG-001-REV) — no code means the row is
+ * always a new record, and a code that matches nothing is skipped rather
+ * than silently falling back to a create (the submitter meant to edit a
+ * specific record). Used both by route.ts's "bulk"/"bulk_from_s3" (to decide,
+ * per row, whether to submit a real per-record MFG edit approval immediately
+ * or bundle it into the MFG_BULK batch of new records) and by
+ * mfgBulkHandler.applyAndArchive below (which only ever expects "create"
+ * rows, since edits never enter the batch — see route.ts's doc comment).
  */
 export async function resolveMfgBulkRows(
   conn: PoolConnection,
@@ -94,13 +99,11 @@ export async function resolveMfgBulkRows(
     const name = row.name?.trim()
     if (!name) { resolved.push({ action: "skip", row }); continue }
 
-    const existing = await findEditMatchForRow<MfgCandidateRow>(conn, {
-      selectByName: mfgSql.selectByName,
-      selectByRegisteredName: mfgSql.selectByRegisteredName,
-      selectByGstNumber: mfgSql.selectByGstNumber,
-    }, row)
+    const code = row.code?.trim()
+    if (code) {
+      const existing = await findEditMatchForRow<MfgCandidateRow>(conn, mfgSql.selectByCodeForMatch, row)
+      if (!existing) { resolved.push({ action: "skip", row }); continue } // code doesn't match any manufacturer
 
-    if (existing) {
       // Remarks are mandatory for edits; blank cells otherwise keep the
       // record's current value (partial update) — see the "edit" consumers.
       if (!row.remarks?.trim()) { resolved.push({ action: "skip", row }); continue }
@@ -179,6 +182,48 @@ export async function submitMfgBulkEdit(
     createdBy: userId,
   })
   return approvalId
+}
+
+/**
+ * Full staging pipeline shared by route.ts's "bulk" and "bulk_from_s3" —
+ * resolves rows, submits each edit as its own real MFG approval, and uploads
+ * the remaining new-record rows to S3 as one staged MFG_BULK approval. Must
+ * run inside the caller's already-open transaction: per CLAUDE.md's rule,
+ * helpers never call beginTransaction/commit/rollback themselves.
+ */
+export async function stageMfgBulkRows(
+  conn: PoolConnection,
+  rows: Record<string, string>[],
+  userId: number,
+  s3Folder: string,
+): Promise<{ approvalId: number | null; staged: number; skipped: number }> {
+  const resolved = await resolveMfgBulkRows(conn, rows)
+  const createRows = resolved.filter((r) => r.action === "create").map((r) => r.row)
+  const editEntries = resolved.filter((r) => r.action === "edit")
+  let skipped = resolved.length - createRows.length - editEntries.length
+
+  let editsSubmitted = 0
+  let firstEditApprovalId: number | null = null
+  for (const { row, existing } of editEntries) {
+    const approvalId = await submitMfgBulkEdit(conn, row, existing, userId)
+    if (approvalId == null) { skipped++; continue } // fell back to every current value — nothing actually changed
+    editsSubmitted++
+    firstEditApprovalId ??= approvalId
+  }
+
+  let batchApprovalId: number | null = null
+  if (createRows.length > 0) {
+    const { key, filename } = await uploadRowsAsCsv(createRows, s3Folder, "mfg_bulk")
+    batchApprovalId = await stageBulkUploadApproval(conn, {
+      userId, module: "MFG_BULK", s3Key: key, filename, rowCount: createRows.length,
+    })
+  }
+
+  return {
+    approvalId: batchApprovalId ?? firstEditApprovalId,
+    staged: createRows.length + editsSubmitted,
+    skipped,
+  }
 }
 
 // Same shape as every other *_BULK handler — see raw-materials.ts's

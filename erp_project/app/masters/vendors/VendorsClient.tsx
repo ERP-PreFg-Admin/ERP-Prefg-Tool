@@ -50,25 +50,34 @@ import { AddVendorDialog } from "./AddVendorDialog"
 import { VendorDocumentsDialog } from "./VendorDocumentsDialog"
 import { EntityHistoryDialog } from "@/components/masters/EntityHistoryDialog"
 // Common fields shared by the CSV importer.
+// `code` is auto-generated server-side on single-record create AND on a
+// bulk-CSV new-record row — never collected from the user directly. In the
+// CSV importer it's the authoritative "this row edits THAT record" signal: a
+// row whose `code` cell matches an existing vendor is an edit of it; a blank
+// `code` (e.g. every row in the downloadable template) is always a new
+// record. `aliases` covers the exported file's "Vendor Code" column header.
 const VENDOR_CSV_FIELDS: MasterField[] = [
+  { key: "code",            label: "Code",            colSpan: 2, placeholder: "Leave blank for a new vendor",
+    aliases: ["Vendor Code"], sample: "" },
   { key: "name",            label: "Name",            required: true, placeholder: "Vendor name",      sample: "Acme Pvt Ltd" },
   {
-    key: "type", label: "Type", type: "select", required: true, default: "rm", colSpan: 2, sample: "rm",
+    key: "type", label: "Type", type: "select", required: true, requiredForCreateOnly: true, colSpan: 2, sample: "rm",
     options: [
       { value: "rm",   label: "RM"   },
       { value: "pm",   label: "PM"   },
       { value: "both", label: "BOTH" },
     ],
   },
-  { key: "registered_name", label: "Registered Name", required: true, placeholder: "Legal registered name", sample: "Acme Pvt Ltd" },
+  { key: "registered_name", label: "Registered Name", required: true, requiredForCreateOnly: true, placeholder: "Legal registered name", sample: "Acme Pvt Ltd" },
   { key: "location",        label: "Location",        placeholder: "e.g. Mumbai",           sample: "Mumbai" },
-  { key: "zone",            label: "Zone",            required: true, type: "select", options: ZONE_OPTIONS, sample: "West",
+  { key: "zone",            label: "Zone",            required: true, requiredForCreateOnly: true, type: "select", options: ZONE_OPTIONS, sample: "West",
     validate: (raw) => (normalizeZone(raw) ? null : `Must be one of: ${ZONE_OPTIONS.map((o) => o.value).join(", ")}`),
     parse: (raw) => normalizeZone(raw) ?? raw },
   { key: "gst_number",      label: "GST Number",      placeholder: "e.g. 27AAEPM1234C1Z5",  sample: "27AAEPM1234C1Z5" },
   { key: "bank_name",       label: "Bank Name",       placeholder: "e.g. HDFC Bank",        sample: "HDFC Bank" },
   { key: "ifsc_number",     label: "IFSC Number",     placeholder: "e.g. HDFC0001234",      sample: "HDFC0001234" },
   { key: "account_number",  label: "Account Number",  placeholder: "e.g. 12345678901234",   sample: "12345678901234" },
+  { key: "remarks",         label: "Remarks",         colSpan: 2, placeholder: "Optional for new records — remarks are required when submitting an edit", sample: "New vendor onboarding" },
 ]
 
 export default function VendorsClient({
@@ -175,6 +184,8 @@ export default function VendorsClient({
             templateFilename="vendor_template.csv"
             fields={VENDOR_CSV_FIELDS}
             onSuccess={refresh}
+            enableDuplicateCheck
+            previewExcel
           />
           <AddVendorDialog onSuccess={refresh} />
         </MasterToolbarActions>

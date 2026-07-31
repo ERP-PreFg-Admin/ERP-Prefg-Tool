@@ -38,9 +38,15 @@ import { EditMfgDialog } from "./EditMfgDialog"
 import { ManufacturerDocumentsDialog } from "./ManufacturerDocumentsDialog"
 import { EntityHistoryDialog } from "@/components/masters/EntityHistoryDialog"
 // Common fields shared by the Add dialog and the CSV import.
-// `code` is auto-generated server-side on both single-record create AND bulk
-// import (MFG-<serial>-<XX>), so it's never collected from the user.
+// `code` is auto-generated server-side on single-record create AND on a
+// bulk-CSV new-record row (MFG-<serial>-<XX>) — it's never collected from
+// the user in the Add form (form: false). In the CSV importer it's the
+// authoritative "this row edits THAT record" signal: a row whose `code`
+// cell matches an existing manufacturer is an edit of it; a blank `code`
+// (e.g. every row in the downloadable template) is always a new record.
 const MFG_COMMON_FIELDS: MasterField[] = [
+  { key: "code",            label: "Code",            form: false, colSpan: 2, placeholder: "Leave blank for a new manufacturer",
+    sample: "" },
   { key: "name",            label: "Name",            required: true, colSpan: 2, placeholder: "Manufacturer name", sample: "Acme Manufacturing",
     duplicateKey: true,
     validate: (raw) => (/^\d+$/.test(raw) ? "Looks numeric, not a name" : null) },

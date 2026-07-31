@@ -48,9 +48,8 @@ import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { mfgActionSchema } from "@/lib/validation/manufacturers"
 import { assertNoDuplicateBankingFields, insertMfgWithGeneratedCode } from "@/lib/master-routes/material-utils"
-import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
 import { type EditCandidate, findBestEditMatch, fetchEditMatchCandidates } from "@/lib/master-routes/edit-match"
-import { resolveMfgBulkRows, submitMfgBulkEdit } from "@/lib/approvals/handlers/manufacturers"
+import { stageMfgBulkRows } from "@/lib/approvals/handlers/manufacturers"
 
 type MfgDetailRow = {
   id: number; mfg_id: number; status: string; location: string | null
@@ -158,49 +157,20 @@ export const POST = withGateway({
       let staged = 0
       let skipped = 0
       try {
-        const resolved = await resolveMfgBulkRows(conn, rows)
-        const createRows = resolved.filter((r) => r.action === "create").map((r) => r.row)
-        const editEntries = resolved.filter((r) => r.action === "edit")
-        skipped = resolved.length - createRows.length - editEntries.length
-
-        if (createRows.length === 0 && editEntries.length === 0) {
-          throw new ApiError(400, "nothing_to_stage", `All ${rows.length} row${rows.length !== 1 ? "s" : ""} were skipped — nothing to submit for approval.`)
-        }
-
-        // Uploading the new-record batch to S3 has no DB side effects, so it
-        // doesn't need to happen inside the transaction below.
-        const s3 = createRows.length > 0
-          ? await uploadRowsAsCsv(createRows, `imports/manufacturers/${new Date().toISOString().slice(0, 7)}`, "mfg_bulk")
-          : null
-
         await conn.beginTransaction()
+        const s3Folder = `imports/manufacturers/${new Date().toISOString().slice(0, 7)}`
+        const result = await stageMfgBulkRows(conn, rows, userId, s3Folder)
+        staged = result.staged
+        skipped = result.skipped
 
-        let editsSubmitted = 0
-        let firstEditApprovalId: number | null = null
-        for (const { row, existing } of editEntries) {
-          const approvalId = await submitMfgBulkEdit(conn, row, existing, userId)
-          if (approvalId == null) { skipped++; continue } // fell back to every current value — nothing actually changed
-          editsSubmitted++
-          firstEditApprovalId ??= approvalId
-        }
-
-        if (createRows.length === 0 && editsSubmitted === 0) {
+        if (staged === 0) {
           throw new ApiError(400, "nothing_to_stage", "Nothing to submit for approval — every row was skipped or had no actual changes.")
-        }
-
-        let batchApprovalId: number | null = null
-        if (s3) {
-          batchApprovalId = await stageBulkUploadApproval(conn, {
-            userId, module: "MFG_BULK", s3Key: s3.key, filename: s3.filename, rowCount: createRows.length,
-          })
         }
         await conn.commit()
 
-        staged = createRows.length + editsSubmitted
-        const approvalId = batchApprovalId ?? firstEditApprovalId
-        logger.info({ ...logCtx, approvalId, staged, skipped, message: "Manufacturer bulk upload staged for approval" })
-        recordProcessedEvent("MFG_BULK", eventId, { source: "csv", staged, skipped, approvalId })
-        return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rows.length })
+        logger.info({ ...logCtx, approvalId: result.approvalId, staged, skipped, message: "Manufacturer bulk upload staged for approval" })
+        recordProcessedEvent("MFG_BULK", eventId, { source: "csv", staged, skipped, approvalId: result.approvalId })
+        return NextResponse.json({ ok: true, approval_id: result.approvalId, staged, skipped, total: rows.length })
       } catch (err: unknown) {
         await conn.rollback()
         const message = err instanceof Error ? err.message : String(err)
@@ -219,18 +189,15 @@ export const POST = withGateway({
     if (body.action === "check_duplicates") {
       const { rows } = body
       const duplicates: Record<number, string[]> = {}
-      // Rows that agree with an existing manufacturer on at least 2 of
-      // {name, registered_name, gst_number} aren't a "duplicate" error —
-      // they're treated as an edit of that record (see mfgBulkHandler). This
-      // lets any ONE of those three fields (most often the name) change
-      // without the row losing its match.
+      // A row whose `code` cell matches an existing manufacturer's business
+      // code isn't a "duplicate" error — it's treated as an edit of that
+      // record (see resolveMfgBulkRows). No code means the row is always a
+      // new record.
       const editMatches: Record<number, { id: number; code: string; current: EditCandidate }> = {}
 
-      const candidates = await fetchEditMatchCandidates<EditCandidate>({
-        selectCandidatesByNames: manufacturers.selectCandidatesByNamesBatch,
-        selectCandidatesByRegisteredNames: manufacturers.selectCandidatesByRegisteredNamesBatch,
-        selectCandidatesByGstNumbers: manufacturers.selectCandidatesByGstNumbersBatch,
-      }, rows)
+      const candidates = await fetchEditMatchCandidates<EditCandidate>(
+        manufacturers.selectCandidatesByCodesBatch, rows
+      )
 
       rows.forEach((row: Record<string, unknown>, i: number) => {
         const match = findBestEditMatch(row, candidates)
@@ -458,51 +425,24 @@ export const POST = withGateway({
       let staged = 0
       let skipped = 0
       try {
-        const resolved = await resolveMfgBulkRows(conn, rawRows)
-        const createRows = resolved.filter((r) => r.action === "create").map((r) => r.row)
-        const editEntries = resolved.filter((r) => r.action === "edit")
-        skipped = resolved.length - createRows.length - editEntries.length
-
-        if (createRows.length === 0 && editEntries.length === 0) {
-          throw new ApiError(400, "nothing_to_stage", `All ${rawRows.length} row${rawRows.length !== 1 ? "s" : ""} were skipped — nothing to submit for approval.`)
-        }
-
-        // The originally-uploaded file (`key`) has every row, edits included
-        // — MFG_BULK's staged file must only ever contain new records (see
-        // the "bulk" action above), so re-upload just the create rows rather
-        // than reusing `key` as-is.
-        const s3 = createRows.length > 0
-          ? await uploadRowsAsCsv(createRows, `imports/manufacturers/${new Date().toISOString().slice(0, 7)}`, "mfg_bulk")
-          : null
-
         await conn.beginTransaction()
+        // Uploading just the create rows to a fresh S3 key — MFG_BULK's
+        // staged file must only ever contain new records (see the "bulk"
+        // action above), so stageMfgBulkRows can't reuse `key` as-is (the
+        // originally-uploaded file has every row, edits included).
+        const s3Folder = `imports/manufacturers/${new Date().toISOString().slice(0, 7)}`
+        const result = await stageMfgBulkRows(conn, rawRows, userId, s3Folder)
+        staged = result.staged
+        skipped = result.skipped
 
-        let editsSubmitted = 0
-        let firstEditApprovalId: number | null = null
-        for (const { row, existing } of editEntries) {
-          const approvalId = await submitMfgBulkEdit(conn, row, existing, userId)
-          if (approvalId == null) { skipped++; continue }
-          editsSubmitted++
-          firstEditApprovalId ??= approvalId
-        }
-
-        if (createRows.length === 0 && editsSubmitted === 0) {
+        if (staged === 0) {
           throw new ApiError(400, "nothing_to_stage", "Nothing to submit for approval — every row was skipped or had no actual changes.")
-        }
-
-        let batchApprovalId: number | null = null
-        if (s3) {
-          batchApprovalId = await stageBulkUploadApproval(conn, {
-            userId, module: "MFG_BULK", s3Key: s3.key, filename: s3.filename, rowCount: createRows.length,
-          })
         }
         await conn.commit()
 
-        staged = createRows.length + editsSubmitted
-        const approvalId = batchApprovalId ?? firstEditApprovalId
-        logger.info({ ...logCtx, approvalId, staged, skipped, message: "Manufacturer bulk upload (S3) staged for approval" })
-        recordProcessedEvent("MFG_BULK", eventId, { source: "s3", s3Key: key, staged, skipped, approvalId })
-        return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rawRows.length })
+        logger.info({ ...logCtx, approvalId: result.approvalId, staged, skipped, message: "Manufacturer bulk upload (S3) staged for approval" })
+        recordProcessedEvent("MFG_BULK", eventId, { source: "s3", s3Key: key, staged, skipped, approvalId: result.approvalId })
+        return NextResponse.json({ ok: true, approval_id: result.approvalId, staged, skipped, total: rawRows.length })
       } catch (err: unknown) {
         await conn.rollback()
         const message = err instanceof Error ? err.message : String(err)
