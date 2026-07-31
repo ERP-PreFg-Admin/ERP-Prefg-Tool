@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import type { Sku } from "@/types/masters"
 
 type RejectionInfo = {
@@ -36,6 +37,7 @@ export function EditSkuDialog({
     subcategory: sku?.subcategory ?? "",
     mrp: sku?.mrp != null ? String(sku.mrp) : "",
     status: sku?.status ?? "active",
+    remarks: "",
   })
   const [saving, setSaving] = useState(false)
   const [submitted, setSubmitted] = useState(false)
@@ -53,6 +55,7 @@ export function EditSkuDialog({
         subcategory: sku.subcategory ?? "",
         mrp: sku.mrp != null ? String(sku.mrp) : "",
         status: sku.status ?? "active",
+        remarks: "",
       })
       setSubmitted(false)
       setError(null)
@@ -82,8 +85,10 @@ export function EditSkuDialog({
     setForm((f) => ({ ...f, [key]: value }))
   }
 
+  const remarksMissing = !form.remarks.trim()
+
   async function handleSave() {
-    if (!canEdit || isInReview) return
+    if (!canEdit || isInReview || remarksMissing) return
     setSaving(true)
     setError(null)
     try {
@@ -182,6 +187,18 @@ export function EditSkuDialog({
             </div>
           </div>
 
+          {/* Row 4: Remarks (mandatory — reason for this edit, archived to history_masters_edits) */}
+          <div className="grid gap-1">
+            <Label>Remarks <span className="text-destructive">*</span></Label>
+            <p className="text-xs text-muted-foreground">Remarks are required for every edit — briefly explain the reason for this change.</p>
+            <Textarea
+              value={form.remarks}
+              onChange={(e) => set("remarks", e.target.value)}
+              disabled={isInReview || !canEdit}
+              placeholder="Reason for this change…"
+            />
+          </div>
+
           {submitted && <p className="text-sm text-emerald-600 font-medium">Edit submitted for approval.</p>}
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
@@ -189,7 +206,7 @@ export function EditSkuDialog({
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           {!isInReview && (
-            <Button onClick={handleSave} disabled={saving || !canEdit || submitted}>
+            <Button onClick={handleSave} disabled={saving || !canEdit || submitted || remarksMissing}>
               {saving ? "Saving…" : "Submit for Approval"}
             </Button>
           )}

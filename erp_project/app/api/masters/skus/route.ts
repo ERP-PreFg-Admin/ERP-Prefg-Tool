@@ -106,7 +106,7 @@ export const POST = withGateway({
 
     // ── update (approval flow) ───────────────────────────────────────────────────
     if (body.action === "update") {
-      const { id, category, subcategory, sku_type, mrp, status } = body
+      const { id, category, subcategory, sku_type, mrp, status, remarks } = body
 
       const eventId = makeEventId("SKU_UPDATE", "update", id)
       const logCtx = { ...ctx, eventId, module: "SKU_UPDATE" }
@@ -185,7 +185,7 @@ export const POST = withGateway({
           module: "SKU",
           entityId: Number(id),
           actionType: "edit",
-          remarks: null,
+          remarks: remarks.trim(),
           createdBy: userId,
         })
         await conn.commit()

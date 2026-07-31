@@ -38,6 +38,8 @@ export const mfgUpdateSchema = z.object({
   account_number: accountNumberField,
   email: emailField,
   status: z.string().optional(),
+  /** Mandatory reason for this edit — archived to history_masters_edits.remarks. */
+  remarks: z.string().trim().min(1, "Remarks are required"),
 })
 
 export const mfgBulkFromS3Schema = z.object({
