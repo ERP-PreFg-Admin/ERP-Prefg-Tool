@@ -10,15 +10,22 @@
 //     Response 200 { ok, approval_id } · 400 (validation, via withGateway) · 500 { error }
 //
 //   Request  { action: "bulk", rows: [{ name, ... }, ...] }
-//     Process → stages the WHOLE batch as ONE pending approval (module
-//       "MFG_BULK") — rows are uploaded to S3 and nothing is inserted into
-//       master_mfgs until an admin approves. See MFG_BULK's handler in
-//       lib/approvals/module-handlers.ts, which does the real insert.
+//     Process → rows recognized as an edit of an existing manufacturer (see
+//       resolveMfgBulkRows) are submitted immediately as their own real MFG
+//       approval — same insertApproval/insertApprovalItem/setStatus sequence
+//       as the single-record "update" action, so each shows up (with a real
+//       field diff) in that manufacturer's History dialog right away. Rows
+//       that don't match anything are new records: bundled together and
+//       staged as ONE pending "MFG_BULK" approval (S3 file, nothing inserted
+//       into master_mfgs until an admin approves — see MFG_BULK's handler in
+//       lib/approvals/module-handlers.ts). `approval_id` in the response is
+//       whichever of these got created (arbitrary if both did — it's only
+//       used client-side as a truthy "this went through approval" signal).
 //     Response 200 { ok, approval_id, staged, skipped, total } · 500 { error }
 //
 //   Request  { action: "bulk_from_s3", key }
-//     Process → same staging behaviour as "bulk", but the file is already in
-//       S3 — just parsed for a preview count, no second upload.
+//     Process → same split staging behaviour as "bulk", but the file is
+//       already in S3 — just parsed, no second upload for the create rows.
 //     Response 200 { ok, approval_id, staged, skipped, total } · 500 { error }
 //
 //   Request  { action: "update_docs", mfg_id, gst_certificate_key?, cancelled_cheque_key?, pan_card_key?, misc_document_key? }
@@ -33,14 +40,17 @@ import type { ResultSetHeader } from "mysql2/promise"
 import { pool, query } from "@/lib/db"
 import { manufacturers } from "@/lib/queries/manufacturers"
 import { approvalsSql } from "@/lib/queries/approvals"
+import { insertHistoryEntry } from "@/lib/master-routes/history-utils"
 import { parseS3Import } from "@/lib/import-s3"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { mfgActionSchema } from "@/lib/validation/manufacturers"
-import { assertNoDuplicateBankingFields, findDuplicateBankingField, insertMfgWithGeneratedCode } from "@/lib/master-routes/material-utils"
+import { assertNoDuplicateBankingFields, insertMfgWithGeneratedCode } from "@/lib/master-routes/material-utils"
 import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
+import { type EditCandidate, findBestEditMatch, fetchEditMatchCandidates } from "@/lib/master-routes/edit-match"
+import { resolveMfgBulkRows, submitMfgBulkEdit } from "@/lib/approvals/handlers/manufacturers"
 
 type MfgDetailRow = {
   id: number; mfg_id: number; status: string; location: string | null
@@ -132,9 +142,11 @@ export const POST = withGateway({
     }
 
     // ── bulk (client-side CSV) ───────────────────────────────────────────────────
-    // Stages the WHOLE batch as one pending approval — nothing is inserted
-    // into master_mfgs until an admin approves (see the MFG_BULK handler in
-    // lib/approvals/module-handlers.ts).
+    // Edits are submitted as their own real MFG approvals immediately; new
+    // records are bundled into ONE pending "MFG_BULK" approval — nothing is
+    // inserted into master_mfgs for those until an admin approves (see the
+    // MFG_BULK handler in lib/approvals/module-handlers.ts). See the doc
+    // comment at the top of this file for why edits are split out.
     if (body.action === "bulk") {
       const { rows } = body
       const eventId = makeEventId("MFG_BULK", "bulk")
@@ -146,23 +158,46 @@ export const POST = withGateway({
       let staged = 0
       let skipped = 0
       try {
-        for (const row of rows) {
-          if (!row.name?.trim() || !row.registered_name?.trim() || !row.gst_number?.trim() || !row.zone?.trim()) { skipped++; continue }
-          const dup = await findDuplicateBankingField(conn, manufacturers, {
-            gst_number: row.gst_number, ifsc_number: row.ifsc_number, account_number: row.account_number,
-          }, 0)
-          if (dup) { skipped++; continue }
-          staged++
+        const resolved = await resolveMfgBulkRows(conn, rows)
+        const createRows = resolved.filter((r) => r.action === "create").map((r) => r.row)
+        const editEntries = resolved.filter((r) => r.action === "edit")
+        skipped = resolved.length - createRows.length - editEntries.length
+
+        if (createRows.length === 0 && editEntries.length === 0) {
+          throw new ApiError(400, "nothing_to_stage", `All ${rows.length} row${rows.length !== 1 ? "s" : ""} were skipped — nothing to submit for approval.`)
         }
 
-        const yyyymm = new Date().toISOString().slice(0, 7)
-        const { key, filename } = await uploadRowsAsCsv(rows, `imports/manufacturers/${yyyymm}`, "mfg_bulk")
+        // Uploading the new-record batch to S3 has no DB side effects, so it
+        // doesn't need to happen inside the transaction below.
+        const s3 = createRows.length > 0
+          ? await uploadRowsAsCsv(createRows, `imports/manufacturers/${new Date().toISOString().slice(0, 7)}`, "mfg_bulk")
+          : null
 
         await conn.beginTransaction()
-        const approvalId = await stageBulkUploadApproval(conn, {
-          userId, module: "MFG_BULK", s3Key: key, filename, rowCount: rows.length,
-        })
+
+        let editsSubmitted = 0
+        let firstEditApprovalId: number | null = null
+        for (const { row, existing } of editEntries) {
+          const approvalId = await submitMfgBulkEdit(conn, row, existing, userId)
+          if (approvalId == null) { skipped++; continue } // fell back to every current value — nothing actually changed
+          editsSubmitted++
+          firstEditApprovalId ??= approvalId
+        }
+
+        if (createRows.length === 0 && editsSubmitted === 0) {
+          throw new ApiError(400, "nothing_to_stage", "Nothing to submit for approval — every row was skipped or had no actual changes.")
+        }
+
+        let batchApprovalId: number | null = null
+        if (s3) {
+          batchApprovalId = await stageBulkUploadApproval(conn, {
+            userId, module: "MFG_BULK", s3Key: s3.key, filename: s3.filename, rowCount: createRows.length,
+          })
+        }
         await conn.commit()
+
+        staged = createRows.length + editsSubmitted
+        const approvalId = batchApprovalId ?? firstEditApprovalId
         logger.info({ ...logCtx, approvalId, staged, skipped, message: "Manufacturer bulk upload staged for approval" })
         recordProcessedEvent("MFG_BULK", eventId, { source: "csv", staged, skipped, approvalId })
         return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rows.length })
@@ -172,6 +207,7 @@ export const POST = withGateway({
         const stack = err instanceof Error ? err.stack : undefined
         logger.warn({ ...logCtx, staged, skipped, message: "Transaction rolled back" })
         recordFailedEvent("MFG_BULK", eventId, { source: "csv", rowCount: rows.length }, message)
+        if (err instanceof ApiError) throw err
         logger.error({ ...logCtx, err: message, stack, message: "Manufacturer bulk upload failed" })
         throw new ApiError(500, "internal", "Bulk upload failed: " + message)
       } finally {
@@ -183,9 +219,25 @@ export const POST = withGateway({
     if (body.action === "check_duplicates") {
       const { rows } = body
       const duplicates: Record<number, string[]> = {}
+      // Rows that agree with an existing manufacturer on at least 2 of
+      // {name, registered_name, gst_number} aren't a "duplicate" error —
+      // they're treated as an edit of that record (see mfgBulkHandler). This
+      // lets any ONE of those three fields (most often the name) change
+      // without the row losing its match.
+      const editMatches: Record<number, { id: number; code: string; current: EditCandidate }> = {}
+
+      const candidates = await fetchEditMatchCandidates<EditCandidate>({
+        selectCandidatesByNames: manufacturers.selectCandidatesByNamesBatch,
+        selectCandidatesByRegisteredNames: manufacturers.selectCandidatesByRegisteredNamesBatch,
+        selectCandidatesByGstNumbers: manufacturers.selectCandidatesByGstNumbersBatch,
+      }, rows)
+
+      rows.forEach((row: Record<string, unknown>, i: number) => {
+        const match = findBestEditMatch(row, candidates)
+        if (match) editMatches[i] = { id: match.id, code: match.code, current: match }
+      })
 
       const fieldChecks: [string, string, string][] = [
-        ["name", manufacturers.checkDuplicateNameBatch, "Name"],
         ["gst_number", manufacturers.checkDuplicateGstBatch, "GST number"],
         ["ifsc_number", manufacturers.checkDuplicateIfscBatch, "IFSC code"],
         ["account_number", manufacturers.checkDuplicateAccountNumberBatch, "Account number"],
@@ -203,6 +255,9 @@ export const POST = withGateway({
         const codeByValue = new Map(matches.map((m) => [m.value, m.code]))
 
         rows.forEach((row: Record<string, unknown>, i: number) => {
+          // A row already recognized as an edit-of-existing-record (by name)
+          // legitimately reuses its own GST/IFSC/account — don't flag those.
+          if (editMatches[i]) return
           const val = String(row[field] ?? "").trim()
           const code = val && codeByValue.get(val)
           if (code) {
@@ -211,7 +266,7 @@ export const POST = withGateway({
         })
       }
 
-      return NextResponse.json({ duplicates })
+      return NextResponse.json({ duplicates, editMatches })
     }
 
     // ── update_docs (approval flow) ──────────────────────────────────────────────
@@ -280,7 +335,7 @@ export const POST = withGateway({
 
     // ── update (approval flow) ───────────────────────────────────────────────────
     if (body.action === "update") {
-      const { mfg_id, name, location, gst_number, status, registered_name, zone, bank_name, ifsc_number, account_number, email } = body
+      const { mfg_id, name, location, gst_number, status, registered_name, zone, bank_name, ifsc_number, account_number, email, remarks } = body
 
       const eventId = makeEventId("MFG_UPDATE", "update", mfg_id)
       const logCtx = { ...ctx, eventId, module: "MFG_UPDATE" }
@@ -350,6 +405,13 @@ export const POST = withGateway({
           ])
         }
         await conn.execute(manufacturers.setStatus, ["in_review", mfg_id])
+        await insertHistoryEntry(conn, {
+          module: "MFG",
+          entityId: Number(mfg_id),
+          actionType: "edit",
+          remarks: remarks.trim(),
+          createdBy: userId,
+        })
         await conn.commit()
         logger.info({ ...logCtx, mfg_id, approvalId, message: "Manufacturer update submitted for approval" })
 
@@ -396,22 +458,48 @@ export const POST = withGateway({
       let staged = 0
       let skipped = 0
       try {
-        for (const row of rawRows) {
-          const name = row["name"]?.trim()
-          if (!name || !row["registered_name"]?.trim() || !row["gst_number"]?.trim() || !row["zone"]?.trim()) { skipped++; continue }
-          const dup = await findDuplicateBankingField(conn, manufacturers, {
-            gst_number: row["gst_number"], ifsc_number: row["ifsc_number"], account_number: row["account_number"],
-          }, 0)
-          if (dup) { skipped++; continue }
-          staged++
+        const resolved = await resolveMfgBulkRows(conn, rawRows)
+        const createRows = resolved.filter((r) => r.action === "create").map((r) => r.row)
+        const editEntries = resolved.filter((r) => r.action === "edit")
+        skipped = resolved.length - createRows.length - editEntries.length
+
+        if (createRows.length === 0 && editEntries.length === 0) {
+          throw new ApiError(400, "nothing_to_stage", `All ${rawRows.length} row${rawRows.length !== 1 ? "s" : ""} were skipped — nothing to submit for approval.`)
         }
 
-        const filename = key.split("/").pop() ?? key
+        // The originally-uploaded file (`key`) has every row, edits included
+        // — MFG_BULK's staged file must only ever contain new records (see
+        // the "bulk" action above), so re-upload just the create rows rather
+        // than reusing `key` as-is.
+        const s3 = createRows.length > 0
+          ? await uploadRowsAsCsv(createRows, `imports/manufacturers/${new Date().toISOString().slice(0, 7)}`, "mfg_bulk")
+          : null
+
         await conn.beginTransaction()
-        const approvalId = await stageBulkUploadApproval(conn, {
-          userId, module: "MFG_BULK", s3Key: key, filename, rowCount: rawRows.length,
-        })
+
+        let editsSubmitted = 0
+        let firstEditApprovalId: number | null = null
+        for (const { row, existing } of editEntries) {
+          const approvalId = await submitMfgBulkEdit(conn, row, existing, userId)
+          if (approvalId == null) { skipped++; continue }
+          editsSubmitted++
+          firstEditApprovalId ??= approvalId
+        }
+
+        if (createRows.length === 0 && editsSubmitted === 0) {
+          throw new ApiError(400, "nothing_to_stage", "Nothing to submit for approval — every row was skipped or had no actual changes.")
+        }
+
+        let batchApprovalId: number | null = null
+        if (s3) {
+          batchApprovalId = await stageBulkUploadApproval(conn, {
+            userId, module: "MFG_BULK", s3Key: s3.key, filename: s3.filename, rowCount: createRows.length,
+          })
+        }
         await conn.commit()
+
+        staged = createRows.length + editsSubmitted
+        const approvalId = batchApprovalId ?? firstEditApprovalId
         logger.info({ ...logCtx, approvalId, staged, skipped, message: "Manufacturer bulk upload (S3) staged for approval" })
         recordProcessedEvent("MFG_BULK", eventId, { source: "s3", s3Key: key, staged, skipped, approvalId })
         return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rawRows.length })
@@ -421,6 +509,7 @@ export const POST = withGateway({
         const stack = err instanceof Error ? err.stack : undefined
         logger.warn({ ...logCtx, staged, skipped, message: "Transaction rolled back" })
         recordFailedEvent("MFG_BULK", eventId, { source: "s3", s3Key: key }, message)
+        if (err instanceof ApiError) throw err
         logger.error({ ...logCtx, err: message, stack, message: "Manufacturer bulk upload (S3) failed" })
         throw new ApiError(500, "internal", "Import failed: " + message)
       } finally {

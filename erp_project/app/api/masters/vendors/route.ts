@@ -16,16 +16,24 @@
 //     Response 200 { ok, approval_id } · 400 (validation, via withGateway) · 500 { error }
 //
 //   Request  { action: "bulk", rows: [{ name, type, location?, ... }, ...] }
-//     Process → stages the WHOLE batch as ONE pending approval (module
-//       "VENDOR_BULK") — rows are uploaded to S3 and nothing is inserted into
-//       master_vendors until an admin approves. See VENDOR_BULK's handler in
-//       lib/approvals/module-handlers.ts, which does the real insert.
+//     Process → rows recognized as an edit of an existing vendor (see
+//       resolveVendorBulkRows) are submitted immediately as their own real
+//       VENDOR approval — same insertApproval/insertApprovalItem/setStatus
+//       sequence as the single-record "update" action, so each shows up
+//       (with a real field diff) in that vendor's History dialog right
+//       away. Rows that don't match anything are new records: bundled
+//       together and staged as ONE pending "VENDOR_BULK" approval (S3 file,
+//       nothing inserted into master_vendors until an admin approves — see
+//       VENDOR_BULK's handler in lib/approvals/module-handlers.ts).
+//       `approval_id` in the response is whichever of these got created
+//       (arbitrary if both did — only used client-side as a truthy "this
+//       went through approval" signal).
 //     Response 200 { ok, approval_id, staged, skipped, total } · 500 { error }
 //
 //   Request  { action: "bulk_from_s3", key }
-//     Process → same staging behaviour as "bulk", but the file is already in
-//       S3 (client uploaded it via /api/upload) — just parsed for a preview
-//       count, no second upload.
+//     Process → same split staging behaviour as "bulk", but the file is
+//       already in S3 (client uploaded it via /api/upload) — just parsed,
+//       no second upload for the create rows.
 //     Response 200 { ok, approval_id, staged, skipped, total } · 500 { error }
 //
 // Auth + body validation handled by withGateway (see lib/gateway/with-gateway.ts).
@@ -35,14 +43,17 @@ import { NextResponse } from "next/server"
 import { pool, query } from "@/lib/db"
 import { vendors } from "@/lib/queries/vendors"
 import { approvalsSql } from "@/lib/queries/approvals"
+import { insertHistoryEntry } from "@/lib/master-routes/history-utils"
 import { parseS3Import } from "@/lib/import-s3"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { vendorActionSchema } from "@/lib/validation/vendors"
-import { assertNoDuplicateBankingFields, findDuplicateBankingField, insertVendorWithGeneratedCode } from "@/lib/master-routes/material-utils"
+import { assertNoDuplicateBankingFields, insertVendorWithGeneratedCode } from "@/lib/master-routes/material-utils"
 import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
+import { type EditCandidate, findBestEditMatch, fetchEditMatchCandidates } from "@/lib/master-routes/edit-match"
+import { resolveVendorBulkRows, submitVendorBulkEdit } from "@/lib/approvals/handlers/vendors"
 
 export const POST = withGateway({
   schema: vendorActionSchema,
@@ -126,9 +137,11 @@ export const POST = withGateway({
     }
 
     // ── bulk (client-side CSV) ───────────────────────────────────────────────────
-    // Stages the WHOLE batch as one pending approval — nothing is inserted
-    // into master_vendors until an admin approves (see the VENDOR_BULK
-    // handler in lib/approvals/module-handlers.ts).
+    // Edits are submitted as their own real VENDOR approvals immediately;
+    // new records are bundled into ONE pending "VENDOR_BULK" approval —
+    // nothing is inserted into master_vendors for those until an admin
+    // approves (see the VENDOR_BULK handler in lib/approvals/module-handlers.ts).
+    // See the doc comment at the top of this file for why edits are split out.
     if (body.action === "bulk") {
       const { rows } = body
       const eventId = makeEventId("VENDOR_BULK", "bulk")
@@ -143,23 +156,46 @@ export const POST = withGateway({
         // Preview-only validation (no writes yet) — same skip rules used by
         // the VENDOR_BULK handler at approval time, since data may drift
         // between now and then.
-        for (const row of rows) {
-          if (!row.name?.trim() || !row.type?.trim() || !row.registered_name?.trim() || !row.zone?.trim()) { skipped++; continue }
-          const dup = await findDuplicateBankingField(conn, vendors, {
-            gst_number: row.gst_number, ifsc_number: row.ifsc_number, account_number: row.account_number,
-          }, 0)
-          if (dup) { skipped++; continue }
-          staged++
+        const resolved = await resolveVendorBulkRows(conn, rows)
+        const createRows = resolved.filter((r) => r.action === "create").map((r) => r.row)
+        const editEntries = resolved.filter((r) => r.action === "edit")
+        skipped = resolved.length - createRows.length - editEntries.length
+
+        if (createRows.length === 0 && editEntries.length === 0) {
+          throw new ApiError(400, "nothing_to_stage", `All ${rows.length} row${rows.length !== 1 ? "s" : ""} were skipped — nothing to submit for approval.`)
         }
 
-        const yyyymm = new Date().toISOString().slice(0, 7)
-        const { key, filename } = await uploadRowsAsCsv(rows, `imports/vendors/${yyyymm}`, "vendor_bulk")
+        // Uploading the new-record batch to S3 has no DB side effects, so it
+        // doesn't need to happen inside the transaction below.
+        const s3 = createRows.length > 0
+          ? await uploadRowsAsCsv(createRows, `imports/vendors/${new Date().toISOString().slice(0, 7)}`, "vendor_bulk")
+          : null
 
         await conn.beginTransaction()
-        const approvalId = await stageBulkUploadApproval(conn, {
-          userId, module: "VENDOR_BULK", s3Key: key, filename, rowCount: rows.length,
-        })
+
+        let editsSubmitted = 0
+        let firstEditApprovalId: number | null = null
+        for (const { row, existing } of editEntries) {
+          const approvalId = await submitVendorBulkEdit(conn, row, existing, userId)
+          if (approvalId == null) { skipped++; continue } // fell back to every current value — nothing actually changed
+          editsSubmitted++
+          firstEditApprovalId ??= approvalId
+        }
+
+        if (createRows.length === 0 && editsSubmitted === 0) {
+          throw new ApiError(400, "nothing_to_stage", "Nothing to submit for approval — every row was skipped or had no actual changes.")
+        }
+
+        let batchApprovalId: number | null = null
+        if (s3) {
+          batchApprovalId = await stageBulkUploadApproval(conn, {
+            userId, module: "VENDOR_BULK", s3Key: s3.key, filename: s3.filename, rowCount: createRows.length,
+          })
+        }
         await conn.commit()
+
+        staged = createRows.length + editsSubmitted
+        const approvalId = batchApprovalId ?? firstEditApprovalId
         logger.info({ ...logCtx, approvalId, staged, skipped, message: "Vendor bulk upload staged for approval" })
         recordProcessedEvent("VENDOR_BULK", eventId, { source: "csv", staged, skipped, approvalId })
         return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rows.length })
@@ -169,6 +205,7 @@ export const POST = withGateway({
         await conn.rollback()
         logger.warn({ ...logCtx, staged, skipped, message: "Transaction rolled back" })
         recordFailedEvent("VENDOR_BULK", eventId, { source: "csv", rowCount: rows.length }, message)
+        if (err instanceof ApiError) throw err
         logger.error({ ...logCtx, err: message, stack, message: "Vendor bulk upload failed." })
         throw new ApiError(500, "internal", "Bulk upload failed: " + message)
       } finally {
@@ -177,10 +214,62 @@ export const POST = withGateway({
       }
     }
 
+    // ── check_duplicates (read-only CSV-preview helper) ─────────────────────────
+    // Mirrors manufacturers/route.ts's action of the same name.
+    if (body.action === "check_duplicates") {
+      const { rows } = body
+      const duplicates: Record<number, string[]> = {}
+      // Rows that agree with an existing vendor on at least 2 of
+      // {name, registered_name, gst_number} aren't a "duplicate" error —
+      // they're treated as an edit of that record (see vendorBulkHandler).
+      // This lets any ONE of those three fields (most often the name) change
+      // without the row losing its match.
+      const editMatches: Record<number, { id: number; code: string; current: EditCandidate }> = {}
+
+      const candidates = await fetchEditMatchCandidates<EditCandidate>({
+        selectCandidatesByNames: vendors.selectCandidatesByNamesBatch,
+        selectCandidatesByRegisteredNames: vendors.selectCandidatesByRegisteredNamesBatch,
+        selectCandidatesByGstNumbers: vendors.selectCandidatesByGstNumbersBatch,
+      }, rows)
+
+      rows.forEach((row: Record<string, unknown>, i: number) => {
+        const match = findBestEditMatch(row, candidates)
+        if (match) editMatches[i] = { id: match.id, code: match.code, current: match }
+      })
+
+      const fieldChecks: [string, string, string][] = [
+        ["gst_number", vendors.checkDuplicateGstBatch, "GST number"],
+        ["ifsc_number", vendors.checkDuplicateIfscBatch, "IFSC code"],
+        ["account_number", vendors.checkDuplicateAccountNumberBatch, "Account number"],
+      ]
+
+      for (const [field, sql, label] of fieldChecks) {
+        const values = [...new Set(
+          rows.map((r: Record<string, unknown>) => String(r[field] ?? "").trim()).filter(Boolean)
+        )]
+        if (values.length === 0) continue
+
+        const matches = await query<{ code: string; value: string }>(sql, [values])
+        if (matches.length === 0) continue
+        const codeByValue = new Map(matches.map((m) => [m.value, m.code]))
+
+        rows.forEach((row: Record<string, unknown>, i: number) => {
+          if (editMatches[i]) return
+          const val = String(row[field] ?? "").trim()
+          const code = val && codeByValue.get(val)
+          if (code) {
+            ;(duplicates[i] ??= []).push(`${label} "${val}" is already used by ${code}`)
+          }
+        })
+      }
+
+      return NextResponse.json({ duplicates, editMatches })
+    }
+
     // ── update (approval flow) ───────────────────────────────────────────────────
     if (body.action === "update") {
       const { vendor_id, name, type, location, status, zone, registered_name,
-              gst_number, bank_name, ifsc_number, account_number } = body
+              gst_number, bank_name, ifsc_number, account_number, remarks } = body
 
       const eventId = makeEventId("VENDOR_UPDATE", "update", vendor_id)
       const logCtx = { ...ctx, eventId, module: "VENDOR_UPDATE" }
@@ -255,6 +344,13 @@ export const POST = withGateway({
         }
 
         await conn.execute(vendors.setStatus, ["in_review", vendor_id])
+        await insertHistoryEntry(conn, {
+          module: "VENDOR",
+          entityId: Number(vendor_id),
+          actionType: "edit",
+          remarks: remarks.trim(),
+          createdBy: userId,
+        })
 
         await conn.commit()
         logger.info({ ...logCtx, vendor_id, approvalId, message: "Vendor update submitted for approval" })
@@ -303,23 +399,48 @@ export const POST = withGateway({
       let staged = 0
       let skipped = 0
       try {
-        for (const row of rawRows) {
-          const name = row["name"]?.trim()
-          const type = row["type"]?.trim()
-          if (!name || !type || !row["registered_name"]?.trim() || !row["zone"]?.trim()) { skipped++; continue }
-          const dup = await findDuplicateBankingField(conn, vendors, {
-            gst_number: row["gst_number"], ifsc_number: row["ifsc_number"], account_number: row["account_number"],
-          }, 0)
-          if (dup) { skipped++; continue }
-          staged++
+        const resolved = await resolveVendorBulkRows(conn, rawRows)
+        const createRows = resolved.filter((r) => r.action === "create").map((r) => r.row)
+        const editEntries = resolved.filter((r) => r.action === "edit")
+        skipped = resolved.length - createRows.length - editEntries.length
+
+        if (createRows.length === 0 && editEntries.length === 0) {
+          throw new ApiError(400, "nothing_to_stage", `All ${rawRows.length} row${rawRows.length !== 1 ? "s" : ""} were skipped — nothing to submit for approval.`)
         }
 
-        const filename = key.split("/").pop() ?? key
+        // The originally-uploaded file (`key`) has every row, edits included
+        // — VENDOR_BULK's staged file must only ever contain new records
+        // (see the "bulk" action above), so re-upload just the create rows
+        // rather than reusing `key` as-is.
+        const s3 = createRows.length > 0
+          ? await uploadRowsAsCsv(createRows, `imports/vendors/${new Date().toISOString().slice(0, 7)}`, "vendor_bulk")
+          : null
+
         await conn.beginTransaction()
-        const approvalId = await stageBulkUploadApproval(conn, {
-          userId, module: "VENDOR_BULK", s3Key: key, filename, rowCount: rawRows.length,
-        })
+
+        let editsSubmitted = 0
+        let firstEditApprovalId: number | null = null
+        for (const { row, existing } of editEntries) {
+          const approvalId = await submitVendorBulkEdit(conn, row, existing, userId)
+          if (approvalId == null) { skipped++; continue }
+          editsSubmitted++
+          firstEditApprovalId ??= approvalId
+        }
+
+        if (createRows.length === 0 && editsSubmitted === 0) {
+          throw new ApiError(400, "nothing_to_stage", "Nothing to submit for approval — every row was skipped or had no actual changes.")
+        }
+
+        let batchApprovalId: number | null = null
+        if (s3) {
+          batchApprovalId = await stageBulkUploadApproval(conn, {
+            userId, module: "VENDOR_BULK", s3Key: s3.key, filename: s3.filename, rowCount: createRows.length,
+          })
+        }
         await conn.commit()
+
+        staged = createRows.length + editsSubmitted
+        const approvalId = batchApprovalId ?? firstEditApprovalId
         logger.info({ ...logCtx, approvalId, staged, skipped, message: "Vendor bulk upload (S3) staged for approval" })
         recordProcessedEvent("VENDOR_BULK", eventId, { source: "s3", s3Key: key, staged, skipped, approvalId })
         return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rawRows.length })
@@ -329,6 +450,7 @@ export const POST = withGateway({
         await conn.rollback()
         logger.warn({ ...logCtx, staged, skipped, message: "Transaction rolled back" })
         recordFailedEvent("VENDOR_BULK", eventId, { source: "s3", s3Key: key }, message)
+        if (err instanceof ApiError) throw err
         logger.error({ ...logCtx, err: message, stack, message: "Vendor bulk upload (S3) failed" })
         throw new ApiError(500, "internal", "Import failed: " + message)
       } finally {

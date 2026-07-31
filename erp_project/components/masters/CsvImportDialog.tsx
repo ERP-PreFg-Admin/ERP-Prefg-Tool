@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState } from "react"
@@ -11,6 +12,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
+import { useToast } from "@/components/ui/toast"
 import {
   type MasterField,
   type ParsedRow,
@@ -21,6 +23,7 @@ import {
   isFlagged,
   rowRemark,
   buildFlaggedCsv,
+  normalizeHeader,
 } from "./field-config"
 
 export function CsvImportDialog({
@@ -63,11 +66,11 @@ export function CsvImportDialog({
   const cols = csvFields(fields)
   const plural = entityLabelPlural ?? `${entityLabel}s`
 
+  const { toast } = useToast()
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<ParsedRow[]>([])
   const [filename, setFilename] = useState("")
   const [error, setError] = useState("")
-  const [success, setSuccess] = useState("")
   const [loading, setLoading] = useState(false)
   const [checkingDuplicates, setCheckingDuplicates] = useState(false)
   const [parsingExcel, setParsingExcel] = useState(false)
@@ -83,6 +86,8 @@ export function CsvImportDialog({
   const valid = rows.filter((r) => !isFlagged(r))
   const invalid = rows.filter(isFlagged)
   const blockedByInvalid = !!requireAllValid && invalid.length > 0
+  const editRows = rows.filter((r) => r._edit)
+  const newRows = rows.filter((r) => !r._edit)
 
   const requiredKeys = cols.filter((f) => f.required).map((f) => f.key)
   const optionalKeys = cols.filter((f) => !f.required).map((f) => f.key)
@@ -91,7 +96,6 @@ export function CsvImportDialog({
     setRows([])
     setFilename("")
     setError("")
-    setSuccess("")
     setOpen(true)
   }
 
@@ -100,7 +104,6 @@ export function CsvImportDialog({
     if (!file) return
     setFilename(file.name)
     setError("")
-    setSuccess("")
     setRows([])
     setS3Key(null)
 
@@ -171,7 +174,7 @@ export function CsvImportDialog({
         v == null ? "" : String(v).trim()
       )
       if (rowNumber === 1) {
-        headers = values.map((h) => h.toLowerCase())
+        headers = values.map(normalizeHeader)
         return
       }
       if (values.every((v) => !v)) return
@@ -191,7 +194,7 @@ export function CsvImportDialog({
       // validate() carries _remarks as a string[], which fails that schema
       // for the WHOLE array and 400s the request (silently, via the catch
       // below) if left in.
-      const plainRows = parsed.map(({ _error, _remarks, ...fields }) => fields)
+      const plainRows = parsed.map(({ _error, _remarks, _edit, ...fields }) => fields)
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -200,11 +203,49 @@ export function CsvImportDialog({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Duplicate check failed")
       const duplicates: Record<number, string[]> = data.duplicates ?? {}
+      // Rows the server recognizes as an edit of an existing record (not a
+      // blocking duplicate) — only populated by modules that opt into this
+      // (manufacturers/vendors' check_duplicates action); absent everywhere
+      // else, so this is a no-op for every other CsvImportDialog consumer.
+      // `current` carries the matched record's existing field values, used
+      // below to build the before/after change list shown in the Edits table.
+      const editMatches: Record<number, { id: number; code: string; current: Record<string, unknown> }> = data.editMatches ?? {}
+      // Fields only required when a row turns out to be a NEW record — see
+      // requiredForCreateOnly on MasterField. Deferred here because whether a
+      // row is new vs. an edit is only known once editMatches comes back.
+      const createOnlyFields = cols.filter((f) => f.required && f.requiredForCreateOnly)
       setRows((prev) =>
         prev.map((row, i) => {
           const msgs = duplicates[i]
-          if (!msgs?.length) return row
-          return { ...row, _remarks: [...(row._remarks ?? []), ...msgs] }
+          const match = editMatches[i]
+          const remarks = msgs?.length ? [...(row._remarks ?? []), ...msgs] : row._remarks
+
+          if (match) {
+            const needsRemarks = !String(row.remarks ?? "").trim()
+            const changes = cols
+              .filter((f) => f.key !== "remarks")
+              .map((f) => {
+                const before = String(match.current[f.key] ?? "").trim()
+                const after = String(row[f.key] ?? "").trim()
+                if (!after || after.toLowerCase() === before.toLowerCase()) return null
+                return { label: f.label, before: before || "—", after }
+              })
+              .filter((c): c is { label: string; before: string; after: string } => c !== null)
+            return {
+              ...row,
+              _remarks: needsRemarks ? [...(remarks ?? []), "Remarks are required for edits"] : remarks,
+              _edit: { code: match.code, changes },
+            }
+          }
+
+          const missingCreateFields = createOnlyFields.filter((f) => !String(row[f.key] ?? "").trim())
+          if (!msgs?.length && missingCreateFields.length === 0) return row
+          return {
+            ...row,
+            _remarks: missingCreateFields.length
+              ? [...(remarks ?? []), `Missing required: ${missingCreateFields.map((f) => f.key).join(", ")}`]
+              : remarks,
+          }
         })
       )
     } catch {
@@ -249,16 +290,33 @@ export function CsvImportDialog({
       }
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Upload failed")
-      setSuccess(
-        data.approval_id
-          // Bulk-approval masters (vendors/manufacturers/RM/PM): nothing is
-          // inserted yet — the whole batch is staged as one pending approval.
-          ? `Submitted ${data.staged} ${plural} for approval${data.skipped > 0 ? ` (${data.skipped} skipped)` : ""}.`
-          : data.skipped > 0
-          ? `Uploaded ${data.inserted} ${plural}. ${data.skipped} skipped (duplicates).`
-          : `Successfully uploaded ${data.inserted} ${plural}.`
-      )
+
+      // The bulk/bulk_from_s3 routes return 200 + ok:true even when EVERY row
+      // was skipped (bad data, duplicates, missing remarks on an edit, …) —
+      // an approval with nothing staged still gets created. Treat that as a
+      // failure on the client: no toast, no auto-close, so the user sees the
+      // per-row remarks and can fix + retry instead of believing it worked.
+      const staged = Number(data.staged ?? 0)
+      const inserted = Number(data.inserted ?? 0)
+      const submittedCount = data.approval_id ? staged : inserted
+      if (submittedCount === 0) {
+        throw new Error(
+          data.skipped > 0
+            ? `Nothing was submitted — all ${data.skipped} row${data.skipped !== 1 ? "s" : ""} were skipped. Check the remarks column below.`
+            : `Nothing was submitted.`
+        )
+      }
+
+      const message = data.approval_id
+        // Bulk-approval masters (vendors/manufacturers/RM/PM): nothing is
+        // inserted yet — the whole batch is staged as one pending approval.
+        ? `Submitted ${staged} ${plural} for approval${data.skipped > 0 ? ` (${data.skipped} skipped)` : ""}.`
+        : data.skipped > 0
+        ? `Uploaded ${inserted} ${plural}. ${data.skipped} skipped (duplicates).`
+        : `Successfully uploaded ${inserted} ${plural}.`
+      toast({ title: message, variant: "success" })
       onSuccess?.()
+      setOpen(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed")
     } finally {
@@ -375,17 +433,85 @@ export function CsvImportDialog({
               </p>
             )}
 
-            {success && (
-              <p className="text-sm text-emerald-600 flex items-center gap-1.5">
-                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> {success}
-              </p>
-            )}
-
-            {rows.length > 0 && (
+            {editRows.length > 0 && (
               <div className="rounded-lg border border-border overflow-hidden">
                 <div className="px-3 py-2 bg-muted/50 border-b border-border">
                   <span className="text-xs font-medium text-muted-foreground">
-                    Preview — {rows.length} row{rows.length !== 1 ? "s" : ""}
+                    Edits — {editRows.length} row{editRows.length !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="overflow-x-auto max-h-[40vh] overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-background border-b border-border">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Name</th>
+                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Code</th>
+                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Changes</th>
+                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {editRows.map((row, i) => {
+                        const flagged = isFlagged(row)
+                        const edit = row._edit
+                        if (!edit) return null
+                        return (
+                          <tr
+                            key={i}
+                            className={cn(
+                              "border-b border-border last:border-0 align-top",
+                              flagged && "bg-destructive/5"
+                            )}
+                          >
+                            <td className="px-3 py-1.5 text-muted-foreground">
+                              {String(row.name ?? "—")}
+                            </td>
+                            <td className="px-3 py-1.5 text-muted-foreground font-mono">
+                              {edit.code}
+                            </td>
+                            <td className="px-3 py-1.5 text-muted-foreground">
+                              {edit.changes.length > 0 ? (
+                                <ul className="space-y-0.5">
+                                  {edit.changes.map((c, j) => (
+                                    <li key={j}>
+                                      <span className="font-medium">{c.label}:</span>{" "}
+                                      <span className="line-through text-muted-foreground/60">{c.before}</span>
+                                      {" → "}
+                                      <span>{c.after}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                "No field changes"
+                              )}
+                            </td>
+                            <td className="px-3 py-1.5">
+                              {flagged ? (
+                                <span className="text-destructive flex items-start gap-1">
+                                  <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                                  {rowRemark(row)}
+                                </span>
+                              ) : (
+                                <span className="text-emerald-600 flex items-center gap-1">
+                                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                                  OK
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {newRows.length > 0 && (
+              <div className="rounded-lg border border-border overflow-hidden">
+                <div className="px-3 py-2 bg-muted/50 border-b border-border">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {editRows.length > 0 ? "New additions" : "Preview"} — {newRows.length} row{newRows.length !== 1 ? "s" : ""}
                   </span>
                 </div>
                 <div className="overflow-x-auto max-h-[55vh] overflow-y-auto">
@@ -406,7 +532,7 @@ export function CsvImportDialog({
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((row, i) => {
+                      {newRows.map((row, i) => {
                         const flagged = isFlagged(row)
                         return (
                           <tr
@@ -426,7 +552,7 @@ export function CsvImportDialog({
                                   className="px-3 py-1.5 text-muted-foreground"
                                 >
                                   {display ??
-                                    (f.required ? (
+                                    (f.required && !f.requiredForCreateOnly ? (
                                       <span className="text-destructive">
                                         missing
                                       </span>
@@ -441,6 +567,11 @@ export function CsvImportDialog({
                                 <span className="text-destructive flex items-start gap-1">
                                   <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                                   {rowRemark(row)}
+                                </span>
+                              ) : row._info?.length ? (
+                                <span className="text-blue-600 flex items-start gap-1">
+                                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                                  {row._info.join("; ")}
                                 </span>
                               ) : (
                                 <span className="text-emerald-600 flex items-center gap-1">

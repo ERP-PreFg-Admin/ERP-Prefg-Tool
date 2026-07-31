@@ -44,12 +44,12 @@ const MFG_COMMON_FIELDS: MasterField[] = [
   { key: "name",            label: "Name",            required: true, colSpan: 2, placeholder: "Manufacturer name", sample: "Acme Manufacturing",
     duplicateKey: true,
     validate: (raw) => (/^\d+$/.test(raw) ? "Looks numeric, not a name" : null) },
-  { key: "registered_name", label: "Registered Name", required: true, placeholder: "Legal registered name",         sample: "Acme Manufacturing Pvt Ltd" },
+  { key: "registered_name", label: "Registered Name", required: true, requiredForCreateOnly: true, placeholder: "Legal registered name", sample: "Acme Manufacturing Pvt Ltd" },
   { key: "location",        label: "Location",        placeholder: "e.g. Mumbai",                  sample: "Mumbai" },
-  { key: "zone",            label: "Zone",            required: true, type: "select", options: ZONE_OPTIONS, sample: "West",
+  { key: "zone",            label: "Zone",            required: true, requiredForCreateOnly: true, type: "select", options: ZONE_OPTIONS, sample: "West",
     validate: (raw) => (normalizeZone(raw) ? null : `Must be one of: ${ZONE_OPTIONS.map((o) => o.value).join(", ")}`),
     parse: (raw) => normalizeZone(raw) ?? raw },
-  { key: "gst_number",      label: "GST Number",      required: true, placeholder: "e.g. 27AAEPM1234C1Z5",         sample: "27AAEPM1234C1Z5",
+  { key: "gst_number",      label: "GST Number",      required: true, requiredForCreateOnly: true, placeholder: "e.g. 27AAEPM1234C1Z5", sample: "27AAEPM1234C1Z5",
     duplicateKey: true,
     validate: (raw) => (GST_REGEX.test(raw.toUpperCase()) ? null : "Invalid GST format") },
   { key: "bank_name",       label: "Bank Name",       placeholder: "e.g. HDFC Bank",               sample: "HDFC Bank" },
@@ -60,8 +60,10 @@ const MFG_COMMON_FIELDS: MasterField[] = [
     duplicateKey: true,
     validate: (raw) => (ACCOUNT_NUMBER_REGEX.test(raw) ? null : "Invalid account number — expected 9 to 18 digits") },
   { key: "email",           label: "Email Address",   placeholder: "e.g. vendor@manufacturer.com", sample: "vendor@manufacturer.com",
+    aliases: ["Email Address"],
     duplicateKey: true,
     validate: (raw) => (EMAIL_REGEX.test(raw) ? null : "Invalid email address") },
+  { key: "remarks",         label: "Remarks",         colSpan: 2, placeholder: "Optional for new records — remarks are required when submitting an edit", sample: "New manufacturer onboarding" },
 ]
 
 const MFG_CSV_FIELDS: MasterField[] = MFG_COMMON_FIELDS

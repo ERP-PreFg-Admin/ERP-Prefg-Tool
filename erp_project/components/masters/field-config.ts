@@ -40,9 +40,27 @@ export type MasterField = {
   /** CSV-only: this field must be unique — checked both within the file and,
    *  when the importer enables it, against existing DB records. */
   duplicateKey?: boolean
+  /**
+   * CSV-only: `required` is enforced only for rows the importer's edit-match
+   * check (see CsvImportDialog's editMatches handling) determines are NEW
+   * records — rows matched to an existing record can leave this blank
+   * (falls back to the existing value at apply time). Still listed in the
+   * dialog's "Required columns" summary. Ignored unless `required` is also
+   * true; ignored entirely by importers that never populate editMatches.
+   */
+  requiredForCreateOnly?: boolean
 }
 
-export type ParsedRow = Record<string, unknown> & { _error?: string; _remarks?: string[] }
+export type ParsedRow = Record<string, unknown> & {
+  _error?: string
+  _remarks?: string[]
+  /** Non-blocking informational notes (e.g. "will update existing record: CODE") — set post-parse by callers like CsvImportDialog's editMatches handling. Doesn't affect isFlagged(). */
+  _info?: string[]
+  /** Set when this row was matched to an existing record (see CsvImportDialog's
+   *  editMatches handling) — the importer renders it in a separate "Edits"
+   *  table with a before/after list instead of the flat "New additions" grid. */
+  _edit?: { code: string; changes: { label: string; before: string; after: string }[] }
+}
 
 /** Fixed zone options shared by vendors + manufacturers (Add form, Edit form, CSV import). */
 export const ZONE_OPTIONS: FieldOption[] = [
@@ -61,6 +79,21 @@ export function normalizeZone(raw: string): string | null {
 }
 
 const unquote = (s: string) => s.trim().replace(/^"|"$/g, "")
+
+/**
+ * Normalizes a CSV/Excel header (or a field key/alias/label) to a comparable
+ * form — lowercase, non-alphanumerics collapsed to underscores — so a
+ * human-readable column like "Registered Name" or "GST Number" matches the
+ * field key `registered_name` / `gst_number` without needing an explicit
+ * alias for every label variant.
+ */
+export function normalizeHeader(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+}
 
 export function csvFields(fields: MasterField[]) {
   return fields.filter((f) => f.csv !== false)
@@ -89,7 +122,7 @@ export function buildRows(rawRows: Record<string, string>[], fields: MasterField
     const missing: string[] = []
     const remarks: string[] = []
     for (const f of cols) {
-      const keys = [f.key, ...(f.aliases ?? [])].map((k) => k.toLowerCase())
+      const keys = [f.key, ...(f.aliases ?? [])].map(normalizeHeader)
       let val = ""
       for (const k of keys) {
         if (raw[k]) {
@@ -98,7 +131,11 @@ export function buildRows(rawRows: Record<string, string>[], fields: MasterField
         }
       }
       if (!val && f.default != null) val = f.default
-      if (!val && f.required) missing.push(f.key)
+      // requiredForCreateOnly fields are deferred to CsvImportDialog's
+      // post-duplicate-check pass, which knows whether this row matched an
+      // existing record (edit) or not (create) — buildRows() runs before
+      // that async check ever happens, so it can't make that call yet.
+      if (!val && f.required && !f.requiredForCreateOnly) missing.push(f.key)
       if (val && f.validate) {
         const msg = f.validate(val)
         if (msg) remarks.push(`${f.label}: ${msg}`)
@@ -139,7 +176,7 @@ export function parseCSV(text: string, fields: MasterField[]): ParsedRow[] {
   if (lines.length < 2) {
     throw new Error("CSV must have a header row and at least one data row")
   }
-  const headers = lines[0].split(",").map((h) => unquote(h).toLowerCase())
+  const headers = lines[0].split(",").map((h) => normalizeHeader(unquote(h)))
 
   const rawRows: Record<string, string>[] = lines
     .slice(1)

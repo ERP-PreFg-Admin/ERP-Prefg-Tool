@@ -151,6 +151,48 @@ export const manufacturers = {
   /** Lightweight fetch of code + name — used when building readable approval diffs. Parameters: [id] */
   selectNameById: `SELECT code, name FROM master_mfgs WHERE id = ? LIMIT 1`,
 
+  /**
+   * Exact-name lookup (case-insensitive per the table's default collation) —
+   * one of three single-field lookups (name / registered_name / gst_number)
+   * the bulk CSV importer's edit-match scorer (lib/master-routes/edit-match.ts)
+   * unions together to decide whether a row is an edit of an existing record.
+   * Parameters: [name]
+   */
+  selectByName: `
+    SELECT
+      mfg.id, mfgd.mfg_id, mfgd.status, mfgd.location,
+      mfgd.gst_number, mfgd.registered_name, mfgd.zone,
+      mfgd.bank_name, mfgd.ifsc_number, mfgd.account_number,
+      mfgd.email, mfg.code, mfg.name
+    FROM master_mfgs AS mfg
+    INNER JOIN details_mfg AS mfgd ON mfgd.mfg_id = mfg.id
+    WHERE mfg.name = ? LIMIT 1
+  `,
+
+  /** Same shape as selectByName, keyed on registered_name. Parameters: [registered_name] */
+  selectByRegisteredName: `
+    SELECT
+      mfg.id, mfgd.mfg_id, mfgd.status, mfgd.location,
+      mfgd.gst_number, mfgd.registered_name, mfgd.zone,
+      mfgd.bank_name, mfgd.ifsc_number, mfgd.account_number,
+      mfgd.email, mfg.code, mfg.name
+    FROM master_mfgs AS mfg
+    INNER JOIN details_mfg AS mfgd ON mfgd.mfg_id = mfg.id
+    WHERE mfgd.registered_name = ? LIMIT 5
+  `,
+
+  /** Same shape as selectByName, keyed on gst_number. Parameters: [gst_number] */
+  selectByGstNumber: `
+    SELECT
+      mfg.id, mfgd.mfg_id, mfgd.status, mfgd.location,
+      mfgd.gst_number, mfgd.registered_name, mfgd.zone,
+      mfgd.bank_name, mfgd.ifsc_number, mfgd.account_number,
+      mfgd.email, mfg.code, mfg.name
+    FROM master_mfgs AS mfg
+    INNER JOIN details_mfg AS mfgd ON mfgd.mfg_id = mfg.id
+    WHERE mfgd.gst_number = ? LIMIT 5
+  `,
+
   // ── Duplicate checks (banking/tax fields must be unique across manufacturers) ─
   // `excludeMfgId` is 0 on create (no self to exclude) or the current mfg_id on
   // update, so the manufacturer being edited never flags itself as a duplicate.
@@ -211,8 +253,43 @@ export const manufacturers = {
 
   /** Parameters: [names[]] */
   checkDuplicateNameBatch: `
-    SELECT mfg.code, mfg.name AS value FROM master_mfgs mfg
+    SELECT mfg.id, mfg.code, mfg.name AS value FROM master_mfgs mfg
     WHERE mfg.name IN (?)
+  `,
+
+  // ── Full-row batch lookups for the CSV-preview edit-match scorer ──────────
+  // Same shape as selectByName/selectByRegisteredName/selectByGstNumber but
+  // IN (?)-batched across the whole uploaded file — see
+  // lib/master-routes/edit-match.ts's fetchEditMatchCandidates.
+
+  /** Parameters: [names[]] */
+  selectCandidatesByNamesBatch: `
+    SELECT mfg.id, mfg.code, mfg.name, mfgd.location, mfgd.gst_number,
+      mfgd.registered_name, mfgd.zone, mfgd.bank_name, mfgd.ifsc_number,
+      mfgd.account_number, mfgd.email
+    FROM master_mfgs mfg
+    JOIN details_mfg mfgd ON mfgd.mfg_id = mfg.id
+    WHERE mfg.name IN (?)
+  `,
+
+  /** Parameters: [registered_names[]] */
+  selectCandidatesByRegisteredNamesBatch: `
+    SELECT mfg.id, mfg.code, mfg.name, mfgd.location, mfgd.gst_number,
+      mfgd.registered_name, mfgd.zone, mfgd.bank_name, mfgd.ifsc_number,
+      mfgd.account_number, mfgd.email
+    FROM master_mfgs mfg
+    JOIN details_mfg mfgd ON mfgd.mfg_id = mfg.id
+    WHERE mfgd.registered_name IN (?)
+  `,
+
+  /** Parameters: [gst_numbers[]] */
+  selectCandidatesByGstNumbersBatch: `
+    SELECT mfg.id, mfg.code, mfg.name, mfgd.location, mfgd.gst_number,
+      mfgd.registered_name, mfgd.zone, mfgd.bank_name, mfgd.ifsc_number,
+      mfgd.account_number, mfgd.email
+    FROM master_mfgs mfg
+    JOIN details_mfg mfgd ON mfgd.mfg_id = mfg.id
+    WHERE mfgd.gst_number IN (?)
   `,
 
   /**
