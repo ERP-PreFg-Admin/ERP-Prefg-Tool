@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { useToast } from "@/components/ui/toast"
 import { ZONE_OPTIONS } from "@/components/masters/field-config"
 import type { Vendor } from "@/types/masters"
 
@@ -27,6 +28,7 @@ export function EditVendorDialog({
   onSuccess: () => void
   onClose: () => void
 }) {
+  const { toast } = useToast()
   const [form, setForm] = useState({
     name: vendor?.name ?? "",
     type: vendor?.type ?? "rm",
@@ -104,11 +106,18 @@ export function EditVendorDialog({
         body: JSON.stringify({ action: "update", vendor_id: vendor!.vendor_id, ...form }),
       })
       const data = await res.json()
-      if (!res.ok) { setError(data.error ?? "Failed to save"); return }
+      if (!res.ok) {
+        const message = data.error ?? "Failed to save"
+        setError(message)
+        toast({ title: "Submission failed", description: message, variant: "error" })
+        return
+      }
       setSubmitted(true)
+      toast({ title: "Submitted for approval", description: `Vendor ${vendor!.code} edit is now awaiting approval.`, variant: "success" })
       setTimeout(() => { onSuccess(); onClose() }, 1500)
     } catch {
       setError("Network error")
+      toast({ title: "Submission failed", description: "Network error — please try again.", variant: "error" })
     } finally {
       setSaving(false)
     }

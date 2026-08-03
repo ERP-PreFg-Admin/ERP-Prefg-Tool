@@ -9,6 +9,7 @@ import { PaginationBar } from "@/components/ui/pagination-bar"
 import type { Approval } from "../approvals-types"
 import { MODULE_LABEL } from "../approvals-types"
 import ApprovalCard, { type MaterialMap } from "../ApprovalCard"
+import CsvPreviewDialog from "../CsvPreviewDialog"
 
 export default function ApprovalHistoryClient({
   approvals,
@@ -32,7 +33,7 @@ export default function ApprovalHistoryClient({
   const searchParams = useSearchParams()
 
   const [expanded,       setExpanded]       = useState<number | null>(null)
-  const [openingFileFor, setOpeningFileFor] = useState<number | null>(null)
+  const [csvPreview,     setCsvPreview]     = useState<{ s3Key: string; filename: string } | null>(null)
 
   function navigate(updates: Record<string, string>) {
     const params = new URLSearchParams(searchParams.toString())
@@ -44,15 +45,8 @@ export default function ApprovalHistoryClient({
     router.push(`${pathname}?${params.toString()}`)
   }
 
-  async function openCsvFile(_approvalId: number, s3Key: string) {
-    setOpeningFileFor(_approvalId)
-    try {
-      const res  = await fetch(`/api/files/presign?key=${encodeURIComponent(s3Key)}&view=1`)
-      const data = await res.json()
-      if (data.url) window.open(data.url, "_blank", "noopener,noreferrer")
-    } finally {
-      setOpeningFileFor(null)
-    }
+  function openCsvFile(_approvalId: number, s3Key: string, filename: string) {
+    setCsvPreview({ s3Key, filename })
   }
 
   // Draft filter state — selects only update these locally; the actual
@@ -150,7 +144,6 @@ export default function ApprovalHistoryClient({
                 isExpanded={expanded === approval.id}
                 isApprover={false}
                 loading={false}
-                openingFileFor={openingFileFor}
                 onToggle={() => setExpanded((prev) => (prev === approval.id ? null : approval.id))}
                 onApprove={() => {}}
                 onReject={() => {}}
@@ -164,6 +157,13 @@ export default function ApprovalHistoryClient({
           </Card>
         </>
       )}
+
+      <CsvPreviewDialog
+        open={csvPreview !== null}
+        s3Key={csvPreview?.s3Key ?? null}
+        filename={csvPreview?.filename ?? ""}
+        onClose={() => setCsvPreview(null)}
+      />
     </>
   )
 }

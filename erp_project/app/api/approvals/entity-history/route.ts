@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { approvalsSql, entityLabelSql } from "@/lib/queries/approvals"
+import { historySql } from "@/lib/queries/history"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import logger from "@/lib/logger"
@@ -34,14 +35,23 @@ export const GET = withGateway({
 
       const approvals = await Promise.all(
         rows.map(async (a) => {
-          const [items, labelRows] = await Promise.all([
+          const [items, labelRows, remarksRows] = await Promise.all([
             query<any>(approvalsSql.getItems, [a.id]),
             query<any>(entityLabelSql[module], [entityId]),
+            // Only the currently-pending row (if any) can be reliably matched
+            // to a history_masters_edits row — see selectPendingRemarks.
+            a.status === "pending"
+              ? query<{ remarks: string | null }>(historySql.selectPendingRemarks, [module, entityId])
+              : Promise.resolve([]),
           ])
           const label = labelRows[0] ?? {}
+          const remarks = remarksRows[0]?.remarks
+          const allItems = remarks
+            ? [...items, { field_name: "remarks", old_value: "", new_value: remarks }]
+            : items
           return {
             ...a,
-            items,
+            items: allItems,
             entity_code: label.code ?? null,
             entity_name: label.name ?? null,
             entity_secondary_code: label.secondary_code ?? null,
