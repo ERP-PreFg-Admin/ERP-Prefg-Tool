@@ -23,7 +23,7 @@ type NavItem = {
 }
 
 const NAV: NavItem[] = [
-  { label: "Dashboard", href: "/masters", icon: LayoutDashboard },
+  { label: "Dashboard", href: "/", icon: LayoutDashboard },
   {
     label: "Masters", icon: Database,
     children: [
@@ -41,7 +41,7 @@ const NAV: NavItem[] = [
     children: [
       { label: "MFG Overview",       href: "/po-tracking/mfg-overview" },
       { label: "FG POs Tracking",    href: "/po-tracking/po-procurement" },
-      { label: "RM/PM Procurement", href: "/po-tracking/rm-pm-procurement" },
+      // { label: "RM/PM Procurement", href: "/po-tracking/rm-pm-procurement" },
       { label: "PO Inwarding",      href: "/po-tracking/po-inwarding" },
     ],
   },
