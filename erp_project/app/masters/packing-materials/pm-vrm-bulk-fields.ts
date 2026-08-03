@@ -29,4 +29,5 @@ export const PM_VRM_BULK_FIELDS: MasterField[] = [
     key: "effective_to", label: "Effective To", placeholder: "YYYY-MM-DD", sample: "",
     validate: validateDateStr,
   },
+  { key: "remarks", label: "Remarks", colSpan: 2, placeholder: "Optional for new rates — remarks are required when submitting an edit", sample: "" },
 ]

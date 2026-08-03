@@ -8,8 +8,9 @@
  */
 
 import { useState } from "react"
-import { GitCompare, Pencil } from "lucide-react"
+import { GitCompare, Pencil, History as HistoryIcon } from "lucide-react"
 import { StatusBadge } from "@/components/masters/StatusBadge"
+import { TruncatedCell } from "@/components/masters/TruncatedCell"
 import type { PMByMfg, Vendor, Mfg } from "@/types/masters"
 import {
   PmRateTable,
@@ -19,6 +20,7 @@ import {
 } from "./PmRateTable"
 import { MfgPMDetailDialog } from "./MfgPMDetailDialog"
 import { EditPmMfgRateDialog } from "./EditPmMfgRateDialog"
+import { PmRateHistoryDialog } from "./PmRateHistoryDialog"
 
 // For PM the rate status is stored directly as `status` (pmm.status).
 const rateStatusBadge = (row: AnyRow) => <StatusBadge status={row.status as string | null} />
@@ -26,15 +28,15 @@ const rateStatusBadge = (row: AnyRow) => <StatusBadge status={row.status as stri
 function buildMfgColumns(manufacturers: Mfg[]): ColumnDef[] {
   const nameByMfgId = new Map(manufacturers.map((m) => [m.mfg_id, m.name]))
   return [
-  { key: "pm_code",        label: "PM Code",        sortAs: "text", className: "font-mono text-xs font-medium" },
-  { key: "name",           label: "Name",           sortAs: "text", className: "font-medium text-wrap" },
-  { key: "type",           label: "Type",           sortAs: "text" },
+  { key: "pm_code",        label: "PM Code",        sortAs: "text", width: "100px", className: "font-mono text-xs font-medium" },
+  { key: "name",           label: "Name",           sortAs: "text", className: "font-medium", render: (r) => <TruncatedCell value={r.name} label="Name" /> },
+  { key: "type",           label: "Type",           sortAs: "text", width: "100px" },
   { key: "mfg_code",       label: "Manufacturer",   sortAs: "text", render: (r) => nameByMfgId.get(r.mfg_id as number) ?? (r.mfg_code as string | null) ?? "—" },
-  { key: "mfg_id",         label: "MFG ID",         sortAs: "num"  },
-  { key: "curr_rate",      label: "Current Rate",   sortAs: "num",  render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
-  { key: "uom",            label: "UOM",            sortAs: "text", className: "uppercase text-xs text-muted-foreground" },
-  { key: "status",         label: "Status",         sortAs: "text", render: rateStatusBadge },
-  { key: "effective_from", label: "Effective From", sortAs: "date", render: (r) => fmtDate(r.effective_from) },
+  { key: "mfg_id",         label: "MFG ID",         sortAs: "num",  width: "80px" },
+  { key: "curr_rate",      label: "Current Rate",   sortAs: "num",  width: "100px", render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
+  { key: "uom",            label: "UOM",            sortAs: "text", width: "70px", className: "uppercase text-xs text-muted-foreground" },
+  { key: "status",         label: "Status",         sortAs: "text", width: "100px", render: rateStatusBadge },
+  { key: "effective_from", label: "Effective From", sortAs: "date", width: "110px", render: (r) => fmtDate(r.effective_from) },
   ]
 }
 
@@ -71,6 +73,7 @@ export default function ManufacturerPackingMaterialsClient({
 }) {
   const [selectedRow, setSelectedRow] = useState<PMByMfg | null>(null)
   const [editRow, setEditRow] = useState<PMByMfg | null>(null)
+  const [historyRow, setHistoryRow] = useState<PMByMfg | null>(null)
 
   return (
     <>
@@ -124,6 +127,13 @@ export default function ManufacturerPackingMaterialsClient({
               >
                 <GitCompare className="h-4 w-4" />
               </button>
+              <button
+                onClick={() => setHistoryRow(typedRow)}
+                className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                title="View rate history"
+              >
+                <HistoryIcon className="h-4 w-4" />
+              </button>
             </div>
           )
         }}
@@ -138,6 +148,11 @@ export default function ManufacturerPackingMaterialsClient({
         row={editRow}
         onSuccess={() => { setEditRow(null); window.location.reload() }}
         onClose={() => setEditRow(null)}
+      />
+      <PmRateHistoryDialog
+        row={historyRow ? { pm_id: historyRow.pm_id, mfg_id: historyRow.mfg_id, name: historyRow.name, code: historyRow.mfg_code } : null}
+        kind="mfg"
+        onClose={() => setHistoryRow(null)}
       />
     </>
   )

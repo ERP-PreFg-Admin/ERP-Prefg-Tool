@@ -8,8 +8,9 @@
  */
 
 import { useState } from "react"
-import { GitCompare, Pencil } from "lucide-react"
+import { GitCompare, Pencil, History as HistoryIcon } from "lucide-react"
 import { StatusBadge } from "@/components/masters/StatusBadge"
+import { TruncatedCell } from "@/components/masters/TruncatedCell"
 import type { RMByMfg, Vendor, Mfg } from "@/types/masters"
 import {
   RmRateTable,
@@ -19,6 +20,7 @@ import {
 } from "./RmRateTable"
 import { MfgDetailDialog } from "./MfgDetailDialog"
 import { EditRmMfgRateDialog } from "./EditRmMfgRateDialog"
+import { RmRateHistoryDialog } from "./RmRateHistoryDialog"
 
 // Renders the rate-row status (rmm.status), not the base RM status.
 const rateStatusBadge = (row: AnyRow) => <StatusBadge status={row.rate_status as string | null} />
@@ -27,17 +29,17 @@ function buildMfgColumns(vendors: Vendor[], manufacturers: Mfg[]): ColumnDef[] {
   const nameByVendorId = new Map(vendors.map((v) => [v.vendor_id, v.name]))
   const nameByMfgId = new Map(manufacturers.map((m) => [m.mfg_id, m.name]))
   return [
-  { key: "rm_code",              label: "RM Code",         sortAs: "text", className: "font-mono text-xs font-medium" },
-  { key: "name",                 label: "Name",            sortAs: "text", className: "font-medium text-wrap" },
-  { key: "inci_name",            label: "INCI Name",       sortAs: "text", className: "font-medium text-wrap" },
-  { key: "make",                 label: "Make",            sortAs: "text" },
-  { key: "type",                 label: "Type",            sortAs: "text" },
-  { key: "curr_rate",            label: "Current Rate",    sortAs: "num",  render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
+  { key: "rm_code",              label: "RM Code",         sortAs: "text", width: "100px", className: "font-mono text-xs font-medium" },
+  { key: "name",                 label: "Name",            sortAs: "text", className: "font-medium", render: (r) => <TruncatedCell value={r.name} label="Name" /> },
+  { key: "inci_name",            label: "INCI Name",       sortAs: "text", render: (r) => <TruncatedCell value={r.inci_name} label="INCI Name" /> },
+  { key: "make",                 label: "Make",            sortAs: "text", render: (r) => <TruncatedCell value={r.make} label="Make" /> },
+  { key: "type",                 label: "Type",            sortAs: "text", width: "100px" },
+  { key: "curr_rate",            label: "Current Rate",    sortAs: "num",  width: "100px", render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
   { key: "mfg_code",             label: "Manufacturer",    sortAs: "text", render: (r) => nameByMfgId.get(r.mfg_id as number) ?? (r.mfg_code as string | null) ?? "—" },
   { key: "approved_vendor_code", label: "Approved Vendor", sortAs: "text", render: (r) => nameByVendorId.get(r.approved_vendor_id as number) ?? (r.approved_vendor_code as string | null) ?? "—" },
-  { key: "rate_status",          label: "Status",          sortAs: "text", render: rateStatusBadge },
-  { key: "uom",                  label: "UOM",             sortAs: "text", className: "uppercase text-xs text-muted-foreground" },
-  { key: "effective_from",       label: "Effective From",  sortAs: "date", render: (r) => fmtDate(r.effective_from) },
+  { key: "rate_status",          label: "Status",          sortAs: "text", width: "100px", render: rateStatusBadge },
+  { key: "uom",                  label: "UOM",             sortAs: "text", width: "70px", className: "uppercase text-xs text-muted-foreground" },
+  { key: "effective_from",       label: "Effective From",  sortAs: "date", width: "110px", render: (r) => fmtDate(r.effective_from) },
   ]
 }
 
@@ -74,6 +76,7 @@ export default function ManufacturerRawMaterialsClient({
 }) {
   const [selectedRow, setSelectedRow] = useState<RMByMfg | null>(null)
   const [editRow, setEditRow] = useState<RMByMfg | null>(null)
+  const [historyRow, setHistoryRow] = useState<RMByMfg | null>(null)
 
   return (
     <>
@@ -127,6 +130,13 @@ export default function ManufacturerRawMaterialsClient({
               >
                 <GitCompare className="h-4 w-4" />
               </button>
+              <button
+                onClick={() => setHistoryRow(typedRow)}
+                className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                title="View rate history"
+              >
+                <HistoryIcon className="h-4 w-4" />
+              </button>
             </div>
           )
         }}
@@ -141,6 +151,11 @@ export default function ManufacturerRawMaterialsClient({
         row={editRow}
         onSuccess={() => { setEditRow(null); window.location.reload() }}
         onClose={() => setEditRow(null)}
+      />
+      <RmRateHistoryDialog
+        row={historyRow ? { rm_id: historyRow.rm_id, mfg_id: historyRow.mfg_id, name: historyRow.name, code: historyRow.mfg_code } : null}
+        kind="mfg"
+        onClose={() => setHistoryRow(null)}
       />
     </>
   )

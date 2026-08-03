@@ -14,7 +14,12 @@ export interface ModuleHandler {
     conn: PoolConnection,
     entityId: number,
     items: DiffItem[],
-    approverId: number
+    approverId: number,
+    /** The original submitter (approvals.raised_by) — only consumed by
+     *  handlers that attribute an archived change to who made it (e.g.
+     *  RM_VRM/RM_RATE/PM_VRM/PM_RATE's history_vrm/history_mrm archive row).
+     *  Optional so existing handlers that ignore it need no changes. */
+    raisedBy?: number
   ): Promise<void>
 }
 

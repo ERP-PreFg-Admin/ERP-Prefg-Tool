@@ -8,8 +8,9 @@
  */
 
 import { useState } from "react"
-import { GitCompare, Pencil } from "lucide-react"
+import { GitCompare, Pencil, History as HistoryIcon } from "lucide-react"
 import { StatusBadge } from "@/components/masters/StatusBadge"
+import { TruncatedCell } from "@/components/masters/TruncatedCell"
 import type { RM, Vendor, Mfg } from "@/types/masters"
 import {
   RmRateTable,
@@ -19,25 +20,26 @@ import {
 } from "./RmRateTable"
 import { VendorDetailDialog } from "./VendorDetailDialog"
 import { EditRmVendorRateDialog } from "./EditRmVendorRateDialog"
+import { RmRateHistoryDialog } from "./RmRateHistoryDialog"
 
 const vrmStatusBadge = (row: AnyRow) => <StatusBadge status={row.vrm_status as string | null} />
 
 function buildVendorColumns(vendors: Vendor[]): ColumnDef[] {
   const nameByVendorId = new Map(vendors.map((v) => [v.vendor_id, v.name]))
   return [
-  { key: "rm_code",        label: "RM Code",        sortAs: "text", className: "font-mono text-xs font-medium" },
-  { key: "name",           label: "Name",           sortAs: "text", className: "font-medium" },
-  { key: "inci_name",      label: "INCI Name",      sortAs: "text" },
-  { key: "make",           label: "Make",           sortAs: "text" },
-  { key: "type",           label: "Type",           sortAs: "text" },
-  { key: "curr_rate",      label: "Current Rate",   sortAs: "num",  render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
+  { key: "rm_code",        label: "RM Code",        sortAs: "text", width: "100px", className: "font-mono text-xs font-medium" },
+  { key: "name",           label: "Name",           sortAs: "text", className: "font-medium", render: (r) => <TruncatedCell value={r.name} label="Name" /> },
+  { key: "inci_name",      label: "INCI Name",      sortAs: "text", render: (r) => <TruncatedCell value={r.inci_name} label="INCI Name" /> },
+  { key: "make",           label: "Make",           sortAs: "text", render: (r) => <TruncatedCell value={r.make} label="Make" /> },
+  { key: "type",           label: "Type",           sortAs: "text", width: "100px" },
+  { key: "curr_rate",      label: "Current Rate",   sortAs: "num",  width: "100px", render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
   { key: "vendor_code",    label: "Vendor",         sortAs: "text", render: (r) => nameByVendorId.get(r.vendor_id as number) ?? (r.vendor_code as string | null) ?? "—" },
   { key: "mfg_name",       label: "Manufacturer",   sortAs: "text", render: (r) => (r.mfg_name as string | null) ?? "—" },
-  { key: "vrm_status",     label: "Status",         sortAs: "text", render: vrmStatusBadge },
-  { key: "moq",            label: "MOQ",            sortAs: "num",  render: (r) => r.moq != null ? String(Math.round(Number(r.moq))) : "—" },
-  { key: "uom",            label: "UOM",            sortAs: "text", className: "uppercase text-xs text-muted-foreground" },
-  { key: "effective_from", label: "Effective From", sortAs: "date", render: (r) => fmtDate(r.effective_from) },
-  { key: "effective_to",   label: "Effective To",   sortAs: "date", render: (r) => fmtDate(r.effective_to) },
+  { key: "vrm_status",     label: "Status",         sortAs: "text", width: "100px", render: vrmStatusBadge },
+  { key: "moq",            label: "MOQ",            sortAs: "num",  width: "80px", render: (r) => r.moq != null ? String(Math.round(Number(r.moq))) : "—" },
+  { key: "uom",            label: "UOM",            sortAs: "text", width: "70px", className: "uppercase text-xs text-muted-foreground" },
+  { key: "effective_from", label: "Effective From", sortAs: "date", width: "110px", render: (r) => fmtDate(r.effective_from) },
+  { key: "effective_to",   label: "Effective To",   sortAs: "date", width: "110px", render: (r) => fmtDate(r.effective_to) },
   ]
 }
 
@@ -78,6 +80,7 @@ export default function VendorRawMaterialsClient({
 }) {
   const [selectedRow, setSelectedRow] = useState<RM | null>(null)
   const [editRow, setEditRow] = useState<RM | null>(null)
+  const [historyRow, setHistoryRow] = useState<RM | null>(null)
 
   return (
     <>
@@ -133,6 +136,13 @@ export default function VendorRawMaterialsClient({
               >
                 <GitCompare className="h-4 w-4" />
               </button>
+              <button
+                onClick={() => setHistoryRow(typedRow)}
+                className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                title="View rate history"
+              >
+                <HistoryIcon className="h-4 w-4" />
+              </button>
             </div>
           )
         }}
@@ -148,6 +158,11 @@ export default function VendorRawMaterialsClient({
         manufacturers={manufacturers}
         onSuccess={() => { setEditRow(null); window.location.reload() }}
         onClose={() => setEditRow(null)}
+      />
+      <RmRateHistoryDialog
+        row={historyRow ? { rm_id: historyRow.rm_id, vendor_id: historyRow.vendor_id ? Number(historyRow.vendor_id) : null, name: historyRow.name, code: historyRow.vendor_code } : null}
+        kind="vendor"
+        onClose={() => setHistoryRow(null)}
       />
     </>
   )

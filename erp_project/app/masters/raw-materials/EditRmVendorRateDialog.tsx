@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { CostImpactAlert } from "@/components/masters/CostImpactAlert"
 import type { RM, Mfg } from "@/types/masters"
 
@@ -36,6 +37,7 @@ export function EditRmVendorRateDialog({
     effective_to: "",
     mfg_id: "" as string,
   })
+  const [remarks, setRemarks] = useState("")
   const [saving, setSaving] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -53,6 +55,7 @@ export function EditRmVendorRateDialog({
         effective_to: toDateStr(row.effective_to),
         mfg_id: row.mfg_id ? String(row.mfg_id) : "",
       })
+      setRemarks("")
       setSubmitted(false)
       setError(null)
       setRejection(null)
@@ -94,6 +97,7 @@ export function EditRmVendorRateDialog({
       setError("Effective From cannot be a past date. Please select today or a future date.")
       return
     }
+    if (!remarks.trim()) { setError("Remarks are required."); return }
     setSaving(true)
     setError(null)
     try {
@@ -114,6 +118,7 @@ export function EditRmVendorRateDialog({
             effective_from: form.effective_from,
             effective_to: form.effective_to || null,
             mfg_id: form.mfg_id ? Number(form.mfg_id) : null,
+            remarks: remarks.trim(),
           }],
         }),
       })
@@ -212,13 +217,19 @@ export function EditRmVendorRateDialog({
             </div>
           </div>
 
+          <div className="grid gap-1">
+            <Label>Remarks <span className="text-destructive">*</span></Label>
+            <p className="text-xs text-muted-foreground">Remarks are required for every edit — briefly explain the reason for this change.</p>
+            <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} disabled={!canEdit} placeholder="Reason for this change…" />
+          </div>
+
           {submitted && <p className="text-sm text-emerald-600 font-medium">Edit submitted for approval.</p>}
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving || !canEdit || submitted}>
+          <Button onClick={handleSave} disabled={saving || !canEdit || submitted || !remarks.trim()}>
             {saving ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>

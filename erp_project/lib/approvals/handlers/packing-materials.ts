@@ -20,7 +20,7 @@ export const pmRateHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
     await conn.execute(pmSql.setRateStatus, [status, entityId])
   },
-  async applyAndArchive(conn, entityId, items) {
+  async applyAndArchive(conn, entityId, items, _approverId, raisedBy) {
     const fieldMap = buildFieldMap(items)
     const [rows] = await conn.execute(pmSql.selectRateById, [entityId])
     const cur = (rows as any[])[0]
@@ -33,6 +33,7 @@ export const pmRateHandler: ModuleHandler = {
       cur.mfg_id, cur.pm_id, vendorId,
       cur.curr_rate, cur.effective_from, null,
       cur.status === STATUS.ACTIVE ? 1 : 0,
+      fieldMap.remarks || null, raisedBy ?? null,
     ])
     await conn.execute(pmSql.updateMfgRate, [
       fieldMap.curr_rate      !== undefined ? roundToTwoDecimals(fieldMap.curr_rate) : cur.curr_rate,
@@ -48,7 +49,7 @@ export const pmVrmHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
     await conn.execute(pmSql.setVendorRateStatus, [status, entityId])
   },
-  async applyAndArchive(conn, entityId, items) {
+  async applyAndArchive(conn, entityId, items, _approverId, raisedBy) {
     const fieldMap = buildFieldMap(items)
     const [rows] = await conn.execute(pmSql.selectVendorRateById, [entityId])
     const cur = (rows as any[])[0]
@@ -57,6 +58,7 @@ export const pmVrmHandler: ModuleHandler = {
     await conn.execute(pmSql.archiveToHistoryVrm, [
       cur.pm_id, cur.vendor_id,
       cur.curr_rate, cur.effective_from, cur.effective_to, cur.status,
+      fieldMap.remarks || null, raisedBy ?? null,
     ])
     await conn.execute(pmSql.updateVendorRate, [
       fieldMap.curr_rate      !== undefined ? roundToTwoDecimals(fieldMap.curr_rate) : cur.curr_rate,

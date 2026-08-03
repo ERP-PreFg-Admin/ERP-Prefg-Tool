@@ -89,7 +89,7 @@ export const POST = withGateway({
   await conn.beginTransaction()
   try {
     if (action === "approve") {
-      await handler.applyAndArchive(conn, approval.entity_id, items, approverId)
+      await handler.applyAndArchive(conn, approval.entity_id, items, approverId, approval.raised_by)
       await conn.execute(approvalsSql.markApproved, [approverId, approvalId])
       logger.info({ ...eventLogCtx, message: "Approval applied and archived", approverId })
     } else {

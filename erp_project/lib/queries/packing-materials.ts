@@ -352,19 +352,19 @@ export const packingMaterials = {
   `,
 
   /** Archive old PM vendor rate to history_vrm before overwriting.
-   *  Parameters: [mtrl_id, vendor_id, rate, effective_from, effective_to, status]
+   *  Parameters: [mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by]
    */
   archiveToHistoryVrm: `
-    INSERT INTO history_vrm (mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status)
-    VALUES ('pm', ?, ?, ?, ?, ?, ?)
+    INSERT INTO history_vrm (mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by)
+    VALUES ('pm', ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   /** Archive old PM mfg rate to history_mrm before overwriting.
-   *  Parameters: [mfg_id, mtrl_id, vendor_id, rate, effective_from, effective_to, status]
+   *  Parameters: [mfg_id, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by]
    */
   archiveToHistoryMrm: `
-    INSERT INTO history_mrm (mfg_id, mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status)
-    VALUES (?, 'pm', ?, ?, ?, ?, ?, ?)
+    INSERT INTO history_mrm (mfg_id, mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by)
+    VALUES (?, 'pm', ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   /** Find the first vendor_id linked to a PM in the vendor rate master. Parameters: [pm_id] */
@@ -438,19 +438,23 @@ export const packingMaterials = {
    *  Parameters: [pm_id, vendor_id]
    */
   selectVendorRateHistory: `
-    SELECT id, rate, effective_from, effective_to, updated_on, status
-    FROM history_vrm
-    WHERE mtrl_type = 'pm' AND mtrl_id = ? AND vendor_id = ?
-    ORDER BY updated_on DESC, id DESC
+    SELECT h.id, h.rate, h.effective_from, h.effective_to, h.updated_on, h.status, h.remarks,
+           u.name AS changed_by_name
+    FROM history_vrm h
+    LEFT JOIN users u ON u.id = h.changed_by
+    WHERE h.mtrl_type = 'pm' AND h.mtrl_id = ? AND h.vendor_id = ?
+    ORDER BY h.updated_on DESC, h.id DESC
   `,
 
   /** Full archived rate history for one PM×Manufacturer pair from history_mrm, newest first.
    *  Parameters: [pm_id, mfg_id]
    */
   selectMfgRateHistory: `
-    SELECT id, rate, effective_from, effective_to, updated_on, status
-    FROM history_mrm
-    WHERE mtrl_type = 'pm' AND mtrl_id = ? AND mfg_id = ?
-    ORDER BY updated_on DESC, id DESC
+    SELECT h.id, h.rate, h.effective_from, h.effective_to, h.updated_on, h.status, h.remarks,
+           u.name AS changed_by_name
+    FROM history_mrm h
+    LEFT JOIN users u ON u.id = h.changed_by
+    WHERE h.mtrl_type = 'pm' AND h.mtrl_id = ? AND h.mfg_id = ?
+    ORDER BY h.updated_on DESC, h.id DESC
   `,
 }
