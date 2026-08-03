@@ -52,6 +52,10 @@ export const AWS_ACCESS_KEY_ID     = required("ACCESS_KEY_ID_AWS")
 export const AWS_SECRET_ACCESS_KEY = required("SECRET_ACCESS_KEY_AWS")
 export const AWS_S3_BUCKET_FILES   = required("S3_BUCKET_FILES_AWS")
 export const AWS_S3_BUCKET_EVENTS  = required("S3_BUCKET_EVENTS_AWS")
+// ── Nanonets (invoice extraction) ────────────────────────────────────────────
+
+export const NANONET_API_KEY = required("NANONET_API_KEY")
+
 // ── Gmail SMTP ───────────────────────────────────────────────────────────────
 
 export const GMAIL_USER         = required("GMAIL_USER")

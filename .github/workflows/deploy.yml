@@ -89,6 +89,10 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --comment "Deploy erp-app:${ENVIRONMENT} ${{ github.sha }}" \
             --parameters "{\"commands\":[
+              \"set -euo pipefail\",
+              \"aws ssm get-parameters-by-path --path /erp-app/${ENVIRONMENT} --with-decryption --region $AWS_REGION --query 'Parameters[].[Name,Value]' --output text | tr '\\t' '=' | sed 's|^/erp-app/${ENVIRONMENT}/||' > /etc/erp/env.new\",
+              \"test -s /etc/erp/env.new\",
+              \"chmod 600 /etc/erp/env.new && mv /etc/erp/env.new /etc/erp/env\",
               \"aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ steps.ecr-login.outputs.registry }}\",
               \"docker pull ${{ steps.ecr-login.outputs.registry }}/$ECR_REPOSITORY:${ENVIRONMENT}\",
               \"docker rm -f erp || true\",

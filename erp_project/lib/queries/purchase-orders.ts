@@ -19,12 +19,13 @@ const EFFECTIVE_STATUS_EXPR = `
 `
 
 // ── Shared WHERE fragment (all filters) ──────────────────────────────────────
-// Params (21): [like×6, status×3, mfgCode×2, poType×2, dateFrom×2, dateTo×2, sku×2, destination×2]
+// Params (22): [like×6, status×4, mfgCode×2, poType×2, dateFrom×2, dateTo×2, sku×2, destination×2]
 // The status filter matches an IN-list rather than a single value so the
-// "received" tab can also pull in short-closed POs — see statusMatchValues().
+// "received" tab can also pull in short-closed POs and the PO Inwarding page's
+// "open" tab can span raised/punched/partially_received — see statusMatchValues().
 const FULL_WHERE = `
   WHERE (? IS NULL OR po.po_no LIKE ? OR m.code LIKE ? OR m.name LIKE ? OR po.sku_code LIKE ? OR sk.name LIKE ?)
-    AND (? IS NULL OR ${EFFECTIVE_STATUS_EXPR} IN (?, ?))
+    AND (? IS NULL OR ${EFFECTIVE_STATUS_EXPR} IN (?, ?, ?))
     AND (? IS NULL OR m.code         = ?)
     AND (? IS NULL OR po.po_type     = ?)
     AND (? IS NULL OR po.date       >= ?)
@@ -86,7 +87,7 @@ export const purchaseOrdersSql = {
   /**
    * Paginated PO list with all filters.
    * Use buildSelectPaginated(sortBy, sortDir) to get the sorted variant.
-   * Params: buildFilterParams(...) + [LIMIT, OFFSET]  (21 + 2 = 23 total)
+   * Params: buildFilterParams(...) + [LIMIT, OFFSET]  (22 + 2 = 24 total)
    */
   buildSelectPaginated(sortBy = "date", sortDir: "asc" | "desc" = "desc"): string {
     const col = SAFE_SORT_COLS[sortBy] ?? "po.date"
@@ -100,7 +101,7 @@ export const purchaseOrdersSql = {
     `
   },
 
-  /** COUNT matching the full WHERE. Params: buildFilterParams(...)  (21 total) */
+  /** COUNT matching the full WHERE. Params: buildFilterParams(...)  (22 total) */
   countPaginated: `
     SELECT COUNT(*) AS total
     ${FROM_JOINS}
@@ -110,7 +111,7 @@ export const purchaseOrdersSql = {
   /**
    * Every PO matching the full WHERE, unpaginated — for the CSV/Excel export
    * (which must return all rows a filtered/searched view would page through,
-   * not just the current page). Params: buildFilterParams(...)  (21 total)
+   * not just the current page). Params: buildFilterParams(...)  (22 total)
    */
   buildSelectFiltered(sortBy = "date", sortDir: "asc" | "desc" = "desc"): string {
     const col = SAFE_SORT_COLS[sortBy] ?? "po.date"
@@ -167,6 +168,20 @@ export const purchaseOrdersSql = {
     INSERT INTO purchase_orders
       (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination)
     VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, 'raised', 'normal', ?)
+  `,
+
+  /**
+   * Insert an inward PO — one per line item of a parsed supplier invoice.
+   * Raised immediately (the invoice is the authorisation), and carries the
+   * invoice number plus the S3 key of the original PDF so the inwarding desk
+   * can pull the source document back up from the row. received_qty is left at
+   * its 0 default: creating the PO is not receiving against it.
+   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, invoice_no, attachment_key]
+   */
+  insertInward: `
+    INSERT INTO purchase_orders
+      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, invoice_no, attachment_key)
+    VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, 'raised', 'inward', ?, ?, ?)
   `,
 
   /** Set status on a purchase_orders row. Parameters: [status, id] */
@@ -319,6 +334,26 @@ export const purchaseOrdersSql = {
    * Drives the mfg-batch screen's "current open POs" panel and the batch
    * email's "currently open" summary section. Parameters: [mfg_id]
    */
+  /**
+   * Open POs a goods receipt can be booked against, for one manufacturer —
+   * feeds the Add Invoice dialog's "Reference PO" picker. Only raised and
+   * partially_received qualify: the same set the receive route accepts, minus
+   * punched (which has no physical goods behind it yet). `remaining` is
+   * returned so the picker can show how much is still outstanding and the
+   * caller doesn't have to re-derive it. Parameters: [mfg_id]
+   */
+  openForReceiveByMfg: `
+    SELECT po.id, po.po_no, po.sku_code, sk.name AS sku_name,
+           po.qty, COALESCE(po.received_qty, 0) AS received_qty,
+           (po.qty - COALESCE(po.received_qty, 0)) AS remaining,
+           po.expected_on, ${EFFECTIVE_STATUS_EXPR} AS status
+    FROM purchase_orders po
+    LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
+    WHERE po.mfg_id = ?
+      AND ${EFFECTIVE_STATUS_EXPR} IN ('raised', 'partially_received')
+    ORDER BY po.date DESC, po.id DESC
+  `,
+
   ongoingByMfg: `
     SELECT po.id, po.po_no, po.sku_code, sk.name AS sku_name, po.qty,
            po.expected_on, ${EFFECTIVE_STATUS_EXPR} AS status
@@ -377,17 +412,23 @@ export const purchaseOrdersSql = {
 // ── Filter parameter helpers ──────────────────────────────────────────────────
 
 /**
- * The "received" tab also pulls in short-closed POs, since short-closing is
- * just an early/manual way of finishing a PO. Every other status filters
- * on its own exact value (the IN-list just repeats it twice).
+ * Expand a tab's status into the 3-slot IN-list FULL_WHERE matches on.
+ *
+ * - "open" is a pseudo-status used by the PO Inwarding tab bar (never stored in
+ *   the DB) covering every PO still awaiting goods.
+ * - "received" also pulls in short-closed POs, since short-closing is just an
+ *   early/manual way of finishing a PO.
+ * - Everything else filters on its own exact value; repeating it to fill the
+ *   remaining slots is harmless inside an IN list.
  */
-function statusMatchValues(status: string | null): [unknown, unknown] {
-  if (status === "received") return ["received", "short_closed"]
-  return [status, status]
+export function statusMatchValues(status: string | null): [unknown, unknown, unknown] {
+  if (status === "open")     return ["raised", "punched", "partially_received"]
+  if (status === "received") return ["received", "short_closed", "short_closed"]
+  return [status, status, status]
 }
 
 /**
- * Build the 21-element param array for selectPaginated / countPaginated.
+ * Build the 22-element param array for selectPaginated / countPaginated.
  * All-null values disable the corresponding filter.
  */
 export function buildFilterParams(
@@ -401,10 +442,10 @@ export function buildFilterParams(
   destination: string | null,
 ): unknown[] {
   const like = search ? `%${search}%` : null
-  const [statusA, statusB] = statusMatchValues(status)
+  const [statusA, statusB, statusC] = statusMatchValues(status)
   return [
-    like, like, like, like, like, like,     // search ×6
-    status,      statusA,      statusB,     // status ×3 (IS NULL check + IN-list pair)
+    like, like, like, like, like, like,               // search ×6
+    status, statusA, statusB, statusC,                // status ×4 (IS NULL check + IN-list triple)
     mfgCode,     mfgCode,               // mfgCode ×2
     poType,      poType,                // poType ×2
     dateFrom,    dateFrom,              // dateFrom ×2

@@ -755,6 +755,7 @@ enum purchase_orders_status {
 enum purchase_orders_type {
   normal
   impromptu
+  inward
 }
 
 enum page_permissions_access {

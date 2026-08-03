@@ -42,7 +42,7 @@ const NAV: NavItem[] = [
       { label: "MFG Overview",       href: "/po-tracking/mfg-overview" },
       { label: "FG POs Tracking",    href: "/po-tracking/po-procurement" },
       { label: "RM/PM Procurement", href: "/po-tracking/rm-pm-procurement" },
-      { label: "Dispatch Calendar", href: "/po-tracking/dispatch-calendar" },
+      { label: "PO Inwarding",      href: "/po-tracking/po-inwarding" },
     ],
   },
   {

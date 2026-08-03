@@ -37,7 +37,7 @@ These docs capture ongoing architectural decisions. Do not edit them without con
 | Masters (SKUs, Vendors, Manufacturers, RM, PM, BOM) | Complete | `app/masters/` |
 | Material Master (flat RM + PM view) | Complete | `app/masters/material-master/` |
 | PO Tracking — PO Procurement | Partial (mock data) | `app/po-tracking/po-procurement/` |
-| PO Tracking — Dispatch Calendar | Stub | `app/po-tracking/dispatch-calendar/` |
+| PO Tracking — PO Inwarding | Live | `app/po-tracking/po-inwarding/` |
 | PO Tracking — RM/PM Procurement | Stub | `app/po-tracking/rm-pm-procurement/` |
 | Finance & Accounting | Stub | `app/finance/` |
 | HR & Payroll | Stub | `app/hr-payroll/` |

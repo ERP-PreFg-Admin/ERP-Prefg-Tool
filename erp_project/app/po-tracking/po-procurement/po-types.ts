@@ -17,7 +17,7 @@ export type PoRow = {
   invoice_no: string | null
   destination: string | null
   status: PoStatus | null
-  po_type: "normal" | "impromptu" | null
+  po_type: "normal" | "impromptu" | "inward" | null
   attachment_key: string | null
   csv_source_key: string | null
   email_sent_at: string | null
@@ -47,6 +47,18 @@ export const STATUS_CONFIG: Record<string, { label: string; variant: BadgeVarian
 export const STATUS_KEYS = Object.keys(STATUS_CONFIG)
 export const TABS = ["all", ...STATUS_KEYS] as const
 export type TabKey = (typeof TABS)[number]
+
+/**
+ * Tab bar for the PO Inwarding page — only the statuses that desk cares about,
+ * led by "open": a pseudo-status (never stored) that spans raised + punched +
+ * partially_received. See statusMatchValues() in lib/queries/purchase-orders.ts.
+ */
+export const INWARD_TABS = [
+  "open", "raised", "punched", "partially_received", "received", "short_closed", "all",
+] as const
+
+/** Labels for tabs that aren't a stored status, so aren't in STATUS_CONFIG. */
+export const TAB_LABEL: Record<string, string> = { all: "All", open: "Open" }
 
 export const PAGE_SIZE = 20
 

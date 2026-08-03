@@ -3,7 +3,7 @@
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useMemo, useState } from "react"
 import {
-  Filter, FileStack, IndianRupee, Mail, PackageCheck, PackageOpen, Plus, Send, Upload, X,
+  FileStack, FileUp, Filter, IndianRupee, Mail, PackageCheck, PackageOpen, Plus, Send, X,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -18,10 +18,11 @@ import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { cn } from "@/lib/utils"
 
 import type { MfgOption, PoRow, SkuOption, TabKey, WarehouseOption } from "./po-types"
-import { STATUS_CONFIG, TABS } from "./po-types"
+import { INWARD_TABS, STATUS_CONFIG, TAB_LABEL, TABS } from "./po-types"
 import { fmtInt, fmtMoney } from "./po-utils"
 import { PO_BULK_CSV_FIELDS } from "./po-bulk-fields"
 import PoTable from "./PoTable"
+import AddInvoiceDialog from "../po-inwarding/AddInvoiceDialog"
 import AddPODialog from "./AddPODialog"
 import ImpromptuPODialog from "./ImpromptuPODialog"
 import SplitPODialog from "./SplitPODialog"
@@ -35,6 +36,7 @@ const selectCls =
 // Dot color shown on each status tab — mirrors the Badge variant used for
 // that status elsewhere on the page, so the color means the same thing everywhere.
 const TAB_DOT: Record<string, string> = {
+  open: "bg-slate-500",
   draft: "bg-muted-foreground/40",
   raised: "bg-slate-400",
   punched: "bg-primary",
@@ -81,6 +83,7 @@ export default function PoProcurementClient({
   mfgOptions,
   warehouseOptions,
   sessionUserId,
+  mode = "procurement",
 }: {
   rows: PoRow[]
   total: number
@@ -102,13 +105,18 @@ export default function PoProcurementClient({
   mfgOptions: MfgOption[]
   warehouseOptions: WarehouseOption[]
   sessionUserId: number
+  /** "inwarding" = the PO Inwarding page: same table/filters, but receiving is
+   *  the only write action — no PO creation, bulk upload, or mail flow. */
+  mode?: "procurement" | "inwarding"
 }) {
+  const isInwarding = mode === "inwarding"
   const router       = useRouter()
   const pathname     = usePathname()
   const searchParams = useSearchParams()
 
-  const [showAddPO,    setShowAddPO]    = useState(false)
-  const [showFilters,  setShowFilters]  = useState(false)
+  const [showAddPO,      setShowAddPO]      = useState(false)
+  const [showAddInvoice, setShowAddInvoice] = useState(false)
+  const [showFilters,    setShowFilters]    = useState(false)
   const [editTarget,   setEditTarget]   = useState<PoRow | null>(null)
   const [splitTarget,  setSplitTarget]  = useState<PoRow | null>(null)
 
@@ -225,20 +233,29 @@ export default function PoProcurementClient({
             </span>
           )}
         </Button>
-        <CsvImportDialog
-          entityLabel="PO"
-          entityLabelPlural="POs"
-          endpoint="/api/purchase-orders"
-          templateFilename="po_bulk_template.csv"
-          fields={PO_BULK_CSV_FIELDS}
-          onSuccess={afterAction}
-        />
-        <Button variant="outline" size="lg" onClick={() => router.push("/po-tracking/po-procurement/entity-emails")}>
-          <Mail className="h-3.5 w-3.5" /> Entity Emails
-        </Button>
-        <Button size="lg" onClick={() => setShowAddPO(true)} className="sm:ml-auto">
-          <Plus className="h-3.5 w-3.5" /> Add PO
-        </Button>
+        {isInwarding && (
+          <Button size="lg" onClick={() => setShowAddInvoice(true)} className="sm:ml-auto">
+            <FileUp className="h-3.5 w-3.5" /> Add Invoice
+          </Button>
+        )}
+        {!isInwarding && (
+          <>
+            <CsvImportDialog
+              entityLabel="PO"
+              entityLabelPlural="POs"
+              endpoint="/api/purchase-orders"
+              templateFilename="po_bulk_template.csv"
+              fields={PO_BULK_CSV_FIELDS}
+              onSuccess={afterAction}
+            />
+            <Button variant="outline" size="lg" onClick={() => router.push("/po-tracking/po-procurement/entity-emails")}>
+              <Mail className="h-3.5 w-3.5" /> Entity Emails
+            </Button>
+            <Button size="lg" onClick={() => setShowAddPO(true)} className="sm:ml-auto">
+              <Plus className="h-3.5 w-3.5" /> Add PO
+            </Button>
+          </>
+        )}
       </div>
 
       {/* ── Filter panel ── */}
@@ -275,6 +292,7 @@ export default function PoProcurementClient({
                   <option value="">All Types</option>
                   <option value="normal">Normal</option>
                   <option value="impromptu">Impromptu</option>
+                  <option value="inward">Inward</option>
                 </select>
               </div>
               <div className="grid gap-1.5">
@@ -333,15 +351,15 @@ export default function PoProcurementClient({
 
       {/* ── Status tabs ── */}
       <div className="flex flex-wrap items-center gap-1 border-b border-border">
-        {TABS.map((tab) => {
+        {(isInwarding ? INWARD_TABS : TABS).map((tab) => {
           const isActive = activeTab === tab
-          const count = tab === "all"
-            ? statusCounts.all
-            : (statusCounts[tab] ?? 0)
+          const count = statusCounts[tab] ?? 0
           return (
             <button
               key={tab}
-              onClick={() => navigate({ status: tab === "all" ? "" : tab })}
+              // On inwarding "all" must stay in the URL: dropping the param there
+              // means "no filter chosen", which the page reads as the open tab.
+              onClick={() => navigate({ status: tab === "all" && !isInwarding ? "" : tab })}
               className={cn(
                 "relative flex items-center gap-1.5 px-2.5 py-2 text-xs font-medium transition-colors -mb-px border-b-2",
                 isActive
@@ -350,7 +368,7 @@ export default function PoProcurementClient({
               )}
             >
               {tab !== "all" && <span className={cn("h-1.5 w-1.5 rounded-full", TAB_DOT[tab])} />}
-              {tab === "all" ? "All" : STATUS_CONFIG[tab].label}
+              {TAB_LABEL[tab] ?? STATUS_CONFIG[tab]?.label ?? tab}
               <span className="opacity-60 tabular-nums">({count})</span>
             </button>
           )
@@ -369,12 +387,24 @@ export default function PoProcurementClient({
         selectedIds={selectedIds}
         onToggleRow={toggleRow}
         onToggleAll={toggleAll}
+        selectable={!isInwarding}
+        receiveOnly={isInwarding}
       />
 
       {/* ── Pagination ── */}
       <PaginationBar page={page} pageSize={pageSize} total={total} />
 
-      {/* ── Dialogs ── */}
+      {/* ── Dialogs — procurement-only writes; inwarding's Receive dialog lives in PoTable ── */}
+      {isInwarding ? (
+        <AddInvoiceDialog
+          open={showAddInvoice}
+          onClose={() => setShowAddInvoice(false)}
+          skuOptions={skuOptions}
+          mfgOptions={mfgOptions}
+          warehouseOptions={warehouseOptions}
+          onCreated={afterAction}
+        />
+      ) : <>
       <AddPODialog
         open={showAddPO}
         onClose={() => setShowAddPO(false)}
@@ -414,6 +444,7 @@ export default function PoProcurementClient({
         onClear={() => setSelectedIds(new Set())}
         onSubmitted={() => { setSelectedIds(new Set()); afterAction() }}
       />
+      </>}
     </div>
   )
 }

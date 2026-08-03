@@ -247,4 +247,4 @@ flowchart TD
 
 - Does not propose fixes for the gaps or inconsistencies above — that's a follow-up decision once you decide which ones are worth closing.
 - Does not touch the future domain-event bus design — see [`event-catalog.md`](./event-catalog.md) for that.
-- Does not cover RM/PM Procurement or Dispatch Calendar pages (`app/po-tracking/rm-pm-procurement`, `app/po-tracking/dispatch-calendar`) — no dedicated API routes or instrumentation exist there to document.
+- Does not cover the RM/PM Procurement page (`app/po-tracking/rm-pm-procurement`) — no dedicated API routes or instrumentation exist there to document. PO Inwarding (`app/po-tracking/po-inwarding`, formerly the Dispatch Calendar stub) reuses the PO routes covered in §3.8.

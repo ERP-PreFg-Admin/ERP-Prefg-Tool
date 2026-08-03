@@ -99,7 +99,9 @@ sequenceDiagram
 | `lib/utils.ts` | `cn()` — Tailwind class name utility |
 | `lib/constants.ts` | Typed `STATUS` and `APPROVAL_STATUS` const objects — use these instead of raw string literals across the codebase |
 | `lib/queries/` | SQL statement strings grouped by domain |
-| `lib/approvals/module-handlers.ts` | Strategy pattern registry — each approval module (`SKU`, `RM_RATE`, `PM_VRM`, etc.) owns its `setStatus` and `applyAndArchive` logic here; adding a new module requires adding one entry, the route never changes |
+| `lib/queries/history.ts` | `historySql` — generic per-module audit trail (`history_masters_edits`), populated alongside the approvals mechanism on every create/edit/delete submission |
+| `lib/master-routes/history-utils.ts` | `insertHistoryEntry` / `resolvePendingHistoryEntry` — shared helpers a module route calls to write/resolve its history row; the approve/reject route resolves it automatically regardless of module |
+| `lib/approvals/module-handlers.ts` | Strategy pattern registry — aggregates and re-exports `MODULE_HANDLERS` (`SKU`, `RM_RATE`, `PM_VRM`, `*_BULK`, etc.); the actual `setStatus`/`applyAndArchive` logic per module lives in `lib/approvals/handlers/<domain>.ts` (one file per domain: `sku.ts`, `raw-materials.ts`, `packing-materials.ts`, `vendors.ts`, `manufacturers.ts`, `purchase-orders.ts`, `bom.ts`, plus shared `types.ts`); adding a new module means adding one handler object in the relevant domain file and registering it in the top-level `MODULE_HANDLERS` map — the route never changes |
 | `lib/pdf/po-document.tsx` | React PDF template for PO documents — renders branded A4 PDF, used by preview and email send |
 | `types/` | TypeScript types for database row shapes and NextAuth session augmentation |
 | `prisma/` | `schema.prisma` (source of truth for DB models) + migration history |
@@ -145,6 +147,6 @@ The following modules have an `app/<module>/page.tsx` file showing a "Coming soo
 - `app/sales-crm/`
 - `app/reports/`
 
-> `app/po-tracking/` is **fully implemented** — see [API Reference](./api-reference.md#purchase-orders) for the PO API surface.
+> `app/po-tracking/` is **fully implemented**. A PO's lifecycle runs `raised` → `split` (into child POs via `app/api/purchase-orders/[id]/split/route.ts`) and/or `receive` (partial or full goods receipt via `app/api/purchase-orders/[id]/receive/route.ts`, auto-closing to `received` once the remainder is within tolerance) → `cancel` / `short_close` for early termination. The procurement table (`app/po-tracking/po-procurement/PoTable.tsx`) delegates cell rendering to `PoTableCells.tsx` and row actions to `PoActionMenu.tsx`, with one dialog per action (`SplitPODialog.tsx`, `ReceivePODialog.tsx`, `CancelPODialog.tsx`, `ShortClosePODialog.tsx`). See [API Reference](./api-reference.md#purchase-orders) for the full PO API surface.
 
 See [Adding a New Module](./adding-a-new-module.md) for how to implement one from scratch, and [docs/architecture-evolution.md](./architecture-evolution.md) for the planned gateway + events pattern to adopt when building them.

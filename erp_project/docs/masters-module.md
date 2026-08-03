@@ -108,9 +108,9 @@ Posts `{ action: "create", ...formValues }` to `endpoint`. Shows inline error me
 
 ### `CsvImportDialog`
 
-A file-upload dialog for bulk imports. Generates a downloadable CSV template from the field config, parses the uploaded file client-side, shows a 5-row preview, then POSTs `{ action: "bulk", rows: validRows[] }`.
+A file-upload dialog for bulk imports. Generates a downloadable CSV template from the field config, parses the uploaded file client-side, shows a 5-row preview, then POSTs `{ action: "bulk", rows: validRows[] }` (optionally preceded by a `check_duplicates` preview call — see field configs that set `enableDuplicateCheck`).
 
-Returns `{ inserted, skipped }` — both are shown to the user in a success message.
+The `bulk` action no longer inserts rows directly: the whole file is uploaded to S3 and staged as **one pending approval** covering the entire batch. Returns `{ ok, approval_id, staged, skipped }`. The actual per-row insert happens in that module's `applyAndArchive` handler once an approver approves the batch — see [CSV Import Workflow](#csv-import-workflow) below.
 
 ### `MasterToolbar`
 
@@ -141,6 +141,19 @@ Submits `POST /api/masters/manufacturers` with `action: "update"` and `mfg_id`. 
 
 Both dialogs use `useEffect` (not `useState` initializer) to re-populate the form whenever a different row is selected, so switching between rows always shows the correct data.
 
+### History Views (Create/Edit Audit Trail)
+
+Every master except BOM/Recipe (which has its own dedicated history page — see BOM Master section) has a per-record history dialog showing every create/edit submission and its approve/reject outcome:
+
+| Dialog | File | Backed by |
+|--------|------|-----------|
+| Manufacturer | `EditHistoryDialog.tsx` (`app/masters/manufacturers/`) | `GET /api/masters/manufacturers/history` |
+| Vendor | `EditHistoryDialog.tsx` (`app/masters/vendors/`) | `GET /api/masters/vendors/history` |
+| RM rate | `RmRateHistoryDialog.tsx` | `GET /api/masters/raw-materials/mrm-history` / `vrm-history` |
+| PM rate | `PmRateHistoryDialog.tsx` | `GET /api/masters/packing-materials/mrm-history` / `vrm-history` |
+
+Each row shown is one entry in the generic `history_masters_edits` audit table (`lib/queries/history.ts`), populated **alongside** (not instead of) the `approvals`/`approval_items` pending-review mechanism: `insertHistoryEntry` (`lib/master-routes/history-utils.ts`) writes one row per create/edit/delete submission with an auto-incrementing `version_no` per `(module, entity_id)`, and the shared approve/reject route calls `resolvePendingHistoryEntry` to mark that same row approved/rejected — safe to call unconditionally even for modules that don't participate. Each entry shows who submitted it, who approved/rejected it, and when.
+
 ---
 
 ## Edit Actions — Rate Masters
@@ -165,6 +178,27 @@ function toDateStr(val: unknown): string {
   return String(val).slice(0, 10)
 }
 ```
+
+### MOQ-Slab Vendor Pricing
+
+A vendor rate row is keyed by `(rm_id/pm_id, vendor_id, moq)`, not just `(material, vendor)` — the same vendor can hold **multiple rate rows for the same material, one per MOQ (minimum order quantity) slab** (e.g. ₹120/kg at MOQ 100, ₹110/kg at MOQ 500). `checkDuplicate` for vendor rates matches on all three columns, so adding a new MOQ slab for an already-priced vendor is a new row, not an update. `EditRmVendorRateDialog.tsx` / `EditPmVendorRateDialog.tsx` edit one slab row at a time (MOQ is itself an editable field).
+
+### Bulk CSV Upload for Rate Masters
+
+RM and PM vendor/manufacturer rates support bulk CSV upload via **dedicated endpoints**, separate from each entity's main `/api/masters/*` route (which already has its own unrelated base-material `bulk`/`check_duplicates` actions):
+
+| Dialog context | Endpoint | Field config |
+|---|---|---|
+| RM vendor rates | `POST /api/masters/raw-materials/vrm-bulk` | `rm-vrm-bulk-fields.ts` (`RM_VRM_BULK_FIELDS`) |
+| RM manufacturer rates | `POST /api/masters/raw-materials/mrm-bulk` | `rm-mrm-bulk-fields.ts` (`RM_MRM_BULK_FIELDS`) |
+| PM vendor rates | `POST /api/masters/packing-materials/vrm-bulk` | `pm-vrm-bulk-fields.ts` (`PM_VRM_BULK_FIELDS`) |
+| PM manufacturer rates | `POST /api/masters/packing-materials/mrm-bulk` | `pm-mrm-bulk-fields.ts` (`PM_MRM_BULK_FIELDS`) |
+
+Each endpoint supports two actions:
+- `check_duplicates` — CsvImportDialog's preview-time deep check; resolves `rm_code`/`pm_code`, `vendor_code`, `mfg_code` against the DB (existence + active status) and flags duplicate material+vendor / material+mfg pairs within the same file, before the user ever hits "Upload".
+- `bulk` — does **not** insert rows directly. It uploads the whole validated row set as one CSV to S3 (`uploadRowsAsCsv`) and stages the **entire file as a single pending approval** (module `RM_VRM_BULK` / `RM_RATE_BULK` / `PM_VRM_BULK` / `PM_RATE_BULK`) via `stageBulkUploadApproval`. The real per-row insert only happens in that module's `applyAndArchive` handler once an approver approves the batch — see `lib/approvals/module-handlers.ts` and `lib/approvals/handlers/raw-materials.ts` / `packing-materials.ts`.
+
+Base-material bulk uploads (RM/PM/Vendor/Manufacturer `action: "bulk"` on the main `/api/masters/*` routes) follow the same approval-staged pattern — see the updated CSV Import Workflow section below.
 
 ---
 
@@ -270,13 +304,19 @@ bom (header)
 ├── sku_code → which product
 ├── mfg_id   → which plant
 ├── bom_code → version identifier
+├── effective_from / effective_till → validity window (recipe-level)
 └── bom_details[] (line items)
     ├── mtrl_type: "rm" or "pm"
     ├── mtrl_id: FK to rm or pm
     ├── amount: quantity per batch
-    ├── mtrl_cost: cost per unit
-    └── effective_from / effective_till: validity window
+    └── mtrl_cost: cost per unit
 ```
+
+> **Recipe-level effective dates:** `effective_from`/`effective_till` moved from the line level to the BOM header (`master_bom`) — there is one validity window per recipe, not one per RM/PM line. `effective_from` is entered when the BOM is created/edited as a new version; `effective_till` is set automatically to the approval date when the recipe is discontinued or superseded. `details_bom`/`history_bom` still carry the same two columns for legacy rows predating this change (surfaced read-only on the BOM History page), but new lines no longer populate them.
+
+### Bulk BOM Upload via CSV
+
+`BOMMasterComponent.tsx` offers a `CsvImportDialog` (fields in `bom-bulk-fields.ts` → `BOM_BULK_CSV_FIELDS`) for creating many BOM lines across SKUs in one file: `sku_code`, optional `bom_code` (auto-generated if blank), `effective_from` (once per SKU group), `mtrl_type` (rm/pm), `mtrl_code`, `amount`, `uom`. Like the rate-master bulk uploads above, `POST /api/masters/bom-master` with `action: "bulk"` doesn't insert immediately — it stages the whole file as one `BOM_BULK` pending approval (`stageBulkUploadApproval`); the real per-row inserts happen in that module's `applyAndArchive` handler on approval. A separate `check_duplicates` action does the preview-time deep check (SKU/material code existence, RM%-total per SKU group) before the user uploads.
 
 ### Status Lifecycle
 
@@ -293,13 +333,17 @@ A SKU can have multiple BOMs (different versions or different manufacturing site
 
 ## CSV Import Workflow
 
+Bulk CSV upload is **approval-gated**, not a direct insert: the whole uploaded file is staged as a single pending approval, and the real inserts only happen once that approval is approved (see [Approval Flow](./api-reference.md) and `lib/master-routes/bulk-approval.ts`). This applies uniformly to base-material bulk uploads (RM/PM/Vendor/Manufacturer/BOM) and to the rate-master bulk uploads described above (`RM_VRM_BULK`, `RM_RATE_BULK`, `PM_VRM_BULK`, `PM_RATE_BULK`).
+
 ```mermaid
 sequenceDiagram
     participant U as User
     participant D as CsvImportDialog
     participant C as Client Component
     participant R as API Route
+    participant S3 as S3
     participant DB as MariaDB
+    participant Ap as Approver
 
     U->>D: Click "Upload CSV"
     D-->>U: Show dialog + Download Template button
@@ -307,13 +351,19 @@ sequenceDiagram
     U->>U: Fill in data, save file
     U->>D: Upload filled CSV file
     D->>D: Parse CSV client-side\n(handle RFC 4180 quoting)
-    D-->>U: Show 5-row preview\n(highlight invalid rows)
+    D->>R: POST { action: "check_duplicates", rows }
+    R->>DB: Resolve codes, flag in-file duplicates
+    R-->>D: { duplicates: { rowIndex: [messages] } }
+    D-->>U: Show 5-row preview\n(highlight invalid/duplicate rows)
     U->>D: Click "Upload"
     D->>R: POST { action: "bulk", rows: validRows }
-    R->>DB: INSERT each row\n(skip ER_DUP_ENTRY)
+    R->>S3: Upload validated rows as one CSV
+    R->>DB: INSERT ONE approvals row\n(s3_key, filename, row_count)
     DB-->>R: —
-    R-->>D: { inserted: 5, skipped: 2 }
-    D-->>U: Show success: "5 records imported, 2 skipped"
+    R-->>D: { ok: true, approval_id, staged: 5, skipped: 0 }
+    D-->>U: Show success: "5 rows staged for approval"
     D->>C: onSuccess callback
     C->>C: router.refresh()
+    Ap->>DB: Approve the batch (/approvals)
+    DB->>DB: Module's applyAndArchive\nparses S3 CSV, inserts each row\n(skip ER_DUP_ENTRY per row)
 ```

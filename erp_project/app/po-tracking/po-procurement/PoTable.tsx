@@ -32,11 +32,13 @@ export default function PoTable({
   selectedIds,
   onToggleRow,
   onToggleAll,
+  selectable = true,
+  receiveOnly = false,
 }: {
   rows: PoRow[]
   sessionUserId: number
-  onEdit: (row: PoRow) => void
-  onSplit: (row: PoRow) => void
+  onEdit?: (row: PoRow) => void
+  onSplit?: (row: PoRow) => void
   sortBy: string
   sortDir: SortDir
   onSort: (key: string) => void
@@ -46,6 +48,11 @@ export default function PoTable({
   selectedIds: Set<number>
   onToggleRow: (id: number) => void
   onToggleAll: (ids: number[]) => void
+  /** false drops the checkbox column entirely (PO Inwarding has no mail flow). */
+  selectable?: boolean
+  /** PO Inwarding mode: receiving is the point, so Receive gets a labelled
+   *  button and the procurement-side actions (edit, split, cancel) are hidden. */
+  receiveOnly?: boolean
 }) {
   const router                                      = useRouter()
   const [shortCloseTarget, setShortCloseTarget]     = useState<number | null>(null)
@@ -65,14 +72,16 @@ export default function PoTable({
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
-                  <TableHead className="w-9">
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={() => onToggleAll(pageIds)}
-                      aria-label="Select all POs on this page"
-                    />
-                  </TableHead>
+                  {selectable && (
+                    <TableHead className="w-9">
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={() => onToggleAll(pageIds)}
+                        aria-label="Select all POs on this page"
+                      />
+                    </TableHead>
+                  )}
                   <SortHead colKey="po_no"        {...sh}>PO No.</SortHead>
                   <SortHead colKey="mfg_name"     {...sh}>Manufacturer</SortHead>
                   <SortHead colKey="date"         {...sh}>PO Date</SortHead>
@@ -92,7 +101,7 @@ export default function PoTable({
               <TableBody>
                 {rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={14} className="text-center text-muted-foreground py-10">
+                    <TableCell colSpan={selectable ? 14 : 13} className="text-center text-muted-foreground py-10">
                       No purchase orders match your filters.
                     </TableCell>
                   </TableRow>
@@ -101,8 +110,8 @@ export default function PoTable({
                     const status = r.status ?? "draft"
                     const cfg    = STATUS_CONFIG[status] ?? { label: status, variant: "secondary" as BadgeVariant }
 
-                    const canEdit    = status === "draft" && r.po_raised_by === sessionUserId
-                    const canSplit   = ["draft", "raised", "punched", "partially_received"].includes(status)
+                    const canEdit    = !receiveOnly && status === "draft" && r.po_raised_by === sessionUserId
+                    const canSplit   = !receiveOnly && ["draft", "raised", "punched", "partially_received"].includes(status)
                     const canReceive = ["raised", "punched", "partially_received"].includes(status)
 
                     // Three-dot menu items
@@ -111,7 +120,7 @@ export default function PoTable({
                     const remaining     = originalQty - receivedQty
                     const tolerance     = poTolerance(originalQty)
                     const canShortClose = ["raised", "punched", "partially_received"].includes(status) && remaining > tolerance
-                    const canCancel     = ["raised", "punched", "partially_received"].includes(status)
+                    const canCancel     = !receiveOnly && ["raised", "punched", "partially_received"].includes(status)
                     const hasAttachment = !!r.attachment_key
 
                     const menuActions: MenuAction[] = []
@@ -154,14 +163,16 @@ export default function PoTable({
 
                     return (
                       <TableRow key={r.id} data-state={selectedIds.has(r.id) ? "selected" : undefined}>
-                        <TableCell>
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(r.id)}
-                            onChange={() => onToggleRow(r.id)}
-                            aria-label={`Select PO ${r.po_no}`}
-                          />
-                        </TableCell>
+                        {selectable && (
+                          <TableCell>
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(r.id)}
+                              onChange={() => onToggleRow(r.id)}
+                              aria-label={`Select PO ${r.po_no}`}
+                            />
+                          </TableCell>
+                        )}
                         {/* PO Number */}
                         <TableCell className="font-mono text-xs font-medium whitespace-nowrap">
                           {r.po_no}
@@ -220,7 +231,7 @@ export default function PoTable({
                           <div className="flex items-center justify-end gap-1.5">
                             {canEdit && (
                               <button
-                                onClick={() => onEdit(r)}
+                                onClick={() => onEdit?.(r)}
                                 className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 transition-colors"
                               >
                                 <Pencil className="h-3 w-3" /> Edit
@@ -228,7 +239,7 @@ export default function PoTable({
                             )}
                             {canSplit && (
                               <button
-                                onClick={() => onSplit(r)}
+                                onClick={() => onSplit?.(r)}
                                 title="Split PO"
                                 className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent transition-colors"
                               >
@@ -239,9 +250,15 @@ export default function PoTable({
                               <button
                                 onClick={() => setReceiveTarget(r)}
                                 title="Receive against PO"
-                                className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent transition-colors"
+                                className={cn(
+                                  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors",
+                                  receiveOnly
+                                    ? "border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300"
+                                    : "border border-input hover:bg-accent"
+                                )}
                               >
                                 <PackageCheck className="h-3 w-3" />
+                                {receiveOnly && "Receive"}
                               </button>
                             )}
                             <PoActionMenu actions={menuActions} />
