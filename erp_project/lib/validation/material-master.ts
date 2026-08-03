@@ -39,6 +39,8 @@ export const materialMasterUpdateRmSchema = z.object({
   uom: z.string().nullable().optional(),
   hsn_code: z.string().nullable().optional(),
   status: z.string().nullable().optional(),
+  /** Mandatory reason for this edit — archived to history_masters_edits.remarks. */
+  remarks: z.string().trim().min(1, "Remarks are required"),
 })
 
 export const materialMasterUpdatePmSchema = z.object({
@@ -50,6 +52,8 @@ export const materialMasterUpdatePmSchema = z.object({
   hsn_code: z.string().nullable().optional(),
   pantone_color: z.string().nullable().optional(),
   status: z.string().nullable().optional(),
+  /** Mandatory reason for this edit — archived to history_masters_edits.remarks. */
+  remarks: z.string().trim().min(1, "Remarks are required"),
 })
 
 export const materialMasterUpdateSchema = z.discriminatedUnion("material", [

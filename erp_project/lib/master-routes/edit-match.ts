@@ -17,13 +17,16 @@ export type EditCandidate = {
 
 /** Resolves the existing record ONE CSV row edits, by exact `code` match —
  *  used inside an open transaction (`conn.execute`), e.g. the staging step
- *  and the *_BULK handlers' applyAndArchive. */
+ *  and the *_BULK handlers' applyAndArchive. `codeField` names the row's own
+ *  business-code column (e.g. "rm_code"/"pm_code" for material master, "code"
+ *  for manufacturers/vendors). */
 export async function findEditMatchForRow<T extends EditCandidate>(
   conn: PoolConnection,
   selectByCodeSql: string,
-  row: Record<string, unknown>
+  row: Record<string, unknown>,
+  codeField: string = "code",
 ): Promise<T | null> {
-  const code = String(row.code ?? "").trim()
+  const code = String(row[codeField] ?? "").trim()
   if (!code) return null
   const [rows] = await conn.execute(selectByCodeSql, [code])
   return (rows as T[])[0] ?? null
@@ -36,9 +39,10 @@ export async function findEditMatchForRow<T extends EditCandidate>(
  */
 export async function fetchEditMatchCandidates<T extends EditCandidate>(
   selectCandidatesByCodesSql: string,
-  rows: Record<string, unknown>[]
+  rows: Record<string, unknown>[],
+  codeField: string = "code",
 ): Promise<T[]> {
-  const codes = [...new Set(rows.map((r) => String(r.code ?? "").trim()).filter(Boolean))]
+  const codes = [...new Set(rows.map((r) => String(r[codeField] ?? "").trim()).filter(Boolean))]
   if (codes.length === 0) return []
   return query<T>(selectCandidatesByCodesSql, [codes])
 }
@@ -47,9 +51,10 @@ export async function fetchEditMatchCandidates<T extends EditCandidate>(
  *  row has no code (always a new record) or the code matches nothing. */
 export function findBestEditMatch<T extends EditCandidate>(
   row: Record<string, unknown>,
-  candidates: T[]
+  candidates: T[],
+  codeField: string = "code",
 ): T | null {
-  const code = String(row.code ?? "").trim()
+  const code = String(row[codeField] ?? "").trim()
   if (!code) return null
   return candidates.find((c) => c.code === code) ?? null
 }

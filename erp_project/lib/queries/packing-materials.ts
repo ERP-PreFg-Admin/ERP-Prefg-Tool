@@ -399,6 +399,21 @@ export const packingMaterials = {
     FROM master_pm WHERE id = ? LIMIT 1
   `,
 
+  /** Full-row lookup by business code, for bulk-CSV edit detection — `code`
+   *  aliases pm_code so this satisfies the generic EditCandidate shape used
+   *  by lib/master-routes/edit-match.ts. Parameters: [pm_code] */
+  selectByCodeForMatch: `
+    SELECT id, pm_code, pm_code AS code, name, type, uom, status, hsn_code, pantone_color
+    FROM master_pm WHERE pm_code = ? LIMIT 1
+  `,
+
+  /** IN (?)-batched counterpart of selectByCodeForMatch, for the whole
+   *  uploaded file at once — see fetchEditMatchCandidates. Parameters: [codes[]] */
+  selectCandidatesByCodesBatch: `
+    SELECT id, pm_code, pm_code AS code, name, type, uom, status, hsn_code, pantone_color
+    FROM master_pm WHERE pm_code IN (?)
+  `,
+
   /** Set status on a master_pm base record (e.g. 'in_review', 'draft', 'active').
    *  Parameters: [status, id]
    */

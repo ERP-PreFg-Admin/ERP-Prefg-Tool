@@ -6,7 +6,8 @@ import { parseS3Import } from "@/lib/import-s3"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { insertApprovalWithItems, applyVendorRateApproval, applyMfgRateApproval, generateMaterialCode, toRmParams, findFuzzyMakeMatch } from "../../../../lib/master-routes/material-utils"
-import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
+import { stageRmBulkRows } from "@/lib/approvals/handlers/raw-materials"
+import { fetchEditMatchCandidates, findBestEditMatch, type EditCandidate } from "@/lib/master-routes/edit-match"
 import { roundToWholeNumber, roundToTwoDecimals } from "@/lib/numeric"
 
 function toRmVendorRateParams(rmId: number, r: any, today: string): any[] {
@@ -156,14 +157,27 @@ export async function rmCheckMakeFuzzy(body: any, ctx: object): Promise<NextResp
 }
 
 // Read-only CSV-preview helper for CsvImportDialog's enableDuplicateCheck —
-// same "did you mean?" fuzzy check as rmCheckMakeFuzzy, run per row.
+// runs the "did you mean?" fuzzy make check (rmCheckMakeFuzzy) per row, and
+// flags rows whose rm_code matches an existing record as edits (requiring
+// remarks) rather than blocking duplicates — mirrors manufacturers/route.ts's
+// check_duplicates action.
 export async function rmCheckDuplicatesBulk(body: any, ctx: object): Promise<NextResponse> {
   const { rows } = body
   const duplicates: Record<number, string[]> = {}
-  if (!Array.isArray(rows)) return NextResponse.json({ duplicates })
+  const editMatches: Record<number, { id: number; code: string; current: EditCandidate }> = {}
+  if (!Array.isArray(rows)) return NextResponse.json({ duplicates, editMatches })
 
   try {
+    const candidates = await fetchEditMatchCandidates<EditCandidate>(
+      rawMaterials.selectCandidatesByCodesBatch, rows, "rm_code"
+    )
+    rows.forEach((row: Record<string, unknown>, i: number) => {
+      const match = findBestEditMatch(row, candidates, "rm_code")
+      if (match) editMatches[i] = { id: match.id, code: match.code, current: match }
+    })
+
     for (let i = 0; i < rows.length; i++) {
+      if (editMatches[i]) continue
       const row = rows[i]
       const make = String(row.make ?? "").trim()
       const name = String(row.name ?? "").trim()
@@ -171,7 +185,7 @@ export async function rmCheckDuplicatesBulk(body: any, ctx: object): Promise<Nex
       const suggestion = await findFuzzyMakeMatch(name, row.type, make)
       if (suggestion) duplicates[i] = [`Make "${make}" is close to existing "${suggestion}" for this material — did you mean "${suggestion}"?`]
     }
-    return NextResponse.json({ duplicates })
+    return NextResponse.json({ duplicates, editMatches })
   } catch (err: any) {
     logger.error({ ...ctx, error: err.message, message: "RM bulk duplicate check error" })
     return NextResponse.json({ error: "Database error" }, { status: 500 })
@@ -334,9 +348,11 @@ export async function rmAddRates(body: any, userId: number, ctx: object): Promis
   }
 }
 
-// Stages the WHOLE batch as one pending approval — nothing is inserted into
-// master_rm until an admin approves (see the RM_BULK handler in
-// lib/approvals/module-handlers.ts).
+// Stages the batch for approval — new-record rows are bundled into ONE
+// pending RM_BULK approval (nothing inserted into master_rm until an admin
+// approves it, see the RM_BULK handler in lib/approvals/module-handlers.ts);
+// rows recognized as an edit of an existing rm_code are submitted immediately
+// as their own real RM_MAT approval — see stageRmBulkRows for why.
 export async function rmBulk(body: any, userId: number, ctx: object): Promise<NextResponse> {
   const { rows } = body
   if (!Array.isArray(rows) || rows.length === 0)
@@ -346,22 +362,23 @@ export async function rmBulk(body: any, userId: number, ctx: object): Promise<Ne
   logger.info({ ...logCtx, rowCount: rows.length, message: "RM bulk upload started" })
   recordRawEvent("RM_BULK", logCtx.eventId, { rowCount: rows.length })
 
-  const staged = rows.filter((r: any) => r.name?.trim()).length
-  const skipped = rows.length - staged
-
   const conn = await pool.getConnection()
+  let staged = 0
+  let skipped = 0
   try {
     const yyyymm = new Date().toISOString().slice(0, 7)
-    const { key, filename } = await uploadRowsAsCsv(rows, `imports/raw-materials/${yyyymm}`, "rm_bulk")
-
     await conn.beginTransaction()
-    const approvalId = await stageBulkUploadApproval(conn, {
-      userId, module: "RM_BULK", s3Key: key, filename, rowCount: rows.length,
-    })
+    const result = await stageRmBulkRows(conn, rows, userId, `imports/raw-materials/${yyyymm}`)
+    staged = result.staged
+    skipped = result.skipped
+
+    if (staged === 0) {
+      throw new Error("Nothing to submit for approval — every row was skipped or had no actual changes.")
+    }
     await conn.commit()
-    recordProcessedEvent("RM_BULK", logCtx.eventId, { staged, skipped, approvalId })
-    logger.info({ ...logCtx, approvalId, staged, skipped, message: "RM bulk upload staged for approval" })
-    return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rows.length })
+    recordProcessedEvent("RM_BULK", logCtx.eventId, { staged, skipped, approvalId: result.approvalId })
+    logger.info({ ...logCtx, approvalId: result.approvalId, staged, skipped, message: "RM bulk upload staged for approval" })
+    return NextResponse.json({ ok: true, approval_id: result.approvalId, staged, skipped, total: rows.length })
   } catch (err: any) {
     await conn.rollback()
     recordFailedEvent("RM_BULK", logCtx.eventId, { rowCount: rows.length }, err.message)
@@ -372,8 +389,8 @@ export async function rmBulk(body: any, userId: number, ctx: object): Promise<Ne
   }
 }
 
-// Same staging-only behaviour as rmBulk above — the file is already in S3,
-// so we just parse it for a preview count and stage ONE approval.
+// Same staging behaviour as rmBulk above — the file is already in S3, so we
+// just parse it and run it through the same stageRmBulkRows split.
 export async function rmS3Bulk(body: any, userId: number, ctx: object): Promise<NextResponse> {
   const { key } = body
   if (!key?.trim()) return NextResponse.json({ error: "key is required" }, { status: 400 })
@@ -397,20 +414,23 @@ export async function rmS3Bulk(body: any, userId: number, ctx: object): Promise<
     return NextResponse.json({ error: "File is empty or has no data rows" }, { status: 400 })
   }
 
-  const staged = rawRows.filter((r) => r["name"]?.trim()).length
-  const skipped = rawRows.length - staged
-
   const conn = await pool.getConnection()
+  let staged = 0
+  let skipped = 0
   try {
-    const filename = key.split("/").pop() ?? key
+    const yyyymm = new Date().toISOString().slice(0, 7)
     await conn.beginTransaction()
-    const approvalId = await stageBulkUploadApproval(conn, {
-      userId, module: "RM_BULK", s3Key: key, filename, rowCount: rawRows.length,
-    })
+    const result = await stageRmBulkRows(conn, rawRows, userId, `imports/raw-materials/${yyyymm}`)
+    staged = result.staged
+    skipped = result.skipped
+
+    if (staged === 0) {
+      throw new Error("Nothing to submit for approval — every row was skipped or had no actual changes.")
+    }
     await conn.commit()
-    recordProcessedEvent("RM_S3BULK", logCtx.eventId, { s3Key: key, staged, skipped, approvalId })
-    logger.info({ ...logCtx, approvalId, staged, skipped, message: "RM bulk upload (S3) staged for approval" })
-    return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rawRows.length })
+    recordProcessedEvent("RM_S3BULK", logCtx.eventId, { s3Key: key, staged, skipped, approvalId: result.approvalId })
+    logger.info({ ...logCtx, approvalId: result.approvalId, staged, skipped, message: "RM bulk upload (S3) staged for approval" })
+    return NextResponse.json({ ok: true, approval_id: result.approvalId, staged, skipped, total: rawRows.length })
   } catch (err: any) {
     await conn.rollback()
     recordFailedEvent("RM_S3BULK", logCtx.eventId, { s3Key: key }, err.message)

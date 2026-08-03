@@ -17,7 +17,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
-import { ArrowUp, ArrowDown, ChevronsUpDown } from "lucide-react"
+import { ArrowUp, ArrowDown, ChevronsUpDown, History as HistoryIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -38,6 +38,8 @@ import { cn } from "@/lib/utils"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { StatusBadge } from "@/components/masters/StatusBadge"
+import { TruncatedCell } from "@/components/masters/TruncatedCell"
+import { EntityHistoryDialog } from "@/components/masters/EntityHistoryDialog"
 import type { MasterField } from "@/components/masters/field-config"
 import AddMaterialDialog from "./AddMaterialDialog"
 import EditMaterialDialog, { EditButton } from "./EditMaterialDialog"
@@ -50,6 +52,7 @@ const RM_CSV_FIELDS: MasterField[] = [
   { key: "uom",       label: "UOM",                           placeholder: "e.g. kg",       sample: "kg" },
   { key: "hsn_code",  label: "HSN Code",  placeholder: "e.g. 33081000", sample: "33081000" },
   { key: "inci_name", label: "INCI Name", placeholder: "e.g. Glycerin", sample: "Glycerin" },
+  { key: "remarks",   label: "Remarks",   colSpan: 2, placeholder: "Optional for new records — remarks are required when submitting an edit", sample: "New material onboarding" },
 ]
 
 const PM_CSV_FIELDS: MasterField[] = [
@@ -59,6 +62,7 @@ const PM_CSV_FIELDS: MasterField[] = [
   { key: "uom",           label: "UOM",                               placeholder: "e.g. pcs",      sample: "pcs" },
   { key: "hsn_code",      label: "HSN Code",     placeholder: "e.g. 39235010", sample: "39235010" },
   { key: "pantone_color", label: "Pantone Color", placeholder: "e.g. PMS 185 C", sample: "PMS 185 C" },
+  { key: "remarks",       label: "Remarks",      colSpan: 2, placeholder: "Optional for new records — remarks are required when submitting an edit", sample: "New material onboarding" },
 ]
 
 type AnyRow = Record<string, unknown>
@@ -66,6 +70,9 @@ type ColumnDef = {
   key: string
   label: string
   sortAs: "text" | "num"
+  /** Fixed pixel width for narrow/fixed-format columns. Columns without a
+   *  width share the remaining space equally (table-layout: fixed). */
+  width?: string
   className?: string
   render?: (row: AnyRow) => ReactNode
 }
@@ -73,22 +80,22 @@ type ColumnDef = {
 const statusBadge = (row: AnyRow) => <StatusBadge status={row.status as string | null} />
 
 const RM_COLUMNS: ColumnDef[] = [
-  { key: "rm_code",   label: "RM Code",   sortAs: "text", className: "font-mono text-xs font-medium" },
-  { key: "name",      label: "Name",      sortAs: "text", className: "font-medium" },
-  { key: "make",      label: "Make",      sortAs: "text" },
-  { key: "type",      label: "Type",      sortAs: "text" },
-  { key: "uom",       label: "UOM",       sortAs: "text", className: "uppercase text-xs text-muted-foreground" },
-  { key: "inci_name", label: "INCI Name", sortAs: "text" },
-  { key: "status",    label: "Status",    sortAs: "text", render: statusBadge },
+  { key: "rm_code",   label: "RM Code",   sortAs: "text", width: "110px", className: "font-mono text-xs font-medium" },
+  { key: "name",      label: "Name",      sortAs: "text", className: "font-medium", render: (row) => <TruncatedCell value={row.name} label="Name" /> },
+  { key: "make",      label: "Make",      sortAs: "text", render: (row) => <TruncatedCell value={row.make} label="Make" /> },
+  { key: "type",      label: "Type",      sortAs: "text", width: "110px" },
+  { key: "uom",       label: "UOM",       sortAs: "text", width: "80px", className: "uppercase text-xs text-muted-foreground" },
+  { key: "inci_name", label: "INCI Name", sortAs: "text", render: (row) => <TruncatedCell value={row.inci_name} label="INCI Name" /> },
+  { key: "status",    label: "Status",    sortAs: "text", width: "110px", render: statusBadge },
 ]
 
 const PM_COLUMNS: ColumnDef[] = [
-  { key: "pm_code",       label: "PM Code",      sortAs: "text", className: "font-mono text-xs font-medium" },
-  { key: "name",          label: "Name",         sortAs: "text", className: "font-medium" },
-  { key: "type",          label: "Type",         sortAs: "text" },
-  { key: "uom",           label: "UOM",          sortAs: "text", className: "uppercase text-xs text-muted-foreground" },
-  { key: "pantone_color", label: "Pantone Color", sortAs: "text" },
-  { key: "status",        label: "Status",       sortAs: "text", render: statusBadge },
+  { key: "pm_code",       label: "PM Code",      sortAs: "text", width: "110px", className: "font-mono text-xs font-medium" },
+  { key: "name",          label: "Name",         sortAs: "text", className: "font-medium", render: (row) => <TruncatedCell value={row.name} label="Name" /> },
+  { key: "type",          label: "Type",         sortAs: "text", width: "120px" },
+  { key: "uom",           label: "UOM",          sortAs: "text", width: "80px", className: "uppercase text-xs text-muted-foreground" },
+  { key: "pantone_color", label: "Pantone Color", sortAs: "text", render: (row) => <TruncatedCell value={row.pantone_color} label="Pantone Color" /> },
+  { key: "status",        label: "Status",       sortAs: "text", width: "110px", render: statusBadge },
 ]
 
 export default function MaterialMasterClient({
@@ -122,6 +129,8 @@ export default function MaterialMasterClient({
 
   // Edit dialog state — which row is being edited (null = closed).
   const [editRow, setEditRow] = useState<AnyRow | null>(null)
+  // History dialog state — which row's edit history is being viewed (null = closed).
+  const [historyRow, setHistoryRow] = useState<AnyRow | null>(null)
 
   // Draft filter state — selects only update these locally; the actual
   // server refetch fires only when "Apply" is clicked.
@@ -274,6 +283,7 @@ export default function MaterialMasterClient({
               endpoint="/api/masters/packing-materials"
               templateFilename="packing_material_template.csv"
               fields={PM_CSV_FIELDS}
+              enableDuplicateCheck
               onSuccess={refresh}
             />
           )}
@@ -302,7 +312,7 @@ export default function MaterialMasterClient({
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <Table className="[&_th]:whitespace-nowrap [&_td]:whitespace-nowrap">
+          <Table className="[&_th]:whitespace-nowrap table-fixed">
             <TableHeader>
               <TableRow>
                 {columns.map((col) => {
@@ -310,6 +320,7 @@ export default function MaterialMasterClient({
                   return (
                     <TableHead
                       key={col.key}
+                      style={col.width ? { width: col.width } : undefined}
                       className="bg-muted/50 font-medium text-muted-foreground"
                     >
                       <button
@@ -330,7 +341,7 @@ export default function MaterialMasterClient({
                     </TableHead>
                   )
                 })}
-                <TableHead className="bg-muted/50 w-10 font-medium text-muted-foreground">Action</TableHead>
+                <TableHead style={{ width: "80px" }} className="bg-muted/50 font-medium text-muted-foreground">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -354,19 +365,26 @@ export default function MaterialMasterClient({
                     {columns.map((col) => (
                       <TableCell
                         key={col.key}
-                        className={col.className ?? "text-muted-foreground"}
+                        className={cn("overflow-hidden text-ellipsis", col.className ?? "text-muted-foreground")}
                       >
                         {col.render
                           ? col.render(row)
                           : ((row[col.key] as ReactNode) ?? "—")}
                       </TableCell>
                     ))}
-                    <TableCell>
+                    <TableCell className="flex items-center gap-1">
                       <EditButton
                         onClick={() => setEditRow(row)}
                         disabled={row.status === "in_review"}
                         title={row.status === "in_review" ? "Pending approval — cannot edit" : undefined}
                       />
+                      <button
+                        onClick={() => setHistoryRow(row)}
+                        className="p-1.5 rounded-md transition-colors hover:bg-accent text-muted-foreground hover:text-foreground"
+                        title="View edit history"
+                      >
+                        <HistoryIcon className="h-4 w-4" />
+                      </button>
                     </TableCell>
                   </TableRow>
                 ))
@@ -384,6 +402,14 @@ export default function MaterialMasterClient({
         row={editRow}
         onClose={() => setEditRow(null)}
         onSuccess={refresh}
+      />
+
+      {/* ── History dialog — rendered once, driven by historyRow state ── */}
+      <EntityHistoryDialog
+        module={material === "rm" ? "RM_MAT" : "PM_MAT"}
+        entityId={historyRow ? Number(historyRow.id) : null}
+        title={`${material === "rm" ? "Raw Material" : "Packing Material"} Edit History`}
+        onClose={() => setHistoryRow(null)}
       />
     </>
   )

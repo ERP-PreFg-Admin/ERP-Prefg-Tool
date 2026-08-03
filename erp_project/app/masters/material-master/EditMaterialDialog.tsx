@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 
 const UOM_OPTIONS = ["kg", "g", "l", "ml", "pcs", "m"]
@@ -49,6 +50,7 @@ export default function EditMaterialDialog({
   const [hsn,          setHsn]          = useState("")
   const [pantoneColor, setPantoneColor] = useState("")
   const [status,       setStatus]       = useState<"active" | "discontinued">("active")
+  const [remarks,      setRemarks]      = useState("")
 
   const [makeOptions, setMakeOptions] = useState<string[]>([])
   const [inciOptions, setInciOptions] = useState<string[]>([])
@@ -69,6 +71,7 @@ export default function EditMaterialDialog({
     setHsn(String(row.hsn_code ?? ""))
     setPantoneColor(String(row.pantone_color ?? ""))
     setStatus((row.status as "active" | "discontinued") ?? "active")
+    setRemarks("")
     setError(null)
     setSubmitted(false)
     setRejection(null)
@@ -112,6 +115,7 @@ export default function EditMaterialDialog({
     if (material === "rm" && !make.trim()) { setError("Make is required."); return }
     if (material === "rm" && !inci.trim()) { setError("INCI Name is required."); return }
     if (material === "pm" && !type.trim()) { setError("Type is required."); return }
+    if (!remarks.trim()) { setError("Remarks are required."); return }
 
     setLoading(true)
     setError(null)
@@ -119,8 +123,8 @@ export default function EditMaterialDialog({
     try {
       const payload =
         material === "rm"
-          ? { material: "rm", id: row!.id, name: name.trim(), make: make.trim(), inci_name: inci.trim(), type: type.trim() || null, uom: uom.trim() || null, hsn_code: hsn.trim() || null, status }
-          : { material: "pm", id: row!.id, name: name.trim(), type: type.trim(), uom: uom.trim() || null, hsn_code: hsn.trim() || null, pantone_color: pantoneColor.trim() || null, status }
+          ? { material: "rm", id: row!.id, name: name.trim(), make: make.trim(), inci_name: inci.trim(), type: type.trim() || null, uom: uom.trim() || null, hsn_code: hsn.trim() || null, status, remarks: remarks.trim() }
+          : { material: "pm", id: row!.id, name: name.trim(), type: type.trim(), uom: uom.trim() || null, hsn_code: hsn.trim() || null, pantone_color: pantoneColor.trim() || null, status, remarks: remarks.trim() }
 
       const res = await fetch("/api/masters/material-master", {
         method: "PUT",
@@ -333,6 +337,21 @@ export default function EditMaterialDialog({
               <option value="discontinued">Discontinued</option>
             </select>
           </div>
+
+          {/* Remarks — mandatory reason for this edit, archived to history_masters_edits */}
+          <div className="col-span-2 flex flex-col gap-1.5">
+            <Label htmlFor="edit-remarks">
+              Remarks <span className="text-destructive">*</span>
+            </Label>
+            <p className="text-xs text-muted-foreground">Remarks are required for every edit — briefly explain the reason for this change.</p>
+            <Textarea
+              id="edit-remarks"
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              disabled={!canEdit}
+              placeholder="Reason for this change…"
+            />
+          </div>
         </div>
 
         {submitted && <p className="text-sm text-emerald-600 font-medium -mt-2">Edit submitted for approval.</p>}
@@ -342,7 +361,7 @@ export default function EditMaterialDialog({
           <Button variant="outline" onClick={onClose} disabled={loading}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={loading || !canEdit || submitted}>
+          <Button onClick={handleSubmit} disabled={loading || !canEdit || submitted || !remarks.trim()}>
             {loading ? "Submitting…" : "Submit for Approval"}
           </Button>
         </DialogFooter>

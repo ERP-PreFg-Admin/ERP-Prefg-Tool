@@ -472,6 +472,21 @@ export const rawMaterials = {
    */
   setBaseStatus: `UPDATE master_rm SET status = ? WHERE id = ?`,
 
+  /** Full-row lookup by business code, for bulk-CSV edit detection — `code`
+   *  aliases rm_code so this satisfies the generic EditCandidate shape used
+   *  by lib/master-routes/edit-match.ts. Parameters: [rm_code] */
+  selectByCodeForMatch: `
+    SELECT id, rm_code, rm_code AS code, name, make, type, uom, status, hsn_code, inci_name
+    FROM master_rm WHERE rm_code = ? LIMIT 1
+  `,
+
+  /** IN (?)-batched counterpart of selectByCodeForMatch, for the whole
+   *  uploaded file at once — see fetchEditMatchCandidates. Parameters: [codes[]] */
+  selectCandidatesByCodesBatch: `
+    SELECT id, rm_code, rm_code AS code, name, make, type, uom, status, hsn_code, inci_name
+    FROM master_rm WHERE rm_code IN (?)
+  `,
+
   // ── VRM Approval-flow helpers ─────────────────────────────────────────────
 
   /** Set status on a rm_vrm_dynamic row (e.g. 'in_review', 'draft', 'active').
