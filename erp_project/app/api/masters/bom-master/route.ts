@@ -85,7 +85,10 @@ export const POST = withGateway({
 
         if (body.mode === "new-version") {
           const [result] = await conn.execute(bomSql.insertBomHeader, [
-            body.bom_code!.trim(), body.sku_id, userId, BOM_STATUS_IN_REVIEW, body.effective_from!.trim(),
+            // effective_from is optional — the column is nullable, so a recipe
+            // can be created before its start date is decided.
+            body.bom_code!.trim(), body.sku_id, userId, BOM_STATUS_IN_REVIEW,
+            body.effective_from?.trim() || null,
           ])
           bomId = (result as ResultSetHeader).insertId
         } else {

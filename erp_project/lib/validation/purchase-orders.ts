@@ -45,6 +45,12 @@ export const poActionSchema = z.union([poBulkSchema, poCreateSchema])
 // validates it in the route — nothing is in S3 at parse time, so there's no key
 // to schema-check here.
 
+/** Optional free-text field off a document: trimmed, length-capped to match the
+ *  column, and normalised to null so an empty input doesn't store "". */
+const optionalText = (max: number) =>
+  z.string().trim().max(max).optional().nullable()
+    .transform((v): string | null => (v ? v : null))
+
 /**
  * POST /api/purchase-orders/invoice — the reviewed, user-corrected invoice.
  *
@@ -53,17 +59,37 @@ export const poActionSchema = z.union([poBulkSchema, poCreateSchema])
  * dispatched before anyone opened this dialog.
  */
 export const invoiceInwardSchema = z.object({
-  attachment_key: z.string().trim().min(1, "The invoice PDF must be uploaded first."),
+  // No attachment_key: the PDF is posted as multipart alongside this payload and
+  // stored server-side as step 1 of the commit, so the client never has a key.
   invoice_no:     z.string().trim().min(1, "Invoice number is required."),
   invoice_date:   z.string().trim().optional().nullable(),
   mfg_id:         z.union([z.number(), z.string()]).refine((v) => String(v).trim().length > 0, {
     message: "Manufacturer is required.",
   }),
   destination:    z.string().trim().min(1, "Destination is required."),
+
+  // Header fields recorded on supplier_invoices. Free text, all optional —
+  // they're what the document said, not something the app derives, so an
+  // unreadable scan shouldn't block the inwarding.
+  currency:        optionalText(10),
+  eway_bill_no:    optionalText(50),
+  vehicle_no:      optionalText(50),
+  po_ref:          optionalText(100),
+  seller_gstin:    optionalText(20),
+  buyer_gstin:     optionalText(20),
+  bill_to_name:    optionalText(255),
+  bill_to_address: optionalText(2000),
+  bill_to_state:   optionalText(100),
+  ship_to_name:    optionalText(255),
+  ship_to_address: optionalText(2000),
+  invoice_total:   z.union([z.number(), z.string()]).optional().nullable(),
+
   line_items: z
     .array(
       z.object({
-        sku_code:     z.string().trim().min(1, "Every line item needs a mapped SKU."),
+        // Not required when the line is received against an existing PO: that
+        // receipt is keyed by PO id and never needs a SKU mapping.
+        sku_code:     z.string().trim().optional().nullable(),
         qty:          z.union([z.number(), z.string()]).refine((v) => Number(v) > 0, {
           message: "Quantity must be greater than 0.",
         }),
@@ -72,9 +98,34 @@ export const invoiceInwardSchema = z.object({
         /** When set, the line books a receipt against that existing PO instead
          *  of creating a new inward PO. */
         reference_po_id: z.coerce.number().int().positive().optional().nullable(),
+
+        // Recorded verbatim on supplier_invoice_items.
+        parsed_sku_code: optionalText(100),
+        sku_name:        optionalText(500),
+        batch:           optionalText(100),
+        mfg_date:        optionalText(20),
+        expiry:          optionalText(20),
+        hsn:             optionalText(20),
+        rate:            z.union([z.number(), z.string()]).optional().nullable(),
+        mrp:             z.union([z.number(), z.string()]).optional().nullable(),
+        discount:        z.union([z.number(), z.string()]).optional().nullable(),
+        gst_percent:     z.union([z.number(), z.string()]).optional().nullable(),
+        amount:          z.union([z.number(), z.string()]).optional().nullable(),
       })
     )
-    .min(1, "At least one line item is required."),
+    .min(1, "At least one line item is required.")
+    .superRefine((items, ctx) => {
+      // A line either creates a PO (needs a SKU) or receives against one.
+      items.forEach((li, i) => {
+        if (!li.reference_po_id && !li.sku_code?.trim()) {
+          ctx.addIssue({
+            code: "custom",
+            path: [i, "sku_code"],
+            message: "Every line item needs a mapped SKU or a reference PO.",
+          })
+        }
+      })
+    }),
 })
 
 export const poSendMailSchema = z.object({

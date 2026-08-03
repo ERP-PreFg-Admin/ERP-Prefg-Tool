@@ -132,6 +132,18 @@ export const purchaseOrdersSql = {
     GROUP BY ${EFFECTIVE_STATUS_EXPR}
   `,
 
+  /**
+   * Count for the Inward tab. Separate from statusCounts because that groups by
+   * status, and "inward" cuts across every status — it's a po_type. Takes the
+   * same 18 filter params so the badge tracks the other filters.
+   */
+  inwardCount: `
+    SELECT COUNT(*) AS cnt
+    ${FROM_JOINS}
+    ${SUMMARY_WHERE}
+      AND po.po_type = 'inward'
+  `,
+
   /** Summary stats for the cards (ignores status param). Params: buildStatusCountParams(...)  (14 total) */
   summaryStats: `
     SELECT
@@ -182,6 +194,20 @@ export const purchaseOrdersSql = {
     INSERT INTO purchase_orders
       (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, invoice_no, attachment_key)
     VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, 'raised', 'inward', ?, ?, ?)
+  `,
+
+  /**
+   * Inward PO for an invoice line that was also received against an existing
+   * PO. Booked straight in as fully received — the goods are physically here,
+   * which is the whole point of the invoice — and reference_po points back at
+   * the order it fulfils so the two rows aren't mistaken for separate demand.
+   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount,
+   *   expected_on, destination, invoice_no, attachment_key, received_qty, reference_po]
+   */
+  insertInwardReceived: `
+    INSERT INTO purchase_orders
+      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, invoice_no, attachment_key, received_qty, reference_po)
+    VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, 'received', 'inward', ?, ?, ?, ?, ?)
   `,
 
   /** Set status on a purchase_orders row. Parameters: [status, id] */
@@ -256,7 +282,7 @@ export const purchaseOrdersSql = {
   /** Full PO row for a manual receive operation. Parameters: [id] */
   /** Same as selectForReceive but locks the row for the duration of the transaction — prevents two concurrent receives from both reading a stale received_qty. Parameters: [id] */
   selectForReceiveLocked: `
-    SELECT id, po_no, qty, received_qty, status
+    SELECT id, po_no, sku_code, qty, received_qty, status
     FROM purchase_orders WHERE id = ? LIMIT 1 FOR UPDATE
   `,
 

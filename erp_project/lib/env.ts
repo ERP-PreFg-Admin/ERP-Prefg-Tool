@@ -66,6 +66,26 @@ export const GMAIL_APP_PASSWORD = required("GMAIL_APP_PASSWORD")
 export const GOOGLE_CLIENT_ID     = required("GOOGLE_CLIENT_ID")
 export const GOOGLE_CLIENT_SECRET = required("GOOGLE_CLIENT_SECRET")
 
+// ── Uniware (Unicommerce) ────────────────────────────────────────────────────
+// Optional: if these are unset the app simply doesn't push POs to Uniware
+// (see uniwareEnabled() in lib/uniware.ts), rather than failing at boot.
+
+export const UNIWARE_BASE_URL  = process.env.UNIWARE_BASE_URL  ?? ""
+export const UNIWARE_USER_NAME = process.env.UNIWARE_USER_NAME ?? ""
+export const UNIWARE_PASSWORD  = process.env.UNIWARE_PASSWORD  ?? ""
+// Unicommerce's stock public OAuth client — no per-tenant value to configure.
+export const UNIWARE_CLIENT_ID = process.env.UNIWARE_CLIENT_ID ?? "my-trusted-client"
+// purchaseOrder/create is facility-scoped, so this decides where a PO lands.
+// Defaults to the sandbox until the flow is signed off.
+export const UNIWARE_FACILITY  = process.env.UNIWARE_FACILITY  ?? "TEST_FACILITY"
+// Uniware vendors are configured per facility and are NOT the same identifier
+// as master_mfgs.code — falling back to the manufacturer code fails with
+// "Vendor [MFG-002-AJA] is not configured for the facility". Until a real
+// mfg → vendor mapping exists this pins every push to the sandbox vendor, which
+// pairs with UNIWARE_FACILITY above. MUST be overridden before going live, or
+// every PO lands against the test vendor.
+export const UNIWARE_VENDOR_CODE = process.env.UNIWARE_VENDOR_CODE ?? "Test_Vendor"
+
 // ── App base URL ─────────────────────────────────────────────────────────────
 // Used to build absolute links back into the app (e.g. PO links in emails).
 // Optional — falls back to localhost so a missing var only breaks link

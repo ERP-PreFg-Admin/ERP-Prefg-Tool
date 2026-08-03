@@ -54,8 +54,10 @@ export const bomCreateFullSchema = z
     sku_id: z.coerce.number().int().positive(),
     bom_id: z.coerce.number().int().positive().optional(), // required when mode === "update-existing"
     bom_code: z.string().trim().min(1).max(50).optional(), // required when mode === "new-version"
-    // Recipe-level effective date — required when mode === "new-version".
-    // update-existing doesn't touch it (the existing header's date stands).
+    // Recipe-level effective date, optional in every mode. master_bom.effective_from
+    // is nullable, so a recipe may be created without committing to a start date
+    // and have one set later. update-existing doesn't touch it at all (the
+    // existing header's date stands).
     effective_from: z.string().trim().optional(),
     source: z.enum(["manual", "csv"]),
     rm_lines: z.array(bomLineSchema).min(1, "At least one RM line is required"),
@@ -72,9 +74,6 @@ export const bomCreateFullSchema = z
     }
     if (data.mode === "new-version" && !data.bom_code) {
       ctx.addIssue({ code: "custom", path: ["bom_code"], message: "bom_code is required for new-version" })
-    }
-    if (data.mode === "new-version" && !data.effective_from?.trim()) {
-      ctx.addIssue({ code: "custom", path: ["effective_from"], message: "effective_from is required for new-version" })
     }
     if (data.rm_lines.some((l) => l.mtrl_type !== "rm")) {
       ctx.addIssue({ code: "custom", path: ["rm_lines"], message: "rm_lines must all have mtrl_type='rm'" })

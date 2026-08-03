@@ -77,6 +77,8 @@ model purchase_orders {
   mfgs           master_mfgs             @relation(fields: [mfg_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_ibfk_1")
   bom            master_bom?             @relation(fields: [bom_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_ibfk_2")
   history_pos    history_pos[]
+  invoice_items  supplier_invoice_items[] @relation("InvoiceItemInwardPo")
+  invoice_receipts supplier_invoice_items[] @relation("InvoiceItemReceivedAgainstPo")
 
   @@index([bom_id], map: "bom_id")
   @@index([mfg_id], map: "mfg_id")
@@ -105,6 +107,79 @@ model history_pos {
 
   @@index([po_id], map: "idx_history_pos_po_id")
   @@index([changed_by], map: "history_pos_ibfk_2")
+}
+
+/// Supplier invoice header, from the PO Inwarding "Add Invoice" flow.
+/// The unique (mfg_id, invoice_no) is what stops the same invoice being
+/// submitted twice and double-crediting received_qty.
+/// See prisma/add_supplier_invoices.sql.
+model supplier_invoices {
+  id              Int                      @id @default(autoincrement())
+  mfg_id          Int
+  invoice_no      String                   @db.VarChar(100)
+  invoice_date    DateTime?                @db.Date
+  currency        String?                  @db.VarChar(10)
+  eway_bill_no    String?                  @db.VarChar(50)
+  vehicle_no      String?                  @db.VarChar(50)
+  po_ref          String?                  @db.VarChar(100)
+  seller_gstin    String?                  @db.VarChar(20)
+  buyer_gstin     String?                  @db.VarChar(20)
+  bill_to_name    String?                  @db.VarChar(255)
+  bill_to_address String?                  @db.Text
+  bill_to_state   String?                  @db.VarChar(100)
+  ship_to_name    String?                  @db.VarChar(255)
+  ship_to_address String?                  @db.Text
+  destination     String?                  @db.VarChar(100)
+  invoice_total   Decimal?                 @db.Decimal(14, 4)
+  attachment_key  String?                  @db.Text
+  created_by      Int?
+  created_at      DateTime                 @default(now()) @db.DateTime(0)
+  mfgs            master_mfgs              @relation(fields: [mfg_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_supplier_invoices_mfg")
+  users           users?                   @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_supplier_invoices_user")
+  items           supplier_invoice_items[]
+
+  @@unique([mfg_id, invoice_no], map: "uq_supplier_invoice")
+  @@index([mfg_id], map: "idx_supplier_invoices_mfg")
+}
+
+/// One row per invoice line. The model is one PO per SKU, so each line resolves
+/// to exactly one purchase_orders row — either the inward PO it raised
+/// (link_type = created) or the open PO it was received against (= received).
+model supplier_invoice_items {
+  id                     Int @id @default(autoincrement())
+  invoice_id             Int
+  line_no                Int
+  /// The inward PO this line raised.
+  po_id                  Int?
+  /// The pre-existing PO it was also received against, if any.
+  received_against_po_id Int?
+  link_type       supplier_invoice_items_link_type
+  sku_code        String?                      @db.VarChar(50)
+  parsed_sku_code String?                      @db.VarChar(100)
+  sku_name        String?                      @db.VarChar(500)
+  batch           String?                      @db.VarChar(100)
+  mfg_date        String?                      @db.VarChar(20)
+  expiry          String?                      @db.VarChar(20)
+  hsn             String?                      @db.VarChar(20)
+  qty             Decimal                      @db.Decimal(12, 3)
+  rate            Decimal?                     @db.Decimal(12, 4)
+  mrp             Decimal?                     @db.Decimal(12, 4)
+  discount        Decimal?                     @db.Decimal(12, 4)
+  gst_percent     Decimal?                     @db.Decimal(6, 3)
+  amount          Decimal?                     @db.Decimal(14, 4)
+  total_amount    Decimal?                     @db.Decimal(14, 4)
+  invoice         supplier_invoices            @relation(fields: [invoice_id], references: [id], onDelete: Cascade, map: "fk_supplier_invoice_items_invoice")
+  purchase_orders purchase_orders?             @relation("InvoiceItemInwardPo", fields: [po_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_supplier_invoice_items_po")
+  received_against purchase_orders?            @relation("InvoiceItemReceivedAgainstPo", fields: [received_against_po_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_sii_received_against_po")
+
+  @@unique([invoice_id, line_no], map: "uq_invoice_line")
+  @@index([po_id], map: "idx_supplier_invoice_items_po")
+  @@index([received_against_po_id], map: "idx_sii_received_against")
+}
+
+enum supplier_invoice_items_link_type {
+  created
+  received
 }
 
 enum history_pos_action_type {
@@ -205,6 +280,7 @@ model users {
   session_history                        session_history[]
   sessions                               sessions[]
   history_pos                            history_pos[]
+  supplier_invoices                      supplier_invoices[]
 }
 
 model details_bom {
@@ -523,6 +599,7 @@ model master_mfgs {
   pm_mrm_fixed            pm_mrm_fixed[]
   purchase_orders         purchase_orders[]
   rm_mrm_fixed            rm_mrm_fixed[]
+  supplier_invoices       supplier_invoices[]
 }
 
 model master_pm {

@@ -163,14 +163,15 @@ export function useBomWizard({
   const rmValid = rmRows.length > 0 && isRmTotalValid(rmTotal(rmRows))
   const allRmFieldsFilled = rmRows.every((r) => r.mtrl_id && r.amount)
   const allPmFieldsFilled = pmRows.every((r) => r.mtrl_id && r.amount)
+  // effective_from is deliberately absent: it's optional, so a recipe can be
+  // drafted before its start date is decided.
   const canProceedFromLines =
-    rmValid && allRmFieldsFilled && allPmFieldsFilled && bomCode.trim().length > 0 && effectiveFrom.trim().length > 0
+    rmValid && allRmFieldsFilled && allPmFieldsFilled && bomCode.trim().length > 0
 
   async function handleSubmit() {
     setError(null)
     if (!skuId) { setError("Select a SKU first."); return }
     if (!bomCode.trim()) { setError("BOM code is required."); return }
-    if (!effectiveFrom.trim()) { setError("Effective From is required."); return }
     if (rmRows.length === 0) { setError("At least one RM line is required."); return }
     if (!isRmTotalValid(rmTotal(rmRows))) {
       setError(`RM percentages must total between 99.9% and 100.1% (currently ${rmTotal(rmRows).toFixed(2)}%).`)
@@ -204,7 +205,9 @@ export function useBomWizard({
           mode: "new-version",
           sku_id: skuId,
           bom_code: bomCode.trim(),
-          effective_from: effectiveFrom.trim(),
+          // Omitted rather than sent as "" when blank — the column is nullable
+          // and an empty string would land as an invalid date.
+          effective_from: effectiveFrom.trim() || undefined,
           source: entryMethod === "csv" ? "csv" : "manual",
           rm_lines: rmRows.map(toLine),
           pm_lines: pmRows.map(toLine),

@@ -156,7 +156,7 @@ export function Step4LineEntry({
         </div>
         <div>
           <label className="block text-xs font-medium mb-1">
-            Effective From <span className="text-destructive">*</span>
+            Effective From <span className="font-normal text-muted-foreground">(optional)</span>
           </label>
           <input
             type="date"

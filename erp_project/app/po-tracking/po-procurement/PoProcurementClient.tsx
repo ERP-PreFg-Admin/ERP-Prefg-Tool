@@ -3,7 +3,7 @@
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useMemo, useState } from "react"
 import {
-  FileStack, FileUp, Filter, IndianRupee, Mail, PackageCheck, PackageOpen, Plus, Send, X,
+  FileClock, FileStack, FileUp, Filter, IndianRupee, Mail, PackageCheck, PackageOpen, Plus, Send, X,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -23,6 +23,7 @@ import { fmtInt, fmtMoney } from "./po-utils"
 import { PO_BULK_CSV_FIELDS } from "./po-bulk-fields"
 import PoTable from "./PoTable"
 import AddInvoiceDialog from "../po-inwarding/AddInvoiceDialog"
+import InvoiceHistoryDialog from "../po-inwarding/InvoiceHistoryDialog"
 import AddPODialog from "./AddPODialog"
 import ImpromptuPODialog from "./ImpromptuPODialog"
 import SplitPODialog from "./SplitPODialog"
@@ -116,6 +117,7 @@ export default function PoProcurementClient({
 
   const [showAddPO,      setShowAddPO]      = useState(false)
   const [showAddInvoice, setShowAddInvoice] = useState(false)
+  const [showInvoiceHistory, setShowInvoiceHistory] = useState(false)
   const [showFilters,    setShowFilters]    = useState(false)
   const [editTarget,   setEditTarget]   = useState<PoRow | null>(null)
   const [splitTarget,  setSplitTarget]  = useState<PoRow | null>(null)
@@ -234,9 +236,14 @@ export default function PoProcurementClient({
           )}
         </Button>
         {isInwarding && (
-          <Button size="lg" onClick={() => setShowAddInvoice(true)} className="sm:ml-auto">
-            <FileUp className="h-3.5 w-3.5" /> Add Invoice
-          </Button>
+          <>
+            <Button size="lg" onClick={() => setShowAddInvoice(true)} className="sm:ml-auto">
+              <FileUp className="h-3.5 w-3.5" /> Add Invoice
+            </Button>
+            <Button size="lg" variant="outline" onClick={() => setShowInvoiceHistory(true)}>
+              <FileClock className="h-3.5 w-3.5" /> Invoice History
+            </Button>
+          </>
         )}
         {!isInwarding && (
           <>
@@ -396,14 +403,20 @@ export default function PoProcurementClient({
 
       {/* ── Dialogs — procurement-only writes; inwarding's Receive dialog lives in PoTable ── */}
       {isInwarding ? (
-        <AddInvoiceDialog
-          open={showAddInvoice}
-          onClose={() => setShowAddInvoice(false)}
-          skuOptions={skuOptions}
-          mfgOptions={mfgOptions}
-          warehouseOptions={warehouseOptions}
-          onCreated={afterAction}
-        />
+        <>
+          <AddInvoiceDialog
+            open={showAddInvoice}
+            onClose={() => setShowAddInvoice(false)}
+            skuOptions={skuOptions}
+            mfgOptions={mfgOptions}
+            warehouseOptions={warehouseOptions}
+            onCreated={afterAction}
+          />
+          <InvoiceHistoryDialog
+            open={showInvoiceHistory}
+            onClose={() => setShowInvoiceHistory(false)}
+          />
+        </>
       ) : <>
       <AddPODialog
         open={showAddPO}

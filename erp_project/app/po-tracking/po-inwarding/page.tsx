@@ -43,18 +43,25 @@ export default async function PoInwardingPage({
 
   // "all" is an explicit opt-out of the default open-only filter, so it has to
   // travel in the URL as a value rather than as an absent param.
-  const status = statusFilter === "all" ? null : statusFilter || null
+  //
+  // "inward" is not a status at all — it selects on po_type, so that every PO
+  // an invoice raised is reachable in one click. An invoice books those in
+  // already complete, which would otherwise hide them from the default tab.
+  const isInwardTab = statusFilter === "inward"
+  const status      = statusFilter === "all" || isInwardTab ? null : statusFilter || null
+  const poTypeParam = isInwardTab ? "inward" : poType || null
 
-  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null)
+  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poTypeParam, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null)
   const statusCountParams = buildStatusCountParams(search || null, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null)
 
   const pageStart = performance.now()
   console.log(`[AUDIT] PO Inwarding load - page=${page}, size=${size}, search=${search || "none"}, status=${status ?? "all"}, sortBy=${sortBy}, sortDir=${sortDir}`)
 
-  const [rows, countRows, statusCountRows, summaryRows, dropdownOptions] = await Promise.all([
+  const [rows, countRows, statusCountRows, inwardCountRows, summaryRows, dropdownOptions] = await Promise.all([
     timedQuery<PoRow>(purchaseOrdersSql.buildSelectPaginated(sortBy, sortDir), [...filterParams, size, offset], { label: "selectPaginated" }),
     timedQuery<{ total: number }>(purchaseOrdersSql.countPaginated, filterParams, { label: "countPaginated" }),
     timedQuery<{ status: string; cnt: number }>(purchaseOrdersSql.statusCounts, statusCountParams, { label: "statusCounts" }),
+    timedQuery<{ cnt: number }>(purchaseOrdersSql.inwardCount, statusCountParams, { label: "inwardCount" }),
     timedQuery<any>(purchaseOrdersSql.summaryStats, statusCountParams, { label: "summaryStats" }),
     getPoDropdownOptions(),
   ])
@@ -71,6 +78,9 @@ export default async function PoInwardingPage({
   statusCounts.open =
     (statusCounts.raised ?? 0) + (statusCounts.punched ?? 0) + (statusCounts.partially_received ?? 0)
   statusCounts.received = (statusCounts.received ?? 0) + (statusCounts.short_closed ?? 0)
+  // Counted separately: "inward" spans every status, so it isn't a slice of the
+  // group-by above and must not be added into statusCounts.all either.
+  statusCounts.inward = Number(inwardCountRows[0]?.cnt ?? 0)
 
   const s = summaryRows[0] ?? {}
   const summary = {

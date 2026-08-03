@@ -41,6 +41,10 @@ const KEYS = [
   "UNIWARE_BASE_URL", "UNIWARE_USER_NAME", "UNIWARE_PASSWORD",
   "NANONET_API_KEY",
 ]
+// Deliberately NOT pushed: UNIWARE_FACILITY and UNIWARE_VENDOR_CODE. They're
+// sandbox values (TEST_FACILITY / Test_Vendor) that belong in a local .env only
+// — pushing them would point the deployed app at the test facility. Add them
+// here once the real facility and mfg -> vendor mapping are settled.
 
 function parseEnvFile(filePath) {
   const text = readFileSync(filePath, "utf8")

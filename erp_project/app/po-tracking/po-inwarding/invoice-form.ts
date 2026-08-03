@@ -21,6 +21,10 @@ export type Row = {
   parsed_code:  string
   sku_name:     string
   batch:        string
+  /** As printed on the invoice — often month-only ("Jun-2026"), so kept as text
+   *  rather than coerced to a date. */
+  mfg_date:     string
+  expiry:       string
   hsn:          string
   qty:          string
   rate:         string
@@ -67,7 +71,7 @@ export const EMPTY_FORM: InvoiceForm = {
 }
 
 export const emptyRow = (): Row => ({
-  sku_code: "", parsed_code: "", sku_name: "", batch: "", hsn: "",
+  sku_code: "", parsed_code: "", sku_name: "", batch: "", mfg_date: "", expiry: "", hsn: "",
   qty: "", rate: "", mrp: "", discount: "", gst_percent: "", amount: "", total_amount: "",
   reference_po_id: "",
 })
@@ -109,6 +113,8 @@ export function rowsFromParsed(p: ParsedInvoice, skuOptions: SkuOption[]): Row[]
     parsed_code:  s(li.sku_code),
     sku_name:     s(li.sku_name),
     batch:        s(li.batch),
+    mfg_date:     s(li.mfg_date),
+    expiry:       s(li.expiry),
     hsn:          s(li.hsn),
     qty:          s(li.qty),
     rate:         s(li.rate),
@@ -175,14 +181,32 @@ export function poOptionsFor(openPos: OpenPoOption[], skuCode: string): OpenPoOp
   })
 }
 
-/** The reviewed form as the body /api/purchase-orders/invoice expects. */
-export function toInwardPayload(form: InvoiceForm, rows: Row[], attachmentKey: string) {
+/** The reviewed form as the body /api/purchase-orders/invoice expects.
+ *  Header and per-line detail travel too — they're recorded verbatim on
+ *  supplier_invoices / supplier_invoice_items, not just used to raise POs.
+ *
+ *  No attachment_key: the PDF is posted alongside this and stored server-side
+ *  as step 1 of the commit, so the key doesn't exist yet at this point. */
+export function toInwardPayload(form: InvoiceForm, rows: Row[]) {
   return {
-    attachment_key: attachmentKey,
     invoice_no:     form.invoiceNo.trim(),
     invoice_date:   form.invoiceDate || null,
     mfg_id:         Number(form.mfgId),
     destination:    form.destination,
+
+    currency:        form.currency,
+    eway_bill_no:    form.ewayBill,
+    vehicle_no:      form.vehicleNo,
+    po_ref:          form.poRef,
+    seller_gstin:    form.sellerGstin,
+    buyer_gstin:     form.buyerGstin,
+    bill_to_name:    form.billToName,
+    bill_to_address: form.billToAddress,
+    bill_to_state:   form.billToState,
+    ship_to_name:    form.shipToName,
+    ship_to_address: form.shipToAddress,
+    invoice_total:   form.invoiceTotal === "" ? null : Number(form.invoiceTotal),
+
     line_items: rows.map((r) => ({
       sku_code:     r.sku_code.trim(),
       qty:          Number(r.qty),
@@ -191,6 +215,18 @@ export function toInwardPayload(form: InvoiceForm, rows: Row[], attachmentKey: s
                   : r.amount       !== "" ? Number(r.amount)
                   : null,
       reference_po_id: r.reference_po_id ? Number(r.reference_po_id) : null,
+
+      parsed_sku_code: r.parsed_code,
+      sku_name:        r.sku_name,
+      batch:           r.batch,
+      mfg_date:        r.mfg_date,
+      expiry:          r.expiry,
+      hsn:             r.hsn,
+      rate:            r.rate     === "" ? null : Number(r.rate),
+      mrp:             r.mrp      === "" ? null : Number(r.mrp),
+      discount:        r.discount === "" ? null : Number(r.discount),
+      gst_percent:     r.gst_percent === "" ? null : Number(r.gst_percent),
+      amount:          r.amount   === "" ? null : Number(r.amount),
     })),
   }
 }

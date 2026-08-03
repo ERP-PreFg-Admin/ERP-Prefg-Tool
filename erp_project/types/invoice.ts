@@ -62,6 +62,52 @@ export type OpenPoOption = {
   status:       string
 }
 
+/** A row in the Invoice History list. Numerics arrive as strings from DECIMAL. */
+export type InvoiceHistoryHeader = {
+  id:              number
+  invoice_no:      string
+  invoice_date:    string | null
+  currency:        string | null
+  destination:     string | null
+  invoice_total:   string | number | null
+  eway_bill_no:    string | null
+  vehicle_no:      string | null
+  attachment_key:  string | null
+  created_at:      string
+  mfg_code:        string
+  mfg_name:        string
+  created_by_name: string | null
+  /** Present on the list query only. */
+  item_count?:     number
+  received_count?: number
+}
+
+/** One line of a historical invoice, with both PO links resolved. */
+export type InvoiceHistoryItem = {
+  id:                     number
+  line_no:                number
+  link_type:              "created" | "received"
+  sku_code:               string | null
+  parsed_sku_code:        string | null
+  sku_name:               string | null
+  batch:                  string | null
+  mfg_date:               string | null
+  expiry:                 string | null
+  hsn:                    string | null
+  qty:                    string | number
+  rate:                   string | number | null
+  total_amount:           string | number | null
+  /** The inward PO this line raised. */
+  po_id:                  number | null
+  po_no:                  string | null
+  po_status:              string | null
+  /** The pre-existing PO it was also received against. */
+  received_against_po_id: number | null
+  received_against_po_no: string | null
+  received_against_qty:            string | number | null
+  received_against_received_qty:   string | number | null
+}
+
 /** One line item after the user has reviewed/corrected it, ready to become a PO. */
 export type InwardLineItem = {
   sku_code:     string
