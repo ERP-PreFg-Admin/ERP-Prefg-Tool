@@ -20,19 +20,16 @@ import { isRmTotalValid } from "@/lib/validation/bom"
 import { rmTotal, type BomLineRow, type BomMaterialOption } from "./BomLineEditorGrid"
 import { parseBomCsv } from "./bom-csv"
 import { uploadPendingArtifacts } from "./bom-artifact-upload"
-import type { Sku } from "@/types/masters"
 
 export type WizardStep = 1 | 2 | 3 | 4 | 5
 export type EntryMethod = "manual" | "csv"
 
 export function useBomWizard({
-  skus,
   rmMaterials,
   pmMaterials,
   onSuccess,
   onEditExisting,
 }: {
-  skus: Sku[]
   rmMaterials: BomMaterialOption[]
   pmMaterials: BomMaterialOption[]
   onSuccess: () => void
@@ -48,8 +45,6 @@ export function useBomWizard({
   const [skuId, setSkuId] = useState<number | null>(null)
   const [existingBomId, setExistingBomId] = useState<number | null>(null)
   const [existingBomCode, setExistingBomCode] = useState<string | null>(null)
-  const [bomCount, setBomCount] = useState(0)
-  const [bomCode, setBomCode] = useState("")
   const [effectiveFrom, setEffectiveFrom] = useState("")
   const [entryMethod, setEntryMethod] = useState<EntryMethod | null>(null)
   const [csvParsed, setCsvParsed] = useState(false)
@@ -67,8 +62,6 @@ export function useBomWizard({
     setSkuId(null)
     setExistingBomId(null)
     setExistingBomCode(null)
-    setBomCount(0)
-    setBomCode("")
     setEffectiveFrom("")
     setEntryMethod(null)
     setCsvParsed(false)
@@ -92,7 +85,6 @@ export function useBomWizard({
   async function handleSelectSku(id: number) {
     setError(null)
     setSkuId(id)
-    const sku = skus.find((s) => s.id === id)
     setLoading(true)
     try {
       const res = await fetch("/api/masters/bom-master", {
@@ -103,13 +95,11 @@ export function useBomWizard({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Failed to check existing BOMs")
 
-      setBomCount(data.bom_count ?? 0)
       if (data.hasActive) {
         setExistingBomId(data.bom_id)
         setExistingBomCode(data.bom_code)
         setStep(2)
       } else {
-        setBomCode(sku ? `${sku.sku_code}-BOM-V${(data.bom_count ?? 0) + 1}` : "")
         setStep(3)
       }
     } catch (e: any) {
@@ -126,8 +116,6 @@ export function useBomWizard({
   }
 
   function handleCreateNewVersion() {
-    const sku = skus.find((s) => s.id === skuId)
-    setBomCode(sku ? `${sku.sku_code}-BOM-V${bomCount + 1}` : "")
     setStep(3)
   }
 
@@ -164,12 +152,11 @@ export function useBomWizard({
   const allRmFieldsFilled = rmRows.every((r) => r.mtrl_id && r.amount)
   const allPmFieldsFilled = pmRows.every((r) => r.mtrl_id && r.amount)
   const canProceedFromLines =
-    rmValid && allRmFieldsFilled && allPmFieldsFilled && bomCode.trim().length > 0 && effectiveFrom.trim().length > 0
+    rmValid && allRmFieldsFilled && allPmFieldsFilled && effectiveFrom.trim().length > 0
 
   async function handleSubmit() {
     setError(null)
     if (!skuId) { setError("Select a SKU first."); return }
-    if (!bomCode.trim()) { setError("BOM code is required."); return }
     if (!effectiveFrom.trim()) { setError("Effective From is required."); return }
     if (rmRows.length === 0) { setError("At least one RM line is required."); return }
     if (!isRmTotalValid(rmTotal(rmRows))) {
@@ -203,7 +190,6 @@ export function useBomWizard({
           action: "create-full",
           mode: "new-version",
           sku_id: skuId,
-          bom_code: bomCode.trim(),
           effective_from: effectiveFrom.trim(),
           source: entryMethod === "csv" ? "csv" : "manual",
           rm_lines: rmRows.map(toLine),
@@ -214,7 +200,7 @@ export function useBomWizard({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Failed to submit BOM")
       closeWizard()
-      toast({ title: "BOM submitted for approval", description: bomCode.trim(), variant: "success" })
+      toast({ title: "BOM submitted for approval", description: data.bom_code ?? undefined, variant: "success" })
       onSuccess()
     } catch (e: any) {
       setError(e.message || "An error occurred")
@@ -235,8 +221,6 @@ export function useBomWizard({
     skuId,
     existingBomId,
     existingBomCode,
-    bomCode,
-    setBomCode,
     effectiveFrom,
     setEffectiveFrom,
     entryMethod,

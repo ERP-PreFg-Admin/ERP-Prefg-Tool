@@ -4,9 +4,13 @@ import { redirect, notFound } from "next/navigation"
 import { timedQuery } from "@/lib/query-timing"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { manufacturers as manufacturersSql } from "@/lib/queries/manufacturers"
+import { bom as bomSql } from "@/lib/queries/bom"
+import { rawMaterials } from "@/lib/queries/raw-materials"
+import { packingMaterials } from "@/lib/queries/packing-materials"
 import { getRmVendorByMfg, getRmVendorHistoryByMfg, getPmVendorByMfg, getPmVendorHistoryByMfg, getAgreedRmRatesByMfg, getAgreedPmRatesByMfg } from "@/lib/cached-reference-data"
+import { computeRmCost, computePmCost, computeWastage, computeTotalCosting } from "@/lib/costing/final-costing"
 import type {
-  FinalCostingRow, MfgLine, MfgLineOption, MfgMonthlyPoRow,
+  FinalCostingRow, FinalCostingComparisonRow, MfgLine, MfgLineOption, MfgMonthlyPoRow,
   MiscCostLine, MiscCostType,
 } from "@/types/masters"
 import TabBar, { type MfgTab } from "./TabBar"
@@ -15,16 +19,31 @@ import MiscCostClient from "./MiscCostClient"
 import RmVendorTable from "./ApprovedRates"
 import AgreedRatesClient from "./AgreedRatesClient"
 import FinalCostingTable from "./FinalCostingTable"
-import MfgMonthlyPoSummary from "./MfgMonthlyPoSummary"
+import FinalCostingComparisonTable from "./FinalCostingComparisonTable"
+import CommonRmsTable from "./CommonRmsTable"
+import VendorIngMappingClient from "./VendorIngMappingClient"
+// import MfgMonthlyPoSummary from "./MfgMonthlyPoSummary"
+
+type BomLineInputRow = { bom_id: number; mtrl_type: "rm" | "pm"; mtrl_id: number; amount: string; filling: string | null }
+type MinMaxRateRow = {
+  rm_id?: number
+  pm_id?: number
+  min_rate: string | null
+  max_rate: string | null
+  min_vendor_code: string | null
+  min_vendor_name: string | null
+  max_vendor_code: string | null
+  max_vendor_name: string | null
+}
 
 export const dynamic = "force-dynamic"
 
 const VALID_TABS: MfgTab[] = [
-  "active", "on_hold", "tech_transfer",
+  "active",
   "misc_cost",
   "rm_vendor", "agreed_rates", "final_costing",
+  "common_rms", "vendor_ing_mapping",
 ]
-const LINE_STATUS_TABS: MfgTab[] = ["active", "on_hold", "tech_transfer"]
 
 export default async function ManufacturerDetailPage({
   params,
@@ -56,7 +75,7 @@ export default async function ManufacturerDetailPage({
   const mfg = mfgRows[0]
   if (!mfg) notFound()
 
-  const statusCounts: Record<string, number> = { active: 0, on_hold: 0, tech_transfer: 0 }
+  const statusCounts: Record<string, number> = { active: 0, discontinued: 0, inactive: 0 }
   for (const r of statusCountRows) statusCounts[r.status] = Number(r.cnt)
 
   return (
@@ -66,32 +85,40 @@ export default async function ManufacturerDetailPage({
           <h1 className="text-lg font-bold tracking-tight">{mfg.name}</h1>
           <p className="text-muted-foreground text-xs mt-0.5 font-mono">{mfg.code}</p>
         </div>
-        <MfgMonthlyPoSummary rows={monthlyPoRows} />
+        {/* <MfgMonthlyPoSummary rows={monthlyPoRows} /> */}
       </div>
 
       <div className="space-y-4">
         <TabBar mfgId={id} currentTab={tab} statusCounts={statusCounts} />
-        {LINE_STATUS_TABS.includes(tab) && <LineStatusTabContent mfgId={id} tab={tab} status={tab} />}
+        {tab === "active" && <LineStatusTabContent mfgId={id} />}
         {tab === "misc_cost" && <MiscTabContent mfgId={id} />}
         {tab === "rm_vendor" && <RmVendorTabContent mfgId={id} />}
         {tab === "agreed_rates" && <AgreedRatesTabContent mfgId={id} />}
         {tab === "final_costing" && <FinalCostingTabContent mfgId={id} />}
+        {tab === "common_rms" && <CommonRmsTable mfgId={id} />}
+        {tab === "vendor_ing_mapping" && <VendorIngMappingClient mfgId={id} />}
       </div>
     </div>
   )
 }
 
-async function LineStatusTabContent({ mfgId, status }: { mfgId: number; tab: MfgTab; status: string }) {
-  const [lineRows, bomOptions] = await Promise.all([
-    timedQuery<MfgLine>(manufacturingSql.selectLinesByMfg, [mfgId, status, status], { label: "manufacturing.selectLinesByMfg" }),
+async function LineStatusTabContent({ mfgId }: { mfgId: number }) {
+  const [lineRows, bomOptions, liveBomRows] = await Promise.all([
+    timedQuery<MfgLine>(manufacturingSql.selectLinesByMfg, [mfgId, null, null], { label: "manufacturing.selectLinesByMfg" }),
     timedQuery<{ id: number; bom_code: string; sku_code: string | null; sku_name: string | null }>(manufacturingSql.bomOptionsForMfg, [mfgId], { label: "manufacturing.bomOptionsForMfg" }),
+    timedQuery<{ sku_id: number; sku_code: string | null; live_bom_count: number; bom_ids: string; bom_codes: string }>(bomSql.selectSkusWithMultipleLiveBomsByMfg, [mfgId], { label: "bom.selectSkusWithMultipleLiveBomsByMfg" }),
   ])
+  const liveBomsBySkuCode = new Map(
+    liveBomRows
+      .filter((r) => r.sku_code)
+      .map((r) => [r.sku_code as string, { bomCodes: r.bom_codes, bomIds: r.bom_ids.split(",").map(Number) }])
+  )
   return (
     <ManufacturingLinesClient
       mfgId={mfgId}
       rows={lineRows}
-      currentTab={status as "active" | "on_hold" | "tech_transfer"}
       bomOptions={bomOptions}
+      liveBomsBySkuCode={liveBomsBySkuCode}
     />
   )
 }
@@ -123,38 +150,125 @@ async function AgreedRatesTabContent({ mfgId }: { mfgId: number }) {
 }
 
 async function FinalCostingTabContent({ mfgId }: { mfgId: number }) {
-  const [lineRows, materialCostRows, miscCostRows] = await Promise.all([
-    timedQuery<MfgLine>(manufacturingSql.selectLinesByMfg, [mfgId, "active", "active"], { label: "manufacturing.selectLinesByMfg (costing)" }),
+  const [lineRows, materialCostRows, miscCostRows, bomLineInputRows, minMaxRmRows, minMaxPmRows] = await Promise.all([
+    timedQuery<MfgLine>(manufacturingSql.selectLiveLinesByMfg, [mfgId], { label: "manufacturing.selectLiveLinesByMfg (costing)" }),
     timedQuery<{ bom_id: number; rm_cost: string; pm_cost: string }>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId], { label: "manufacturing.selectMaterialCostByMfg" }),
     timedQuery<{ bom_id: number; type: MiscCostType; cost: string }>(manufacturingSql.selectMiscCostsByMfg, [mfgId], { label: "manufacturing.selectMiscCostsByMfg" }),
+    timedQuery<BomLineInputRow>(manufacturingSql.selectBomLineInputsByMfg, [mfgId], { label: "manufacturing.selectBomLineInputsByMfg" }),
+    timedQuery<MinMaxRateRow>(rawMaterials.selectMinMaxVrmRateByRm, [], { label: "rawMaterials.selectMinMaxVrmRateByRm" }),
+    timedQuery<MinMaxRateRow>(packingMaterials.selectMinMaxVrmRateByPm, [], { label: "packingMaterials.selectMinMaxVrmRateByPm" }),
   ])
 
   const materialByBom = new Map(materialCostRows.map((r) => [r.bom_id, { rm: Number(r.rm_cost), pm: Number(r.pm_cost) }]))
-  const miscByBom = new Map<number, Record<MiscCostType, number>>()
+  // Keys are only set when a row actually exists — a missing type and a genuine
+  // 0% are different states, and the "incomplete costing" flag needs to tell them apart.
+  const miscByBom = new Map<number, Partial<Record<MiscCostType, number>>>()
   for (const r of miscCostRows) {
-    const entry = miscByBom.get(r.bom_id) ?? { jw: 0, shrink: 0, shipper: 0, rm_loss: 0, pm_loss: 0 }
+    const entry = miscByBom.get(r.bom_id) ?? {}
     entry[r.type] = Number(r.cost)
     miscByBom.set(r.bom_id, entry)
   }
 
   const rows: FinalCostingRow[] = lineRows.map((l) => {
-    const material = materialByBom.get(l.bom_id) ?? { rm: 0, pm: 0 }
-    const misc = miscByBom.get(l.bom_id) ?? { jw: 0, shrink: 0, shipper: 0, rm_loss: 0, pm_loss: 0 }
-    const wastage = (material.rm + material.pm) * 0.10
-    const total = material.rm + material.pm + wastage + misc.jw + misc.shrink + misc.shipper
+    const material = materialByBom.get(l.bom_id)
+    const misc = miscByBom.get(l.bom_id) ?? {}
+    const rmCost = material?.rm ?? 0
+    const pmCost = material?.pm ?? 0
+    const { rmWastage, pmWastage, total: wastage } = computeWastage(rmCost, pmCost, misc.rm_loss ?? 0, misc.pm_loss ?? 0)
+    const jw = misc.jw ?? 0
+    const shrink = misc.shrink ?? 0
+    const shipper = misc.shipper ?? 0
+    const total = computeTotalCosting({ rmCost, pmCost, wastageTotal: wastage, jw, shrink, shipper })
+    const incomplete =
+      !material || rmCost <= 0 || pmCost <= 0 ||
+      misc.jw === undefined || misc.shrink === undefined || misc.shipper === undefined ||
+      misc.rm_loss === undefined || misc.pm_loss === undefined
     return {
       bom_id: l.bom_id,
       sku_code: l.sku_code,
       sku_name: l.sku_name,
-      rm_cost: material.rm,
-      pm_cost: material.pm,
-      jw: misc.jw,
-      shrink: misc.shrink,
-      shipper: misc.shipper,
+      rm_cost: rmCost,
+      pm_cost: pmCost,
+      jw,
+      shrink,
+      shipper,
+      rm_wastage: rmWastage,
+      pm_wastage: pmWastage,
       wastage,
       total,
+      incomplete,
     }
   })
 
-  return <FinalCostingTable mfgId={mfgId} rows={rows} />
+  const linesByBom = new Map<number, BomLineInputRow[]>()
+  for (const l of bomLineInputRows) {
+    const arr = linesByBom.get(l.bom_id) ?? []
+    arr.push(l)
+    linesByBom.set(l.bom_id, arr)
+  }
+  const rmRateMap = new Map(minMaxRmRows.map((r) => [r.rm_id as number, { min: Number(r.min_rate ?? 0), max: Number(r.max_rate ?? 0) }]))
+  const pmRateMap = new Map(minMaxPmRows.map((r) => [r.pm_id as number, { min: Number(r.min_rate ?? 0), max: Number(r.max_rate ?? 0) }]))
+
+  function buildComparisonRows(scenario: "min" | "max"): FinalCostingComparisonRow[] {
+    return rows.map((mrmRow) => {
+      const lines = linesByBom.get(mrmRow.bom_id) ?? []
+      let rmCost = 0
+      let pmCost = 0
+      for (const line of lines) {
+        const amount = Number(line.amount)
+        if (line.mtrl_type === "rm") {
+          const filling = Number(line.filling ?? 0)
+          const rate = rmRateMap.get(line.mtrl_id)?.[scenario] ?? 0
+          rmCost += computeRmCost(filling, amount, rate)
+        } else {
+          const rate = pmRateMap.get(line.mtrl_id)?.[scenario] ?? 0
+          pmCost += computePmCost(amount, rate)
+        }
+      }
+      const misc = miscByBom.get(mrmRow.bom_id) ?? {}
+      const { rmWastage, pmWastage, total: wastage } = computeWastage(rmCost, pmCost, misc.rm_loss ?? 0, misc.pm_loss ?? 0)
+      const jw = misc.jw ?? 0
+      const shrink = misc.shrink ?? 0
+      const shipper = misc.shipper ?? 0
+      const total = computeTotalCosting({ rmCost, pmCost, wastageTotal: wastage, jw, shrink, shipper })
+      const rmDelta = rmCost - mrmRow.rm_cost
+      const pmDelta = pmCost - mrmRow.pm_cost
+      const totalDelta = total - mrmRow.total
+      return {
+        ...mrmRow,
+        rm_cost: rmCost,
+        pm_cost: pmCost,
+        rm_wastage: rmWastage,
+        pm_wastage: pmWastage,
+        wastage,
+        jw, shrink, shipper,
+        total,
+        rm_delta: rmDelta,
+        rm_delta_pct: mrmRow.rm_cost ? (rmDelta / mrmRow.rm_cost) * 100 : 0,
+        pm_delta: pmDelta,
+        pm_delta_pct: mrmRow.pm_cost ? (pmDelta / mrmRow.pm_cost) * 100 : 0,
+        total_delta: totalDelta,
+        total_delta_pct: mrmRow.total ? (totalDelta / mrmRow.total) * 100 : 0,
+      }
+    })
+  }
+
+  const cheapestRows = buildComparisonRows("min")
+  const maxRows = buildComparisonRows("max")
+
+  return (
+    <div className="space-y-6">
+      <FinalCostingTable mfgId={mfgId} rows={rows} />
+      <FinalCostingComparisonTable
+        title="Cheapest Available Vendor Rate"
+        subtitle="Recomputed using the lowest currently-effective vendor (VRM) rate per RM/PM component, compared against the agreed MRM rate above."
+        rows={cheapestRows}
+      />
+      <FinalCostingComparisonTable
+        title="Most Expensive Available Vendor Rate"
+        subtitle="Recomputed using the highest currently-effective vendor (VRM) rate per RM/PM component, compared against the agreed MRM rate above."
+        rows={maxRows}
+      />
+    </div>
+  )
 }

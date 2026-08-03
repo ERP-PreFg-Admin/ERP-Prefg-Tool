@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-export const mfgLineStatusSchema = z.enum(["active", "on_hold", "tech_transfer"])
+export const mfgLineStatusSchema = z.enum(["active", "discontinued", "inactive"])
 
 export const createMfgLineSchema = z.object({
   action: z.literal("create"),
@@ -84,7 +84,3 @@ export const mfgIdParamSchema = z.object({
   mfgId: z.coerce.number().int().positive("Invalid manufacturer id"),
 })
 
-export const mfgLinesExportParamSchema = z.object({
-  mfgId: z.coerce.number().int().positive("Invalid manufacturer id"),
-  status: mfgLineStatusSchema,
-})

@@ -181,12 +181,13 @@ export const BOM_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "effective_from",  label: "Effective From",  type: "date"   },
 ]
 
-// ── Manufacturing — Manufacturing lines (Active / On Hold / Tech Transfer) ────
+// ── Manufacturing — Manufacturing lines (Active / Inactive) ──────────────────
 
 export const MFG_LINES_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "sku_code",        label: "SKU",             type: "text" },
   { key: "bom_code",        label: "BOM Code",        type: "text" },
   { key: "sku_name",        label: "SKU Name",        type: "text" },
+  { key: "status",          label: "Status",          type: "text", format: (v) => (v === "discontinued" ? "Discontinued" : v === "inactive" ? "Inactive" : "Active") },
   { key: "effective_from",  label: "Effective From",  type: "date" },
   { key: "effective_to",    label: "Effective To",    type: "date" },
   { key: "filling",         label: "Filling",         type: "number" },
@@ -306,6 +307,45 @@ export const FINAL_COSTING_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "jw",       label: "JWW",             type: "number" },
   { key: "shrink",   label: "Shrinkage",       type: "number" },
   { key: "shipper",  label: "Shipper",         type: "number" },
-  { key: "wastage",  label: "Wastage (10%)",   type: "number" },
+  { key: "rm_wastage", label: "RM Wastage",    type: "number" },
+  { key: "pm_wastage", label: "PM Wastage",    type: "number" },
+  { key: "wastage",  label: "Wastage",         type: "number" },
   { key: "total",    label: "Total Costing",   type: "number" },
+  { key: "incomplete", label: "Incomplete Costing", type: "text", format: (v) => (v ? "Yes" : "No") },
+]
+
+// ── Manufacturing — Agreed Final Costing "Detailed Breakup" export ───────────
+// Two-sheet workbook for negotiation analysis: one row per SKU across all 3
+// rate scenarios (Summary), and one row per SKU x material line (Detail).
+
+export const FINAL_COSTING_DETAILED_SUMMARY_COLUMNS: ExportColumn[] = [
+  { key: "sku_code",         label: "SKU",                    type: "text"   },
+  { key: "sku_name",         label: "SKU Name",                type: "text"   },
+  { key: "mrm_total",        label: "MRM Total Costing",       type: "number" },
+  { key: "cheapest_total",   label: "Cheapest Vendor Total",    type: "number" },
+  { key: "cheapest_delta",   label: "Cheapest Δ vs MRM",       type: "number" },
+  { key: "cheapest_delta_pct", label: "Cheapest Δ% vs MRM",    type: "number" },
+  { key: "max_total",        label: "Max Vendor Total",        type: "number" },
+  { key: "max_delta",        label: "Max Δ vs MRM",            type: "number" },
+  { key: "max_delta_pct",    label: "Max Δ% vs MRM",           type: "number" },
+]
+
+export const FINAL_COSTING_DETAILED_LINE_COLUMNS: ExportColumn[] = [
+  { key: "sku_code",          label: "SKU",                type: "text"   },
+  { key: "sku_name",          label: "SKU Name",           type: "text"   },
+  { key: "component",         label: "Component",          type: "text"   },
+  { key: "mtrl_code",         label: "Material Code",      type: "text"   },
+  { key: "mtrl_name",         label: "Material Name",      type: "text"   },
+  { key: "mrm_rate",          label: "MRM Rate",           type: "number" },
+  { key: "mrm_cost",          label: "MRM Cost",           type: "number" },
+  { key: "cheapest_vendor",   label: "Cheapest Vendor",    type: "text"   },
+  { key: "cheapest_rate",     label: "Cheapest Rate",      type: "number" },
+  { key: "cheapest_cost",     label: "Cheapest Cost",      type: "number" },
+  { key: "cheapest_delta",    label: "Δ vs MRM (₹)",       type: "number" },
+  { key: "cheapest_delta_pct", label: "Δ vs MRM (%)",      type: "number" },
+  { key: "max_vendor",        label: "Max Vendor",         type: "text"   },
+  { key: "max_rate",          label: "Max Rate",           type: "number" },
+  { key: "max_cost",          label: "Max Cost",           type: "number" },
+  { key: "max_delta",         label: "Δ vs MRM (₹)",       type: "number" },
+  { key: "max_delta_pct",     label: "Δ vs MRM (%)",       type: "number" },
 ]

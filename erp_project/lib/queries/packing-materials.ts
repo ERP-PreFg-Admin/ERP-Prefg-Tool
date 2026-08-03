@@ -39,6 +39,39 @@ export const packingMaterials = {
     FROM pm_vrm_dynamic AS pmv
     INNER JOIN master_pm AS p ON pmv.pm_id = p.id
   `,
+  /**
+   * Cheapest and most expensive currently-effective vendor (VRM) rate per PM,
+   * across ALL vendors (not scoped to any one manufacturer). Mirrors
+   * rawMaterials.selectMinMaxVrmRateByRm — see that query's comment for the
+   * correlated-subquery vendor-resolution rationale.
+   */
+  selectMinMaxVrmRateByPm: `
+    SELECT
+      agg.pm_id, agg.min_rate, agg.max_rate,
+      minv.code AS min_vendor_code, minv.name AS min_vendor_name,
+      maxv.code AS max_vendor_code, maxv.name AS max_vendor_name
+    FROM (
+      SELECT pm_id, MIN(curr_rate) AS min_rate, MAX(curr_rate) AS max_rate
+      FROM pm_vrm_dynamic
+      WHERE status = 'active'
+        AND effective_from <= CURDATE()
+        AND (effective_to IS NULL OR effective_to >= CURDATE())
+      GROUP BY pm_id
+    ) agg
+    LEFT JOIN master_vendors minv ON minv.id = (
+      SELECT vendor_id FROM pm_vrm_dynamic
+      WHERE pm_id = agg.pm_id AND curr_rate = agg.min_rate AND status = 'active'
+        AND effective_from <= CURDATE() AND (effective_to IS NULL OR effective_to >= CURDATE())
+      ORDER BY id LIMIT 1
+    )
+    LEFT JOIN master_vendors maxv ON maxv.id = (
+      SELECT vendor_id FROM pm_vrm_dynamic
+      WHERE pm_id = agg.pm_id AND curr_rate = agg.max_rate AND status = 'active'
+        AND effective_from <= CURDATE() AND (effective_to IS NULL OR effective_to >= CURDATE())
+      ORDER BY id LIMIT 1
+    )
+  `,
+
   /** Get all Packing material along with manufacturer details and prices. */
   selectAllByManufacturer: `
     SELECT

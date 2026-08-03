@@ -131,6 +131,20 @@ export const bom = {
   `,
 
   /**
+   * The single most recent BOM for a SKU (any status — the prior BOM to diff
+   * a new version against may be `discontinued` per the "2 BOMs live"
+   * definition, so an active-only query would miss it), with its rm/pm
+   * version numbers for independent-version bom_code generation. Params: [sku_id]
+   */
+  selectMostRecentBomForSku: `
+    SELECT id, bom_code, rm_version, pm_version
+    FROM master_bom
+    WHERE sku_id = ?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `,
+
+  /**
    * Every active SKU whose active BOM references this material — portfolio-wide,
    * used by the RM/PM vendor-rate edit dialogs' cost-impact alert.
    * Params: [mtrl_type, mtrl_id]
@@ -289,6 +303,18 @@ export const bom = {
   `,
 
   /**
+   * Same as insertBomHeader, but also stamps rm_version/pm_version — used
+   * only by the single-BOM new-version submit path (app/api/masters/bom-master/route.ts),
+   * which computes these independently via lib/masters/bom-version.ts's
+   * diffBomLines. The CSV bulk-upload path (lib/approvals/handlers/bom.ts)
+   * keeps using plain insertBomHeader and the legacy bom_code format.
+   */
+  insertBomHeaderWithVersions: `
+    INSERT INTO master_bom (bom_code, sku_id, created_by, status, effective_from, rm_version, pm_version, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+  `,
+
+  /**
    * Insert a single BOM detail line. Only ever called at approval time (see
    * lib/approvals/module-handlers.ts bomHandler) — never at submission time.
    * effective_from/effective_till are recipe-level (master_bom), not per line —
@@ -360,6 +386,42 @@ export const bom = {
     UPDATE master_bom
     SET status = 'discontinued', effective_till = CURDATE(), updated_at = NOW()
     WHERE sku_id = ? AND id <> ? AND status = 'active'
+  `,
+
+  /**
+   * SKUs with more than one BOM still "live" (producible) right now — this is
+   * a fast-moving system where effective_till is often left unset, so both an
+   * `active` BOM and a `discontinued` one it superseded can remain producible
+   * during a transition period until someone manually flips the older one to
+   * `inactive`. Effective_till is intentionally ignored (unreliable); a BOM
+   * counts as live purely by status IN ('active','discontinued') AND
+   * effective_from <= today. No params.
+   */
+  selectSkusWithMultipleLiveBoms: `
+    SELECT
+      sku_id,
+      COUNT(*) AS live_bom_count,
+      GROUP_CONCAT(id ORDER BY effective_from ASC, id ASC) AS bom_ids,
+      GROUP_CONCAT(bom_code ORDER BY effective_from ASC, id ASC SEPARATOR ', ') AS bom_codes
+    FROM master_bom
+    WHERE status IN ('active', 'discontinued') AND effective_from <= CURDATE() AND sku_id IS NOT NULL
+    GROUP BY sku_id
+    HAVING COUNT(*) > 1
+  `,
+
+  /** Same as selectSkusWithMultipleLiveBoms, restricted to BOMs this manufacturer produces. Params: [mfg_id] */
+  selectSkusWithMultipleLiveBomsByMfg: `
+    SELECT
+      b.sku_id, sk.sku_code,
+      COUNT(*) AS live_bom_count,
+      GROUP_CONCAT(b.id ORDER BY b.effective_from ASC, b.id ASC) AS bom_ids,
+      GROUP_CONCAT(b.bom_code ORDER BY b.effective_from ASC, b.id ASC SEPARATOR ', ') AS bom_codes
+    FROM master_bom b
+    INNER JOIN master_bom_mfg mbm ON mbm.bom_id = b.id AND mbm.mfg_id = ?
+    LEFT JOIN master_skus sk ON sk.id = b.sku_id
+    WHERE b.status IN ('active', 'discontinued') AND b.effective_from <= CURDATE() AND b.sku_id IS NOT NULL
+    GROUP BY b.sku_id, sk.sku_code
+    HAVING COUNT(*) > 1
   `,
 
   // ============ HISTORY QUERIES (read-only "BOM History" page) ============

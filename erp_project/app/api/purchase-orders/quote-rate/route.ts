@@ -4,7 +4,7 @@
  * Auto-computes the per-unit PO rate for a SKU + Manufacturer combination,
  * reusing the exact same Final Costing formula as the Manufacturing module
  * (app/manufacturing/[mfgId]/page.tsx FinalCostingTabContent):
- *   wastage = (rm_cost + pm_cost) * 0.10
+ *   wastage = (rm_cost * rm_loss%) + (pm_cost * pm_loss%)   -- real per-SKU wastage from bom_misc
  *   rate    = rm_cost + pm_cost + wastage + jw + shrink + shipper
  *
  * Returns 404 when the SKU isn't linked to that manufacturer via an active
@@ -16,6 +16,7 @@
 import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
+import { computeWastage, computeTotalCosting } from "@/lib/costing/final-costing"
 import type { MiscCostType } from "@/types/masters"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
@@ -31,7 +32,7 @@ export const GET = withGateway({
     const { sku_code: skuCode, mfg_id: mfgId } = parsed.data
 
     const [lineRows, materialCostRows, miscCostRows] = await Promise.all([
-      query<{ bom_id: number; sku_code: string }>(manufacturingSql.selectLinesByMfg, [mfgId, "active", "active"]),
+      query<{ bom_id: number; sku_code: string }>(manufacturingSql.selectLiveLinesByMfg, [mfgId]),
       query<{ bom_id: number; rm_cost: string; pm_cost: string }>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId]),
       query<{ bom_id: number; type: MiscCostType; cost: string }>(manufacturingSql.selectMiscCostsByMfg, [mfgId]),
     ])
@@ -52,8 +53,8 @@ export const GET = withGateway({
     for (const r of miscCostRows) {
       if (r.bom_id === line.bom_id) misc[r.type] = Number(r.cost)
     }
-    const wastage = (rm + pm) * 0.10
-    const rate = rm + pm + wastage + misc.jw + misc.shrink + misc.shipper
+    const { total: wastage } = computeWastage(rm, pm, misc.rm_loss, misc.pm_loss)
+    const rate = computeTotalCosting({ rmCost: rm, pmCost: pm, wastageTotal: wastage, jw: misc.jw, shrink: misc.shrink, shipper: misc.shipper })
 
     return NextResponse.json({ rate })
   },

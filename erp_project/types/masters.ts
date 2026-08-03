@@ -330,8 +330,14 @@ export type bomType = {
 }
 export type bom_detailsType = Record<string, never>
 
-/** MFG Management line status — a manufacturer's SKU-level production state. */
-export type MfgLineStatus = "active" | "on_hold" | "tech_transfer"
+/**
+ * MFG Management line status — a manufacturer's SKU-level production state.
+ * `active` — normal production, POs can be raised.
+ * `discontinued` — winding down: still "live" (existing ingredient stock can still
+ *   be consumed, POs can still be raised) but on its way to `inactive`.
+ * `inactive` — fully stopped; POs can no longer be raised against this line.
+ */
+export type MfgLineStatus = "active" | "discontinued" | "inactive"
 
 /**
  * `master_bom_mfg` joined with `master_bom`/`master_skus`/`master_mfgs` — one
@@ -352,7 +358,7 @@ export type MfgLine = {
   sku_code: string | null
   sku_name: string | null
   brand: string | null
-  /** `details_sku.filling` — the SKU's fill volume/weight; often empty. */
+  /** `master_skus.filling` — the SKU's fill volume/weight; often empty. */
   filling: number | null
   filling_uom: string | null
   mfg_code: string
@@ -493,6 +499,28 @@ export type FinalCostingRow = {
   jw: number
   shrink: number
   shipper: number
+  /** rm_cost * (rm_loss% / 100) — real per-SKU RM wastage, not a flat rate. */
+  rm_wastage: number
+  /** pm_cost * (pm_loss% / 100) — real per-SKU PM wastage, not a flat rate. */
+  pm_wastage: number
+  /** rm_wastage + pm_wastage — kept for the existing combined "Wastage" column. */
   wastage: number
   total: number
+  /** True when RM/PM cost or any misc cost (jw/shrink/shipper/rm_loss/pm_loss) row is missing for this SKU x mfg. */
+  incomplete: boolean
+}
+
+/**
+ * A FinalCostingRow recomputed using the cheapest/most-expensive available
+ * vendor (VRM) rate per RM/PM component instead of the agreed MRM rate, with
+ * deltas vs. the MRM-based row — for the Agreed Final Costing tab's
+ * negotiation comparison tables.
+ */
+export type FinalCostingComparisonRow = FinalCostingRow & {
+  rm_delta: number
+  rm_delta_pct: number
+  pm_delta: number
+  pm_delta_pct: number
+  total_delta: number
+  total_delta_pct: number
 }

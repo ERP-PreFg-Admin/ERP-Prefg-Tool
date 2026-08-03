@@ -59,6 +59,42 @@ export const rawMaterials = {
   /** Select a raw material by its code for bulk import purposes. Parameters: [rm_code] */
   selectByCode: `SELECT id, uom, status FROM master_rm WHERE rm_code = ? LIMIT 1`,
 
+  /**
+   * Cheapest and most expensive currently-effective vendor (VRM) rate per RM,
+   * across ALL vendors (not scoped to any one manufacturer — vendors aren't
+   * tied to a specific mfg). Used by the Agreed Final Costing tab's
+   * cheapest/max vendor-rate comparison tables. Vendor name at the min/max
+   * rate is resolved via a correlated subquery (same "pick one row" pattern
+   * as manufacturingSql.selectPmVendorByMfg) since MIN()/MAX() alone can't
+   * say which vendor produced that extreme.
+   */
+  selectMinMaxVrmRateByRm: `
+    SELECT
+      agg.rm_id, agg.min_rate, agg.max_rate,
+      minv.code AS min_vendor_code, minv.name AS min_vendor_name,
+      maxv.code AS max_vendor_code, maxv.name AS max_vendor_name
+    FROM (
+      SELECT rm_id, MIN(curr_rate) AS min_rate, MAX(curr_rate) AS max_rate
+      FROM rm_vrm_dynamic
+      WHERE status = 'active'
+        AND effective_from <= CURDATE()
+        AND (effective_to IS NULL OR effective_to >= CURDATE())
+      GROUP BY rm_id
+    ) agg
+    LEFT JOIN master_vendors minv ON minv.id = (
+      SELECT vendor_id FROM rm_vrm_dynamic
+      WHERE rm_id = agg.rm_id AND curr_rate = agg.min_rate AND status = 'active'
+        AND effective_from <= CURDATE() AND (effective_to IS NULL OR effective_to >= CURDATE())
+      ORDER BY id LIMIT 1
+    )
+    LEFT JOIN master_vendors maxv ON maxv.id = (
+      SELECT vendor_id FROM rm_vrm_dynamic
+      WHERE rm_id = agg.rm_id AND curr_rate = agg.max_rate AND status = 'active'
+        AND effective_from <= CURDATE() AND (effective_to IS NULL OR effective_to >= CURDATE())
+      ORDER BY id LIMIT 1
+    )
+  `,
+
   // ============ PAGINATED BASE TABLE QUERIES (material-master page) ============
 
   /**

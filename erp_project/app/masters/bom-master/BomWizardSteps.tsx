@@ -106,8 +106,6 @@ function downloadBomCsvTemplate() {
 }
 
 export function Step4LineEntry({
-  bomCode,
-  onChangeBomCode,
   effectiveFrom,
   onChangeEffectiveFrom,
   entryMethod,
@@ -123,8 +121,6 @@ export function Step4LineEntry({
   pendingArtifactFiles,
   onChangePendingArtifactFiles,
 }: {
-  bomCode: string
-  onChangeBomCode: (v: string) => void
   effectiveFrom: string
   onChangeEffectiveFrom: (v: string) => void
   entryMethod: EntryMethod | null
@@ -144,14 +140,12 @@ export function Step4LineEntry({
     <div className="space-y-4 py-2">
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-medium mb-1">
-            BOM Code <span className="text-destructive">*</span>
-          </label>
+          <label className="block text-xs font-medium mb-1">BOM Code</label>
           <input
             type="text"
-            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            value={bomCode}
-            onChange={(e) => onChangeBomCode(e.target.value)}
+            disabled
+            className="w-full rounded-md border border-input bg-muted px-3 py-1.5 text-sm text-muted-foreground"
+            value="Assigned automatically on submit"
           />
         </div>
         <div>
@@ -267,7 +261,6 @@ function SummaryLineList({
 export function Step5Review({
   skus,
   skuId,
-  bomCode,
   effectiveFrom,
   rmRows,
   pmRows,
@@ -276,7 +269,6 @@ export function Step5Review({
 }: {
   skus: Sku[]
   skuId: number | null
-  bomCode: string
   effectiveFrom: string
   rmRows: BomLineRow[]
   pmRows: BomLineRow[]
@@ -292,7 +284,7 @@ export function Step5Review({
         </div>
         <div>
           <p className="text-xs text-muted-foreground">BOM Code</p>
-          <p className="font-mono font-medium">{bomCode}</p>
+          <p className="font-mono font-medium text-muted-foreground">Assigned automatically on submit</p>
         </div>
         <div>
           <p className="text-xs text-muted-foreground">Effective From</p>

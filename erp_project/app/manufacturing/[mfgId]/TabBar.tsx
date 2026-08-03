@@ -4,18 +4,19 @@ import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 
 export type MfgTab =
-  | "active" | "on_hold" | "tech_transfer"
+  | "active"
   | "misc_cost"
   | "rm_vendor" | "agreed_rates" | "final_costing"
+  | "common_rms" | "vendor_ing_mapping"
 
-const TABS: { key: MfgTab; label: string; countKey?: "active" | "on_hold" | "tech_transfer" }[] = [
-  { key: "active",        label: "Active SKUs",         countKey: "active" },
-  { key: "on_hold",       label: "Stopped / On Hold",   countKey: "on_hold" },
-  { key: "tech_transfer", label: "Tech Transfers",      countKey: "tech_transfer" },
-  { key: "misc_cost",     label: "Misc. Cost" },
-  { key: "rm_vendor",     label: "Approved Procurement Rates" },
-  { key: "agreed_rates",  label: "Agreed Rates" },
-  { key: "final_costing", label: "Agreed Final Costing" },
+const TABS: { key: MfgTab; label: string }[] = [
+  { key: "active",             label: "SKUs" },
+  { key: "misc_cost",          label: "Misc. Cost" },
+  { key: "rm_vendor",          label: "Approved Procurement Rates" },
+  { key: "agreed_rates",       label: "Agreed Rates" },
+  { key: "final_costing",      label: "Agreed Final Costing" },
+  { key: "common_rms",         label: "Common RMs" },
+  { key: "vendor_ing_mapping", label: "Vendor Ing Mapping" },
 ]
 
 export default function TabBar({
@@ -42,7 +43,11 @@ export default function TabBar({
             }
           >
             {tab.label}
-            {tab.countKey && <span className="opacity-70"> ({statusCounts[tab.countKey] ?? 0})</span>}
+            {tab.key === "active" && (
+              <span className="opacity-70">
+                {" "}({statusCounts.active ?? 0} active / {statusCounts.discontinued ?? 0} discontinued / {statusCounts.inactive ?? 0} inactive)
+              </span>
+            )}
           </button>
         ))}
       </CardContent>

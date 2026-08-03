@@ -36,8 +36,10 @@ import { STATUS } from "@/lib/constants"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { stageBulkUploadApproval, uploadRowsAsCsv } from "@/lib/master-routes/bulk-approval"
+import { diffBomLines, type DiffableLine } from "@/lib/masters/bom-version"
 
 type BomHeaderRow = { id: number; bom_code: string; sku_id: number; status: string; created_by: number }
+type MostRecentBomRow = { id: number; bom_code: string; rm_version: number; pm_version: number }
 type BomDetailLineRow = {
   id: number; bom_id: number; mtrl_type: string; mtrl_id: number
   amount: number; uom: string | null; effective_from: string; effective_till: string | null
@@ -82,10 +84,33 @@ export const POST = withGateway({
       await conn.beginTransaction()
       try {
         let bomId: number
+        let bomCode: string | undefined
 
         if (body.mode === "new-version") {
-          const [result] = await conn.execute(bomSql.insertBomHeader, [
-            body.bom_code!.trim(), body.sku_id, userId, BOM_STATUS_IN_REVIEW, body.effective_from!.trim(),
+          const [skuRows] = await conn.execute(skuSql.selectById, [body.sku_id])
+          const skuRow = (skuRows as { sku_code: string }[])[0]
+          if (!skuRow) throw new ApiError(404, "not_found", "SKU not found.")
+
+          const [priorRows] = await conn.execute(bomSql.selectMostRecentBomForSku, [body.sku_id])
+          const prior = (priorRows as MostRecentBomRow[])[0] ?? null
+
+          let priorLines: DiffableLine[] = []
+          if (prior) {
+            const [priorLineRows] = await conn.execute(bomSql.selectDetailLinesRawByBomId, [prior.id])
+            priorLines = (priorLineRows as BomDetailLineRow[]).map((r) => ({
+              mtrl_type: r.mtrl_type as "rm" | "pm", mtrl_id: r.mtrl_id, amount: r.amount, uom: r.uom,
+            }))
+          }
+          const newLines: DiffableLine[] = [...body.rm_lines, ...body.pm_lines].map((l) => ({
+            mtrl_type: l.mtrl_type, mtrl_id: l.mtrl_id, amount: l.amount, uom: l.uom,
+          }))
+          const { rmChanged, pmChanged } = diffBomLines(priorLines, newLines)
+          const rmVersion = !prior || rmChanged ? (prior?.rm_version ?? 0) + 1 : prior.rm_version
+          const pmVersion = !prior || pmChanged ? (prior?.pm_version ?? 0) + 1 : prior.pm_version
+          bomCode = `${skuRow.sku_code}RM${rmVersion}PM${pmVersion}`
+
+          const [result] = await conn.execute(bomSql.insertBomHeaderWithVersions, [
+            bomCode, body.sku_id, userId, BOM_STATUS_IN_REVIEW, body.effective_from!.trim(), rmVersion, pmVersion,
           ])
           bomId = (result as ResultSetHeader).insertId
         } else {
@@ -175,7 +200,7 @@ export const POST = withGateway({
         await conn.commit()
         logger.info({ ...logCtx, bomId, approvalId, message: "BOM submitted for approval" })
         recordProcessedEvent("BOM", eventId, { bomId, approvalId, skuId: body.sku_id, mode: body.mode })
-        return NextResponse.json({ ok: true, bom_id: bomId, approval_id: approvalId })
+        return NextResponse.json({ ok: true, bom_id: bomId, approval_id: approvalId, bom_code: bomCode })
       } catch (err: unknown) {
         await conn.rollback()
         const message = err instanceof Error ? err.message : String(err)

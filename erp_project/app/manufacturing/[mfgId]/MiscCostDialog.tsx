@@ -21,6 +21,7 @@ const TYPE_LABEL: Record<MiscCostType, string> = {
 const isPercentType = (t: MiscCostType) => t === "rm_loss" || t === "pm_loss"
 
 type FormState = {
+  type: MiscCostType
   bom_id: string
   cost: string
   effective_from: string
@@ -29,6 +30,7 @@ type FormState = {
 }
 
 const EMPTY_FORM: FormState = {
+  type: "jw",
   bom_id: "",
   cost: "",
   effective_from: new Date().toISOString().slice(0, 10),
@@ -40,25 +42,26 @@ const selectCls =
   "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
 
 export default function MiscCostDialog({
-  open, onClose, onSaved, mfgId, costType, options, editData,
+  open, onClose, onSaved, mfgId, options, editData,
 }: {
   open: boolean
   onClose: () => void
   onSaved: () => void
   mfgId: number
-  costType: MiscCostType
   options: MfgLineOption[]
   editData: MiscCostLine | null
 }) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError] = useState("")
-  const isPercent = isPercentType(costType)
+  const effectiveType = editData ? editData.type : form.type
+  const isPercent = isPercentType(effectiveType)
 
   useEffect(() => {
     if (!open) return
     if (editData) {
       setForm({
+        type: editData.type,
         bom_id: String(editData.bom_id),
         cost: editData.cost != null ? String(editData.cost) : "",
         effective_from: editData.effective_from ?? "",
@@ -96,7 +99,7 @@ export default function MiscCostDialog({
             action: "create-misc",
             bom_id: Number(form.bom_id),
             mfg_id: mfgId,
-            type: costType,
+            type: form.type,
             cost: Number(form.cost),
             effective_from: form.effective_from,
             effective_till: form.effective_till || null,
@@ -123,11 +126,28 @@ export default function MiscCostDialog({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {editData ? "Edit" : "Add"} {TYPE_LABEL[costType]} {isPercent ? "%" : "Cost"}
+            {editData ? "Edit" : "Add"} {TYPE_LABEL[effectiveType]} {isPercent ? "%" : "Cost"}
           </DialogTitle>
         </DialogHeader>
 
         <div className="grid gap-4 py-1">
+          {!editData && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="mc-type">Type <span className="text-destructive">*</span></Label>
+              <select
+                id="mc-type" value={form.type}
+                onChange={(e) => set("type", e.target.value as MiscCostType)}
+                className={selectCls}
+              >
+                <option value="jw">Job Work</option>
+                <option value="shrink">Shrink Wrap</option>
+                <option value="shipper">Shipper</option>
+                <option value="rm_loss">RM Wastage %</option>
+                <option value="pm_loss">PM Wastage %</option>
+              </select>
+            </div>
+          )}
+
           {!editData && (
             <div className="grid gap-1.5">
               <Label htmlFor="mc-bom">SKU / BOM <span className="text-destructive">*</span></Label>

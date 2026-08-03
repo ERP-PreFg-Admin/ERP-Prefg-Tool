@@ -42,7 +42,7 @@ export function BomCreationWizard({
   onSuccess: () => void
   onEditExisting: (bomId: number) => void
 }) {
-  const wizard = useBomWizard({ skus, rmMaterials, pmMaterials, onSuccess, onEditExisting })
+  const wizard = useBomWizard({ rmMaterials, pmMaterials, onSuccess, onEditExisting })
   const { step, loading, canProceedFromLines } = wizard
 
   return (
@@ -108,8 +108,6 @@ export function BomCreationWizard({
 
                 {step === 4 && (
                   <Step4LineEntry
-                    bomCode={wizard.bomCode}
-                    onChangeBomCode={wizard.setBomCode}
                     effectiveFrom={wizard.effectiveFrom}
                     onChangeEffectiveFrom={wizard.setEffectiveFrom}
                     entryMethod={wizard.entryMethod}
@@ -131,7 +129,6 @@ export function BomCreationWizard({
                   <Step5Review
                     skus={skus}
                     skuId={wizard.skuId}
-                    bomCode={wizard.bomCode}
                     effectiveFrom={wizard.effectiveFrom}
                     rmRows={wizard.rmRows}
                     pmRows={wizard.pmRows}

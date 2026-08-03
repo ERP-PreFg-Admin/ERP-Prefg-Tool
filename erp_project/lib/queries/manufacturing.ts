@@ -16,12 +16,11 @@ const LINES_SELECT = `
     l.monthly_capacity, l.this_month_plan, l.last_batch_date, l.remarks,
     b.bom_code,
     sk.sku_code, sk.name AS sku_name, sk.brand,
-    ds.filling, ds.filling_uom,
+    sk.filling, sk.filling_uom,
     m.code AS mfg_code, m.name AS mfg_name
   FROM master_bom_mfg l
   INNER JOIN master_bom    b  ON b.id     = l.bom_id
   LEFT  JOIN master_skus   sk ON sk.id    = b.sku_id
-  LEFT  JOIN details_sku   ds ON ds.sku_id = sk.id
   INNER JOIN master_mfgs   m  ON m.id     = l.mfg_id
 `
 
@@ -33,6 +32,19 @@ export const manufacturingSql = {
   selectLinesByMfg: `
     ${LINES_SELECT}
     WHERE l.mfg_id = ? AND (? IS NULL OR l.status = ?)
+    ORDER BY sk.sku_code ASC
+  `,
+
+  /**
+   * Lines still "live" for this manufacturer — status 'active' or
+   * 'discontinued' (discontinued lines can still consume existing ingredient
+   * stock and still be raised against; only 'inactive' is excluded). Used
+   * everywhere PO-raising eligibility or Agreed Final Costing needs to know
+   * which lines are currently producible. Params: [mfg_id]
+   */
+  selectLiveLinesByMfg: `
+    ${LINES_SELECT}
+    WHERE l.mfg_id = ? AND l.status IN ('active', 'discontinued')
     ORDER BY sk.sku_code ASC
   `,
 
@@ -199,12 +211,13 @@ export const manufacturingSql = {
    * line + active SKU) — used by the PO Procurement "Add PO" dialog once a
    * manufacturer is picked, to list orderable SKUs as rows. Params: [mfg_id]
    */
+  /** PO-eligible SKUs for one manufacturer — a line is eligible while 'active' or 'discontinued'; only 'inactive' blocks new POs. Params: [mfg_id] */
   selectActiveSkusForMfg: `
     SELECT DISTINCT sk.sku_code, sk.name AS sku_name
     FROM master_bom_mfg mbm
     INNER JOIN master_bom  b  ON b.id  = mbm.bom_id
     INNER JOIN master_skus sk ON sk.id = b.sku_id
-    WHERE mbm.mfg_id = ? AND mbm.status = 'active' AND sk.status = 'active'
+    WHERE mbm.mfg_id = ? AND mbm.status IN ('active', 'discontinued') AND sk.status = 'active'
     ORDER BY sk.sku_code ASC
   `,
 
@@ -338,17 +351,23 @@ export const manufacturingSql = {
   // ── Agreed Final Costing (read-only, computed) ────────────────────────────
 
   /**
-   * Per-bom RM/PM material cost for this manufacturer's active lines.
+   * Per-bom RM/PM material cost for this manufacturer's live lines (status
+   * 'active' or 'discontinued' — see selectLiveLinesByMfg's comment; a
+   * discontinued line is still producible, so its costing still applies).
    *
    * RM lines (details_bom.amount) are a formulation PERCENTAGE, not a
    * quantity — the BOM editor requires all RM lines on a SKU to sum to
    * ~100% (see lib/validation/bom.ts). RM rates (rm_mrm_fixed.curr_rate)
-   * are agreed per KG, while the SKU's fill weight (details_sku.filling) is
+   * are agreed per KG, while the SKU's fill weight (master_skus.filling) is
    * in grams. So the RM grams actually used per unit = filling * pct/100,
    * converted to kg (/1000) before multiplying by the per-kg rate:
    *   rm_cost = filling(g) * amount(%) * curr_rate(/kg) / 100 / 1000
    * A SKU with no filling recorded contributes 0 for that line (SUM skips
    * the resulting NULL), same as a missing rate does today.
+   *
+   * Filling is read from master_skus (the SKU master's own source of truth,
+   * same column lib/queries/skus.ts uses), not details_sku — details_sku
+   * carries a separate, unsynced copy that can drift from the real value.
    *
    * PM lines are unit-wise (details_bom.amount is a plain per-unit qty), so
    * PM cost stays a straight quantity × rate multiplication.
@@ -360,20 +379,62 @@ export const manufacturingSql = {
    */
   selectMaterialCostByMfg: `
     SELECT mbm.bom_id,
-      COALESCE(SUM(CASE WHEN db.mtrl_type = 'rm' THEN (db.amount * ds.filling * rmm.curr_rate) / 100000 ELSE 0 END), 0) AS rm_cost,
+      COALESCE(SUM(CASE WHEN db.mtrl_type = 'rm' THEN (db.amount * sk.filling * rmm.curr_rate) / 100000 ELSE 0 END), 0) AS rm_cost,
       COALESCE(SUM(CASE WHEN db.mtrl_type = 'pm' THEN db.amount * pmm.curr_rate ELSE 0 END), 0) AS pm_cost
     FROM master_bom_mfg mbm
     INNER JOIN master_bom  b  ON b.id = mbm.bom_id
-    LEFT  JOIN details_sku ds ON ds.sku_id = b.sku_id
+    LEFT  JOIN master_skus sk ON sk.id = b.sku_id
     INNER JOIN details_bom db ON db.bom_id = mbm.bom_id AND db.status = 'active'
     LEFT  JOIN rm_mrm_fixed rmm ON rmm.rm_id = db.mtrl_id AND rmm.mfg_id = ? AND rmm.status = 'active' AND db.mtrl_type = 'rm'
     LEFT  JOIN pm_mrm_fixed pmm ON pmm.pm_id = db.mtrl_id AND pmm.mfg_id = ? AND pmm.status = 'active' AND db.mtrl_type = 'pm'
-    WHERE mbm.mfg_id = ? AND mbm.status = 'active'
+    WHERE mbm.mfg_id = ? AND mbm.status IN ('active', 'discontinued')
     GROUP BY mbm.bom_id
   `,
 
   /** Active JW/Shrink/Shipper costs for this manufacturer, keyed by bom_id + type in application code. Params: [mfg_id] */
   selectMiscCostsByMfg: `
     SELECT bom_id, type, cost FROM bom_misc WHERE mfg_id = ? AND status = 'active'
+  `,
+
+  /**
+   * Per-bom-line RM/PM inputs (mtrl_type, mtrl_id, amount, filling) for this
+   * manufacturer's active lines — used to recompute RM/PM cost at an
+   * arbitrary rate (cheapest/max vendor rate) instead of the agreed MRM
+   * rate, via lib/costing/final-costing.ts's computeRmCost/computePmCost.
+   * Filling sourced from master_skus (see selectMaterialCostByMfg's comment).
+   * Params: [mfg_id]
+   */
+  selectBomLineInputsByMfg: `
+    SELECT mbm.bom_id, db.mtrl_type, db.mtrl_id, db.amount, sk.filling
+    FROM master_bom_mfg mbm
+    INNER JOIN master_bom  b  ON b.id = mbm.bom_id
+    LEFT  JOIN master_skus sk ON sk.id = b.sku_id
+    INNER JOIN details_bom db ON db.bom_id = mbm.bom_id AND db.status = 'active'
+    WHERE mbm.mfg_id = ? AND mbm.status IN ('active', 'discontinued')
+  `,
+
+  /**
+   * Same per-bom-line scope as selectBomLineInputsByMfg, but also resolves
+   * the material's code/name and its agreed MRM rate — used only by the
+   * Agreed Final Costing "Detailed Breakup" export, which needs line-level
+   * (not bom-aggregated) figures to build a per-material negotiation sheet.
+   * Params: [mfg_id, mfg_id, mfg_id]
+   */
+  selectBomLineDetailByMfg: `
+    SELECT
+      mbm.bom_id, sk.sku_code, sk.name AS sku_name,
+      db.mtrl_type, db.mtrl_id, db.amount, sk.filling,
+      CASE WHEN db.mtrl_type = 'rm' THEN r.rm_code ELSE p.pm_code END AS mtrl_code,
+      CASE WHEN db.mtrl_type = 'rm' THEN r.name    ELSE p.name    END AS mtrl_name,
+      CASE WHEN db.mtrl_type = 'rm' THEN rmm.curr_rate ELSE pmm.curr_rate END AS mrm_rate
+    FROM master_bom_mfg mbm
+    INNER JOIN master_bom  b  ON b.id = mbm.bom_id
+    LEFT  JOIN master_skus sk ON sk.id = b.sku_id
+    INNER JOIN details_bom db ON db.bom_id = mbm.bom_id AND db.status = 'active'
+    LEFT  JOIN master_rm r ON r.id = db.mtrl_id AND db.mtrl_type = 'rm'
+    LEFT  JOIN master_pm p ON p.id = db.mtrl_id AND db.mtrl_type = 'pm'
+    LEFT  JOIN rm_mrm_fixed rmm ON rmm.rm_id = db.mtrl_id AND rmm.mfg_id = ? AND rmm.status = 'active' AND db.mtrl_type = 'rm'
+    LEFT  JOIN pm_mrm_fixed pmm ON pmm.pm_id = db.mtrl_id AND pmm.mfg_id = ? AND pmm.status = 'active' AND db.mtrl_type = 'pm'
+    WHERE mbm.mfg_id = ? AND mbm.status IN ('active', 'discontinued')
   `,
 }

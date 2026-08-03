@@ -422,6 +422,8 @@ model master_bom {
   updated_by              Int?
   effective_from          DateTime?                 @db.Date
   effective_till          DateTime?                 @db.Date
+  rm_version              Int                       @default(1)
+  pm_version              Int                       @default(1)
   bom_artifacts           bom_artifacts[]
   bom_misc                bom_misc[]
   details_bom             details_bom[]

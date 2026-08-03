@@ -8,17 +8,34 @@ import { DownloadButton } from "@/components/masters/DownloadButton"
 import type { FinalCostingRow } from "@/types/masters"
 import { fmtMoney } from "../mfg-utils"
 
+// `incomplete` is computed server-side where row absence (vs. genuine 0) is still visible;
+// by the time rows reach this component only the flattened numbers remain, so this is a
+// best-effort hint rather than a precise list of what's missing.
+function incompleteReasons(r: FinalCostingRow): string {
+  const reasons: string[] = []
+  if (r.rm_cost <= 0) reasons.push("RM cost")
+  if (r.pm_cost <= 0) reasons.push("PM cost")
+  if (reasons.length === 0) reasons.push("JW / Shrink / Shipper / Wastage %")
+  return `Possibly missing: ${reasons.join(", ")}`
+}
+
 export default function FinalCostingTable({ mfgId, rows }: { mfgId: number; rows: FinalCostingRow[] }) {
   return (
     <div className="space-y-2 text-xs">
       <div className="flex items-center justify-between gap-3">
         <p className="text-[11px] text-muted-foreground">
-          Total = (RM + PM) × 1.10 (10% wastage tolerance on materials) + JW + Shrink Wrap + Shipper.
+          Total = RM + PM + (RM × RM Wastage%) + (PM × PM Wastage%) + JW + Shrink Wrap + Shipper. Rates from this manufacturer&apos;s agreed MRM rates.
         </p>
-        <DownloadButton
-          endpoint={`/api/manufacturing/${mfgId}/final-costing/export`}
-          label="Final Costing"
-        />
+        <div className="flex items-center gap-2">
+          <DownloadButton
+            endpoint={`/api/manufacturing/${mfgId}/final-costing/export`}
+            label="Final Costing"
+          />
+          <DownloadButton
+            endpoint={`/api/manufacturing/${mfgId}/final-costing/detailed-export`}
+            label="Detailed Breakup (Negotiation)"
+          />
+        </div>
       </div>
       <Card>
         <CardContent className="p-0">
@@ -33,7 +50,7 @@ export default function FinalCostingTable({ mfgId, rows }: { mfgId: number; rows
                   <TableHead className="text-right">JWW</TableHead>
                   <TableHead className="text-right">Shrinkage</TableHead>
                   <TableHead className="text-right">Shipper</TableHead>
-                  <TableHead className="text-right">Wastage (10%)</TableHead>
+                  <TableHead className="text-right">Wastage</TableHead>
                   <TableHead className="text-right">Total Costing</TableHead>
                 </TableRow>
               </TableHeader>
@@ -47,7 +64,19 @@ export default function FinalCostingTable({ mfgId, rows }: { mfgId: number; rows
                 ) : (
                   rows.map((r) => (
                     <TableRow key={r.bom_id}>
-                      <TableCell className="font-mono">{r.sku_code ?? "—"}</TableCell>
+                      <TableCell className="font-mono">
+                        <span className="inline-flex items-center gap-1">
+                          {r.incomplete && (
+                            <span
+                              title={incompleteReasons(r)}
+                              className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 text-[10px] font-bold cursor-help"
+                            >
+                              !
+                            </span>
+                          )}
+                          {r.sku_code ?? "—"}
+                        </span>
+                      </TableCell>
                       <TableCell className="max-w-40 truncate">{r.sku_name ?? "—"}</TableCell>
                       <TableCell className="text-right tabular-nums">{fmtMoney(r.rm_cost)}</TableCell>
                       <TableCell className="text-right tabular-nums">{fmtMoney(r.pm_cost)}</TableCell>

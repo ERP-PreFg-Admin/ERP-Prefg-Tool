@@ -225,7 +225,6 @@ export function useBomDetailPanel() {
     // by openEditMode's effect.
     let bomId = detail?.bom_id ?? null
     let skuId = detail?.sku_id ?? null
-    let skuCode = detail?.sku_code ?? null
     if (bomId == null || skuId == null) {
       if (selectedBomId == null) {
         setSaveError("No BOM selected.")
@@ -241,7 +240,6 @@ export function useBomDetailPanel() {
       setDetail(fresh)
       bomId = fresh.bom_id
       skuId = fresh.sku_id
-      skuCode = fresh.sku_code
       if (bomId == null || skuId == null) {
         setSaveError("This BOM is missing its SKU link and cannot be submitted for approval.")
         return
@@ -269,18 +267,9 @@ export function useBomDetailPanel() {
 
     setSaving(true)
     try {
-      // Editing an existing BOM always creates a NEW version — compute its
-      // code with the same convention used everywhere else (wizard,
-      // BOM_BULK): `${sku_code}-BOM-V${count+1}`.
-      const checkRes = await fetch("/api/masters/bom-master", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "check-existing", sku_id: skuId }),
-      })
-      const checkData = await checkRes.json()
-      if (!checkRes.ok) throw new Error(checkData.error || "Failed to determine the next BOM version.")
-      const newBomCode = skuCode ? `${skuCode}-BOM-V${(checkData.bom_count ?? 0) + 1}` : `BOM-V${(checkData.bom_count ?? 0) + 1}`
-
+      // Editing an existing BOM always creates a NEW version — the server
+      // computes its <sku_code>RM<n>PM<n> code (independent RM/PM version
+      // bump vs. the SKU's prior BOM), not this client.
       const artifactAdds = await uploadPendingArtifacts(
         pendingArtifactFiles,
         `boms/tmp/${crypto.randomUUID()}`
@@ -299,7 +288,6 @@ export function useBomDetailPanel() {
           action: "create-full",
           mode: "new-version",
           sku_id: skuId,
-          bom_code: newBomCode,
           effective_from: editEffectiveFrom.trim(),
           source: "manual",
           rm_lines: editRmRows.map(toLine),
@@ -322,7 +310,7 @@ export function useBomDetailPanel() {
       const params = new URLSearchParams(searchParams.toString())
       params.set("bomId", String(newBomId))
       router.push(`${pathname}?${params.toString()}`, { scroll: false })
-      toast({ title: "New BOM version submitted for approval", description: newBomCode, variant: "success" })
+      toast({ title: "New BOM version submitted for approval", description: data.bom_code ?? undefined, variant: "success" })
       router.refresh()
     } catch (e: any) {
       const message = e.message || "An error occurred"

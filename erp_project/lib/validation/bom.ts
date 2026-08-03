@@ -53,7 +53,9 @@ export const bomCreateFullSchema = z
     mode: z.enum(["new-version", "update-existing"]),
     sku_id: z.coerce.number().int().positive(),
     bom_id: z.coerce.number().int().positive().optional(), // required when mode === "update-existing"
-    bom_code: z.string().trim().min(1).max(50).optional(), // required when mode === "new-version"
+    // For mode === "new-version" the server always computes its own
+    // <sku_code>RM<n>PM<n> code (see route.ts) — any client-sent value here is ignored.
+    bom_code: z.string().trim().min(1).max(50).optional(),
     // Recipe-level effective date — required when mode === "new-version".
     // update-existing doesn't touch it (the existing header's date stands).
     effective_from: z.string().trim().optional(),
@@ -69,9 +71,6 @@ export const bomCreateFullSchema = z
   .superRefine((data, ctx) => {
     if (data.mode === "update-existing" && !data.bom_id) {
       ctx.addIssue({ code: "custom", path: ["bom_id"], message: "bom_id is required for update-existing" })
-    }
-    if (data.mode === "new-version" && !data.bom_code) {
-      ctx.addIssue({ code: "custom", path: ["bom_code"], message: "bom_code is required for new-version" })
     }
     if (data.mode === "new-version" && !data.effective_from?.trim()) {
       ctx.addIssue({ code: "custom", path: ["effective_from"], message: "effective_from is required for new-version" })

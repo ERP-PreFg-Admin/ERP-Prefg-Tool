@@ -194,9 +194,9 @@ export default function LineDialog({
               onChange={(e) => set("status", e.target.value as MfgLineStatus)}
               className={selectCls}
             >
-              <option value="active">Active Manufacturing</option>
-              <option value="on_hold">Stopped / On Hold</option>
-              <option value="tech_transfer">Tech Transfer</option>
+              <option value="active">Active</option>
+              <option value="discontinued">Discontinued</option>
+              <option value="inactive">Inactive</option>
             </select>
           </div>
 
