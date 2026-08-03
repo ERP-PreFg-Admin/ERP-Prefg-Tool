@@ -111,6 +111,7 @@ export const POST = withGateway({
 
           const [result] = await conn.execute(bomSql.insertBomHeaderWithVersions, [
             bomCode, body.sku_id, userId, BOM_STATUS_IN_REVIEW, body.effective_from!.trim(), rmVersion, pmVersion,
+
           ])
           bomId = (result as ResultSetHeader).insertId
         } else {

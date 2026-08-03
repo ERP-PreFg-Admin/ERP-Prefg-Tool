@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer"
-import { GMAIL_USER, GMAIL_APP_PASSWORD } from "@/lib/env"
+import { GMAIL_USER, GMAIL_APP_PASSWORD, MAIL_SIGNATURE_TITLE } from "@/lib/env"
 import { query } from "@/lib/db"
 import { generatePoPdf, type PoEmailData } from "@/lib/pdf/po-document"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
@@ -235,5 +235,113 @@ export async function sendMfgSelectionEmail(
 
   logger.info({ ...ctx, eventId, mfgId, mfg_name: mfg.name, mfg_email: recipients.join(", "), message: "PO selection email sent successfully" })
   recordProcessedEvent("PO_SELECTION_EMAIL", eventId, { mfgId, mfg_name: mfg.name, mfg_email: recipients.join(", ") })
+  return true
+}
+
+// ── Inward invoice notification ──────────────────────────────────────────────
+// Sent when an invoice is turned into inward POs. Deliberately not
+// sendMfgSelectionEmail: that one reports PO status and attaches PO documents
+// we generate. Here the manufacturer already knows the order — what they need
+// is the paperwork for goods that have arrived, so the invoice we read is the
+// attachment and the mail is a covering note, not a report.
+
+/** "2-AUG-26" — the format the MIS team uses in these subjects. */
+function subjectDate(value: string | null): string {
+  if (!value) return ""
+  // YYYY-MM-DD is parsed by hand: new Date() treats it as UTC midnight, which
+  // shifts the day backwards for anyone reading west of the meridian.
+  const ymd = /^(\d{4})-(\d{2})-(\d{2})/.exec(value)
+  const d = ymd
+    ? new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]))
+    : new Date(value)
+  if (Number.isNaN(d.getTime())) return ""
+  const mon = d.toLocaleString("en-US", { month: "short" }).toUpperCase()
+  return `${d.getDate()}-${mon}-${String(d.getFullYear()).slice(-2)}`
+}
+
+const escapeHtml = (s: string) =>
+  s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!))
+
+export type InwardInvoiceMail = {
+  mfgId: number
+  invoiceNo: string
+  /** Invoice date as entered on the review form (YYYY-MM-DD). */
+  invoiceDate: string | null
+  /** The PO code we registered in Uniware — quoted in the body as the reference. */
+  uniwarePoCode: string | null
+  /** The original invoice, attached as-is. */
+  invoicePdf: { filename: string; content: Buffer } | null
+  /** Signed by whoever filed the invoice, not a name baked into the repo. */
+  senderName: string
+}
+
+/**
+ * Notify the manufacturer that an invoice has been inwarded.
+ *
+ * Returns false (rather than throwing) when there's no one to send to — a
+ * manufacturer with no email on file is a data gap, not a failure of the
+ * invoice, which is already committed by the time this runs.
+ */
+export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<boolean> {
+  const { mfgId, invoiceNo, invoiceDate, uniwarePoCode, invoicePdf, senderName } = mail
+
+  const mfgRows = await query<{ code: string; name: string; email: string | null }>(
+    `SELECT m.code, m.name, d.email FROM master_mfgs m JOIN details_mfg d ON d.mfg_id = m.id WHERE m.id = ? LIMIT 1`,
+    [mfgId]
+  )
+  const mfg = mfgRows[0]
+  if (!mfg) {
+    logger.warn({ ...ctx, mfgId, message: "sendInwardInvoiceEmail: manufacturer not found" })
+    return false
+  }
+
+  const recipients = await resolveMfgRecipients(mfg.code, mfg.email)
+  if (recipients.length === 0) {
+    logger.warn({ ...ctx, mfgId, message: "sendInwardInvoiceEmail: manufacturer has no email on file, skipping" })
+    return false
+  }
+
+  const dated = subjectDate(invoiceDate)
+  const subject =
+    `Create PO : ${mfg.name.toUpperCase()} || Invoice No : ${invoiceNo}` + (dated ? ` || ${dated}` : "")
+
+  const attachments: { filename: string; content: Buffer }[] = []
+  if (invoicePdf) attachments.push(invoicePdf)
+  // The Uniware PO belongs here too, but Unicommerce exposes no endpoint to
+  // download one — only create and approve. Add it here once that's available.
+
+  const eventId = makeEventId("PO_INWARD_INVOICE_EMAIL", "send", mfgId)
+  recordRawEvent("PO_INWARD_INVOICE_EMAIL", eventId, {
+    mfgId, mfg_name: mfg.name, invoiceNo, uniwarePoCode,
+    mfg_email: recipients.join(", "), attachmentCount: attachments.length,
+  })
+
+  try {
+    await transporter.sendMail({
+      from: `mcaffeine ERP <${GMAIL_USER}>`,
+      to: recipients.join(", "),
+      subject,
+      html: `
+        <div style="font-family:sans-serif;max-width:620px;margin:auto;color:#111;font-size:14px;line-height:1.6">
+          <p style="margin:0">PFA</p>
+          ${uniwarePoCode ? `<p style="margin:12px 0 0;font-weight:600">${escapeHtml(uniwarePoCode)}</p>` : ""}
+          <p style="margin:20px 0 0">Thanks &amp; Regards<br>${escapeHtml(senderName)}<br>${escapeHtml(MAIL_SIGNATURE_TITLE)}</p>
+        </div>
+      `,
+      attachments: attachments.length > 0 ? attachments : undefined,
+    })
+  } catch (sendErr: unknown) {
+    const message = sendErr instanceof Error ? sendErr.message : String(sendErr)
+    logger.error({ ...ctx, eventId, mfgId, invoiceNo, err: message, message: "Inward invoice email send failed" })
+    recordFailedEvent("PO_INWARD_INVOICE_EMAIL", eventId, { mfgId, invoiceNo }, message)
+    throw sendErr
+  }
+
+  logger.info({
+    ...ctx, eventId, mfgId, mfg_name: mfg.name, invoiceNo, uniwarePoCode,
+    mfg_email: recipients.join(", "), message: "Inward invoice email sent",
+  })
+  recordProcessedEvent("PO_INWARD_INVOICE_EMAIL", eventId, { mfgId, invoiceNo, uniwarePoCode })
   return true
 }

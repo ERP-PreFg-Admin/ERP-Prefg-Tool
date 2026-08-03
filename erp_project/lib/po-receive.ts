@@ -16,6 +16,7 @@ export const RECEIVABLE = new Set(["raised", "punched", "partially_received"])
 type ReceivePoRow = {
   id: number
   po_no: string
+  sku_code: string | null
   qty: number
   received_qty: number | null
   status: string
@@ -23,6 +24,9 @@ type ReceivePoRow = {
 
 export type ReceiveResult = {
   po_no: string
+  /** The order's SKU — callers raising a matching inward PO reuse it rather
+   *  than trusting whatever the invoice printed. */
+  sku_code: string | null
   previous_qty: number
   received_qty: number
   status: string
@@ -85,5 +89,11 @@ export async function receivePo(
     poId, po.po_no, "update", "received_qty", String(receivedQty), String(newReceivedQty), null, userId,
   ])
 
-  return { po_no: po.po_no, previous_qty: receivedQty, received_qty: newReceivedQty, status: newStatus }
+  return {
+    po_no: po.po_no,
+    sku_code: po.sku_code,
+    previous_qty: receivedQty,
+    received_qty: newReceivedQty,
+    status: newStatus,
+  }
 }

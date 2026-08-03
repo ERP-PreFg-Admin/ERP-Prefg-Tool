@@ -151,6 +151,8 @@ export function useBomWizard({
   const rmValid = rmRows.length > 0 && isRmTotalValid(rmTotal(rmRows))
   const allRmFieldsFilled = rmRows.every((r) => r.mtrl_id && r.amount)
   const allPmFieldsFilled = pmRows.every((r) => r.mtrl_id && r.amount)
+  // effective_from is deliberately absent: it's optional, so a recipe can be
+  // drafted before its start date is decided.
   const canProceedFromLines =
     rmValid && allRmFieldsFilled && allPmFieldsFilled && effectiveFrom.trim().length > 0
 

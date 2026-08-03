@@ -53,12 +53,22 @@ export type TabKey = (typeof TABS)[number]
  * led by "open": a pseudo-status (never stored) that spans raised + punched +
  * partially_received. See statusMatchValues() in lib/queries/purchase-orders.ts.
  */
+// Two statuses are deliberately absent from the inwarding desk's tabs:
+//   punched       — STATUS_CONFIG labels it "Inward POs", which read as a
+//                   duplicate of the "Inward" tab beside it.
+//   short_closed  — not part of this desk's workflow.
+// Neither becomes unreachable: punched is counted inside "open", short-closed
+// inside "received" (see statusMatchValues), and both are listed under "All".
 export const INWARD_TABS = [
-  "open", "raised", "punched", "partially_received", "received", "short_closed", "all",
+  "open", "raised", "partially_received", "received", "inward", "all",
 ] as const
 
 /** Labels for tabs that aren't a stored status, so aren't in STATUS_CONFIG. */
-export const TAB_LABEL: Record<string, string> = { all: "All", open: "Open" }
+// Tabs that aren't a stored status need their own label. "inward" is a po_type
+// filter, not a status: every PO an invoice ever raised, whatever state it's in.
+// Without it those POs are only reachable via Received/All, because an invoice
+// books them in already complete.
+export const TAB_LABEL: Record<string, string> = { all: "All", open: "Open", inward: "Inward" }
 
 export const PAGE_SIZE = 20
 

@@ -5,17 +5,21 @@
 // Three phases in one dialog: pick a PDF, parse it with Nanonets, then review
 // the parsed fields side by side with the original before anything is written.
 //
-// Nothing is persisted until the user clicks "Create Inward POs" — the PDF is
-// posted straight to the parser and previewed from a local blob URL, and the
-// S3 upload happens as the first step of submit. Abandoning a review leaves no
-// stored file behind.
+// Nothing is persisted server-side until the user clicks "Create Inward POs" —
+// the PDF is posted straight to the parser and previewed from a local blob URL,
+// and the S3 upload happens as the first step of submit. Abandoning a review
+// leaves nothing on the server.
+//
+// It does leave a local checkpoint: the review (PDF included) is mirrored to
+// IndexedDB so a closed tab can be resumed instead of re-parsed. See
+// invoice-draft.ts, which also explains why that isn't localStorage.
 //
 // This file is the orchestration only. The form model and its rules live in
 // invoice-form.ts, the requests in invoice-api.ts, and the two halves of the
 // review pane in InvoiceFields.tsx / InvoiceLineItems.tsx.
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, FileUp, Loader2, RotateCw } from "lucide-react"
+import { AlertTriangle, FileUp, History, Loader2, RotateCw } from "lucide-react"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog"
@@ -25,16 +29,32 @@ import { cn } from "@/lib/utils"
 import type { OpenPoOption } from "@/types/invoice"
 import type { MfgOption, SkuOption, WarehouseOption } from "../po-procurement/po-types"
 import {
-  EMPTY_FORM, MAX_BYTES, collectProblems, emptyRow, formFromParsed, poOptionsFor,
+  EMPTY_FORM, MAX_BYTES, collectProblems, emptyRow, formFromParsed,
   rowsFromParsed, sumLineItems, toInwardPayload,
   type InvoiceForm, type Row,
 } from "./invoice-form"
-import { createInwardPos, fetchOpenPos, parseInvoiceFile, uploadInvoice } from "./invoice-api"
+import { commitInvoice, fetchOpenPos, parseInvoiceFile, type InwardStep } from "./invoice-api"
+import { clearDraft, loadDraft, saveDraft, savedAgo, type InvoiceDraft } from "./invoice-draft"
 import { InvoiceFields } from "./InvoiceFields"
 import { InvoiceLineItems } from "./InvoiceLineItems"
 import { useSplitPane } from "./useSplitPane"
 
 type Phase = "pick" | "parsing" | "review"
+
+/** Shown on the button while a step runs, and as that step's toast title. */
+const STEP_LABEL: Record<InwardStep, string> = {
+  s3:      "Invoice stored",
+  po:      "Inward POs created",
+  uniware: "Sent to Uniware",
+  email:   "Manufacturer notified",
+}
+
+const STEP_PROGRESS: Record<InwardStep, string> = {
+  s3:      "Storing invoice…",
+  po:      "Creating inward POs…",
+  uniware: "Sending to Uniware…",
+  email:   "Notifying manufacturer…",
+}
 
 export default function AddInvoiceDialog({
   open, onClose, skuOptions, mfgOptions, warehouseOptions, onCreated,
@@ -51,9 +71,9 @@ export default function AddInvoiceDialog({
   const [phase, setPhase]   = useState<Phase>("pick")
   const [error, setError]   = useState("")
   const [elapsed, setElapsed] = useState(0)
-  const [progress, setProgress] = useState(0)
   /** "" when idle; otherwise which step of submit is running, for the button. */
-  const [submitStep, setSubmitStep] = useState<"" | "uploading" | "creating">("")
+  /** "" when idle; otherwise the step currently running, for the button label. */
+  const [submitStep, setSubmitStep] = useState<"" | InwardStep>("")
 
   /** Held in memory for the whole review — it's the only copy until submit. */
   const [file, setFile]     = useState<File | null>(null)
@@ -64,8 +84,13 @@ export default function AddInvoiceDialog({
   const [extra, setExtra] = useState<Record<string, string>>({})
   const [openPos, setOpenPos] = useState<OpenPoOption[]>([])
 
+  /** A checkpointed review found on open, offered for resume. */
+  const [draft, setDraft] = useState<InvoiceDraft | null>(null)
+
   const fileInputRef = useRef<HTMLInputElement>(null)
   const xhrRef       = useRef<XMLHttpRequest | null>(null)
+  /** Set once the invoice is filed, so closing doesn't resurrect its draft. */
+  const committedRef = useRef(false)
   const split        = useSplitPane(50)
 
   const submitting = submitStep !== ""
@@ -77,12 +102,13 @@ export default function AddInvoiceDialog({
   }
 
   function reset() {
-    setPhase("pick"); setError(""); setElapsed(0); setProgress(0); setSubmitStep("")
+    setPhase("pick"); setError(""); setElapsed(0); setSubmitStep("")
     // Blob URLs are held by the document until explicitly revoked; without this
     // every reviewed invoice leaks its full size for the life of the tab.
     setPdfUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return "" })
     setFile(null)
     setForm(EMPTY_FORM); setRows([]); setExtra({}); setOpenPos([])
+    committedRef.current = false
     split.reset()
   }
 
@@ -92,8 +118,36 @@ export default function AddInvoiceDialog({
    *  renders the stale form for a frame first. */
   function closeAndReset() {
     xhrRef.current?.abort()
+    // The autosave is debounced, so an edit made in the last 800ms hasn't been
+    // written yet. Flush it — closing is exactly when it matters most.
+    //
+    // Unless the invoice was just committed. A ref, not the `submitting` state:
+    // handleSubmit closes over the render in which it was created, where
+    // submitStep is still "", so reading state here would always say "not
+    // submitting" and flush the draft straight back after clearDraft() — the
+    // next Add Invoice would then offer to resume an invoice already filed.
+    if (!committedRef.current && phase === "review" && file) {
+      void saveDraft({ fileName: file.name, file, form, rows, extra })
+    }
     reset()
     onClose()
+  }
+
+  /** Pick up a checkpointed review: no re-upload, no second 60s parse. */
+  function resumeDraft(d: InvoiceDraft) {
+    setError("")
+    setFile(d.file)
+    setPdfUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(d.file) })
+    setForm(d.form)
+    setRows(d.rows)
+    setExtra(d.extra)
+    setDraft(null)
+    setPhase("review")
+  }
+
+  function discardDraft() {
+    setDraft(null)
+    void clearDraft()
   }
 
   // Elapsed counter — a minute of "Parsing…" with no moving number reads as a hang.
@@ -105,6 +159,25 @@ export default function AddInvoiceDialog({
 
   // Abort an in-flight upload if the dialog is dismissed mid-transfer.
   useEffect(() => () => xhrRef.current?.abort(), [])
+
+  // Look for an unfinished review each time the dialog opens on the pick screen.
+  // Async, so this never sets state synchronously during the effect.
+  useEffect(() => {
+    if (!open || phase !== "pick") return
+    let cancelled = false
+    void loadDraft().then((d) => { if (!cancelled) setDraft(d) })
+    return () => { cancelled = true }
+  }, [open, phase])
+
+  // Checkpoint the review as it's edited. Debounced because this fires on every
+  // keystroke, and each save writes the whole PDF back to IndexedDB.
+  useEffect(() => {
+    if (phase !== "review" || !file || submitting) return
+    const t = setTimeout(() => {
+      void saveDraft({ fileName: file.name, file, form, rows, extra })
+    }, 800)
+    return () => clearTimeout(t)
+  }, [phase, file, form, rows, extra, submitting])
 
   // Reference-PO options follow the manufacturer. Refetched rather than filtered
   // client-side because the full open-PO set across all manufacturers is large.
@@ -168,21 +241,31 @@ export default function AddInvoiceDialog({
   async function handleSubmit() {
     if (problems.length > 0 || !file) return
     setError("")
+    setSubmitStep("s3")
     try {
-      // Store the PDF only now that the user has committed. If this fails,
-      // nothing is created — better than POs pointing at a missing document.
-      setSubmitStep("uploading")
-      setProgress(0)
-      const key = await uploadInvoice(file, setProgress, (xhr) => { xhrRef.current = xhr })
+      // One request: S3, our rows and the Uniware mirror have to succeed or
+      // unwind together, which they can't if the client drives them separately.
+      // Its step events arrive as they happen, so each gets its own toast.
+      const outcome = await commitInvoice(file, toInwardPayload(form, rows), (e) => {
+        if (e.status === "start") { setSubmitStep(e.step); return }
+        if (e.status === "ok")      toast({ title: STEP_LABEL[e.step], description: e.message, variant: "success" })
+        if (e.status === "skipped") toast({ title: STEP_LABEL[e.step], description: e.message, variant: "info" })
+        if (e.status === "failed")  toast({ title: `${STEP_LABEL[e.step]} failed`, description: e.message, variant: "error" })
+      })
 
-      setSubmitStep("creating")
-      const { count, receivedCount } = await createInwardPos(toInwardPayload(form, rows, key))
+      if (!outcome.ok) {
+        // Everything before the failing step was rolled back, so the review is
+        // still valid — leave the dialog open to retry.
+        setError(outcome.error ?? "Something went wrong. Nothing was saved.")
+        return
+      }
 
-      const parts = [
-        count > 0 ? `${count} inward PO${count === 1 ? "" : "s"} created` : "",
-        receivedCount > 0 ? `${receivedCount} PO${receivedCount === 1 ? "" : "s"} received against` : "",
-      ].filter(Boolean)
-      toast({ title: parts.join(" · ") || "Invoice processed", variant: "success" })
+      // Filed. Mark it before clearing so closeAndReset's flush stays off, then
+      // drop the checkpoint and close — this runs after the email step, which
+      // is the last event commitInvoice waits for.
+      committedRef.current = true
+      await clearDraft()
+      setDraft(null)
       onCreated()
       closeAndReset()
     } catch (err) {
@@ -204,7 +287,17 @@ export default function AddInvoiceDialog({
         )}
       >
         <DialogHeader className={cn(isReview && "mb-2 shrink-0")}>
-          <DialogTitle>Add Invoice</DialogTitle>
+          <DialogTitle className={cn(isReview && "flex flex-wrap items-baseline gap-x-2")}>
+            {isReview ? (
+              <>
+                Review
+                <span className="font-mono text-base font-medium text-primary">{form.invoiceNo || "this invoice"}</span>
+                <span className="text-sm font-normal text-muted-foreground">
+                  {rows.length} line item{rows.length === 1 ? "" : "s"}
+                </span>
+              </>
+            ) : "Add Invoice"}
+          </DialogTitle>
           <DialogDescription>
             {isReview
               ? "Check the parsed fields against the original, correct anything wrong, then create the inward POs."
@@ -215,16 +308,41 @@ export default function AddInvoiceDialog({
         {/* ── Pick ─────────────────────────────────────────────────────────── */}
         {phase === "pick" && (
           <div className="grid gap-3 py-2">
+            {draft && (
+              <div className="rounded-lg border border-primary/40 bg-primary/5 p-4">
+                <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-primary">
+                  <History className="h-3.5 w-3.5 shrink-0" /> Unfinished review
+                </p>
+                <p className="mt-2 truncate font-medium">{draft.fileName}</p>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  {draft.rows.length > 0 && <>{draft.rows.length} line item{draft.rows.length === 1 ? "" : "s"} · </>}
+                  saved {savedAgo(draft.savedAt)}
+                </p>
+                <div className="mt-3 flex items-center gap-2">
+                  <Button size="sm" onClick={() => resumeDraft(draft)}>Resume review</Button>
+                  <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={discardDraft}>
+                    Discard
+                  </Button>
+                </div>
+              </div>
+            )}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); handleFile(e.dataTransfer.files?.[0]) }}
-              className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-input py-10 text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-accent/40"
+              className={cn(
+                "flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-input text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-accent/40",
+                draft ? "py-5" : "py-10"
+              )}
             >
-              <FileUp className="h-6 w-6" />
-              <span className="font-medium text-foreground">Choose a PDF invoice</span>
-              <span className="text-xs">or drop it here — max 10 MB</span>
+              {!draft && <FileUp className="h-6 w-6" />}
+              <span className="font-medium text-foreground">
+                {draft ? "Start a new invoice instead" : "Choose a PDF invoice"}
+              </span>
+              <span className="text-xs">
+                {draft ? "Replaces the unfinished review" : "or drop it here — max 10 MB"}
+              </span>
             </button>
             <input
               ref={fileInputRef}
@@ -323,7 +441,9 @@ export default function AddInvoiceDialog({
                 <span className="absolute inset-y-0 -left-1.5 -right-1.5" />
               </div>
 
-              <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto pr-1">
+              {/* @container, not viewport breakpoints: this pane's width is set by
+                  the split drag, so the field grid has to respond to the pane. */}
+              <div className="@container min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto pr-1">
                 <InvoiceFields
                   form={form}
                   setField={setField}
@@ -348,29 +468,53 @@ export default function AddInvoiceDialog({
               </div>
             </div>
 
-            {/* Footer */}
-            <div className="mt-3 flex shrink-0 flex-wrap items-center gap-3 border-t border-border pt-3">
-              <div className="min-w-0 flex-1 text-xs">
-                {error ? (
-                  <span className="text-destructive">{error}</span>
-                ) : problems.length > 0 ? (
-                  <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-500">
+            {/* Commit bar — one blocking list, then what pressing the button does. */}
+            <div className="mt-3 shrink-0 border-t border-border pt-3">
+              {problems.length > 0 && (
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                  <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-500">
                     <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                    {problems.join(" ")}
+                    {problems.length} to fix
                   </span>
-                ) : (
-                  <span className="text-muted-foreground">{summarise(rows.length, receiveCount)}</span>
-                )}
+                  {/* Chips, not one joined sentence — six problems ran together
+                      into a wall nobody read to the end of. */}
+                  {problems.map((p) => (
+                    <span
+                      key={p}
+                      className="rounded border border-amber-400/60 bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                    >
+                      {p}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {error && <p className="mb-2 text-sm text-destructive">{error}</p>}
+
+              <div className="flex flex-wrap items-center gap-3">
+                <p className="min-w-0 flex-1 truncate text-sm">
+                  {problems.length > 0 ? (
+                    <span className="text-muted-foreground">Fix the items above to continue.</span>
+                  ) : (
+                    <>
+                      <span className="font-medium">{form.invoiceNo || "This invoice"}</span>
+                      {form.destination && <span className="text-muted-foreground"> → {form.destination}</span>}
+                      <span className="text-muted-foreground">
+                        {" · "}{form.currency || "INR"}{" "}
+                        {lineSum.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                      </span>
+                    </>
+                  )}
+                </p>
+                <Button variant="outline" onClick={closeAndReset} disabled={submitting}>Cancel</Button>
+                <Button size="lg" onClick={handleSubmit} disabled={submitting || problems.length > 0}>
+                  {submitting ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      {submitStep ? STEP_PROGRESS[submitStep] : "Working…"}
+                    </>
+                  ) : commitLabel(rows.length, receiveCount)}
+                </Button>
               </div>
-              <Button variant="outline" onClick={closeAndReset} disabled={submitting}>Cancel</Button>
-              <Button onClick={handleSubmit} disabled={submitting || problems.length > 0}>
-                {submitting ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    {submitStep === "uploading" ? `Storing invoice… ${progress}%` : "Creating…"}
-                  </>
-                ) : "OK — Create Inward POs"}
-              </Button>
             </div>
           </>
         )}
@@ -379,11 +523,11 @@ export default function AddInvoiceDialog({
   )
 }
 
-/** "Creates 2 inward POs and receives against 1 existing PO." */
-function summarise(total: number, receiveCount: number): string {
+/** The button states its own outcome: "Create 2 POs · receive against 1". */
+function commitLabel(total: number, receiveCount: number): string {
   const creates = total - receiveCount
-  const parts: string[] = []
-  if (creates > 0) parts.push(`Creates ${creates} inward PO${creates === 1 ? "" : "s"}`)
-  if (receiveCount > 0) parts.push(`receives against ${receiveCount} existing PO${receiveCount === 1 ? "" : "s"}`)
-  return parts.length ? parts.join(" and ") + "." : ""
+  const pos = (n: number) => `${n} PO${n === 1 ? "" : "s"}`
+  if (creates > 0 && receiveCount > 0) return `Create ${pos(creates)} · receive against ${receiveCount}`
+  if (receiveCount > 0)               return `Receive against ${pos(receiveCount)}`
+  return `Create ${creates} inward PO${creates === 1 ? "" : "s"}`
 }

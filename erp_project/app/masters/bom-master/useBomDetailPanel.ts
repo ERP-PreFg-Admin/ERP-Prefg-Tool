@@ -246,10 +246,9 @@ export function useBomDetailPanel() {
       }
     }
 
-    if (!editEffectiveFrom.trim()) {
-      setSaveError("Effective From is required.")
-      return
-    }
+    // No Effective From check: it's optional here too. Editing creates a new
+    // version, so requiring it here but not in the creation wizard would make
+    // the same field mandatory in one place and not the other.
     if (editRmRows.length === 0) {
       setSaveError("At least one RM line is required.")
       return

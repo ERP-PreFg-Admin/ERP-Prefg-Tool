@@ -70,18 +70,73 @@ export function uploadInvoice(
   })
 }
 
-export type InwardResult = { count: number; receivedCount: number }
+export type InwardStep = "s3" | "po" | "uniware" | "email"
 
-export async function createInwardPos(payload: unknown): Promise<InwardResult> {
-  const res = await fetch("/api/purchase-orders/invoice", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
+export type StepEvent = {
+  step: InwardStep
+  status: "start" | "ok" | "failed" | "skipped"
+  message?: string
+}
+
+export type InwardOutcome = {
+  ok: boolean
+  created: { id: number; po_no: string; sku_code: string }[]
+  received: { id: number; po_no: string; qty: number; status: string }[]
+  uniwarePoCode?: string
+  error?: string
+  failedStep?: InwardStep
+}
+
+/**
+ * Commit the reviewed invoice. Posts the PDF and the form together, then reads
+ * the server's newline-delimited step events so the caller can report each
+ * stage as it lands rather than only at the end.
+ *
+ * The whole thing is one request on purpose: S3, our rows and the Uniware
+ * mirror have to succeed or unwind together, which they can't do if the client
+ * drives them as separate calls.
+ */
+export async function commitInvoice(
+  file: File,
+  payload: unknown,
+  onStep: (e: StepEvent) => void
+): Promise<InwardOutcome> {
+  const form = new FormData()
+  form.append("file", file)
+  form.append("payload", JSON.stringify(payload))
+
+  const res = await fetch("/api/purchase-orders/invoice", { method: "POST", body: form })
+
+  // Only pre-stream failures (auth, validation) arrive as a non-200 with a JSON
+  // body. Once streaming starts the status is always 200.
   if (!res.ok) throw new InvoiceApiError(await messageFrom(res, "Failed to create inward POs."))
+  if (!res.body) throw new InvoiceApiError("The server returned no response body.")
 
-  const data = await res.json()
-  return { count: data.count ?? 0, receivedCount: data.receivedCount ?? 0 }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  let outcome: InwardOutcome | null = null
+
+  // NDJSON: one JSON object per line. A chunk can split a line, so only whole
+  // lines are parsed and the remainder is carried forward.
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+    for (const line of lines) {
+      if (!line.trim()) continue
+      let msg: StepEvent & { done?: boolean; outcome?: InwardOutcome }
+      try { msg = JSON.parse(line) } catch { continue }
+      if (msg.done) outcome = msg.outcome ?? null
+      else onStep(msg)
+    }
+  }
+
+  if (!outcome) throw new InvoiceApiError("The server closed the connection before finishing.")
+  return outcome
 }
 
 /** Open POs a receipt can be booked against, for one manufacturer. Returns []

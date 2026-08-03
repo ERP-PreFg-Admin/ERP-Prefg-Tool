@@ -2,9 +2,9 @@
 
 import { Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { cn } from "@/lib/utils"
+import { SectionHead } from "./InvoiceFields"
 import { poOptionsFor, type Row } from "./invoice-form"
 import type { OpenPoOption } from "@/types/invoice"
 import type { SkuOption } from "../po-procurement/po-types"
@@ -30,9 +30,9 @@ export function InvoiceLineItems({
 }) {
   return (
     <section className="grid gap-2">
-      <div className="flex items-center justify-between">
-        <Label className="text-xs">Line Items <span className="text-destructive">*</span></Label>
-        <Button variant="outline" size="sm" onClick={addRow}>
+      <div className="flex items-center gap-3">
+        <SectionHead>{`Line items (${rows.length})`}</SectionHead>
+        <Button variant="outline" size="sm" className="shrink-0" onClick={addRow}>
           <Plus className="h-3 w-3" /> Add row
         </Button>
       </div>
@@ -45,6 +45,8 @@ export function InvoiceLineItems({
               <th className="min-w-56">Reference PO</th>
               <th className="min-w-48">Product Name</th>
               <th className="min-w-28">Batch</th>
+              <th className="min-w-24">Mfg Date</th>
+              <th className="min-w-24">Expiry</th>
               <th className="min-w-24">HSN</th>
               <th className="min-w-24">Qty *</th>
               <th className="min-w-24">Rate</th>
@@ -59,7 +61,7 @@ export function InvoiceLineItems({
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={13} className="px-2 py-6 text-center text-muted-foreground">
+                <td colSpan={15} className="px-2 py-6 text-center text-muted-foreground">
                   No line items were read. Add rows manually.
                 </td>
               </tr>
@@ -117,6 +119,10 @@ export function InvoiceLineItems({
 
                 <td><input className={cellCls} value={r.sku_name} onChange={(e) => setRow(i, "sku_name", e.target.value)} /></td>
                 <td><input className={cellCls} value={r.batch}    onChange={(e) => setRow(i, "batch", e.target.value)} /></td>
+                {/* Text, not <input type="date">: invoices routinely print these
+                    month-only ("Jun-2026"), which a date input can't represent. */}
+                <td><input className={cellCls} value={r.mfg_date} onChange={(e) => setRow(i, "mfg_date", e.target.value)} /></td>
+                <td><input className={cellCls} value={r.expiry}   onChange={(e) => setRow(i, "expiry", e.target.value)} /></td>
                 <td><input className={cellCls} value={r.hsn}      onChange={(e) => setRow(i, "hsn", e.target.value)} /></td>
 
                 <td>
