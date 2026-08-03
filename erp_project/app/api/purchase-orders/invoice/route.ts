@@ -64,6 +64,10 @@ export const POST = withGateway({
   access: { pageSlug: "/po-tracking", level: "editor" },
   handler: async ({ req, session, ctx }) => {
     const userId = Number(session.user.id)
+    // Signs the manufacturer notification. Falls back to the email local-part
+    // when the account has no display name, rather than signing off blank.
+    const senderName =
+      session.user.name?.trim() || session.user.email?.split("@")[0] || "mcaffeine ERP"
 
     const form = await req.formData().catch(() => null)
     const file = form?.get("file")
@@ -104,7 +108,7 @@ export const POST = withGateway({
         const emit = (e: StepEvent) => { send(e) }
 
         try {
-          const outcome = await runInwardInvoice(body, pdf, userId, emit)
+          const outcome = await runInwardInvoice(body, pdf, { id: userId, name: senderName }, emit)
 
           if (outcome.ok) {
             logger.info({

@@ -61,6 +61,10 @@ export const NANONET_API_KEY = required("NANONET_API_KEY")
 export const GMAIL_USER         = required("GMAIL_USER")
 export const GMAIL_APP_PASSWORD = required("GMAIL_APP_PASSWORD")
 
+// Job title printed under the sender's name on inward-invoice emails. The name
+// itself comes from whoever filed the invoice, so only the title is configured.
+export const MAIL_SIGNATURE_TITLE = process.env.MAIL_SIGNATURE_TITLE ?? "MIS Executive"
+
 // ── Google OAuth ─────────────────────────────────────────────────────────────
 
 export const GOOGLE_CLIENT_ID     = required("GOOGLE_CLIENT_ID")

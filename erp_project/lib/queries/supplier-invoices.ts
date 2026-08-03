@@ -41,6 +41,13 @@ export const supplierInvoicesSql = {
   `,
 
   /**
+   * Store the code Uniware assigned. Runs after the mirror succeeds but still
+   * inside the same transaction, so an invoice never commits claiming a Uniware
+   * PO that doesn't exist. Parameters: [uniware_po_code, invoice_id]
+   */
+  setUniwarePoCode: `UPDATE supplier_invoices SET uniware_po_code = ? WHERE id = ?`,
+
+  /**
    * Has this manufacturer already had this invoice entered? Drives the
    * dialog's pre-flight warning at review time — the constraint above is what
    * actually enforces it. Parameters: [mfg_id, invoice_no]

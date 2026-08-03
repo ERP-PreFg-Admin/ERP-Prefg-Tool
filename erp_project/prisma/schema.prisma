@@ -132,6 +132,9 @@ model supplier_invoices {
   destination     String?                  @db.VarChar(100)
   invoice_total   Decimal?                 @db.Decimal(14, 4)
   attachment_key  String?                  @db.Text
+  /// Code Uniware assigned when this invoice was mirrored — its own series, and
+  /// the reference quoted to the manufacturer.
+  uniware_po_code String?                  @db.VarChar(64)
   created_by      Int?
   created_at      DateTime                 @default(now()) @db.DateTime(0)
   mfgs            master_mfgs              @relation(fields: [mfg_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_supplier_invoices_mfg")
@@ -140,6 +143,7 @@ model supplier_invoices {
 
   @@unique([mfg_id, invoice_no], map: "uq_supplier_invoice")
   @@index([mfg_id], map: "idx_supplier_invoices_mfg")
+  @@index([uniware_po_code], map: "idx_supplier_invoices_uniware_po")
 }
 
 /// One row per invoice line. The model is one PO per SKU, so each line resolves

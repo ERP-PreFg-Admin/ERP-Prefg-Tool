@@ -2,9 +2,9 @@
 
 import { Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { cn } from "@/lib/utils"
+import { SectionHead } from "./InvoiceFields"
 import { poOptionsFor, type Row } from "./invoice-form"
 import type { OpenPoOption } from "@/types/invoice"
 import type { SkuOption } from "../po-procurement/po-types"
@@ -30,9 +30,9 @@ export function InvoiceLineItems({
 }) {
   return (
     <section className="grid gap-2">
-      <div className="flex items-center justify-between">
-        <Label className="text-xs">Line Items <span className="text-destructive">*</span></Label>
-        <Button variant="outline" size="sm" onClick={addRow}>
+      <div className="flex items-center gap-3">
+        <SectionHead>{`Line items (${rows.length})`}</SectionHead>
+        <Button variant="outline" size="sm" className="shrink-0" onClick={addRow}>
           <Plus className="h-3 w-3" /> Add row
         </Button>
       </div>

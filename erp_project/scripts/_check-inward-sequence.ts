@@ -7,7 +7,7 @@
 // Uniware and emails a manufacturer, so it has to be done by hand through the UI.
 import "dotenv/config"
 import assert from "node:assert"
-import { INWARD_STEPS, uniwarePoCodeFor } from "../lib/invoice-inward"
+import { INWARD_STEPS } from "../lib/invoice-inward"
 import { buildPurchaseOrder } from "../lib/uniware"
 
 // ── Requirement 5: the sequence, in order ────────────────────────────────────
@@ -18,16 +18,15 @@ assert.deepStrictEqual(
 )
 console.log("step order OK:", INWARD_STEPS.join(" → "))
 
-// ── Uniware PO code: one per invoice, safe and stable ────────────────────────
-const code = uniwarePoCodeFor("MCAFF", "RP/L/26-27/482")
-assert.strictEqual(code, "MCAFF-RP-L-26-27-482")
-assert.ok(!/[^A-Za-z0-9-]/.test(code), "code must be alphanumeric + dashes")
-assert.ok(code.length <= 45)
-// Stable, because Uniware's uniqueness on this is what makes a retry safe.
-assert.strictEqual(code, uniwarePoCodeFor("MCAFF", "RP/L/26-27/482"))
-// Distinct manufacturers can legitimately share an invoice number.
-assert.notStrictEqual(code, uniwarePoCodeFor("HYP", "RP/L/26-27/482"))
-console.log("uniware PO code OK:", code)
+// ── No purchaseOrderCode is sent ─────────────────────────────────────────────
+// Uniware numbers the PO from the facility's own series and returns the code,
+// so the payload must leave the field out entirely rather than send a blank.
+const noCode = buildPurchaseOrder({
+  vendorCode: "Test_Vendor",
+  items: [{ itemSKU: "MCaf407", quantity: 1, unitPrice: 1 }],
+})
+assert.ok(!("purchaseOrderCode" in noCode), "must not send a code — Uniware assigns it")
+console.log("payload omits purchaseOrderCode OK")
 
 // ── Requirement 4: one Uniware PO carrying every SKU ─────────────────────────
 // Our side raises one PO per line; Uniware gets a single PO with all of them.
@@ -36,7 +35,6 @@ const ourInwardPos = [
   { po_no: "MCAFF-INW-202608-002", sku_code: "MCaf396", qty: 1032, unitPrice: 58.39, mrp: null },
 ]
 const payload = buildPurchaseOrder({
-  purchaseOrderCode: code,
   vendorCode: "Test_Vendor",
   deliveryDate: "2026-06-10",
   items: ourInwardPos.map((p) => ({

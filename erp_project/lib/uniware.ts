@@ -125,8 +125,17 @@ export type UniwarePoItem = {
 }
 
 export type UniwarePoInput = {
-  /** Our po_no. Uniware enforces uniqueness on it, which is what makes a retry safe. */
-  purchaseOrderCode: string
+  /**
+   * Omit to let Uniware assign a code from the facility's own series — that's
+   * the number the manufacturer recognises (e.g. GM/2627/PO/2006), and it comes
+   * back on the create response.
+   *
+   * The cost of omitting it is idempotency: Uniware rejects a duplicate code,
+   * so supplying our own made a retry provably safe. Without one, a second
+   * attempt creates a second PO. See the note in lib/invoice-inward.ts for
+   * where that window actually is.
+   */
+  purchaseOrderCode?: string
   vendorCode: string
   vendorAgreementName?: string | null
   currencyCode?: string | null
@@ -200,7 +209,11 @@ export function buildPurchaseOrder(po: UniwarePoInput) {
   return JSON.parse(JSON.stringify(payload))
 }
 
-/** Create the PO. Throws with Uniware's own error text on a business failure. */
+/**
+ * Create the PO and return the code it now carries in Uniware — the assigned
+ * one when we didn't supply a code, otherwise the one we sent back unchanged.
+ * Throws with Uniware's own error text on a business failure.
+ */
 export async function createPurchaseOrder(po: UniwarePoInput): Promise<{ purchaseOrderCode: string }> {
   const token = await getToken()
   const payload = buildPurchaseOrder(po)
@@ -236,7 +249,12 @@ export async function createPurchaseOrder(po: UniwarePoInput): Promise<{ purchas
   for (const w of data.warnings ?? []) {
     logger.warn({ module: "UNIWARE", poCode: po.purchaseOrderCode, message: w.description || w.message })
   }
-  return { purchaseOrderCode: data.purchaseOrderCode ?? po.purchaseOrderCode }
+  const assigned = data.purchaseOrderCode ?? po.purchaseOrderCode
+  if (!assigned) {
+    // Nothing to quote to the manufacturer and nothing to reconcile against.
+    throw new Error("Uniware accepted the purchase order but returned no purchaseOrderCode")
+  }
+  return { purchaseOrderCode: assigned }
 }
 
 export type UniwarePushResult = {
@@ -258,16 +276,19 @@ export type UniwarePushResult = {
 export async function pushPurchaseOrders(pos: UniwarePoInput[]): Promise<UniwarePushResult[]> {
   const out: UniwarePushResult[] = []
   for (const po of pos) {
+    // "(assigned)" until the response comes back — with no code supplied there
+    // is nothing to name the PO by until Uniware answers.
+    const label = po.purchaseOrderCode ?? "(assigned)"
     try {
-      await createPurchaseOrder(po)
-      out.push({ po_no: po.purchaseOrderCode, ok: true })
+      const res = await createPurchaseOrder(po)
+      out.push({ po_no: res.purchaseOrderCode, ok: true })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       const duplicate = /duplicate purchase order code/i.test(message)
-      out.push({ po_no: po.purchaseOrderCode, ok: duplicate, error: message, duplicate })
+      out.push({ po_no: label, ok: duplicate, error: message, duplicate })
       logger[duplicate ? "warn" : "error"]({
         module: "UNIWARE",
-        poCode: po.purchaseOrderCode,
+        poCode: label,
         err: message,
         message: duplicate ? "PO already existed in Uniware" : "Uniware PO create failed",
       })

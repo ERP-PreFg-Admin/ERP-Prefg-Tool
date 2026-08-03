@@ -41,7 +41,7 @@ import { skus as skusSql } from "@/lib/queries/skus"
 import { receivePo } from "@/lib/po-receive"
 import { createPurchaseOrder, futureDeliveryDate, uniwareEnabled } from "@/lib/uniware"
 import { UNIWARE_VENDOR_CODE } from "@/lib/env"
-import { sendMfgSelectionEmail } from "@/lib/mailer"
+import { sendInwardInvoiceEmail } from "@/lib/mailer"
 import { ApiError } from "@/lib/gateway/errors"
 import logger from "@/lib/logger"
 import type { InvoiceInward } from "@/lib/validation/purchase-orders"
@@ -75,15 +75,6 @@ const BRAND_CODES: Record<string, string> = { mcaffeine: "MCAFF", hyphen: "HYP" 
 
 const numOrNull = (v: unknown) =>
   v == null || v === "" || Number.isNaN(Number(v)) ? null : Number(v)
-
-/**
- * Uniware's purchaseOrderCode for the invoice. One code per invoice, because
- * step 3 sends one PO carrying every line — and Uniware enforces uniqueness on
- * it, which is what makes retrying a failed submit safe.
- */
-export function uniwarePoCodeFor(mfgCode: string, invoiceNo: string): string {
-  return `${mfgCode}-${invoiceNo.replace(/[^A-Za-z0-9]+/g, "-")}`.replace(/-+/g, "-").slice(0, 45)
-}
 
 /** Validate SKUs and resolve each one's brand, before any transaction opens. */
 async function resolveBrands(skuCodes: string[]): Promise<Map<string, string>> {
@@ -229,9 +220,12 @@ async function writeInvoiceAndPos(
 export async function runInwardInvoice(
   body: InvoiceInward,
   pdf: { buffer: Buffer; filename: string },
-  userId: number,
+  /** Who filed it — the notification is signed with their name. */
+  user: { id: number; name: string },
   emit: Emit
 ): Promise<InwardOutcome> {
+  const userId = user.id
+  const senderName = user.name
   const { invoice_no, mfg_id, line_items } = body
 
   // Validated before anything is written: a rejected batch shouldn't leave an
@@ -290,7 +284,17 @@ export async function runInwardInvoice(
   }
 
   // ── 3. Uniware — still inside the transaction, so a failure undoes step 2 ──
-  const uniwarePoCode = uniwarePoCodeFor(mfgCode, invoice_no)
+  //
+  // No purchaseOrderCode is sent: the facility's own series numbers the PO
+  // (GM/2627/PO/2006 and the like), and that is the reference the manufacturer
+  // recognises. Uniware returns it on create and we keep it.
+  //
+  // The trade-off is idempotency. Supplying our own code made a retry provably
+  // safe, because Uniware rejects duplicates. The exposed window now is narrow
+  // but real: if the create succeeds and the commit below then fails, the
+  // rollback leaves an orphan PO in Uniware and a retry mints a second one.
+  // Reconcile on uniware_po_code if that ever happens.
+  let uniwarePoCode: string | null = null
   await emit({ step: "uniware", status: "start" })
   if (!uniwareEnabled()) {
     await emit({ step: "uniware", status: "skipped", message: "Uniware is not configured" })
@@ -298,8 +302,7 @@ export async function runInwardInvoice(
     try {
       // ONE Uniware PO carrying every SKU — unlike our side, where the model is
       // one PO per SKU.
-      await createPurchaseOrder({
-        purchaseOrderCode: uniwarePoCode,
+      const res = await createPurchaseOrder({
         vendorCode: UNIWARE_VENDOR_CODE || mfgCode,
         currencyCode: body.currency || "INR",
         // Almost always omitted here: expectedOn is the invoice date, which is
@@ -315,20 +318,19 @@ export async function runInwardInvoice(
         })),
         customFields: { invoiceNo: invoice_no, invoiceDate: written.expectedOn },
       })
+      uniwarePoCode = res.purchaseOrderCode
+      // Persisted inside the transaction, so an invoice can never commit
+      // claiming a Uniware PO that isn't there — and the code survives the
+      // request, which is the only place it exists otherwise.
+      await conn.execute(supplierInvoicesSql.setUniwarePoCode, [uniwarePoCode, written.invoiceId])
       await emit({ step: "uniware", status: "ok", message: `Created ${uniwarePoCode}`, data: { uniwarePoCode } })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      // A duplicate means a previous attempt already got this far — treat it as
-      // success rather than rolling back work that is already mirrored.
-      if (/duplicate purchase order code/i.test(message)) {
-        await emit({ step: "uniware", status: "ok", message: `${uniwarePoCode} already existed`, data: { uniwarePoCode } })
-      } else {
-        await conn.rollback()
-        conn.release()
-        await dropS3()
-        await emit({ step: "uniware", status: "failed", message })
-        return { ok: false, created: [], received: [], error: message, failedStep: "uniware" }
-      }
+      await conn.rollback()
+      conn.release()
+      await dropS3()
+      await emit({ step: "uniware", status: "failed", message })
+      return { ok: false, created: [], received: [], error: message, failedStep: "uniware" }
     }
   }
 
@@ -348,14 +350,20 @@ export async function runInwardInvoice(
   // ── 4. Email — after commit, and never a reason to undo ───────────────────
   await emit({ step: "email", status: "start" })
   try {
-    const sent = await sendMfgSelectionEmail(
-      Number(mfg_id),
-      written.created.map((c) => ({
-        id: c.id, po_no: c.po_no, sku_code: c.sku_code, sku_name: null,
-        qty: written.poLines.find((l) => l.id === c.id)?.qty ?? 0,
-        status: "raised",
-      }))
-    )
+    // Not the PO-status mail procurement sends: the manufacturer already knows
+    // the order. What they need is the paperwork for goods that have arrived,
+    // so the invoice we just read goes out as the attachment. Reused from the
+    // buffer already in hand rather than re-fetched from S3.
+    const sent = await sendInwardInvoiceEmail({
+      mfgId: Number(mfg_id),
+      invoiceNo: invoice_no,
+      invoiceDate: body.invoice_date?.trim() || null,
+      // Null when the mirror was skipped — quoting a reference the
+      // manufacturer can't look up is worse than omitting the line.
+      uniwarePoCode,
+      invoicePdf: { filename: pdf.filename, content: pdf.buffer },
+      senderName,
+    })
     await emit(
       sent
         ? { step: "email", status: "ok", message: "Manufacturer notified" }
@@ -373,7 +381,7 @@ export async function runInwardInvoice(
     attachment_key: attachmentKey,
     created: written.created,
     received: written.received,
-    uniwarePoCode,
+    uniwarePoCode: uniwarePoCode ?? undefined,
   }
 }
 

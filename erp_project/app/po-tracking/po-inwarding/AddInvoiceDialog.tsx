@@ -287,7 +287,17 @@ export default function AddInvoiceDialog({
         )}
       >
         <DialogHeader className={cn(isReview && "mb-2 shrink-0")}>
-          <DialogTitle>Add Invoice</DialogTitle>
+          <DialogTitle className={cn(isReview && "flex flex-wrap items-baseline gap-x-2")}>
+            {isReview ? (
+              <>
+                Review
+                <span className="font-mono text-base font-medium text-primary">{form.invoiceNo || "this invoice"}</span>
+                <span className="text-sm font-normal text-muted-foreground">
+                  {rows.length} line item{rows.length === 1 ? "" : "s"}
+                </span>
+              </>
+            ) : "Add Invoice"}
+          </DialogTitle>
           <DialogDescription>
             {isReview
               ? "Check the parsed fields against the original, correct anything wrong, then create the inward POs."
@@ -299,25 +309,21 @@ export default function AddInvoiceDialog({
         {phase === "pick" && (
           <div className="grid gap-3 py-2">
             {draft && (
-              <div className="grid gap-2 rounded-lg border border-primary/40 bg-primary/5 p-3">
-                <div className="flex items-start gap-2">
-                  <History className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                  <div className="min-w-0 text-sm">
-                    <p className="font-medium">Unfinished invoice</p>
-                    <p className="mt-0.5 text-muted-foreground">
-                      <span className="font-medium text-foreground">{draft.fileName}</span>
-                      {draft.rows.length > 0 && <> · {draft.rows.length} line item{draft.rows.length === 1 ? "" : "s"}</>}
-                      {" · "}saved {savedAgo(draft.savedAt)}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={discardDraft}>Discard</Button>
-                  <Button size="sm" onClick={() => resumeDraft(draft)}>Resume review</Button>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  Resuming skips the upload and the ~1 minute re-read — nothing was submitted.
+              <div className="rounded-lg border border-primary/40 bg-primary/5 p-4">
+                <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-primary">
+                  <History className="h-3.5 w-3.5 shrink-0" /> Unfinished review
                 </p>
+                <p className="mt-2 truncate font-medium">{draft.fileName}</p>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  {draft.rows.length > 0 && <>{draft.rows.length} line item{draft.rows.length === 1 ? "" : "s"} · </>}
+                  saved {savedAgo(draft.savedAt)}
+                </p>
+                <div className="mt-3 flex items-center gap-2">
+                  <Button size="sm" onClick={() => resumeDraft(draft)}>Resume review</Button>
+                  <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={discardDraft}>
+                    Discard
+                  </Button>
+                </div>
               </div>
             )}
             <button
@@ -325,11 +331,18 @@ export default function AddInvoiceDialog({
               onClick={() => fileInputRef.current?.click()}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); handleFile(e.dataTransfer.files?.[0]) }}
-              className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-input py-10 text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-accent/40"
+              className={cn(
+                "flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-input text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-accent/40",
+                draft ? "py-5" : "py-10"
+              )}
             >
-              <FileUp className="h-6 w-6" />
-              <span className="font-medium text-foreground">Choose a PDF invoice</span>
-              <span className="text-xs">or drop it here — max 10 MB</span>
+              {!draft && <FileUp className="h-6 w-6" />}
+              <span className="font-medium text-foreground">
+                {draft ? "Start a new invoice instead" : "Choose a PDF invoice"}
+              </span>
+              <span className="text-xs">
+                {draft ? "Replaces the unfinished review" : "or drop it here — max 10 MB"}
+              </span>
             </button>
             <input
               ref={fileInputRef}
@@ -428,7 +441,9 @@ export default function AddInvoiceDialog({
                 <span className="absolute inset-y-0 -left-1.5 -right-1.5" />
               </div>
 
-              <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto pr-1">
+              {/* @container, not viewport breakpoints: this pane's width is set by
+                  the split drag, so the field grid has to respond to the pane. */}
+              <div className="@container min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto pr-1">
                 <InvoiceFields
                   form={form}
                   setField={setField}
@@ -453,29 +468,53 @@ export default function AddInvoiceDialog({
               </div>
             </div>
 
-            {/* Footer */}
-            <div className="mt-3 flex shrink-0 flex-wrap items-center gap-3 border-t border-border pt-3">
-              <div className="min-w-0 flex-1 text-xs">
-                {error ? (
-                  <span className="text-destructive">{error}</span>
-                ) : problems.length > 0 ? (
-                  <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-500">
+            {/* Commit bar — one blocking list, then what pressing the button does. */}
+            <div className="mt-3 shrink-0 border-t border-border pt-3">
+              {problems.length > 0 && (
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                  <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-500">
                     <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                    {problems.join(" ")}
+                    {problems.length} to fix
                   </span>
-                ) : (
-                  <span className="text-muted-foreground">{summarise(rows.length, receiveCount)}</span>
-                )}
+                  {/* Chips, not one joined sentence — six problems ran together
+                      into a wall nobody read to the end of. */}
+                  {problems.map((p) => (
+                    <span
+                      key={p}
+                      className="rounded border border-amber-400/60 bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                    >
+                      {p}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {error && <p className="mb-2 text-sm text-destructive">{error}</p>}
+
+              <div className="flex flex-wrap items-center gap-3">
+                <p className="min-w-0 flex-1 truncate text-sm">
+                  {problems.length > 0 ? (
+                    <span className="text-muted-foreground">Fix the items above to continue.</span>
+                  ) : (
+                    <>
+                      <span className="font-medium">{form.invoiceNo || "This invoice"}</span>
+                      {form.destination && <span className="text-muted-foreground"> → {form.destination}</span>}
+                      <span className="text-muted-foreground">
+                        {" · "}{form.currency || "INR"}{" "}
+                        {lineSum.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                      </span>
+                    </>
+                  )}
+                </p>
+                <Button variant="outline" onClick={closeAndReset} disabled={submitting}>Cancel</Button>
+                <Button size="lg" onClick={handleSubmit} disabled={submitting || problems.length > 0}>
+                  {submitting ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      {submitStep ? STEP_PROGRESS[submitStep] : "Working…"}
+                    </>
+                  ) : commitLabel(rows.length, receiveCount)}
+                </Button>
               </div>
-              <Button variant="outline" onClick={closeAndReset} disabled={submitting}>Cancel</Button>
-              <Button onClick={handleSubmit} disabled={submitting || problems.length > 0}>
-                {submitting ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    {submitStep ? STEP_PROGRESS[submitStep] : "Working…"}
-                  </>
-                ) : "OK — Create Inward POs"}
-              </Button>
             </div>
           </>
         )}
@@ -484,11 +523,11 @@ export default function AddInvoiceDialog({
   )
 }
 
-/** "Creates 2 inward POs and receives against 1 existing PO." */
-function summarise(total: number, receiveCount: number): string {
+/** The button states its own outcome: "Create 2 POs · receive against 1". */
+function commitLabel(total: number, receiveCount: number): string {
   const creates = total - receiveCount
-  const parts: string[] = []
-  if (creates > 0) parts.push(`Creates ${creates} inward PO${creates === 1 ? "" : "s"}`)
-  if (receiveCount > 0) parts.push(`receives against ${receiveCount} existing PO${receiveCount === 1 ? "" : "s"}`)
-  return parts.length ? parts.join(" and ") + "." : ""
+  const pos = (n: number) => `${n} PO${n === 1 ? "" : "s"}`
+  if (creates > 0 && receiveCount > 0) return `Create ${pos(creates)} · receive against ${receiveCount}`
+  if (receiveCount > 0)               return `Receive against ${pos(receiveCount)}`
+  return `Create ${creates} inward PO${creates === 1 ? "" : "s"}`
 }

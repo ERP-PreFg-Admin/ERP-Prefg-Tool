@@ -70,7 +70,10 @@ export default function PoTable({
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card">
+              {/* The header sticks, so it needs its own ground and a hairline
+                  under it — without them the column labels sit on top of the
+                  scrolling rows with nothing separating the two. */}
+              <TableHeader className="sticky top-0 z-10 bg-muted/40 backdrop-blur-[2px] [&_tr]:border-b [&_tr]:border-border">
                 <TableRow>
                   {selectable && (
                     <TableHead className="w-9">
@@ -162,7 +165,16 @@ export default function PoTable({
                     }
 
                     return (
-                      <TableRow key={r.id} data-state={selectedIds.has(r.id) ? "selected" : undefined}>
+                      <TableRow
+                        key={r.id}
+                        data-state={selectedIds.has(r.id) ? "selected" : undefined}
+                        // A cancelled PO is history, not work: dimmed so the eye
+                        // skips it, and brought back on hover if it's being read.
+                        className={cn(
+                          "transition-colors",
+                          status === "cancelled" && "opacity-55 hover:opacity-100"
+                        )}
+                      >
                         {selectable && (
                           <TableCell>
                             <input

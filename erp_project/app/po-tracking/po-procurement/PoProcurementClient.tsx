@@ -49,14 +49,18 @@ const TAB_DOT: Record<string, string> = {
 
 function SummaryCard({ icon: Icon, label, value, accent }: { icon: LucideIcon; label: string; value: string; accent: string }) {
   return (
-    <Card>
+    // Hover lift is subtle on purpose — these aren't clickable, so the response
+    // is just enough to make the strip feel alive rather than inviting a click.
+    <Card className="transition-colors hover:border-foreground/15">
       <CardContent className="flex items-center gap-3 p-3">
         <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", accent)}>
           <Icon className="h-4 w-4" />
         </div>
         <div className="min-w-0">
-          <div className="text-[11px] text-muted-foreground">{label}</div>
-          <div className="mt-0.5 text-base font-bold tracking-tight tabular-nums truncate">{value}</div>
+          {/* Uppercase + tracking separates the label from the number without
+              needing a second colour; the number carries the weight instead. */}
+          <div className="text-[10px] font-medium uppercase tracking-[0.06em] text-muted-foreground">{label}</div>
+          <div className="mt-1 truncate text-lg font-semibold leading-none tracking-tight tabular-nums">{value}</div>
         </div>
       </CardContent>
     </Card>

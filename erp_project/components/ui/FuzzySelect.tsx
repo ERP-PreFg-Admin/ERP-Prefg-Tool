@@ -1,8 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
+import { createPortal } from "react-dom"
 import Fuse from "fuse.js"
 import { cn } from "@/lib/utils"
+
+/** Matches the list's max-h below; needed as a number to decide flip direction. */
+const LIST_MAX_H = 224
+/** Below this, opening downward isn't worth it — flip above instead. */
+const MIN_ROOM = 140
 
 /**
  * Text input + fuzzy-filtered dropdown, for large option lists (Makes, INCI
@@ -47,6 +53,10 @@ export function FuzzySelect<T = string>({
   const [query, setQuery] = useState("")
   const [highlighted, setHighlighted] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
+  const inputRef     = useRef<HTMLInputElement>(null)
+  const listRef      = useRef<HTMLDivElement>(null)
+  /** Viewport box of the input, for the portalled list. Null until first open. */
+  const [box, setBox] = useState<DOMRect | null>(null)
 
   const fuse = useMemo(
     () => new Fuse(options, searchKeys ? { threshold: 0.4, ignoreLocation: true, keys: searchKeys } : { threshold: 0.4, ignoreLocation: true }),
@@ -66,7 +76,11 @@ export function FuzzySelect<T = string>({
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const t = e.target as Node
+      // The list is portalled to <body>, so it isn't inside containerRef and has
+      // to be excluded here or clicking an option would count as clicking away.
+      if (listRef.current?.contains(t)) return
+      if (containerRef.current && !containerRef.current.contains(t)) {
         setOpen(false)
         setQuery("")
       }
@@ -74,6 +88,25 @@ export function FuzzySelect<T = string>({
     document.addEventListener("mousedown", onClickOutside)
     return () => document.removeEventListener("mousedown", onClickOutside)
   }, [])
+
+  // Track the input's viewport box while open. Capture phase because the
+  // scrolling ancestor is usually a table wrapper, not the window.
+  useEffect(() => {
+    if (!open) return
+    const measure = (e?: Event) => {
+      // Scrolling the list itself doesn't move the input, and a fresh DOMRect is
+      // always a new object — re-measuring here would re-render every wheel tick.
+      if (e && listRef.current?.contains(e.target as Node)) return
+      setBox(inputRef.current?.getBoundingClientRect() ?? null)
+    }
+    measure()
+    window.addEventListener("scroll", measure, true)
+    window.addEventListener("resize", measure)
+    return () => {
+      window.removeEventListener("scroll", measure, true)
+      window.removeEventListener("resize", measure)
+    }
+  }, [open])
 
   function selectOption(opt: T) {
     onChange(getValue(opt))
@@ -105,9 +138,18 @@ export function FuzzySelect<T = string>({
     }
   }
 
+  // Open downward unless the row is near the bottom of the viewport, which is
+  // exactly the case that used to strand the list off-screen.
+  const spaceBelow = box ? window.innerHeight - box.bottom - 8 : 0
+  const spaceAbove = box ? box.top - 8 : 0
+  const flipUp     = spaceBelow < MIN_ROOM && spaceAbove > spaceBelow
+  const roomBelow  = Math.min(LIST_MAX_H, spaceBelow)
+  const roomAbove  = Math.min(LIST_MAX_H, spaceAbove)
+
   return (
     <div ref={containerRef} className="relative">
       <input
+        ref={inputRef}
         className={cn(
           "w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed",
           className
@@ -126,8 +168,24 @@ export function FuzzySelect<T = string>({
         }}
         onKeyDown={handleKeyDown}
       />
-      {open && !disabled && (
-        <div className="absolute z-50 mt-1 w-full max-h-56 overflow-auto rounded-md border border-border bg-popover shadow-md">
+      {open && !disabled && box && createPortal(
+        <div
+          ref={listRef}
+          // Fixed + portalled rather than absolute: most callers sit inside an
+          // `overflow-auto` table, which clipped the list and left rows near the
+          // bottom opening into a region you had to scroll the table to see.
+          style={{
+            left: box.left,
+            width: box.width,
+            ...(flipUp
+              ? { bottom: window.innerHeight - box.top + 4, maxHeight: roomAbove }
+              : { top: box.bottom + 4, maxHeight: roomBelow }),
+          }}
+          // pointer-events-auto is load-bearing: a modal Radix dialog sets
+          // `pointer-events: none` on <body>, and this list is portalled there,
+          // so without it the list renders but can't be scrolled or clicked.
+          className="pointer-events-auto fixed z-9999 overflow-auto rounded-md border border-border bg-popover shadow-md"
+        >
           {filtered.length === 0 && (
             <div className="px-3 py-2 text-sm text-muted-foreground">No matches</div>
           )}
@@ -162,7 +220,8 @@ export function FuzzySelect<T = string>({
               {addNewLabel}
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
