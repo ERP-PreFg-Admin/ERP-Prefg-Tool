@@ -3,7 +3,7 @@
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useMemo, useState } from "react"
 import {
-  Filter, FileStack, IndianRupee, Mail, PackageCheck, PackageOpen, Plus, Send, Upload, X,
+  FileStack, FileUp, Filter, IndianRupee, Mail, PackageCheck, PackageOpen, Plus, Send, X,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -22,6 +22,7 @@ import { INWARD_TABS, STATUS_CONFIG, TAB_LABEL, TABS } from "./po-types"
 import { fmtInt, fmtMoney } from "./po-utils"
 import { PO_BULK_CSV_FIELDS } from "./po-bulk-fields"
 import PoTable from "./PoTable"
+import AddInvoiceDialog from "../po-inwarding/AddInvoiceDialog"
 import AddPODialog from "./AddPODialog"
 import ImpromptuPODialog from "./ImpromptuPODialog"
 import SplitPODialog from "./SplitPODialog"
@@ -113,8 +114,9 @@ export default function PoProcurementClient({
   const pathname     = usePathname()
   const searchParams = useSearchParams()
 
-  const [showAddPO,    setShowAddPO]    = useState(false)
-  const [showFilters,  setShowFilters]  = useState(false)
+  const [showAddPO,      setShowAddPO]      = useState(false)
+  const [showAddInvoice, setShowAddInvoice] = useState(false)
+  const [showFilters,    setShowFilters]    = useState(false)
   const [editTarget,   setEditTarget]   = useState<PoRow | null>(null)
   const [splitTarget,  setSplitTarget]  = useState<PoRow | null>(null)
 
@@ -231,6 +233,11 @@ export default function PoProcurementClient({
             </span>
           )}
         </Button>
+        {isInwarding && (
+          <Button size="lg" onClick={() => setShowAddInvoice(true)} className="sm:ml-auto">
+            <FileUp className="h-3.5 w-3.5" /> Add Invoice
+          </Button>
+        )}
         {!isInwarding && (
           <>
             <CsvImportDialog
@@ -285,6 +292,7 @@ export default function PoProcurementClient({
                   <option value="">All Types</option>
                   <option value="normal">Normal</option>
                   <option value="impromptu">Impromptu</option>
+                  <option value="inward">Inward</option>
                 </select>
               </div>
               <div className="grid gap-1.5">
@@ -387,7 +395,16 @@ export default function PoProcurementClient({
       <PaginationBar page={page} pageSize={pageSize} total={total} />
 
       {/* ── Dialogs — procurement-only writes; inwarding's Receive dialog lives in PoTable ── */}
-      {isInwarding ? null : <>
+      {isInwarding ? (
+        <AddInvoiceDialog
+          open={showAddInvoice}
+          onClose={() => setShowAddInvoice(false)}
+          skuOptions={skuOptions}
+          mfgOptions={mfgOptions}
+          warehouseOptions={warehouseOptions}
+          onCreated={afterAction}
+        />
+      ) : <>
       <AddPODialog
         open={showAddPO}
         onClose={() => setShowAddPO(false)}

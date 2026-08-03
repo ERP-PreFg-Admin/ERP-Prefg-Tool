@@ -170,6 +170,20 @@ export const purchaseOrdersSql = {
     VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, 'raised', 'normal', ?)
   `,
 
+  /**
+   * Insert an inward PO — one per line item of a parsed supplier invoice.
+   * Raised immediately (the invoice is the authorisation), and carries the
+   * invoice number plus the S3 key of the original PDF so the inwarding desk
+   * can pull the source document back up from the row. received_qty is left at
+   * its 0 default: creating the PO is not receiving against it.
+   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, invoice_no, attachment_key]
+   */
+  insertInward: `
+    INSERT INTO purchase_orders
+      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, invoice_no, attachment_key)
+    VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, 'raised', 'inward', ?, ?, ?)
+  `,
+
   /** Set status on a purchase_orders row. Parameters: [status, id] */
   setStatus: `UPDATE purchase_orders SET status = ? WHERE id = ?`,
 
@@ -320,6 +334,26 @@ export const purchaseOrdersSql = {
    * Drives the mfg-batch screen's "current open POs" panel and the batch
    * email's "currently open" summary section. Parameters: [mfg_id]
    */
+  /**
+   * Open POs a goods receipt can be booked against, for one manufacturer —
+   * feeds the Add Invoice dialog's "Reference PO" picker. Only raised and
+   * partially_received qualify: the same set the receive route accepts, minus
+   * punched (which has no physical goods behind it yet). `remaining` is
+   * returned so the picker can show how much is still outstanding and the
+   * caller doesn't have to re-derive it. Parameters: [mfg_id]
+   */
+  openForReceiveByMfg: `
+    SELECT po.id, po.po_no, po.sku_code, sk.name AS sku_name,
+           po.qty, COALESCE(po.received_qty, 0) AS received_qty,
+           (po.qty - COALESCE(po.received_qty, 0)) AS remaining,
+           po.expected_on, ${EFFECTIVE_STATUS_EXPR} AS status
+    FROM purchase_orders po
+    LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
+    WHERE po.mfg_id = ?
+      AND ${EFFECTIVE_STATUS_EXPR} IN ('raised', 'partially_received')
+    ORDER BY po.date DESC, po.id DESC
+  `,
+
   ongoingByMfg: `
     SELECT po.id, po.po_no, po.sku_code, sk.name AS sku_name, po.qty,
            po.expected_on, ${EFFECTIVE_STATUS_EXPR} AS status
