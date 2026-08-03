@@ -143,73 +143,7 @@ export default function LineDialog({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
-            {/* <div className="grid gap-1.5">
-              <Label htmlFor="ml-capacity">Monthly Capacity</Label>
-              <Input
-                id="ml-capacity" type="number" min={0} placeholder="e.g. 25000"
-                value={form.monthly_capacity} onChange={(e) => set("monthly_capacity", e.target.value)}
-              />
-            </div> */}
-            {/* <div className="grid gap-1.5">
-              <Label htmlFor="ml-plan">This Month Plan</Label>
-              <Input
-                id="ml-plan" type="number" min={0} placeholder="e.g. 18000"
-                value={form.this_month_plan} onChange={(e) => set("this_month_plan", e.target.value)}
-              />
-            </div> */}
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            {!editData && (
-              <div className="grid gap-1.5">
-                <Label htmlFor="ml-since">Active Since <span className="text-destructive">*</span></Label>
-                <Input
-                  id="ml-since" type="date"
-                  value={form.effective_from} onChange={(e) => set("effective_from", e.target.value)}
-                />
-              </div>
-            )}
-            <div className="grid gap-1.5">
-              <Label htmlFor="ml-till">Effective To</Label>
-              <Input
-                id="ml-till" type="date"
-                value={form.effective_to} onChange={(e) => set("effective_to", e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label htmlFor="ml-batch">Last Batch</Label>
-            <Input
-              id="ml-batch" type="date"
-              value={form.last_batch_date} onChange={(e) => set("last_batch_date", e.target.value)}
-            />
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label htmlFor="ml-status">Status</Label>
-            <select
-              id="ml-status" value={form.status}
-              onChange={(e) => set("status", e.target.value as MfgLineStatus)}
-              className={selectCls}
-            >
-              <option value="active">Active</option>
-              <option value="discontinued">Discontinued</option>
-              <option value="inactive">Inactive</option>
-            </select>
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label htmlFor="ml-remarks">Remarks</Label>
-            <Textarea
-              id="ml-remarks" rows={2} placeholder="Optional notes…"
-              value={form.remarks} onChange={(e) => set("remarks", e.target.value)}
-            />
-          </div>
-
-          {apiError && <p className="text-sm text-destructive">{apiError}</p>}
-        </div>
+ </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>

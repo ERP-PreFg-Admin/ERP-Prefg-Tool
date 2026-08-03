@@ -22,7 +22,7 @@ import {
   getVendorReferenceList, getManufacturerReferenceList, getPmDistinctTypes,
 } from "@/lib/cached-reference-data"
 import type { PMVendor, PMByMfg } from "@/types/masters"
-import { ViewToggle } from "./ViewToggle"
+import { SegmentedToggle } from "@/components/ui/segmented-toggle"
 import VendorPackingMaterialsClient from "./VendorPackingMaterialsClient"
 import ManufacturerPackingMaterialsClient from "./ManufacturerPackingMaterialsClient"
 
@@ -174,7 +174,12 @@ export default async function PackingMaterialsPage({
           All packing material (PM) master records
         </p>
       </div>
-      <ViewToggle active={isMfg ? "manufacturer" : "vendor"} />
+      <SegmentedToggle
+        className="mb-4"
+        options={[{ key: "vendor", label: "By Vendor" }, { key: "manufacturer", label: "By Manufacturer" }]}
+        active={isMfg ? "manufacturer" : "vendor"}
+        getHref={(key) => `/masters/packing-materials?view=${key}`}
+      />
       {body}
     </div>
   )

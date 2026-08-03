@@ -3,40 +3,14 @@
 import { useMemo } from "react"
 import { Badge } from "@/components/ui/badge"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+  MaterialComparisonDialog,
+  SummaryStatCard,
+  fmt,
+  fmtDate,
+  type ComparisonColumn,
+} from "@/components/masters/MaterialComparisonDialog"
 import { cn } from "@/lib/utils"
 import type { PMByMfg } from "@/types/masters"
-
-function fmt(v: string | number | null | undefined) {
-  return v != null && String(v).trim() !== "" ? String(v) : "—"
-}
-
-function fmtDate(v: string | null | undefined) {
-  if (!v) return "—"
-  return new Date(v).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-}
-
-function InfoField({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="space-y-0.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-sm font-medium">{value}</p>
-    </div>
-  )
-}
 
 export function MfgPMDetailDialog({
   row,
@@ -60,104 +34,70 @@ export function MfgPMDetailDialog({
     )
   }, [mfgRows])
 
-  return (
-    <Dialog open={!!row} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-none [&::-webkit-scrollbar]:hidden">
-        <DialogHeader>
-          <DialogTitle>Manufacturer Comparison</DialogTitle>
-          <DialogDescription>
-            Compare rate across manufacturers for this packing material
-          </DialogDescription>
-        </DialogHeader>
-
-        {row && (
-          <div className="space-y-5">
-            {/* Material info card */}
-            <div className="rounded-lg border border-border bg-muted/30 p-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
-              <InfoField label="Material Code" value={fmt(row.pm_code)} />
-              <InfoField label="Material Name" value={fmt(row.name)} />
-              <InfoField label="Type" value={fmt(row.type)} />
-              <InfoField label="UOM" value={fmt(row.uom)} />
-            </div>
-
-            {/* Manufacturer comparison table */}
-            <div className="rounded-lg border border-border overflow-hidden">
-              <Table className="[&_th]:whitespace-nowrap [&_td]:whitespace-nowrap">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Manufacturer</TableHead>
-                    <TableHead>Rate (₹)</TableHead>
-                    <TableHead>UOM</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Effective From</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {mfgRows.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                        No manufacturer records found for this material.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    mfgRows.map((mr, i) => {
-                      const isBest = bestRateRow?.mfg_id === mr.mfg_id
-                      return (
-                        <TableRow key={i}>
-                          <TableCell>
-                            <p className="font-medium text-sm">{fmt(mr.mfg_code)}</p>
-                            {mr.mfg_id && (
-                              <p className="text-xs text-muted-foreground">ID: {mr.mfg_id}</p>
-                            )}
-                          </TableCell>
-
-                          <TableCell>
-                            <div className="flex items-center gap-1.5">
-                              <span className={cn("text-sm font-medium", isBest && "text-emerald-600")}>
-                                {mr.curr_rate != null ? `₹${Number(mr.curr_rate).toFixed(2)}` : "—"}
-                              </span>
-                              {isBest && (
-                                <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[10px] px-1.5 py-0">
-                                  Best
-                                </Badge>
-                              )}
-                            </div>
-                          </TableCell>
-
-                          <TableCell className="uppercase text-xs text-muted-foreground">
-                            {fmt(mr.uom)}
-                          </TableCell>
-
-                          <TableCell>
-                            <Badge variant={mr.status === "active" ? "default" : "secondary"} className="capitalize">
-                              {mr.status ?? "—"}
-                            </Badge>
-                          </TableCell>
-
-                          <TableCell className="text-sm text-muted-foreground">
-                            {fmtDate(mr.effective_from)}
-                          </TableCell>
-                        </TableRow>
-                      )
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-
-            {/* Summary card */}
-            {bestRateRow && (
-              <div className="grid grid-cols-1 gap-3">
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-                  <p className="text-xs text-emerald-700 font-medium mb-1">Best Rate</p>
-                  <p className="text-2xl font-bold text-emerald-600">₹{Number(bestRateRow.curr_rate).toFixed(2)}</p>
-                  <p className="text-xs text-emerald-700 mt-0.5">{fmt(bestRateRow.mfg_code)}</p>
-                </div>
-              </div>
+  const columns: ComparisonColumn<PMByMfg>[] = [
+    {
+      key: "mfg", label: "Manufacturer", render: (mr) => (
+        <>
+          <p className="font-medium text-sm">{fmt(mr.mfg_code)}</p>
+          {mr.mfg_id && <p className="text-xs text-muted-foreground">ID: {mr.mfg_id}</p>}
+        </>
+      ),
+    },
+    {
+      key: "rate", label: "Rate (₹)", render: (mr) => {
+        const isBest = bestRateRow?.mfg_id === mr.mfg_id
+        return (
+          <div className="flex items-center gap-1.5">
+            <span className={cn("text-sm font-medium", isBest && "text-emerald-600")}>
+              {mr.curr_rate != null ? `₹${Number(mr.curr_rate).toFixed(2)}` : "—"}
+            </span>
+            {isBest && (
+              <Badge variant="success" className="border border-emerald-200 text-[10px] px-1.5 py-0">
+                Best
+              </Badge>
             )}
           </div>
-        )}
-      </DialogContent>
-    </Dialog>
+        )
+      },
+    },
+    { key: "uom", label: "UOM", className: "uppercase text-xs text-muted-foreground", render: (mr) => fmt(mr.uom) },
+    {
+      key: "status", label: "Status", render: (mr) => (
+        <Badge variant={mr.status === "active" ? "default" : "secondary"} className="capitalize">
+          {mr.status ?? "—"}
+        </Badge>
+      ),
+    },
+    { key: "effective_from", label: "Effective From", className: "text-sm text-muted-foreground", render: (mr) => fmtDate(mr.effective_from) },
+  ]
+
+  return (
+    <MaterialComparisonDialog
+      open={!!row}
+      onClose={onClose}
+      title="Manufacturer Comparison"
+      description="Compare rate across manufacturers for this packing material"
+      infoFields={[
+        { label: "Material Code", value: fmt(row?.pm_code) },
+        { label: "Material Name", value: fmt(row?.name) },
+        { label: "Type", value: fmt(row?.type) },
+        { label: "UOM", value: fmt(row?.uom) },
+      ]}
+      columns={columns}
+      rows={mfgRows}
+      rowKey={(_, i) => i}
+      emptyMessage="No manufacturer records found for this material."
+      summaryGridClassName="grid-cols-1"
+      summary={
+        bestRateRow && (
+          <SummaryStatCard
+            highlight
+            label="Best Rate"
+            value={<p className="text-2xl font-bold">₹{Number(bestRateRow.curr_rate).toFixed(2)}</p>}
+            sublabel={fmt(bestRateRow.mfg_code)}
+          />
+        )
+      }
+    />
   )
 }

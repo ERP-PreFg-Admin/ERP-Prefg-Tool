@@ -9,6 +9,7 @@
 
 import { useState } from "react"
 import { GitCompare, Pencil, History as HistoryIcon } from "lucide-react"
+import { IconActionButton } from "@/components/ui/icon-action-button"
 import { StatusBadge } from "@/components/masters/StatusBadge"
 import { TruncatedCell } from "@/components/masters/TruncatedCell"
 import type { RM, Vendor, Mfg } from "@/types/masters"
@@ -20,7 +21,7 @@ import {
 } from "./RmRateTable"
 import { VendorDetailDialog } from "./VendorDetailDialog"
 import { EditRmVendorRateDialog } from "./EditRmVendorRateDialog"
-import { RmRateHistoryDialog } from "./RmRateHistoryDialog"
+import { RateHistoryDialog } from "@/components/masters/RateHistoryDialog"
 
 const vrmStatusBadge = (row: AnyRow) => <StatusBadge status={row.vrm_status as string | null} />
 
@@ -107,42 +108,27 @@ export default function VendorRawMaterialsClient({
           const isLocked = typedRow.vrm_status === "in_review"
           return (
             <div className="flex items-center gap-1">
-              {isLocked && (
-                <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 mr-1">
-                  In Review
+              {(isLocked || typedRow.vrm_status === "rejected") && (
+                <span className="mr-1">
+                  <StatusBadge status={typedRow.vrm_status} />
                 </span>
               )}
-              {typedRow.vrm_status === "rejected" && (
-                <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 mr-1">
-                  Rejected
-                </span>
-              )}
-              <button
-                onClick={() => !isLocked && setEditRow(typedRow)}
+              <IconActionButton
+                icon={Pencil}
+                onClick={() => setEditRow(typedRow)}
                 disabled={isLocked}
-                className={`p-1.5 rounded-md transition-colors ${
-                  isLocked
-                    ? "opacity-40 cursor-not-allowed text-muted-foreground"
-                    : "hover:bg-accent text-muted-foreground hover:text-foreground"
-                }`}
                 title={isLocked ? "Pending approval — cannot edit" : "Edit rate"}
-              >
-                <Pencil className="h-4 w-4" />
-              </button>
-              <button
+              />
+              <IconActionButton
+                icon={GitCompare}
                 onClick={() => setSelectedRow(typedRow)}
-                className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
                 title="View vendor comparison"
-              >
-                <GitCompare className="h-4 w-4" />
-              </button>
-              <button
+              />
+              <IconActionButton
+                icon={HistoryIcon}
                 onClick={() => setHistoryRow(typedRow)}
-                className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
                 title="View rate history"
-              >
-                <HistoryIcon className="h-4 w-4" />
-              </button>
+              />
             </div>
           )
         }}
@@ -159,8 +145,9 @@ export default function VendorRawMaterialsClient({
         onSuccess={() => { setEditRow(null); window.location.reload() }}
         onClose={() => setEditRow(null)}
       />
-      <RmRateHistoryDialog
-        row={historyRow ? { rm_id: historyRow.rm_id, vendor_id: historyRow.vendor_id ? Number(historyRow.vendor_id) : null, name: historyRow.name, code: historyRow.vendor_code } : null}
+      <RateHistoryDialog
+        materialType="rm"
+        row={historyRow ? { id: historyRow.rm_id, vendor_id: historyRow.vendor_id ? Number(historyRow.vendor_id) : null, name: historyRow.name, code: historyRow.vendor_code } : null}
         kind="vendor"
         onClose={() => setHistoryRow(null)}
       />

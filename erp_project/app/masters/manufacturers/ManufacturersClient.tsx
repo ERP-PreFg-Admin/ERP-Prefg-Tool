@@ -8,7 +8,8 @@
  */
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
+import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import {
   Table,
   TableBody,
@@ -121,18 +122,7 @@ export default function ManufacturersClient({
 
       {/* ── Table card ── */}
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            {total} record{total !== 1 ? "s" : ""}
-            {currentSearch && (
-              // UrlSearchInput handles clearing ?search= via the debounce, but we expose
-              // a quick-clear button so the user doesn't have to empty the text box manually.
-              <span className="ml-2 text-xs text-muted-foreground">
-                matching &ldquo;{currentSearch}&rdquo;
-              </span>
-            )}
-          </CardTitle>
-        </CardHeader>
+        <RecordCountHeader total={total} matching={currentSearch} />
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -158,8 +148,8 @@ export default function ManufacturersClient({
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((row, index) => (
-                  <TableRow key={row.mfg_id} className={index % 2 === 0 ? "bg-background" : "bg-muted/40"}>
+                rows.map((row) => (
+                  <TableRow key={row.mfg_id}>
                     <TableCell className="font-mono text-xs font-medium">{row.code}</TableCell>
                     <TableCell className="font-medium">{row.name}</TableCell>
                     <TableCell>{row.registered_name ?? "—"}</TableCell>

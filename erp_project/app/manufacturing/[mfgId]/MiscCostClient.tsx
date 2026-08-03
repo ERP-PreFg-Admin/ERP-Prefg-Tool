@@ -89,7 +89,6 @@ export default function MiscCostClient({
 
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -137,7 +136,6 @@ export default function MiscCostClient({
                 )}
               </TableBody>
             </Table>
-          </div>
         </CardContent>
       </Card>
 

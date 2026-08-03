@@ -17,16 +17,18 @@
 
 import { useMemo, useState, useEffect, type ReactNode } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
-import { ArrowUp, ArrowDown, ChevronsUpDown, Filter, X } from "lucide-react"
+import { Filter, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ToggleButton } from "@/components/ui/toggle-button"
+import { Card, CardContent } from "@/components/ui/card"
+import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
+import { SortableTableHead, StaticTableHead } from "@/components/ui/sortable-table-head"
 import { Label } from "@/components/ui/label"
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
@@ -293,11 +295,10 @@ export function PmRateTable({
         />
 
         {/* ── Filters toggle ── */}
-        <Button
-          variant="outline"
+        <ToggleButton
           size="lg"
+          pressed={activeFilterCount > 0}
           onClick={() => setShowFilters((v) => !v)}
-          className={cn(activeFilterCount > 0 && "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300")}
         >
           <Filter className="h-3.5 w-3.5" />
           Filters
@@ -306,7 +307,7 @@ export function PmRateTable({
               {activeFilterCount}
             </span>
           )}
-        </Button>
+        </ToggleButton>
 
         <MasterToolbarActions>
           <DownloadButton
@@ -507,19 +508,10 @@ export function PmRateTable({
 
       {/* ── Table card ── */}
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            {total} record{total !== 1 ? "s" : ""}
-            {hasFilters && (
-              <button
-                onClick={() => navigate({ search: "", status: "", type: "", make: "", vendor_code: "", rate_min: "", rate_max: "", effective_from: "", mfg_code: "", mfg_rate_min: "", mfg_rate_max: "", mfg_effective_from: "" })}
-                className="ml-2 text-xs text-primary hover:underline"
-              >
-                Clear filters
-              </button>
-            )}
-          </CardTitle>
-        </CardHeader>
+        <RecordCountHeader
+          total={total}
+          onClearFilters={hasFilters ? () => navigate({ search: "", status: "", type: "", make: "", vendor_code: "", rate_min: "", rate_max: "", effective_from: "", mfg_code: "", mfg_rate_min: "", mfg_rate_max: "", mfg_effective_from: "" }) : undefined}
+        />
         <CardContent className="p-0">
           {/* table-layout:fixed + per-column widths cap narrow/fixed-format
               columns; free-text columns (no width) share what's left and
@@ -528,35 +520,19 @@ export function PmRateTable({
           <Table className="[&_th]:whitespace-nowrap table-fixed">
             <TableHeader>
               <TableRow>
-                {columns.map((col) => {
-                  const active = sortKey === col.key
-                  return (
-                    <TableHead
-                      key={col.key}
-                      style={col.width ? { width: col.width } : undefined}
-                      className="bg-muted/50 font-medium text-muted-foreground"
-                    >
-                      {/* Whole header is a button so clicking anywhere sorts it. */}
-                      <button
-                        onClick={() => toggleSort(col.key)}
-                        className="inline-flex items-center gap-1 font-medium hover:text-foreground transition-colors"
-                      >
-                        {col.label}
-                        {active ? (
-                          sortDir === "asc" ? (
-                            <ArrowUp className="h-3.5 w-3.5" />
-                          ) : (
-                            <ArrowDown className="h-3.5 w-3.5" />
-                          )
-                        ) : (
-                          // Faint icon on inactive columns hints they are sortable.
-                          <ChevronsUpDown className="h-3.5 w-3.5 opacity-40" />
-                        )}
-                      </button>
-                    </TableHead>
-                  )
-                })}
-                {actionColumn && <TableHead style={{ width: "112px" }} className="bg-muted/50" />}
+                {columns.map((col) => (
+                  <SortableTableHead
+                    key={col.key}
+                    sortKey={col.key}
+                    activeKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={toggleSort}
+                    width={col.width}
+                  >
+                    {col.label}
+                  </SortableTableHead>
+                ))}
+                {actionColumn && <StaticTableHead width="112px" />}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -573,10 +549,7 @@ export function PmRateTable({
                 </TableRow>
               ) : (
                 sorted.map((row, index) => (
-                  <TableRow
-                    key={index}
-                    className={index % 2 === 0 ? "bg-background" : "bg-muted/40"}
-                  >
+                  <TableRow key={index}>
                     {columns.map((col) => (
                       <TableCell
                         key={col.key}

@@ -13,7 +13,8 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { formatDate, LOCKED_STATUSES } from "./bom-format"
-import { BomStatusBadge } from "./BomStatusBadge"
+import { StatusBadge } from "@/components/masters/StatusBadge"
+import { SegmentedToggle } from "@/components/ui/segmented-toggle"
 import type { BomDetailResponse } from "@/types/masters"
 
 async function viewArtifact(s3Key: string) {
@@ -97,7 +98,7 @@ export function BomDetailPanel({
               <div>
                 <p className="text-xs text-muted-foreground">Status</p>
                 <div className="mt-1">
-                  <BomStatusBadge status={detail.status} />
+                  <StatusBadge status={detail.status} />
                 </div>
               </div>
               <div>
@@ -147,32 +148,15 @@ export function BomDetailPanel({
             <div>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-medium text-muted-foreground">Material Lines</p>
-                <div className="inline-flex rounded-lg border border-input p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => onChangeMtrlType("rm")}
-                    className={cn(
-                      "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-                      activeMtrlType === "rm"
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    RM ({rmLines.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onChangeMtrlType("pm")}
-                    className={cn(
-                      "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-                      activeMtrlType === "pm"
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    PM ({pmLines.length})
-                  </button>
-                </div>
+                <SegmentedToggle
+                  size="xs"
+                  options={[
+                    { key: "rm", label: `RM (${rmLines.length})` },
+                    { key: "pm", label: `PM (${pmLines.length})` },
+                  ]}
+                  active={activeMtrlType}
+                  onSelect={onChangeMtrlType}
+                />
               </div>
 
               {activeMtrlType === "rm" && rmLines.length > 0 && (

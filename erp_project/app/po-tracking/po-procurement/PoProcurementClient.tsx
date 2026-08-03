@@ -7,6 +7,8 @@ import {
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ToggleButton } from "@/components/ui/toggle-button"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -211,9 +213,9 @@ export default function PoProcurementClient({
       {/* ── Toolbar ── */}
       <div className="flex flex-col sm:flex-row gap-3">
         <UrlSearchInput initialValue={currentSearch} placeholder="Search PO, SKU, MFG…" />
-        <Button
-          variant="outline"
+        <ToggleButton
           size="lg"
+          pressed={hasActiveFilters}
           onClick={() => {
             setDraftMfgCode(currentMfgCode)
             setDraftPoType(currentPoType)
@@ -223,7 +225,6 @@ export default function PoProcurementClient({
             setDraftDestination(currentDestination)
             setShowFilters((v) => !v)
           }}
-          className={cn(hasActiveFilters && "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300")}
         >
           <Filter className="h-3.5 w-3.5" />
           Filters
@@ -232,7 +233,7 @@ export default function PoProcurementClient({
               {[currentMfgCode, currentPoType, currentDateFrom, currentDateTo, currentSku, currentDestination].filter(Boolean).length}
             </span>
           )}
-        </Button>
+        </ToggleButton>
         {isInwarding && (
           <Button size="lg" onClick={() => setShowAddInvoice(true)} className="sm:ml-auto">
             <FileUp className="h-3.5 w-3.5" /> Add Invoice
@@ -350,30 +351,27 @@ export default function PoProcurementClient({
       )}
 
       {/* ── Status tabs ── */}
-      <div className="flex flex-wrap items-center gap-1 border-b border-border">
+      <Tabs>
+        <TabsList>
         {(isInwarding ? INWARD_TABS : TABS).map((tab) => {
           const isActive = activeTab === tab
           const count = statusCounts[tab] ?? 0
           return (
-            <button
+            <TabsTrigger
               key={tab}
+              active={isActive}
               // On inwarding "all" must stay in the URL: dropping the param there
               // means "no filter chosen", which the page reads as the open tab.
               onClick={() => navigate({ status: tab === "all" && !isInwarding ? "" : tab })}
-              className={cn(
-                "relative flex items-center gap-1.5 px-2.5 py-2 text-xs font-medium transition-colors -mb-px border-b-2",
-                isActive
-                  ? "border-foreground text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              )}
             >
               {tab !== "all" && <span className={cn("h-1.5 w-1.5 rounded-full", TAB_DOT[tab])} />}
               {TAB_LABEL[tab] ?? STATUS_CONFIG[tab]?.label ?? tab}
               <span className="opacity-60 tabular-nums">({count})</span>
-            </button>
+            </TabsTrigger>
           )
         })}
-      </div>
+        </TabsList>
+      </Tabs>
 
       {/* ── Table ── */}
       <PoTable

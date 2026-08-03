@@ -7,6 +7,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import { DownloadButton } from "@/components/masters/DownloadButton"
+import { SegmentedToggle } from "@/components/ui/segmented-toggle"
 import type {
   RmVendorHistoryRow, RmVendorRow, PmVendorHistoryRow, PmVendorRow,
 } from "@/types/masters"
@@ -26,20 +27,13 @@ export default function RmVendorTable({
   return (
     <div className="space-y-4 text-xs">
       <div className="flex items-center justify-between gap-3">
-        <div className="inline-flex rounded-lg border border-input p-0.5 bg-background">
-          {(["rm", "pm"] as const).map((m) => (
-            <button
-              key={m}
-              onClick={() => setMode(m)}
-              className={
-                "rounded-md px-3 py-1.5 text-xs font-medium transition-colors " +
-                (mode === m ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent")
-              }
-            >
-              {m.toUpperCase()}
-            </button>
-          ))}
-        </div>
+        <SegmentedToggle
+          size="xs"
+          className="bg-background"
+          options={[{ key: "rm", label: "RM" }, { key: "pm", label: "PM" }]}
+          active={mode}
+          onSelect={setMode}
+        />
         <DownloadButton
           endpoint={`/api/manufacturing/${mfgId}/approved-rates/export`}
           label={`Approved ${mode.toUpperCase()} Rates`}
@@ -49,7 +43,6 @@ export default function RmVendorTable({
 
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -117,7 +110,6 @@ export default function RmVendorTable({
                 )}
               </TableBody>
             </Table>
-          </div>
         </CardContent>
       </Card>
 
@@ -132,7 +124,6 @@ export default function RmVendorTable({
         </div>
         <Card>
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -186,7 +177,6 @@ export default function RmVendorTable({
                   )}
                 </TableBody>
               </Table>
-            </div>
           </CardContent>
         </Card>
       </div>

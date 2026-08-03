@@ -1,5 +1,11 @@
 "use client"
 
+/**
+ * Generic RM/PM × mfg/vendor rate-history dialog — RmRateHistoryDialog and
+ * PmRateHistoryDialog were byte-for-byte identical apart from the id field
+ * name and API base path, so both collapse into this one component.
+ */
+
 import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
@@ -36,13 +42,16 @@ function StatusBadge({ status }: { status: RateHistoryEntry["status"] }) {
   return <Badge variant="secondary" className="capitalize">{status ?? "—"}</Badge>
 }
 
-export function RmRateHistoryDialog({
+export function RateHistoryDialog({
+  materialType,
   row,
   kind,
   onClose,
 }: {
-  /** Pass null to close. Must carry rm_id + (mfg_id for kind="mfg" | vendor_id for kind="vendor") + name/code for the title. */
-  row: { rm_id: number; mfg_id?: number | null; vendor_id?: number | null; name?: string | null; code?: string | null } | null
+  /** Picks the API base path (raw-materials vs packing-materials) and id param (rm_id vs pm_id). */
+  materialType: "rm" | "pm"
+  /** Pass null to close. Must carry the material id + (mfg_id for kind="mfg" | vendor_id for kind="vendor") + name/code for the title. */
+  row: { id: number; mfg_id?: number | null; vendor_id?: number | null; name?: string | null; code?: string | null } | null
   kind: "mfg" | "vendor"
   onClose: () => void
 }) {
@@ -56,15 +65,17 @@ export function RmRateHistoryDialog({
     if (!entityId) return
     setLoading(true)
     setError(null)
+    const basePath = materialType === "rm" ? "raw-materials" : "packing-materials"
+    const idParam = materialType === "rm" ? "rm_id" : "pm_id"
     const endpoint = kind === "mfg"
-      ? `/api/masters/raw-materials/mrm-history?rm_id=${row.rm_id}&mfg_id=${entityId}`
-      : `/api/masters/raw-materials/vrm-history?rm_id=${row.rm_id}&vendor_id=${entityId}`
+      ? `/api/masters/${basePath}/mrm-history?${idParam}=${row.id}&mfg_id=${entityId}`
+      : `/api/masters/${basePath}/vrm-history?${idParam}=${row.id}&vendor_id=${entityId}`
     fetch(endpoint)
       .then((r) => r.json())
       .then((data) => setEntries(data.history ?? []))
       .catch(() => setError("Failed to load history"))
       .finally(() => setLoading(false))
-  }, [row, kind])
+  }, [row, kind, materialType])
 
   if (!row) return null
 

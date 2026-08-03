@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { Card, CardContent } from "@/components/ui/card"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 export type MfgTab =
   | "active"
@@ -29,18 +29,13 @@ export default function TabBar({
   const router = useRouter()
 
   return (
-    <Card className="flex flex-wrap items-center gap-1.5 border-b border-border p-2">
-      <CardContent className="p-0 flex flex-wrap gap-1.5">
+    <Tabs>
+      <TabsList>
         {TABS.map((tab) => (
-          <button
+          <TabsTrigger
             key={tab.key}
+            active={currentTab === tab.key}
             onClick={() => router.push(`/manufacturing/${mfgId}?tab=${tab.key}`)}
-            className={
-              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap " +
-              (currentTab === tab.key
-                ? "bg-foreground text-background"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground")
-            }
           >
             {tab.label}
             {tab.key === "active" && (
@@ -48,9 +43,9 @@ export default function TabBar({
                 {" "}({statusCounts.active ?? 0} active / {statusCounts.discontinued ?? 0} discontinued / {statusCounts.inactive ?? 0} inactive)
               </span>
             )}
-          </button>
+          </TabsTrigger>
         ))}
-      </CardContent>
-    </Card>
+      </TabsList>
+    </Tabs>
   )
 }

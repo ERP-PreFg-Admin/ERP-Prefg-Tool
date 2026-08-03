@@ -10,9 +10,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { FuzzySelect } from "@/components/ui/FuzzySelect"
+import { FormField } from "@/components/masters/FormField"
+import { ManagedFuzzyField } from "@/components/masters/ManagedFuzzyField"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -87,7 +86,6 @@ export default function AddMaterialDialog({
   const [makeOptions, setMakeOptions] = useState<string[]>([])
   const [inciOptions, setInciOptions] = useState<string[]>([])
   const [makeIsNew, setMakeIsNew] = useState(false)
-  const [inciIsNew, setInciIsNew] = useState(false)
   const [makeSuggestion, setMakeSuggestion] = useState<string | null>(null)
 
   useEffect(() => {
@@ -112,7 +110,6 @@ export default function AddMaterialDialog({
     setRmExtra(defaultRmExtra())
     setPmExtra(defaultPmExtra())
     setMakeIsNew(false)
-    setInciIsNew(false)
     setMakeSuggestion(null)
     setError(null)
   }
@@ -281,149 +278,87 @@ export default function AddMaterialDialog({
           <div className="grid grid-cols-2 gap-x-4 gap-y-5 py-2">
 
             {/* Name — always required, spans full width */}
-            <div className="col-span-2 flex flex-col gap-1.5">
-              <Label htmlFor="mat-name">
-                Name <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="mat-name"
-                placeholder={
-                  material === "rm" ? "e.g. Cetyl Alcohol" : "e.g. Label 100ml"
-                }
-                value={base.name}
-                onChange={(e) => setField("name", e.target.value)}
-              />
-            </div>
+            <FormField
+              field={{
+                key: "mat-name",
+                label: "Name",
+                required: true,
+                colSpan: 2,
+                placeholder: material === "rm" ? "e.g. Cetyl Alcohol" : "e.g. Label 100ml",
+              }}
+              value={base.name}
+              onChange={(v) => setField("name", v)}
+            />
 
             {/* ── RM-only fields ── */}
             {material === "rm" && (
               <>
-                {/* Make — managed dropdown with "+ Add new" option */}
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="mat-make">
-                    Make <span className="text-destructive">*</span>
-                  </Label>
-                  {makeIsNew ? (
-                    <div className="flex gap-1">
-                      <input
-                        autoFocus
-                        className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        placeholder="Enter new make…"
-                        value={rmExtra.make}
-                        onChange={(e) => setRmField("make", e.target.value)}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => { setMakeIsNew(false); setRmField("make", "") }}
-                        className="h-9 px-2 rounded-lg border border-input bg-background text-muted-foreground hover:text-foreground text-sm"
-                      >✕</button>
-                    </div>
-                  ) : (
-                    <FuzzySelect
-                      options={makeOptions}
-                      value={rmExtra.make}
-                      onChange={(v) => setRmField("make", v)}
-                      onAddNew={() => { setMakeIsNew(true); setRmField("make", "") }}
-                      placeholder="Select make…"
-                      className="h-9"
-                    />
-                  )}
-                </div>
-
-                {/* INCI Name — managed dropdown with "+ Add new" option */}
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="mat-inci">
-                    INCI Name <span className="text-destructive">*</span>
-                  </Label>
-                  {inciIsNew ? (
-                    <div className="flex gap-1">
-                      <input
-                        autoFocus
-                        className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        placeholder="Enter new INCI name…"
-                        value={rmExtra.inci_name}
-                        onChange={(e) => setRmField("inci_name", e.target.value)}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => { setInciIsNew(false); setRmField("inci_name", "") }}
-                        className="h-9 px-2 rounded-lg border border-input bg-background text-muted-foreground hover:text-foreground text-sm"
-                      >✕</button>
-                    </div>
-                  ) : (
-                    <FuzzySelect
-                      options={inciOptions}
-                      value={rmExtra.inci_name}
-                      onChange={(v) => setRmField("inci_name", v)}
-                      onAddNew={() => { setInciIsNew(true); setRmField("inci_name", "") }}
-                      placeholder="Select INCI name…"
-                      className="h-9"
-                    />
-                  )}
-                </div>
+                <ManagedFuzzyField
+                  id="mat-make"
+                  label="Make"
+                  options={makeOptions}
+                  value={rmExtra.make}
+                  onChange={(v) => setRmField("make", v)}
+                  placeholder="Select make…"
+                  newPlaceholder="Enter new make…"
+                  isNew={makeIsNew}
+                  onIsNewChange={setMakeIsNew}
+                />
+                <ManagedFuzzyField
+                  id="mat-inci"
+                  label="INCI Name"
+                  options={inciOptions}
+                  value={rmExtra.inci_name}
+                  onChange={(v) => setRmField("inci_name", v)}
+                  placeholder="Select INCI name…"
+                  newPlaceholder="Enter new INCI name…"
+                />
               </>
             )}
 
             {/* Type — required for PM (used in duplicate check), optional for RM */}
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="mat-type">
-                Type
-                {material === "pm" && (
-                  <span className="text-destructive"> *</span>
-                )}
-              </Label>
-              <select
-                id="mat-type"
-                value={base.type}
-                onChange={(e) => setField("type", e.target.value)}
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                <option value="">Select type…</option>
-                {(material === "rm"
+            <FormField
+              field={{
+                key: "mat-type",
+                label: "Type",
+                required: material === "pm",
+                isSelect: true,
+                placeholder: "Select type…",
+                options: (material === "rm"
                   ? ["API", "Excipient", "Fragrance", "Surfactant", "Preservative"]
                   : ["Label", "Carton", "Bottle", "Pouch", "Cap", "Shrink Sleeve"]
-                ).map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </div>
+                ).map((t) => ({ value: t, label: t })),
+              }}
+              value={base.type}
+              onChange={(v) => setField("type", v)}
+            />
 
             {/* UOM — unit of measure */}
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="mat-uom">UOM</Label>
-              <select
-                id="mat-uom"
-                value={base.uom}
-                onChange={(e) => setField("uom", e.target.value)}
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                <option value="">Select UOM…</option>
-                {UOM_OPTIONS.map((u) => <option key={u} value={u}>{u}</option>)}
-              </select>
-            </div>
+            <FormField
+              field={{
+                key: "mat-uom",
+                label: "UOM",
+                isSelect: true,
+                options: UOM_OPTIONS.map((u) => ({ value: u, label: u })),
+              }}
+              value={base.uom}
+              onChange={(v) => setField("uom", v)}
+            />
 
             {/* HSN Code — for GST */}
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="mat-hsn">HSN Code</Label>
-              <Input
-                id="mat-hsn"
-                placeholder="e.g. 29054500"
-                value={base.hsn_code}
-                onChange={(e) => setField("hsn_code", e.target.value)}
-              />
-            </div>
+            <FormField
+              field={{ key: "mat-hsn", label: "HSN Code", placeholder: "e.g. 29054500" }}
+              value={base.hsn_code}
+              onChange={(v) => setField("hsn_code", v)}
+            />
 
             {/* Pantone Color — PM only */}
             {material === "pm" && (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="mat-pantone">Pantone Color</Label>
-                <Input
-                  id="mat-pantone"
-                  placeholder="e.g. PMS 185 C"
-                  value={pmExtra.pantone_color}
-                  onChange={(e) => setPmExtra((p) => ({ ...p, pantone_color: e.target.value }))}
-                />
-              </div>
+              <FormField
+                field={{ key: "mat-pantone", label: "Pantone Color", placeholder: "e.g. PMS 185 C" }}
+                value={pmExtra.pantone_color}
+                onChange={(v) => setPmExtra((p) => ({ ...p, pantone_color: v }))}
+              />
             )}
 
           </div>

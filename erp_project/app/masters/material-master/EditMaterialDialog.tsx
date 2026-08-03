@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { AlertTriangle, Pencil } from "lucide-react"
+import { Pencil } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -13,19 +13,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { FuzzySelect } from "@/components/ui/FuzzySelect"
+import { RejectionBanner, type RejectionInfo } from "@/components/masters/ApprovalBanners"
+import { FormField } from "@/components/masters/FormField"
+import { ManagedFuzzyField } from "@/components/masters/ManagedFuzzyField"
 
 const UOM_OPTIONS = ["kg", "g", "l", "ml", "pcs", "m"]
 
 type AnyRow = Record<string, unknown>
-
-type RejectionInfo = {
-  raised_by: number
-  raised_by_name: string
-  rejected_by_name: string
-  remarks: string
-  rejected_on: string
-}
 
 export default function EditMaterialDialog({
   material,
@@ -54,8 +48,6 @@ export default function EditMaterialDialog({
 
   const [makeOptions, setMakeOptions] = useState<string[]>([])
   const [inciOptions, setInciOptions] = useState<string[]>([])
-  const [makeIsNew,   setMakeIsNew]   = useState(false)
-  const [inciIsNew,   setInciIsNew]   = useState(false)
 
   const [rejection,      setRejection]      = useState<RejectionInfo | null>(null)
   const [currentUserId,  setCurrentUserId]  = useState<number | null>(null)
@@ -75,8 +67,6 @@ export default function EditMaterialDialog({
     setError(null)
     setSubmitted(false)
     setRejection(null)
-    setMakeIsNew(false)
-    setInciIsNew(false)
 
     if (row.status === "rejected" && row.id) {
       const mod = material === "rm" ? "RM_MAT" : "PM_MAT"
@@ -171,20 +161,7 @@ export default function EditMaterialDialog({
 
           {/* Rejection banner — draft rows only */}
           {isDraft && !loadingInfo && rejection && (
-            <div className="col-span-2 rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-1">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800">
-                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                Rejected by {rejection.rejected_by_name}
-              </div>
-              <p className="text-xs text-amber-700 leading-relaxed">
-                &ldquo;{rejection.remarks}&rdquo;
-              </p>
-              {!canEdit && (
-                <p className="text-xs text-red-600 font-medium mt-1">
-                  Only {rejection.raised_by_name} (original submitter) can re-edit this record.
-                </p>
-              )}
-            </div>
+            <RejectionBanner rejection={rejection} canEdit={canEdit} className="col-span-2" />
           )}
 
           {/* Name */}
@@ -198,145 +175,94 @@ export default function EditMaterialDialog({
           {/* RM-only: Make + INCI Name — managed dropdowns */}
           {material === "rm" && (
             <>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="edit-make">
-                  Make <span className="text-destructive">*</span>
-                </Label>
-                {makeIsNew ? (
-                  <div className="flex gap-1">
-                    <input
-                      autoFocus
-                      className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
-                      placeholder="Enter new make…"
-                      value={make}
-                      onChange={(e) => setMake(e.target.value)}
-                      disabled={!canEdit}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => { setMakeIsNew(false); setMake("") }}
-                      className="h-9 px-2 rounded-lg border border-input bg-background text-muted-foreground hover:text-foreground text-sm"
-                    >✕</button>
-                  </div>
-                ) : (
-                  <FuzzySelect
-                    options={makeOptions}
-                    value={make}
-                    onChange={setMake}
-                    onAddNew={() => { setMakeIsNew(true); setMake("") }}
-                    placeholder="Select make…"
-                    disabled={!canEdit}
-                    className="h-9"
-                  />
-                )}
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="edit-inci">
-                  INCI Name <span className="text-destructive">*</span>
-                </Label>
-                {inciIsNew ? (
-                  <div className="flex gap-1">
-                    <input
-                      autoFocus
-                      className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
-                      placeholder="Enter new INCI name…"
-                      value={inci}
-                      onChange={(e) => setInci(e.target.value)}
-                      disabled={!canEdit}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => { setInciIsNew(false); setInci("") }}
-                      className="h-9 px-2 rounded-lg border border-input bg-background text-muted-foreground hover:text-foreground text-sm"
-                    >✕</button>
-                  </div>
-                ) : (
-                  <FuzzySelect
-                    options={inciOptions}
-                    value={inci}
-                    onChange={setInci}
-                    onAddNew={() => { setInciIsNew(true); setInci("") }}
-                    placeholder="Select INCI name…"
-                    disabled={!canEdit}
-                    className="h-9"
-                  />
-                )}
-              </div>
+              <ManagedFuzzyField
+                id="edit-make"
+                label="Make"
+                options={makeOptions}
+                value={make}
+                onChange={setMake}
+                placeholder="Select make…"
+                newPlaceholder="Enter new make…"
+                disabled={!canEdit}
+              />
+              <ManagedFuzzyField
+                id="edit-inci"
+                label="INCI Name"
+                options={inciOptions}
+                value={inci}
+                onChange={setInci}
+                placeholder="Select INCI name…"
+                newPlaceholder="Enter new INCI name…"
+                disabled={!canEdit}
+              />
             </>
           )}
 
           {/* Type */}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edit-type">
-              Type{material === "pm" && <span className="text-destructive"> *</span>}
-            </Label>
-            <select
-              id="edit-type"
-              value={type}
-              onChange={(e) => setType(e.target.value)}
-              disabled={!canEdit}
-              className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <option value="">Select type…</option>
-              {(material === "rm"
+          <FormField
+            field={{
+              key: "edit-type",
+              label: "Type",
+              required: material === "pm",
+              isSelect: true,
+              placeholder: "Select type…",
+              options: (material === "rm"
                 ? ["API", "Excipient", "Fragrance", "Surfactant", "Preservative"]
                 : ["Label", "Carton", "Bottle", "Pouch", "Cap", "Shrink Sleeve"]
-              ).map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </div>
+              ).map((t) => ({ value: t, label: t })),
+            }}
+            value={type}
+            onChange={setType}
+            disabled={!canEdit}
+          />
 
           {/* UOM */}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edit-uom">UOM</Label>
-            <select
-              id="edit-uom"
-              value={uom}
-              onChange={(e) => setUom(e.target.value)}
-              disabled={!canEdit}
-              className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <option value="">Select UOM…</option>
-              {UOM_OPTIONS.map((u) => <option key={u} value={u}>{u}</option>)}
-            </select>
-          </div>
+          <FormField
+            field={{
+              key: "edit-uom",
+              label: "UOM",
+              isSelect: true,
+              options: UOM_OPTIONS.map((u) => ({ value: u, label: u })),
+            }}
+            value={uom}
+            onChange={setUom}
+            disabled={!canEdit}
+          />
 
           {/* HSN Code */}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edit-hsn">HSN Code</Label>
-            <Input id="edit-hsn" placeholder="e.g. 29054500" value={hsn} onChange={(e) => setHsn(e.target.value)} disabled={!canEdit} />
-          </div>
+          <FormField
+            field={{ key: "edit-hsn", label: "HSN Code", placeholder: "e.g. 29054500" }}
+            value={hsn}
+            onChange={setHsn}
+            disabled={!canEdit}
+          />
 
           {/* Pantone Color — PM only */}
           {material === "pm" && (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="edit-pantone">Pantone Color</Label>
-              <Input
-                id="edit-pantone"
-                placeholder="e.g. PMS 185 C"
-                value={pantoneColor}
-                onChange={(e) => setPantoneColor(e.target.value)}
-                disabled={!canEdit}
-              />
-            </div>
+            <FormField
+              field={{ key: "edit-pantone", label: "Pantone Color", placeholder: "e.g. PMS 185 C" }}
+              value={pantoneColor}
+              onChange={setPantoneColor}
+              disabled={!canEdit}
+            />
           )}
 
           {/* Status */}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edit-status">Status</Label>
-            <select
-              id="edit-status"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as "active" | "discontinued")}
-              disabled={!canEdit}
-              className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <option value="active">Active</option>
-              <option value="discontinued">Discontinued</option>
-            </select>
-          </div>
+          <FormField
+            field={{
+              key: "edit-status",
+              label: "Status",
+              isSelect: true,
+              noBlankOption: true,
+              options: [
+                { value: "active", label: "Active" },
+                { value: "discontinued", label: "Discontinued" },
+              ],
+            }}
+            value={status}
+            onChange={(v) => setStatus(v as "active" | "discontinued")}
+            disabled={!canEdit}
+          />
 
           {/* Remarks — mandatory reason for this edit, archived to history_masters_edits */}
           <div className="col-span-2 flex flex-col gap-1.5">

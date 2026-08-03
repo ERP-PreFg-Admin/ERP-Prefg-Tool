@@ -68,7 +68,6 @@ export default function PoTable({
     <>
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
@@ -270,7 +269,6 @@ export default function PoTable({
                 )}
               </TableBody>
             </Table>
-          </div>
         </CardContent>
       </Card>
 

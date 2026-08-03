@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Roboto, Merriweather } from "next/font/google";
+import { Geist, Geist_Mono, Outfit, Merriweather } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth";
@@ -35,7 +35,7 @@ const SIDEBAR_SLUGS = [
 ] as const;
 
 const merriweatherHeading = Merriweather({ subsets: ["latin"], variable: "--font-heading" });
-const roboto = Roboto({ subsets: ["latin"], variable: "--font-sans" });
+const outfit = Outfit({ subsets: ["latin"], variable: "--font-sans" });
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
@@ -83,7 +83,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         "h-full antialiased",
         geistSans.variable,
         geistMono.variable,
-        roboto.variable,
+        outfit.variable,
         merriweatherHeading.variable,
         "font-sans"
       )}

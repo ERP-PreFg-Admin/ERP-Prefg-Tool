@@ -18,7 +18,7 @@ import { rawMaterials } from "@/lib/queries/raw-materials"
 import { packingMaterials as PMMaterials } from "@/lib/queries/packing-materials"
 import { fuzzyRank } from "@/lib/fuzzy-search"
 import { getRmDistinctMakes, getRmDistinctTypes, getPmDistinctTypes } from "@/lib/cached-reference-data"
-import { MaterialToggle } from "./MaterialToggle"
+import { SegmentedToggle } from "@/components/ui/segmented-toggle"
 import MaterialMasterClient from "./MaterialMasterClient"
 
 type AnyRow = Record<string, unknown>
@@ -108,7 +108,12 @@ export default async function MaterialMasterPage({
           All raw and packing material master records
         </p>
       </div>
-      <MaterialToggle material={isPm ? "pm" : "rm"} />
+      <SegmentedToggle
+        className="mb-4"
+        options={[{ key: "rm", label: "Raw Material" }, { key: "pm", label: "Packing Material" }]}
+        active={isPm ? "pm" : "rm"}
+        getHref={(key) => `/masters/material-master?material=${key}`}
+      />
       <MaterialMasterClient
         material={isPm ? "pm" : "rm"}
         rows={rows}

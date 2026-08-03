@@ -23,7 +23,7 @@ import {
   getRmDistinctMakes, getRmDistinctTypes,
 } from "@/lib/cached-reference-data"
 import type { RM, RMByMfg } from "@/types/masters"
-import { ViewToggle } from "./ViewToggle"
+import { SegmentedToggle } from "@/components/ui/segmented-toggle"
 import VendorRawMaterialsClient from "./VendorRawMaterialsClient"
 import ManufacturerRawMaterialsClient from "./ManufacturerRawMaterialsClient"
 
@@ -180,7 +180,12 @@ export default async function RawMaterialsPage({
           All raw material (RM) master records
         </p>
       </div>
-      <ViewToggle active={isMfg ? "manufacturer" : "vendor"} />
+      <SegmentedToggle
+        className="mb-4"
+        options={[{ key: "vendor", label: "By Vendor" }, { key: "manufacturer", label: "By Manufacturer" }]}
+        active={isMfg ? "manufacturer" : "vendor"}
+        getHref={(key) => `/masters/raw-materials?view=${key}`}
+      />
       {body}
     </div>
   )

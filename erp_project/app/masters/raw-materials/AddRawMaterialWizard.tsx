@@ -1,9 +1,11 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { CheckCircle2, Plus, Trash2 } from "lucide-react"
+import { Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
+import { Stepper, type StepperStep } from "@/components/ui/stepper"
+import { Callout } from "@/components/ui/callout"
 import {
   Dialog,
   DialogContent,
@@ -60,10 +62,10 @@ const DEFAULT_MFG_ENTRY: MfgEntry = {
   curr_rate: "", rate_uom: "kg", effective_from: "",
 }
 
-const STEPS: { label: string; tag?: string; tagCls?: string }[] = [
+const STEPS: StepperStep[] = [
   { label: "Select Material" },
-  { label: "Vendor Pricing", tag: "Procurement Price", tagCls: "bg-blue-100 text-blue-700" },
-  { label: "Manufacturer Pricing", tag: "Agreed Rates", tagCls: "bg-teal-100 text-teal-700" },
+  { label: "Vendor Pricing", tag: "Procurement Price", tagVariant: "info" },
+  { label: "Manufacturer Pricing", tag: "Agreed Rates", tagVariant: "success" },
 ]
 
 export function AddRawMaterialWizard({
@@ -359,40 +361,7 @@ export function AddRawMaterialWizard({
           </DialogHeader>
 
           {/* Progress stepper */}
-          <div className="flex items-center mb-1">
-            {STEPS.map(({ label, tag, tagCls }, i) => {
-              const s = (i + 1) as 1 | 2 | 3
-              const done = step > s
-              const active = step === s
-              return (
-                <div key={s} className="flex items-center">
-                  <div className="flex items-center gap-1.5">
-                    <div
-                      className={cn(
-                        "w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold shrink-0",
-                        done && "bg-teal-600 text-white",
-                        active && "bg-foreground text-background",
-                        !done && !active && "border border-muted-foreground text-muted-foreground"
-                      )}
-                    >
-                      {done ? <CheckCircle2 className="w-3.5 h-3.5" /> : s}
-                    </div>
-                    <span className={cn("text-sm whitespace-nowrap", active ? "font-medium" : "text-muted-foreground")}>
-                      {label}
-                    </span>
-                    {tag && (
-                      <span className={cn("text-xs font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap", tagCls)}>
-                        {tag}
-                      </span>
-                    )}
-                  </div>
-                  {i < STEPS.length - 1 && (
-                    <div className="h-px w-6 bg-border mx-3 shrink-0" />
-                  )}
-                </div>
-              )
-            })}
-          </div>
+          <Stepper steps={STEPS} currentStep={step} className="mb-1" />
 
           {/* ── Close confirmation overlay ── */}
           {showCloseConfirm ? (
@@ -454,9 +423,9 @@ export function AddRawMaterialWizard({
               {step === 2 && (
                 <div className="space-y-3">
                   {material && (
-                    <div className="rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-800">
+                    <Callout>
                       Adding rates to: <strong>{material.name}</strong> ({material.make})
-                    </div>
+                    </Callout>
                   )}
                   <p className="text-sm text-muted-foreground">
                     Add vendor pricing (optional). Vendor not listed?{" "}
@@ -572,9 +541,9 @@ export function AddRawMaterialWizard({
               {step === 3 && (
                 <div className="space-y-3">
                   {material && (
-                    <div className="rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-800">
+                    <Callout>
                       Adding rates to: <strong>{material.name}</strong> ({material.make})
-                    </div>
+                    </Callout>
                   )}
                   <p className="text-sm text-muted-foreground">
                     Add manufacturer rates (optional). Each manufacturer maps to one vendor.

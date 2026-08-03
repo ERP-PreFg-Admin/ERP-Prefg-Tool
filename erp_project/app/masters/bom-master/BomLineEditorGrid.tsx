@@ -13,6 +13,8 @@
  */
 
 import { Plus, Trash2 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Callout } from "@/components/ui/callout"
 import { isRmTotalValid } from "@/lib/validation/bom"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { cn } from "@/lib/utils"
@@ -134,23 +136,16 @@ function LineSection({
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium">{mtrlType === "rm" ? "Raw Materials (RM)" : "Packing Materials (PM)"}</p>
         {total != null && rows.length > 0 && (
-          <span
-            className={cn(
-              "text-xs font-mono rounded-full px-2 py-0.5",
-              balanced
-                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-            )}
-          >
+          <Badge variant={balanced ? "success" : "warning"} className="font-mono">
             {total.toFixed(2)}%
-          </span>
+          </Badge>
         )}
       </div>
 
       {total != null && rows.length > 0 && !balanced && (
-        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-900">
+        <Callout variant="warning">
           RM percentages must total between 99.9% and 100.1% (currently {total.toFixed(2)}%).
-        </p>
+        </Callout>
       )}
 
       {rows.length === 0 ? (

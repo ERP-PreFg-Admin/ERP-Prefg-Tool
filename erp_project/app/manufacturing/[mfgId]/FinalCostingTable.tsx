@@ -39,7 +39,6 @@ export default function FinalCostingTable({ mfgId, rows }: { mfgId: number; rows
       </div>
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -90,7 +89,6 @@ export default function FinalCostingTable({ mfgId, rows }: { mfgId: number; rows
                 )}
               </TableBody>
             </Table>
-          </div>
         </CardContent>
       </Card>
     </div>

@@ -22,7 +22,8 @@
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { StatusBadge } from "@/components/masters/StatusBadge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
+import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import {
   Table,
   TableBody,
@@ -193,23 +194,14 @@ export default function VendorsClient({
 
       {/* ── Table card ── */}
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            {total} record{total !== 1 ? "s" : ""}
-            {hasFilters && (
-              <button
-                onClick={() => {
-                  setDraftType("")
-                  setDraftZone("")
-                  navigate({ search: "", type: "", zone: "" })
-                }}
-                className="ml-2 text-xs text-primary hover:underline"
-              >
-                Clear filters
-              </button>
-            )}
-          </CardTitle>
-        </CardHeader>
+        <RecordCountHeader
+          total={total}
+          onClearFilters={hasFilters ? () => {
+            setDraftType("")
+            setDraftZone("")
+            navigate({ search: "", type: "", zone: "" })
+          } : undefined}
+        />
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -234,8 +226,8 @@ export default function VendorsClient({
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((row, index) => (
-                  <TableRow key={row.vendor_id} className={index % 2 === 0 ? "bg-background" : "bg-muted/40"}>
+                rows.map((row) => (
+                  <TableRow key={row.vendor_id}>
                     <TableCell className="font-mono text-xs font-medium">{row.code}</TableCell>
                     <TableCell className="font-medium">{row.name}</TableCell>
                     <TableCell>{row.registered_name ?? "—"}</TableCell>

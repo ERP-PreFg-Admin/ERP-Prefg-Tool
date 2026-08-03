@@ -17,14 +17,15 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
-import { ArrowUp, ArrowDown, ChevronsUpDown, History as HistoryIcon } from "lucide-react"
+import { History as HistoryIcon } from "lucide-react"
+import { SortableTableHead, StaticTableHead } from "@/components/ui/sortable-table-head"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
+import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
@@ -293,55 +294,32 @@ export default function MaterialMasterClient({
 
       {/* ── Table card ── */}
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            {total} record{total !== 1 ? "s" : ""}
-            {hasFilters && (
-              <button
-                onClick={() => {
-                  setDraftStatus("")
-                  setDraftMake("")
-                  setDraftType("")
-                  navigate({ search: "", status: "", make: "", type: "" })
-                }}
-                className="ml-2 text-xs text-primary hover:underline"
-              >
-                Clear filters
-              </button>
-            )}
-          </CardTitle>
-        </CardHeader>
+        <RecordCountHeader
+          total={total}
+          onClearFilters={hasFilters ? () => {
+            setDraftStatus("")
+            setDraftMake("")
+            setDraftType("")
+            navigate({ search: "", status: "", make: "", type: "" })
+          } : undefined}
+        />
         <CardContent className="p-0">
           <Table className="[&_th]:whitespace-nowrap table-fixed">
             <TableHeader>
               <TableRow>
-                {columns.map((col) => {
-                  const active = sortKey === col.key
-                  return (
-                    <TableHead
-                      key={col.key}
-                      style={col.width ? { width: col.width } : undefined}
-                      className="bg-muted/50 font-medium text-muted-foreground"
-                    >
-                      <button
-                        onClick={() => toggleSort(col.key)}
-                        className="inline-flex items-center gap-1 font-medium hover:text-foreground transition-colors"
-                      >
-                        {col.label}
-                        {active ? (
-                          sortDir === "asc" ? (
-                            <ArrowUp className="h-3.5 w-3.5" />
-                          ) : (
-                            <ArrowDown className="h-3.5 w-3.5" />
-                          )
-                        ) : (
-                          <ChevronsUpDown className="h-3.5 w-3.5 opacity-40" />
-                        )}
-                      </button>
-                    </TableHead>
-                  )
-                })}
-                <TableHead style={{ width: "80px" }} className="bg-muted/50 font-medium text-muted-foreground">Action</TableHead>
+                {columns.map((col) => (
+                  <SortableTableHead
+                    key={col.key}
+                    sortKey={col.key}
+                    activeKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={toggleSort}
+                    width={col.width}
+                  >
+                    {col.label}
+                  </SortableTableHead>
+                ))}
+                <StaticTableHead width="80px">Action</StaticTableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -358,10 +336,7 @@ export default function MaterialMasterClient({
                 </TableRow>
               ) : (
                 sorted.map((row, index) => (
-                  <TableRow
-                    key={index}
-                    className={cn(index % 2 === 0 ? "bg-background" : "bg-muted/40")}
-                  >
+                  <TableRow key={index}>
                     {columns.map((col) => (
                       <TableCell
                         key={col.key}

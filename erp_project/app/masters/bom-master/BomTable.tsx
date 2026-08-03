@@ -8,7 +8,8 @@
 
 import { Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
+import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import {
   Table,
   TableBody,
@@ -20,7 +21,7 @@ import {
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import { cn } from "@/lib/utils"
 import { formatDate, LOCKED_STATUSES } from "./bom-format"
-import { BomStatusBadge } from "./BomStatusBadge"
+import { StatusBadge } from "@/components/masters/StatusBadge"
 import type { BomListItem } from "@/types/masters"
 
 export function BomTable({
@@ -50,16 +51,7 @@ export function BomTable({
 }) {
   return (
     <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          {total} record{total !== 1 ? "s" : ""}
-          {hasFilters && (
-            <button onClick={onClearFilters} className="ml-2 text-xs text-primary hover:underline">
-              Clear filters
-            </button>
-          )}
-        </CardTitle>
-      </CardHeader>
+      <RecordCountHeader total={total} onClearFilters={hasFilters ? onClearFilters : undefined} />
       <CardContent className="p-0">
         <Table>
           <TableHeader>
@@ -102,7 +94,7 @@ export function BomTable({
                   <TableCell className="text-sm">{formatDate(row.effective_from)}</TableCell>
                   <TableCell className="text-sm">{formatDate(row.effective_till)}</TableCell>
                   <TableCell>
-                    <BomStatusBadge status={row.status} />
+                    <StatusBadge status={row.status} />
                   </TableCell>
                   {canEdit && (
                     <TableCell>

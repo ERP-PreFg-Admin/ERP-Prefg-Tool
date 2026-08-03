@@ -1,22 +1,14 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { AlertTriangle } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { CostImpactAlert } from "@/components/masters/CostImpactAlert"
+import { RejectionBanner, type RejectionInfo } from "@/components/masters/ApprovalBanners"
 import type { PMVendor } from "@/types/masters"
-
-type RejectionInfo = {
-  raised_by: number
-  raised_by_name: string
-  rejected_by_name: string
-  remarks: string
-  rejected_on: string
-}
 
 export function EditPmVendorRateDialog({
   row,
@@ -143,20 +135,7 @@ export function EditPmVendorRateDialog({
           />
 
           {isDraft && !loadingInfo && rejection && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-1">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800">
-                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                Rejected by {rejection.rejected_by_name}
-              </div>
-              <p className="text-xs text-amber-700 leading-relaxed">
-                &ldquo;{rejection.remarks}&rdquo;
-              </p>
-              {!canEdit && (
-                <p className="text-xs text-red-600 font-medium mt-1">
-                  Only {rejection.raised_by_name} (original submitter) can re-edit this record.
-                </p>
-              )}
-            </div>
+            <RejectionBanner rejection={rejection} canEdit={canEdit} />
           )}
 
           <div className="grid grid-cols-2 gap-3">

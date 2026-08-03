@@ -15,8 +15,8 @@
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import { Filter, X, Pencil, History as HistoryIcon, Layers, AlertTriangle } from "lucide-react"
-import { cn } from "@/lib/utils"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
+import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import { Label } from "@/components/ui/label"
 import {
   Table,
@@ -27,6 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
+import { ToggleButton } from "@/components/ui/toggle-button"
 import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import {
@@ -161,11 +162,10 @@ export default function SkusClient({
           placeholder="Search by code, name, brand…"
         />
 
-        <Button
-          variant="outline"
+        <ToggleButton
           size="lg"
+          pressed={activeFilterCount > 0}
           onClick={() => setShowFilters((v) => !v)}
-          className={cn(activeFilterCount > 0 && "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300")}
         >
           <Filter className="h-3.5 w-3.5" />
           Filters
@@ -174,7 +174,7 @@ export default function SkusClient({
               {activeFilterCount}
             </span>
           )}
-        </Button>
+        </ToggleButton>
 
         <MasterToolbarActions>
           <DownloadButton
@@ -275,19 +275,7 @@ export default function SkusClient({
 
       {/* ── Table card ── */}
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            {total} record{total !== 1 ? "s" : ""}
-            {hasFilters && (
-              <button
-                onClick={clearAllFilters}
-                className="ml-2 text-xs text-primary hover:underline"
-              >
-                Clear filters
-              </button>
-            )}
-          </CardTitle>
-        </CardHeader>
+        <RecordCountHeader total={total} onClearFilters={hasFilters ? clearAllFilters : undefined} />
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -314,11 +302,11 @@ export default function SkusClient({
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((row, index) => {
+                rows.map((row) => {
                   const missing = missingFieldsFor(row)
                   const hasVariants = (row.variant_count ?? 0) > 1 && row.brand && row.base_sku_sno != null
                   return (
-                    <TableRow key={row.id} className={index % 2 === 0 ? "bg-background" : "bg-muted/40"}>
+                    <TableRow key={row.id}>
                       <TableCell className="font-mono text-xs font-medium">
                         <div className="flex items-center gap-1.5">
                           {row.sku_code}

@@ -8,7 +8,8 @@
  */
 
 import { Fragment } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
+import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import {
   Table,
   TableBody,
@@ -20,7 +21,7 @@ import {
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import { cn } from "@/lib/utils"
 import { formatDateTime } from "../bom-format"
-import { BomStatusBadge } from "../BomStatusBadge"
+import { StatusBadge } from "@/components/masters/StatusBadge"
 import type { BomHistoryListItem } from "@/types/masters"
 
 const COLUMN_COUNT = 5
@@ -58,16 +59,7 @@ export function BomHistoryTable({
 }) {
   return (
     <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          {total} record{total !== 1 ? "s" : ""}
-          {hasFilters && (
-            <button onClick={onClearFilters} className="ml-2 text-xs text-primary hover:underline">
-              Clear filters
-            </button>
-          )}
-        </CardTitle>
-      </CardHeader>
+      <RecordCountHeader total={total} onClearFilters={hasFilters ? onClearFilters : undefined} />
       <CardContent className="p-0">
         <Table>
           <TableHeader>
@@ -115,7 +107,7 @@ export function BomHistoryTable({
                     >
                       <TableCell className="font-mono text-xs font-medium">{row.bom_code ?? "—"}</TableCell>
                       <TableCell>
-                        <BomStatusBadge status={row.status} />
+                        <StatusBadge status={row.status} />
                       </TableCell>
                       <TableCell className="text-sm">
                         <AuditCell when={row.created_at} who={row.created_by_name} />
