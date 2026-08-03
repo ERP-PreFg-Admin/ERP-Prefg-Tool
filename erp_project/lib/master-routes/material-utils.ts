@@ -239,15 +239,25 @@ type VendorRateInput = {
   rate_uom?: unknown
   effective_from?: string | null
   mfg_id?: unknown
+  /** Mandatory reason for this edit (enforced client-side by the Cost Master
+   *  edit dialogs) — stored as an approval_item, not a diffed field, and read
+   *  back by rmVrmHandler/pmVrmHandler.applyAndArchive to archive into
+   *  history_vrm.remarks alongside the superseded rate. */
+  remarks?: string
 }
 
 type MfgRateInput = {
   curr_rate?: unknown
   rate_uom?: unknown
   effective_from?: string | null
+  /** See VendorRateInput.remarks — archived into history_mrm.remarks. */
+  remarks?: string
 }
 
-// Handles the "existing vendor rate" approval path (used by add-rates + rm create-full).
+// Handles the "existing vendor rate" approval path (used by add-rates + rm
+// create-full + the RM_VRM/PM_VRM bulk-CSV edit split). Returns the new
+// approval id, or null if nothing was submitted (already in review/rejected-
+// by-someone-else/pending, or no actual diff).
 export async function applyVendorRateApproval(
   conn: PoolConnection,
   userId: number,
@@ -256,15 +266,15 @@ export async function applyVendorRateApproval(
   v: VendorRateInput,
   today: string,
   setVendorRateStatusSql: string,
-): Promise<void> {
-  if (existing.status === "in_review") return
+): Promise<number | null> {
+  if (existing.status === "in_review") return null
   if (existing.status === "rejected") {
     const [rejRows] = await conn.execute(approvalsSql.selectLatestRejection, [moduleVrm, existing.id])
     const rej = (rejRows as { raised_by: number }[])[0]
-    if (rej && rej.raised_by !== userId) return
+    if (rej && rej.raised_by !== userId) return null
   }
   const [pendingRows] = await conn.execute(approvalsSql.hasPending, [moduleVrm, existing.id])
-  if ((pendingRows as { cnt: number }[])[0]?.cnt > 0) return
+  if ((pendingRows as { cnt: number }[])[0]?.cnt > 0) return null
 
   const diff = ([
     ["curr_rate", existing.curr_rate, v.curr_rate],
@@ -275,17 +285,23 @@ export async function applyVendorRateApproval(
     // tag) — pm_vrm_dynamic has no such column, so skip it for PM_VRM.
     ...(moduleVrm === "RM_VRM" ? [["mfg_id", existing.mfg_id, v.mfg_id] as [string, unknown, unknown]] : []),
   ] as [string, unknown, unknown][]).filter(([, o, n]) => String(o ?? "") !== String(n ?? ""))
-  if (diff.length === 0) return
+  if (diff.length === 0) return null
 
   const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, moduleVrm, existing.id, "edit"])
   const approvalId = (ar as { insertId: number }).insertId
   for (const [field, oldVal, newVal] of diff) {
     await conn.execute(approvalsSql.insertApprovalItem, [approvalId, field, String(oldVal ?? ""), String(newVal ?? "")])
   }
+  if (v.remarks?.trim()) {
+    await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "remarks", "", v.remarks.trim()])
+  }
   await conn.execute(setVendorRateStatusSql, ["in_review", existing.id])
+  return approvalId
 }
 
-// Handles the "existing mfg rate" approval path (used by add-rates for both RM and PM).
+// Handles the "existing mfg rate" approval path (used by add-rates for both
+// RM and PM + the RM_RATE/PM_RATE bulk-CSV edit split). See
+// applyVendorRateApproval above for the return-value contract.
 export async function applyMfgRateApproval(
   conn: PoolConnection,
   userId: number,
@@ -294,27 +310,31 @@ export async function applyMfgRateApproval(
   m: MfgRateInput,
   today: string,
   setRateStatusSql: string,
-): Promise<void> {
-  if (existing.status === "in_review") return
+): Promise<number | null> {
+  if (existing.status === "in_review") return null
   if (existing.status === "rejected") {
     const [rejRows] = await conn.execute(approvalsSql.selectLatestRejection, [moduleMrm, existing.id])
     const rej = (rejRows as { raised_by: number }[])[0]
-    if (rej && rej.raised_by !== userId) return
+    if (rej && rej.raised_by !== userId) return null
   }
   const [pendingRows] = await conn.execute(approvalsSql.hasPending, [moduleMrm, existing.id])
-  if ((pendingRows as { cnt: number }[])[0]?.cnt > 0) return
+  if ((pendingRows as { cnt: number }[])[0]?.cnt > 0) return null
 
   const diff = ([
     ["curr_rate", existing.curr_rate, m.curr_rate],
     ["uom", existing.uom, m.rate_uom],
     ["effective_from", existing.effective_from, m.effective_from ?? today],
   ] as [string, unknown, unknown][]).filter(([, o, n]) => String(o ?? "") !== String(n ?? ""))
-  if (diff.length === 0) return
+  if (diff.length === 0) return null
 
   const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, moduleMrm, existing.id, "edit"])
   const approvalId = (ar as { insertId: number }).insertId
   for (const [field, oldVal, newVal] of diff) {
     await conn.execute(approvalsSql.insertApprovalItem, [approvalId, field, String(oldVal ?? ""), String(newVal ?? "")])
   }
+  if (m.remarks?.trim()) {
+    await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "remarks", "", m.remarks.trim()])
+  }
   await conn.execute(setRateStatusSql, ["in_review", existing.id])
+  return approvalId
 }

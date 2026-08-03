@@ -22,4 +22,5 @@ export const RM_MRM_BULK_FIELDS: MasterField[] = [
     key: "effective_from", label: "Effective From", required: true, placeholder: "YYYY-MM-DD", sample: "2026-01-01",
     validate: validateDateStr,
   },
+  { key: "remarks", label: "Remarks", colSpan: 2, placeholder: "Optional for new rates — remarks are required when submitting an edit", sample: "" },
 ]

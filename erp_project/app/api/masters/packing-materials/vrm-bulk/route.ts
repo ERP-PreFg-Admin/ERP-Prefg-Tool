@@ -15,6 +15,7 @@ import { STATUS } from "@/lib/constants"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { stageBulkUploadApproval, uploadRowsAsCsv } from "@/lib/master-routes/bulk-approval"
+import { applyVendorRateApproval } from "@/lib/master-routes/material-utils"
 
 const looseRow = z.record(z.string(), z.unknown())
 
@@ -35,6 +36,12 @@ export const POST = withGateway({
     if (body.action === "check_duplicates") {
       const { rows } = body
       const duplicates: Record<number, string[]> = {}
+      const editMatches: Record<number, { id: number; code: string; current: Record<string, unknown> }> = {}
+
+      type ExistingVrmRow = {
+        id: number; curr_rate: string; moq: string; uom: string
+        effective_from: string; effective_to: string | null
+      }
 
       const pmCache = new Map<string, PmLookupRow | null>()
       const vendorCache = new Map<string, VendorLookupRow | null>()
@@ -52,18 +59,36 @@ export const POST = withGateway({
         const row = rows[i] as Record<string, string>
         const pmCode = String(row.pm_code ?? "").trim()
         const vendorCode = String(row.vendor_code ?? "").trim()
+        const moq = Number(row.moq)
 
+        let pm: PmLookupRow | null | undefined
+        let vendor: VendorLookupRow | null | undefined
         if (pmCode) {
-          const pm = await resolvePm(pmCode)
+          pm = await resolvePm(pmCode)
           if (!pm) (duplicates[i] ??= []).push(`PM code "${pmCode}" not found`)
           else if (pm.status !== STATUS.ACTIVE) (duplicates[i] ??= []).push(`PM code "${pmCode}" is not active`)
         }
         if (vendorCode) {
-          const vendor = await resolveVendor(vendorCode)
+          vendor = await resolveVendor(vendorCode)
           if (!vendor) (duplicates[i] ??= []).push(`Vendor code "${vendorCode}" not found`)
         }
 
-        if (pmCode && vendorCode) {
+        if (pm && vendor && Number.isFinite(moq)) {
+          const existing = (await query<ExistingVrmRow>(pmSql.checkVendorRate, [pm.id, vendor.id, moq]))[0]
+          if (existing) {
+            editMatches[i] = {
+              id: existing.id,
+              code: `${pmCode}+${vendorCode}`,
+              current: {
+                pm_code: pmCode, vendor_code: vendorCode,
+                curr_rate: existing.curr_rate, moq: existing.moq, uom: existing.uom,
+                effective_from: existing.effective_from, effective_to: existing.effective_to,
+              },
+            }
+          }
+        }
+
+        if (pmCode && vendorCode && !editMatches[i]) {
           const key = `${pmCode.toLowerCase()}:${vendorCode.toLowerCase()}`
           if (!seenPairs.has(key)) seenPairs.set(key, [])
           seenPairs.get(key)!.push(i)
@@ -76,10 +101,12 @@ export const POST = withGateway({
         for (const i of indices) (duplicates[i] ??= []).push(msg)
       }
 
-      return NextResponse.json({ duplicates })
+      return NextResponse.json({ duplicates, editMatches })
     }
 
-    // ── bulk: stage the WHOLE uploaded file as ONE pending approval ────────
+    // ── bulk: rows matching an existing pm+vendor+moq rate submit immediately
+    // as their own real PM_VRM approval (remarks required); genuinely new
+    // rows are batched into ONE pending PM_VRM_BULK approval as before. ─────
     const { rows } = body
     const eventId = makeEventId("PM_VRM_BULK", "bulk")
     const logCtx = { ...ctx, eventId, module: "PM_VRM_BULK" }
@@ -87,23 +114,71 @@ export const POST = withGateway({
     recordRawEvent("PM_VRM_BULK", eventId, { rowCount: rows.length, source: "csv" })
 
     const conn = await pool.getConnection()
+    let staged = 0
+    let skipped = 0
     try {
-      const yyyymm = new Date().toISOString().slice(0, 7)
-      const { key, filename } = await uploadRowsAsCsv(rows as Record<string, string>[], `imports/pm-vrm-bulk/${yyyymm}`, "pm_vrm_bulk")
-
       await conn.beginTransaction()
-      const approvalId = await stageBulkUploadApproval(conn, {
-        userId, module: "PM_VRM_BULK", s3Key: key, filename, rowCount: rows.length,
-      })
+      const today = new Date().toISOString().slice(0, 10)
+      const createRows: Record<string, string>[] = []
+      let firstApprovalId: number | null = null
+
+      for (const raw of rows as Record<string, string>[]) {
+        const pmCode = String(raw.pm_code ?? "").trim()
+        const vendorCode = String(raw.vendor_code ?? "").trim()
+        const moq = Number(raw.moq)
+        if (!pmCode || !vendorCode || !Number.isFinite(moq)) { skipped++; continue }
+
+        const [pmRows] = await conn.execute(pmSql.selectByCode, [pmCode])
+        const pm = (pmRows as { id: number }[])[0]
+        if (!pm) { skipped++; continue }
+
+        const [vRows] = await conn.execute(vendorSql.selectByCode, [vendorCode])
+        const vendor = (vRows as { id: number }[])[0]
+        if (!vendor) { skipped++; continue }
+
+        const [existingRows] = await conn.execute(pmSql.checkVendorRate, [pm.id, vendor.id, moq])
+        const existing = (existingRows as Parameters<typeof applyVendorRateApproval>[3][])[0]
+
+        if (existing) {
+          if (!raw.remarks?.trim()) { skipped++; continue } // remarks are mandatory for edits
+          const approvalId = await applyVendorRateApproval(conn, userId, "PM_VRM", existing, {
+            curr_rate: raw.curr_rate, moq: raw.moq, rate_uom: raw.uom,
+            effective_from: raw.effective_from, remarks: raw.remarks,
+          }, today, pmSql.setVendorRateStatus)
+          if (approvalId == null) { skipped++; continue }
+          staged++
+          firstApprovalId ??= approvalId
+          continue
+        }
+
+        createRows.push(raw)
+      }
+
+      let batchApprovalId: number | null = null
+      if (createRows.length > 0) {
+        const yyyymm = new Date().toISOString().slice(0, 7)
+        const { key, filename } = await uploadRowsAsCsv(createRows, `imports/pm-vrm-bulk/${yyyymm}`, "pm_vrm_bulk")
+        batchApprovalId = await stageBulkUploadApproval(conn, {
+          userId, module: "PM_VRM_BULK", s3Key: key, filename, rowCount: createRows.length,
+        })
+        staged += createRows.length
+      }
+
+      if (staged === 0) {
+        throw new ApiError(400, "nothing_to_stage", "Nothing to submit for approval — every row was skipped or had no actual changes.")
+      }
+
       await conn.commit()
-      logger.info({ ...logCtx, approvalId, message: "PM vendor-rate bulk upload staged for approval" })
-      recordProcessedEvent("PM_VRM_BULK", eventId, { rowCount: rows.length, source: "csv", approvalId })
-      return NextResponse.json({ ok: true, approval_id: approvalId, staged: rows.length, skipped: 0 })
+      const approvalId = batchApprovalId ?? firstApprovalId
+      logger.info({ ...logCtx, approvalId, staged, skipped, message: "PM vendor-rate bulk upload staged for approval" })
+      recordProcessedEvent("PM_VRM_BULK", eventId, { rowCount: rows.length, source: "csv", approvalId, staged, skipped })
+      return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rows.length })
     } catch (err: unknown) {
       await conn.rollback()
       const message = err instanceof Error ? err.message : String(err)
       recordFailedEvent("PM_VRM_BULK", eventId, { rowCount: rows.length, source: "csv" }, message)
       logger.error({ ...logCtx, err: message, message: "PM vendor-rate bulk upload failed" })
+      if (err instanceof ApiError) throw err
       throw new ApiError(500, "internal", "Bulk upload failed: " + message)
     } finally {
       conn.release()

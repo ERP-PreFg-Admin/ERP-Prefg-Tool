@@ -453,6 +453,8 @@ model history_mrm {
   effective_to   DateTime? @db.Date
   updated_on     DateTime? @default(now()) @db.DateTime(0)
   status         Boolean?  @default(true)
+  remarks        String?   @db.VarChar(300)
+  changed_by     Int?
 }
 
 model history_vrm {
@@ -465,6 +467,8 @@ model history_vrm {
   effective_to   DateTime?             @db.Date
   updated_on     DateTime?             @default(now()) @db.Timestamp(0)
   status         history_vrm_status?
+  remarks        String?               @db.VarChar(300)
+  changed_by     Int?
   master_vendors master_vendors?       @relation(fields: [vendor_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "history_vrm_ibfk_1")
 
   @@index([vendor_id], map: "vendor_id")

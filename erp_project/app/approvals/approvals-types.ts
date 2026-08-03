@@ -55,6 +55,29 @@ export const BULK_MODULES = new Set([
   "PO_BULK", "VENDOR_BULK", "MFG_BULK", "RM_BULK", "PM_BULK", "BOM_BULK",
 ])
 
+/** Maps a *_BULK module code to the base module it belongs to, so bulk
+ *  uploads and regular edits for the same entity group under one section
+ *  (e.g. "Bulk Manufacturer Upload" + "Manufacturer" → one "Manufacturer" group)
+ *  instead of splitting into two separate module rows. */
+const BULK_GROUP_KEY: Record<string, string> = {
+  MFG_BULK:    "MFG",
+  VENDOR_BULK: "VENDOR",
+  RM_BULK:     "RM_MAT",
+  PM_BULK:     "PM_MAT",
+  PO_BULK:     "PO",
+  BOM_BULK:    "BOM",
+}
+
+export function groupKeyFor(module: string) {
+  return BULK_GROUP_KEY[module] ?? module
+}
+
+/** True when every changed field has no prior value — i.e. this approval
+ *  creates a brand-new record rather than editing an existing one. */
+export function isNewRecord(items: ApprovalItem[]) {
+  return items.length > 0 && items.every(i => !i.old_value || i.old_value === "-")
+}
+
 export const MODULE_COLOR: Record<string, string> = {
   SKU: "bg-blue-50 text-blue-700 border-blue-200",
   RM_RATE: "bg-purple-50 text-purple-700 border-purple-200",

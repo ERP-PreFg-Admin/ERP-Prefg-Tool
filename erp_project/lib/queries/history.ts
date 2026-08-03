@@ -40,6 +40,21 @@ export const historySql = {
     LIMIT 1
   `,
 
+  /**
+   * The submitter's free-text reason for the currently pending edit on this
+   * entity. Reliable 1:1 lookup because approvals.hasPending already
+   * guarantees at most one pending approval per (module, entity_id), so at
+   * most one pending history_masters_edits row can match too.
+   * Parameters: [module, entity_id]
+   */
+  selectPendingRemarks: `
+    SELECT remarks
+    FROM history_masters_edits
+    WHERE module = ? AND entity_id = ? AND status = 'pending'
+    ORDER BY created_on DESC, id DESC
+    LIMIT 1
+  `,
+
   /** Full audit trail for one entity, newest first, with human-readable names.
    *  id DESC breaks ties within the same second — created_on is DATETIME(0).
    *  Parameters: [module, entity_id] */

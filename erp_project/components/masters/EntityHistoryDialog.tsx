@@ -76,7 +76,6 @@ export function EntityHistoryDialog({
                 isExpanded={expanded === approval.id}
                 isApprover={false}
                 loading={false}
-                openingFileFor={null}
                 onToggle={() => setExpanded((prev) => (prev === approval.id ? null : approval.id))}
                 onApprove={() => {}}
                 onReject={() => {}}

@@ -421,11 +421,11 @@ export const rawMaterials = {
   `,
 
   /** Archive old RM vendor rate to history_vrm before overwriting.
-   *  Parameters: [mtrl_id, vendor_id, rate, effective_from, effective_to, status]
+   *  Parameters: [mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by]
    */
   archiveToHistoryVrm: `
-    INSERT INTO history_vrm (mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status)
-    VALUES ('rm', ?, ?, ?, ?, ?, ?)
+    INSERT INTO history_vrm (mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by)
+    VALUES ('rm', ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   /** Check if a mfg rate already exists for this rm + mfg combination.
@@ -444,11 +444,11 @@ export const rawMaterials = {
   `,
 
   /** Archive old RM mfg rate to history_mrm before overwriting.
-   *  Parameters: [mfg_id, mtrl_id, vendor_id, rate, effective_from, effective_to, status]
+   *  Parameters: [mfg_id, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by]
    */
   archiveToHistoryMrm: `
-    INSERT INTO history_mrm (mfg_id, mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status)
-    VALUES (?, 'rm', ?, ?, ?, ?, ?, ?)
+    INSERT INTO history_mrm (mfg_id, mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by)
+    VALUES (?, 'rm', ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   /** Find the first vendor_id linked to an RM in the vendor rate master. Parameters: [rm_id] */
@@ -472,6 +472,21 @@ export const rawMaterials = {
    */
   setBaseStatus: `UPDATE master_rm SET status = ? WHERE id = ?`,
 
+  /** Full-row lookup by business code, for bulk-CSV edit detection — `code`
+   *  aliases rm_code so this satisfies the generic EditCandidate shape used
+   *  by lib/master-routes/edit-match.ts. Parameters: [rm_code] */
+  selectByCodeForMatch: `
+    SELECT id, rm_code, rm_code AS code, name, make, type, uom, status, hsn_code, inci_name
+    FROM master_rm WHERE rm_code = ? LIMIT 1
+  `,
+
+  /** IN (?)-batched counterpart of selectByCodeForMatch, for the whole
+   *  uploaded file at once — see fetchEditMatchCandidates. Parameters: [codes[]] */
+  selectCandidatesByCodesBatch: `
+    SELECT id, rm_code, rm_code AS code, name, make, type, uom, status, hsn_code, inci_name
+    FROM master_rm WHERE rm_code IN (?)
+  `,
+
   // ── VRM Approval-flow helpers ─────────────────────────────────────────────
 
   /** Set status on a rm_vrm_dynamic row (e.g. 'in_review', 'draft', 'active').
@@ -491,20 +506,24 @@ export const rawMaterials = {
    *  Parameters: [rm_id, vendor_id]
    */
   selectVendorRateHistory: `
-    SELECT id, rate, effective_from, effective_to, updated_on, status
-    FROM history_vrm
-    WHERE mtrl_type = 'rm' AND mtrl_id = ? AND vendor_id = ?
-    ORDER BY updated_on DESC, id DESC
+    SELECT h.id, h.rate, h.effective_from, h.effective_to, h.updated_on, h.status, h.remarks,
+           u.name AS changed_by_name
+    FROM history_vrm h
+    LEFT JOIN users u ON u.id = h.changed_by
+    WHERE h.mtrl_type = 'rm' AND h.mtrl_id = ? AND h.vendor_id = ?
+    ORDER BY h.updated_on DESC, h.id DESC
   `,
 
   /** Full archived rate history for one RM×Manufacturer pair from history_mrm, newest first.
    *  Parameters: [rm_id, mfg_id]
    */
   selectMfgRateHistory: `
-    SELECT id, rate, effective_from, effective_to, updated_on, status
-    FROM history_mrm
-    WHERE mtrl_type = 'rm' AND mtrl_id = ? AND mfg_id = ?
-    ORDER BY updated_on DESC, id DESC
+    SELECT h.id, h.rate, h.effective_from, h.effective_to, h.updated_on, h.status, h.remarks,
+           u.name AS changed_by_name
+    FROM history_mrm h
+    LEFT JOIN users u ON u.id = h.changed_by
+    WHERE h.mtrl_type = 'rm' AND h.mtrl_id = ? AND h.mfg_id = ?
+    ORDER BY h.updated_on DESC, h.id DESC
   `,
 
   // ── Approval-flow helpers ────────────────────────────────────────────────

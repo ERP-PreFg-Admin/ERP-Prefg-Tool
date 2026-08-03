@@ -10,6 +10,7 @@ import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { materialMasterCreateSchema, materialMasterUpdateSchema } from "@/lib/validation/material-master"
 import { generateMaterialCode } from "@/lib/master-routes/material-utils"
+import { insertHistoryEntry } from "@/lib/master-routes/history-utils"
 
 type RmBaseRow = {
   id: number; rm_code: string; name: string; make: string; type: string | null
@@ -244,6 +245,13 @@ export const PUT = withGateway({
           await conn.execute(approvalsSql.insertApprovalItem, [approvalId, field, String(cur[field] ?? ""), String(newVal ?? "")])
         }
         await conn.execute(rawMaterials.setBaseStatus, ["in_review", id])
+        await insertHistoryEntry(conn, {
+          module: "RM_MAT",
+          entityId: Number(id),
+          actionType: "edit",
+          remarks: body.remarks.trim(),
+          createdBy: userId,
+        })
         await conn.commit()
         recordProcessedEvent("RM_UPDATE", eventId, { id, approvalId })
         logger.info({ ...logCtx, id, approvalId, message: "Raw material update submitted for approval" })
@@ -324,6 +332,13 @@ export const PUT = withGateway({
           ])
         }
         await conn.execute(PMMaterials.setBaseStatus, ["in_review", id])
+        await insertHistoryEntry(conn, {
+          module: "PM_MAT",
+          entityId: Number(id),
+          actionType: "edit",
+          remarks: body.remarks.trim(),
+          createdBy: userId,
+        })
         await conn.commit()
         recordProcessedEvent("PM_UPDATE", eventId, { id, approvalId })
         logger.info({ ...logCtx, id, approvalId, message: "Packing material update submitted for approval" })

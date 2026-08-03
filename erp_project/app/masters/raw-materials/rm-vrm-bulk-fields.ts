@@ -32,4 +32,5 @@ export const RM_VRM_BULK_FIELDS: MasterField[] = [
     validate: validateDateStr,
   },
   { key: "mfg_code", label: "Manufacturer Code (optional tag)", placeholder: "e.g. MFG-001", sample: "" },
+  { key: "remarks", label: "Remarks", colSpan: 2, placeholder: "Optional for new rates — remarks are required when submitting an edit", sample: "" },
 ]

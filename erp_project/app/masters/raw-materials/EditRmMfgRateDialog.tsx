@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { CostImpactAlert } from "@/components/masters/CostImpactAlert"
 import type { RMByMfg } from "@/types/masters"
 
@@ -31,6 +32,7 @@ export function EditRmMfgRateDialog({
     uom: "",
     effective_from: "",
   })
+  const [remarks, setRemarks] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(false)
@@ -45,6 +47,7 @@ export function EditRmMfgRateDialog({
         uom: row.uom ?? "",
         effective_from: toDateStr(row.effective_from),
       })
+      setRemarks("")
       setSubmitted(false)
       setError(null)
       setRejection(null)
@@ -80,6 +83,7 @@ export function EditRmMfgRateDialog({
 
   async function handleSave() {
     if (!canEdit) return
+    if (!remarks.trim()) { setError("Remarks are required."); return }
     setSaving(true)
     setError(null)
     try {
@@ -97,6 +101,7 @@ export function EditRmMfgRateDialog({
             curr_rate: form.curr_rate,
             rate_uom: form.uom,
             effective_from: form.effective_from,
+            remarks: remarks.trim(),
           }],
         }),
       })
@@ -170,13 +175,19 @@ export function EditRmMfgRateDialog({
             </div>
           </div>
 
+          <div className="grid gap-1">
+            <Label>Remarks <span className="text-destructive">*</span></Label>
+            <p className="text-xs text-muted-foreground">Remarks are required for every edit — briefly explain the reason for this change.</p>
+            <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} disabled={!canEdit} placeholder="Reason for this change…" />
+          </div>
+
           {error && <p className="text-sm text-destructive">{error}</p>}
           {submitted && <p className="text-sm text-emerald-600 font-medium">Edit submitted for approval.</p>}
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving || !canEdit || submitted}>
+          <Button onClick={handleSave} disabled={saving || !canEdit || submitted || !remarks.trim()}>
             {saving ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>

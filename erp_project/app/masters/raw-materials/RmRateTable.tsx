@@ -54,6 +54,9 @@ export type ColumnDef = {
   key: string
   label: string
   sortAs: "text" | "num" | "date"
+  /** Fixed pixel width for narrow/fixed-format columns. Columns without a
+   *  width share the remaining space equally (table-layout: fixed). */
+  width?: string
   className?: string
   render?: (row: AnyRow) => ReactNode
 }
@@ -529,15 +532,21 @@ export function RmRateTable({
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {/* whitespace-nowrap keeps every column on a single line; the Table's
-              own overflow-x wrapper lets the grid scroll sideways instead. */}
-          <Table className="[&_th]:whitespace-nowrap [&_td]:whitespace-nowrap">
+          {/* table-layout:fixed + per-column widths cap narrow/fixed-format
+              columns; free-text columns (no width) share what's left and
+              truncate via TruncatedCell instead of forcing the whole table
+              to overflow the viewport. */}
+          <Table className="[&_th]:whitespace-nowrap table-fixed">
             <TableHeader>
               <TableRow>
                 {columns.map((col) => {
                   const active = sortKey === col.key
                   return (
-                    <TableHead key={col.key} className="bg-muted/50 font-medium text-muted-foreground">
+                    <TableHead
+                      key={col.key}
+                      style={col.width ? { width: col.width } : undefined}
+                      className="bg-muted/50 font-medium text-muted-foreground"
+                    >
                       {/* Whole header is a button so clicking anywhere sorts it. */}
                       <button
                         onClick={() => toggleSort(col.key)}
@@ -558,7 +567,7 @@ export function RmRateTable({
                     </TableHead>
                   )
                 })}
-                {actionColumn && <TableHead className="bg-muted/50 w-10" />}
+                {actionColumn && <TableHead style={{ width: "112px" }} className="bg-muted/50" />}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -582,7 +591,7 @@ export function RmRateTable({
                     {columns.map((col) => (
                       <TableCell
                         key={col.key}
-                        className={col.className ?? "text-muted-foreground"}
+                        className={cn("overflow-hidden text-ellipsis", col.className ?? "text-muted-foreground")}
                       >
                         {col.render
                           ? col.render(row)

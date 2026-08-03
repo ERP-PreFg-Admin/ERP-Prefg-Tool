@@ -26,6 +26,7 @@ import { STATUS } from "@/lib/constants"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { stageBulkUploadApproval, uploadRowsAsCsv } from "@/lib/master-routes/bulk-approval"
+import { applyVendorRateApproval } from "@/lib/master-routes/material-utils"
 
 const looseRow = z.record(z.string(), z.unknown())
 
@@ -43,10 +44,15 @@ export const POST = withGateway({
     if (body.action === "check_duplicates") {
       const { rows } = body
       const duplicates: Record<number, string[]> = {}
+      const editMatches: Record<number, { id: number; code: string; current: Record<string, unknown> }> = {}
 
       type RmRow = { id: number; uom: string; status: string }
       type VendorRow = { id: number; code: string; name: string; type: string; status: string | null }
       type MfgRow = { id: number; code: string; name: string; status: string | null }
+      type ExistingVrmRow = {
+        id: number; curr_rate: string; moq: string; uom: string
+        effective_from: string; effective_to: string | null; mfg_id: number | null
+      }
 
       const rmCache = new Map<string, RmRow | null>()
       const vendorCache = new Map<string, VendorRow | null>()
@@ -70,14 +76,17 @@ export const POST = withGateway({
         const rmCode = String(row.rm_code ?? "").trim()
         const vendorCode = String(row.vendor_code ?? "").trim()
         const mfgCode = String(row.mfg_code ?? "").trim()
+        const moq = Number(row.moq)
 
+        let rm: RmRow | null | undefined
+        let vendor: VendorRow | null | undefined
         if (rmCode) {
-          const rm = await resolveRm(rmCode)
+          rm = await resolveRm(rmCode)
           if (!rm) (duplicates[i] ??= []).push(`RM code "${rmCode}" not found`)
           else if (rm.status !== STATUS.ACTIVE) (duplicates[i] ??= []).push(`RM code "${rmCode}" is not active`)
         }
         if (vendorCode) {
-          const vendor = await resolveVendor(vendorCode)
+          vendor = await resolveVendor(vendorCode)
           if (!vendor) (duplicates[i] ??= []).push(`Vendor code "${vendorCode}" not found`)
         }
         if (mfgCode) {
@@ -85,7 +94,27 @@ export const POST = withGateway({
           if (!mfg) (duplicates[i] ??= []).push(`Manufacturer code "${mfgCode}" not found`)
         }
 
-        if (rmCode && vendorCode) {
+        // A row matching an existing rm+vendor+moq rate is an edit of that
+        // row (mirrors checkVendorRate's own match key) — flag it so the
+        // generic CsvImportDialog UI requires remarks instead of treating it
+        // as a duplicate error. See vrm-bulk "bulk" action below for the
+        // actual create-vs-edit split at submission time.
+        if (rm && vendor && Number.isFinite(moq)) {
+          const existing = (await query<ExistingVrmRow>(rmSql.checkVendorRate, [rm.id, vendor.id, moq]))[0]
+          if (existing) {
+            editMatches[i] = {
+              id: existing.id,
+              code: `${rmCode}+${vendorCode}`,
+              current: {
+                rm_code: rmCode, vendor_code: vendorCode,
+                curr_rate: existing.curr_rate, moq: existing.moq, uom: existing.uom,
+                effective_from: existing.effective_from, effective_to: existing.effective_to,
+              },
+            }
+          }
+        }
+
+        if (rmCode && vendorCode && !editMatches[i]) {
           const key = `${rmCode.toLowerCase()}:${vendorCode.toLowerCase()}`
           if (!seenPairs.has(key)) seenPairs.set(key, [])
           seenPairs.get(key)!.push(i)
@@ -98,10 +127,12 @@ export const POST = withGateway({
         for (const i of indices) (duplicates[i] ??= []).push(msg)
       }
 
-      return NextResponse.json({ duplicates })
+      return NextResponse.json({ duplicates, editMatches })
     }
 
-    // ── bulk: stage the WHOLE uploaded file as ONE pending approval ────────
+    // ── bulk: rows matching an existing rm+vendor+moq rate submit immediately
+    // as their own real RM_VRM approval (remarks required); genuinely new
+    // rows are batched into ONE pending RM_VRM_BULK approval as before. ──────
     const { rows } = body
     const eventId = makeEventId("RM_VRM_BULK", "bulk")
     const logCtx = { ...ctx, eventId, module: "RM_VRM_BULK" }
@@ -109,23 +140,77 @@ export const POST = withGateway({
     recordRawEvent("RM_VRM_BULK", eventId, { rowCount: rows.length, source: "csv" })
 
     const conn = await pool.getConnection()
+    let staged = 0
+    let skipped = 0
     try {
-      const yyyymm = new Date().toISOString().slice(0, 7)
-      const { key, filename } = await uploadRowsAsCsv(rows as Record<string, string>[], `imports/rm-vrm-bulk/${yyyymm}`, "rm_vrm_bulk")
-
       await conn.beginTransaction()
-      const approvalId = await stageBulkUploadApproval(conn, {
-        userId, module: "RM_VRM_BULK", s3Key: key, filename, rowCount: rows.length,
-      })
+      const today = new Date().toISOString().slice(0, 10)
+      const createRows: Record<string, string>[] = []
+      let firstApprovalId: number | null = null
+
+      for (const raw of rows as Record<string, string>[]) {
+        const rmCode = String(raw.rm_code ?? "").trim()
+        const vendorCode = String(raw.vendor_code ?? "").trim()
+        const moq = Number(raw.moq)
+        if (!rmCode || !vendorCode || !Number.isFinite(moq)) { skipped++; continue }
+
+        const [rmRows] = await conn.execute(rmSql.selectByCode, [rmCode])
+        const rm = (rmRows as { id: number }[])[0]
+        if (!rm) { skipped++; continue }
+
+        const [vRows] = await conn.execute(vendorSql.selectByCode, [vendorCode])
+        const vendor = (vRows as { id: number }[])[0]
+        if (!vendor) { skipped++; continue }
+
+        let mfgId: number | null = null
+        if (raw.mfg_code?.trim()) {
+          const [mRows] = await conn.execute(mfgSql.selectByCode, [raw.mfg_code.trim()])
+          mfgId = (mRows as { id: number }[])[0]?.id ?? null
+        }
+
+        const [existingRows] = await conn.execute(rmSql.checkVendorRate, [rm.id, vendor.id, moq])
+        const existing = (existingRows as Parameters<typeof applyVendorRateApproval>[3][])[0]
+
+        if (existing) {
+          if (!raw.remarks?.trim()) { skipped++; continue } // remarks are mandatory for edits
+          const approvalId = await applyVendorRateApproval(conn, userId, "RM_VRM", existing, {
+            curr_rate: raw.curr_rate, moq: raw.moq, rate_uom: raw.uom,
+            effective_from: raw.effective_from, mfg_id: mfgId, remarks: raw.remarks,
+          }, today, rmSql.setVendorRateStatus)
+          if (approvalId == null) { skipped++; continue } // pending/in-review/no actual change
+          staged++
+          firstApprovalId ??= approvalId
+          continue
+        }
+
+        createRows.push(raw)
+      }
+
+      let batchApprovalId: number | null = null
+      if (createRows.length > 0) {
+        const yyyymm = new Date().toISOString().slice(0, 7)
+        const { key, filename } = await uploadRowsAsCsv(createRows, `imports/rm-vrm-bulk/${yyyymm}`, "rm_vrm_bulk")
+        batchApprovalId = await stageBulkUploadApproval(conn, {
+          userId, module: "RM_VRM_BULK", s3Key: key, filename, rowCount: createRows.length,
+        })
+        staged += createRows.length
+      }
+
+      if (staged === 0) {
+        throw new ApiError(400, "nothing_to_stage", "Nothing to submit for approval — every row was skipped or had no actual changes.")
+      }
+
       await conn.commit()
-      logger.info({ ...logCtx, approvalId, message: "RM vendor-rate bulk upload staged for approval" })
-      recordProcessedEvent("RM_VRM_BULK", eventId, { rowCount: rows.length, source: "csv", approvalId })
-      return NextResponse.json({ ok: true, approval_id: approvalId, staged: rows.length, skipped: 0 })
+      const approvalId = batchApprovalId ?? firstApprovalId
+      logger.info({ ...logCtx, approvalId, staged, skipped, message: "RM vendor-rate bulk upload staged for approval" })
+      recordProcessedEvent("RM_VRM_BULK", eventId, { rowCount: rows.length, source: "csv", approvalId, staged, skipped })
+      return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rows.length })
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
       await conn.rollback()
       recordFailedEvent("RM_VRM_BULK", eventId, { rowCount: rows.length, source: "csv" }, message)
       logger.error({ ...logCtx, err: message, message: "RM vendor-rate bulk upload failed" })
+      if (err instanceof ApiError) throw err
       throw new ApiError(500, "internal", "Bulk upload failed: " + message)
     } finally {
       conn.release()

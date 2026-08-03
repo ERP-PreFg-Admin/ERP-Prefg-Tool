@@ -6,7 +6,8 @@ import { parseS3Import } from "@/lib/import-s3"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { insertApprovalWithItems, applyVendorRateApproval, applyMfgRateApproval, generateMaterialCode, toPmParams } from "@/lib/master-routes/material-utils"
-import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
+import { stagePmBulkRows } from "@/lib/approvals/handlers/packing-materials"
+import { fetchEditMatchCandidates, findBestEditMatch, type EditCandidate } from "@/lib/master-routes/edit-match"
 import { roundToWholeNumber, roundToTwoDecimals } from "@/lib/numeric"
 
 type PmMaterialRow = { id: number; pm_code: string; name: string; type: string; uom: string; hsn_code: string | null }
@@ -409,9 +410,11 @@ export async function pmAddRates(body: PmAddRatesBody, userId: number, ctx: obje
   }
 }
 
-// Stages the WHOLE batch as one pending approval — nothing is inserted into
-// master_pm until an admin approves (see the PM_BULK handler in
-// lib/approvals/module-handlers.ts).
+// Stages the batch for approval — new-record rows are bundled into ONE
+// pending PM_BULK approval (nothing inserted into master_pm until an admin
+// approves it, see the PM_BULK handler in lib/approvals/module-handlers.ts);
+// rows recognized as an edit of an existing pm_code are submitted immediately
+// as their own real PM_MAT approval — see stagePmBulkRows for why.
 export async function pmBulk(body: PmBulkBody, userId: number, ctx: object): Promise<NextResponse> {
   const { rows } = body
   const eventId = makeEventId("PM_BULK", "bulk")
@@ -425,22 +428,23 @@ export async function pmBulk(body: PmBulkBody, userId: number, ctx: object): Pro
   logger.info({ ...logCtx, message: "Bulk upload started", rowCount: rows.length })
   recordRawEvent("PM_BULK", eventId, { source: "csv", rowCount: rows.length })
 
-  const staged = rows.filter((r: Record<string, unknown>) => (r.name as string | undefined)?.trim()).length
-  const skipped = rows.length - staged
-
   const conn = await pool.getConnection()
+  let staged = 0
+  let skipped = 0
   try {
     const yyyymm = new Date().toISOString().slice(0, 7)
-    const { key, filename } = await uploadRowsAsCsv(rows as Record<string, string>[], `imports/packing-materials/${yyyymm}`, "pm_bulk")
-
     await conn.beginTransaction()
-    const approvalId = await stageBulkUploadApproval(conn, {
-      userId, module: "PM_BULK", s3Key: key, filename, rowCount: rows.length,
-    })
+    const result = await stagePmBulkRows(conn, rows as Record<string, string>[], userId, `imports/packing-materials/${yyyymm}`)
+    staged = result.staged
+    skipped = result.skipped
+
+    if (staged === 0) {
+      throw new Error("Nothing to submit for approval — every row was skipped or had no actual changes.")
+    }
     await conn.commit()
-    recordProcessedEvent("PM_BULK", eventId, { source: "csv", staged, skipped, approvalId })
-    logger.info({ ...logCtx, message: "Bulk upload staged for approval", rowCount: rows.length, staged, skipped, approvalId })
-    return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rows.length })
+    recordProcessedEvent("PM_BULK", eventId, { source: "csv", staged, skipped, approvalId: result.approvalId })
+    logger.info({ ...logCtx, message: "Bulk upload staged for approval", rowCount: rows.length, staged, skipped, approvalId: result.approvalId })
+    return NextResponse.json({ ok: true, approval_id: result.approvalId, staged, skipped, total: rows.length })
   } catch (err: unknown) {
     await conn.rollback()
     const message = err instanceof Error ? err.message : String(err)
@@ -452,8 +456,8 @@ export async function pmBulk(body: PmBulkBody, userId: number, ctx: object): Pro
   }
 }
 
-// Same staging-only behaviour as pmBulk above — the file is already in S3,
-// so we just parse it for a preview count and stage ONE approval.
+// Same staging behaviour as pmBulk above — the file is already in S3, so we
+// just parse it and run it through the same stagePmBulkRows split.
 export async function pmS3Bulk(body: PmS3BulkBody, userId: number, ctx: object): Promise<NextResponse> {
   const { key } = body
   const eventId = makeEventId("PM_S3BULK", "bulk-s3")
@@ -482,20 +486,24 @@ export async function pmS3Bulk(body: PmS3BulkBody, userId: number, ctx: object):
   }
 
   logger.info({ ...logCtx, message: "bulk_from_s3 started", rowCount: rawRows.length })
-  const staged = rawRows.filter((r) => r["name"]?.trim()).length
-  const skipped = rawRows.length - staged
 
   const conn = await pool.getConnection()
+  let staged = 0
+  let skipped = 0
   try {
-    const filename = key.split("/").pop() ?? key
+    const yyyymm = new Date().toISOString().slice(0, 7)
     await conn.beginTransaction()
-    const approvalId = await stageBulkUploadApproval(conn, {
-      userId, module: "PM_BULK", s3Key: key, filename, rowCount: rawRows.length,
-    })
+    const result = await stagePmBulkRows(conn, rawRows, userId, `imports/packing-materials/${yyyymm}`)
+    staged = result.staged
+    skipped = result.skipped
+
+    if (staged === 0) {
+      throw new Error("Nothing to submit for approval — every row was skipped or had no actual changes.")
+    }
     await conn.commit()
-    recordProcessedEvent("PM_S3BULK", eventId, { source: "s3", s3Key: key, staged, skipped, approvalId })
-    logger.info({ ...logCtx, message: "bulk_from_s3 staged for approval", rowCount: rawRows.length, staged, skipped, approvalId })
-    return NextResponse.json({ ok: true, approval_id: approvalId, staged, skipped, total: rawRows.length })
+    recordProcessedEvent("PM_S3BULK", eventId, { source: "s3", s3Key: key, staged, skipped, approvalId: result.approvalId })
+    logger.info({ ...logCtx, message: "bulk_from_s3 staged for approval", rowCount: rawRows.length, staged, skipped, approvalId: result.approvalId })
+    return NextResponse.json({ ok: true, approval_id: result.approvalId, staged, skipped, total: rawRows.length })
   } catch (err: unknown) {
     await conn.rollback()
     const message = err instanceof Error ? err.message : String(err)
@@ -504,5 +512,31 @@ export async function pmS3Bulk(body: PmS3BulkBody, userId: number, ctx: object):
     return NextResponse.json({ error: "Import failed: " + message }, { status: 500 })
   } finally {
     conn.release()
+  }
+}
+
+// Read-only CSV-preview helper for CsvImportDialog's enableDuplicateCheck —
+// flags rows whose pm_code matches an existing record as edits (requiring
+// remarks) rather than blocking duplicates — mirrors manufacturers/route.ts's
+// check_duplicates action.
+export async function pmCheckDuplicatesBulk(body: { rows?: Record<string, unknown>[] }, ctx: object): Promise<NextResponse> {
+  const { rows } = body
+  const duplicates: Record<number, string[]> = {}
+  const editMatches: Record<number, { id: number; code: string; current: EditCandidate }> = {}
+  if (!Array.isArray(rows)) return NextResponse.json({ duplicates, editMatches })
+
+  try {
+    const candidates = await fetchEditMatchCandidates<EditCandidate>(
+      packingMaterials.selectCandidatesByCodesBatch, rows, "pm_code"
+    )
+    rows.forEach((row, i) => {
+      const match = findBestEditMatch(row, candidates, "pm_code")
+      if (match) editMatches[i] = { id: match.id, code: match.code, current: match }
+    })
+    return NextResponse.json({ duplicates, editMatches })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    logger.error({ ...ctx, error: message, message: "PM bulk duplicate check error" })
+    return NextResponse.json({ error: "Database error" }, { status: 500 })
   }
 }

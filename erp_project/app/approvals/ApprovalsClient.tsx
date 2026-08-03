@@ -5,25 +5,47 @@ import { useRouter } from "next/navigation"
 import { Check, ShieldCheck, History, ChevronDown, ChevronRight, CheckCheck } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Table, TableBody } from "@/components/ui/table"
 import { useToast } from "@/components/ui/toast"
 import type { Approval } from "./approvals-types"
-import { MODULE_LABEL, MODULE_COLOR } from "./approvals-types"
-import ApprovalCard, { type MaterialMap } from "./ApprovalCard"
+import { MODULE_LABEL, MODULE_COLOR, BULK_MODULES, groupKeyFor, isNewRecord } from "./approvals-types"
+import ApprovalCard, { ApprovalRow, type MaterialMap } from "./ApprovalCard"
 import RejectDialog from "./RejectDialog"
 import BulkApproveDialog from "./BulkApproveDialog"
+import CsvPreviewDialog from "./CsvPreviewDialog"
 
 /** Groups pending approvals by module — busiest module first — so the list
- *  reads as one light row per module instead of every approval stacked flat. */
+ *  reads as one light row per module instead of every approval stacked flat.
+ *  Bulk-upload modules (e.g. MFG_BULK) fold into their base module's group
+ *  (MFG) via groupKeyFor, so "Bulk Manufacturer Upload" and "Manufacturer"
+ *  read as one "Manufacturer" section instead of two. */
 function groupByModule(approvals: Approval[]) {
   const map = new Map<string, Approval[]>()
   for (const a of approvals) {
-    const list = map.get(a.module) ?? []
+    const key  = groupKeyFor(a.module)
+    const list = map.get(key) ?? []
     list.push(a)
-    map.set(a.module, list)
+    map.set(key, list)
   }
   return [...map.entries()]
     .map(([module, items]) => ({ module, items }))
     .sort((a, b) => b.items.length - a.items.length)
+}
+
+/** Within a module group, splits approvals into "New" (brand-new records —
+ *  every changed field has no prior value), "Edits" (existing records
+ *  changed), and "Bulk Uploads" (CSV batch approvals), so each reads as its
+ *  own condensed section instead of one undifferentiated stack. */
+function splitGroupItems(items: Approval[]) {
+  const bulkItems: Approval[] = []
+  const newItems:  Approval[] = []
+  const editItems: Approval[] = []
+  for (const a of items) {
+    if (BULK_MODULES.has(a.module)) bulkItems.push(a)
+    else if (isNewRecord(a.items)) newItems.push(a)
+    else editItems.push(a)
+  }
+  return { bulkItems, newItems, editItems }
 }
 
 export default function ApprovalsClient({
@@ -46,7 +68,7 @@ export default function ApprovalsClient({
   const [bulkLoading,    setBulkLoading]    = useState(false)
   const [loading,        setLoading]        = useState(false)
   const [actionError,    setActionError]    = useState<Record<number, string>>({})
-  const [openingFileFor, setOpeningFileFor] = useState<number | null>(null)
+  const [csvPreview,     setCsvPreview]     = useState<{ s3Key: string; filename: string } | null>(null)
 
   function clearError(id: number) {
     setActionError(prev => { const n = { ...prev }; delete n[id]; return n })
@@ -68,15 +90,8 @@ export default function ApprovalsClient({
 
   const groupedApprovals = useMemo(() => groupByModule(approvals), [approvals])
 
-  async function openCsvFile(approvalId: number, s3Key: string) {
-    setOpeningFileFor(approvalId)
-    try {
-      const res  = await fetch(`/api/files/presign?key=${encodeURIComponent(s3Key)}&view=1`)
-      const data = await res.json()
-      if (data.url) window.open(data.url, "_blank", "noopener,noreferrer")
-    } finally {
-      setOpeningFileFor(null)
-    }
+  function openCsvFile(_approvalId: number, s3Key: string, filename: string) {
+    setCsvPreview({ s3Key, filename })
   }
 
   async function handleApprove(approval: Approval) {
@@ -88,12 +103,23 @@ export default function ApprovalsClient({
         body: JSON.stringify({ action: "approve" }),
       })
       const data = await res.json()
-      if (!res.ok) { setActionError(prev => ({ ...prev, [approval.id]: data.error ?? "Failed to approve" })); return }
+      if (!res.ok) {
+        const message = data.error ?? "Failed to approve"
+        setActionError(prev => ({ ...prev, [approval.id]: message }))
+        toast({ title: "Approval failed", description: message, variant: "error" })
+        return
+      }
       setApprovals(prev => prev.filter(a => a.id !== approval.id))
       setExpanded(null)
+      toast({
+        title: "Approved",
+        description: `${MODULE_LABEL[approval.module] ?? approval.module} change has been approved.`,
+        variant: "success",
+      })
       router.refresh()
     } catch {
       setActionError(prev => ({ ...prev, [approval.id]: "Network error" }))
+      toast({ title: "Approval failed", description: "Network error — please try again.", variant: "error" })
     } finally {
       setLoading(false)
     }
@@ -112,14 +138,22 @@ export default function ApprovalsClient({
       setApprovals(prev => prev.filter(a => a.id !== approval.id))
       setExpanded(null)
       setRejectTarget(null)
+      toast({
+        title: "Rejected",
+        description: `${MODULE_LABEL[approval.module] ?? approval.module} change has been rejected.`,
+        variant: "info",
+      })
       router.refresh()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Network error — please try again."
+      toast({ title: "Rejection failed", description: message, variant: "error" })
     } finally {
       setLoading(false)
     }
   }
 
   async function handleBulkApprove(module: string) {
-    const targets = approvals.filter(a => a.module === module)
+    const targets = approvals.filter(a => groupKeyFor(a.module) === module)
     setBulkLoading(true)
     const succeededIds: number[] = []
     let failedCount = 0
@@ -165,7 +199,7 @@ export default function ApprovalsClient({
           <p className="text-xs text-muted-foreground mt-0.5">
             {approvals.length === 0
               ? "All caught up — no pending edits."
-              : "Master-data changes awaiting your review"}
+              : "The following data changes are awaiting your review"}
           </p>
         </div>
         <div className="flex items-center gap-2.5">
@@ -200,8 +234,11 @@ export default function ApprovalsClient({
             const moduleColor = MODULE_COLOR[module] ?? "bg-slate-50 text-slate-700 border-slate-200"
 
             return (
-              <div key={module}>
-                <div className="w-full flex items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-1.5 hover:bg-muted/40 transition-colors">
+              <div
+                key={module}
+                className={`rounded-lg border border-border/60 overflow-hidden ${isGroupOpen ? "bg-muted/30" : ""}`}
+              >
+                <div className="w-full flex items-center gap-2 px-3 py-1.5 bg-muted/30 hover:bg-muted/40 transition-colors">
                   <button
                     onClick={() => toggleGroup(module)}
                     className="flex flex-1 items-center gap-2 text-left min-w-0"
@@ -228,26 +265,67 @@ export default function ApprovalsClient({
                   )}
                 </div>
 
-                {isGroupOpen && (
-                  <div className="space-y-1.5 mt-1.5 pl-2">
-                    {items.map((approval) => (
-                      <ApprovalCard
-                        key={approval.id}
-                        approval={approval}
-                        isExpanded={expanded === approval.id}
-                        isApprover={isApprover}
-                        loading={loading}
-                        error={actionError[approval.id]}
-                        openingFileFor={openingFileFor}
-                        onToggle={() => toggleExpand(approval.id)}
-                        onApprove={() => handleApprove(approval)}
-                        onReject={() => setRejectTarget(approval)}
-                        onOpenCsvFile={openCsvFile}
-                        materialMap={materialMap}
-                      />
-                    ))}
-                  </div>
-                )}
+                {isGroupOpen && (() => {
+                  const { bulkItems, newItems, editItems } = splitGroupItems(items)
+                  const sections = [
+                    { label: "New",          list: newItems },
+                    { label: "Edits",        list: editItems },
+                    { label: "Bulk Uploads", list: bulkItems },
+                  ].filter(s => s.list.length > 0)
+                  // BOM diffs span multiple materials × fields and can't collapse into
+                  // one table row, so BOM keeps the card layout; everything else renders
+                  // as a condensed table, one row per approval.
+                  const isBomGroup = module === "BOM"
+
+                  return (
+                    <div className="space-y-3 pt-1.5 pb-2 pl-2 pr-2">
+                      {sections.map(({ label, list }) => (
+                        <div key={label} className="space-y-1.5">
+                          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground pl-1">
+                            {label} ({list.length})
+                          </p>
+                          {isBomGroup ? (
+                            list.map((approval) => (
+                              <ApprovalCard
+                                key={approval.id}
+                                approval={approval}
+                                isExpanded={expanded === approval.id}
+                                alwaysExpanded
+                                isApprover={isApprover}
+                                loading={loading}
+                                error={actionError[approval.id]}
+                                onToggle={() => toggleExpand(approval.id)}
+                                onApprove={() => handleApprove(approval)}
+                                onReject={() => setRejectTarget(approval)}
+                                onOpenCsvFile={openCsvFile}
+                                materialMap={materialMap}
+                              />
+                            ))
+                          ) : (
+                            <div className="rounded-lg border border-border bg-card overflow-hidden">
+                              <Table>
+                                <TableBody>
+                                  {list.map((approval) => (
+                                    <ApprovalRow
+                                      key={approval.id}
+                                      approval={approval}
+                                      isApprover={isApprover}
+                                      loading={loading}
+                                      error={actionError[approval.id]}
+                                      onApprove={() => handleApprove(approval)}
+                                      onReject={() => setRejectTarget(approval)}
+                                      onOpenCsvFile={openCsvFile}
+                                    />
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}
               </div>
             )
           })}
@@ -264,10 +342,17 @@ export default function ApprovalsClient({
       <BulkApproveDialog
         open={bulkTarget !== null}
         moduleLabel={bulkTarget ? (MODULE_LABEL[bulkTarget] ?? bulkTarget) : ""}
-        count={bulkTarget ? approvals.filter(a => a.module === bulkTarget).length : 0}
+        count={bulkTarget ? approvals.filter(a => groupKeyFor(a.module) === bulkTarget).length : 0}
         loading={bulkLoading}
         onClose={() => setBulkTarget(null)}
         onConfirm={() => bulkTarget && handleBulkApprove(bulkTarget)}
+      />
+
+      <CsvPreviewDialog
+        open={csvPreview !== null}
+        s3Key={csvPreview?.s3Key ?? null}
+        filename={csvPreview?.filename ?? ""}
+        onClose={() => setCsvPreview(null)}
       />
     </>
   )

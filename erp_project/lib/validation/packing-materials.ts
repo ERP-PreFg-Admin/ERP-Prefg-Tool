@@ -70,6 +70,11 @@ export const pmBulkFromS3Schema = z.object({
   key: z.string().optional(),
 }).passthrough()
 
+export const pmCheckDuplicatesBulkSchema = z.object({
+  action: z.literal("check_duplicates"),
+  rows: looseArray.optional(),
+}).passthrough()
+
 export const pmGetMaterialsSchema = z.object({
   action: z.literal("get-materials"),
 }).passthrough()
@@ -89,6 +94,7 @@ export const pmActionSchema = z.discriminatedUnion("action", [
   pmAddRatesSchema,
   pmBulkSchema,
   pmBulkFromS3Schema,
+  pmCheckDuplicatesBulkSchema,
   pmGetMaterialsSchema,
   pmMaterialImpactSchema,
 ])
