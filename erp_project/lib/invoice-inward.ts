@@ -129,7 +129,7 @@ async function writeInvoiceAndPos(
 
   const created: InwardOutcome["created"] = []
   const receivedOut: InwardOutcome["received"] = []
-  const poLines: { id: number; po_no: string; sku_code: string; qty: number; unitPrice: number | null; mrp: number | null }[] = []
+  const poLines: { id: number; po_no: string; sku_code: string; sku_name: string | null; qty: number; unitPrice: number | null; mrp: number | null }[] = []
   const lineLinks: { poId: number; receivedAgainstPoId: number | null; linkType: "created" | "received" }[] = []
 
   const nextSeq = new Map<string, number>()
@@ -174,7 +174,7 @@ async function writeInvoiceAndPos(
       ])
 
       created.push({ id: poId, po_no, sku_code: skuCode ?? "" })
-      poLines.push({ id: poId, po_no, sku_code: skuCode ?? "", qty, unitPrice, mrp: numOrNull(item.mrp) })
+      poLines.push({ id: poId, po_no, sku_code: skuCode ?? "", sku_name: item.sku_name ?? null, qty, unitPrice, mrp: numOrNull(item.mrp) })
       lineLinks.push({ poId, receivedAgainstPoId: refPoId, linkType: "received" })
       continue
     }
@@ -191,7 +191,7 @@ async function writeInvoiceAndPos(
     ])
 
     created.push({ id: poId, po_no, sku_code: skuCode })
-    poLines.push({ id: poId, po_no, sku_code: skuCode, qty, unitPrice, mrp: numOrNull(item.mrp) })
+    poLines.push({ id: poId, po_no, sku_code: skuCode, sku_name: item.sku_name ?? null, qty, unitPrice, mrp: numOrNull(item.mrp) })
     lineLinks.push({ poId, receivedAgainstPoId: null, linkType: "created" })
   }
 
@@ -226,7 +226,7 @@ export async function runInwardInvoice(
 ): Promise<InwardOutcome> {
   const userId = user.id
   const senderName = user.name
-  const { invoice_no, mfg_id, line_items } = body
+  const { invoice_no, mfg_id, destination, line_items } = body
 
   // Validated before anything is written: a rejected batch shouldn't leave an
   // S3 object behind or hold a connection while we round-trip the SKU master.
@@ -323,6 +323,11 @@ export async function runInwardInvoice(
       // claiming a Uniware PO that isn't there — and the code survives the
       // request, which is the only place it exists otherwise.
       await conn.execute(supplierInvoicesSql.setUniwarePoCode, [uniwarePoCode, written.invoiceId])
+      // Stamped on every inward PO too, not just the invoice header: the PO
+      // list is where anyone reconciling the two systems is actually looking,
+      // and a column beats a join on the hottest query this table has.
+      const poIds = written.poLines.map((l) => l.id)
+      await conn.execute(purchaseOrdersSql.buildSetUniwarePoCode(poIds.length), [uniwarePoCode, ...poIds])
       await emit({ step: "uniware", status: "ok", message: `Created ${uniwarePoCode}`, data: { uniwarePoCode } })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -350,24 +355,29 @@ export async function runInwardInvoice(
   // ── 4. Email — after commit, and never a reason to undo ───────────────────
   await emit({ step: "email", status: "start" })
   try {
-    // Not the PO-status mail procurement sends: the manufacturer already knows
-    // the order. What they need is the paperwork for goods that have arrived,
-    // so the invoice we just read goes out as the attachment. Reused from the
-    // buffer already in hand rather than re-fetched from S3.
+    // Not the PO-status mail procurement sends, and not to the manufacturer:
+    // they shipped the goods and already know the order. This tells the
+    // receiving warehouse what is arriving, with the invoice we just read
+    // attached — reused from the buffer already in hand rather than re-fetched
+    // from S3.
     const sent = await sendInwardInvoiceEmail({
       mfgId: Number(mfg_id),
+      destination,
       invoiceNo: invoice_no,
       invoiceDate: body.invoice_date?.trim() || null,
       // Null when the mirror was skipped — quoting a reference the
       // manufacturer can't look up is worse than omitting the line.
       uniwarePoCode,
       invoicePdf: { filename: pdf.filename, content: pdf.buffer },
+      items: written.poLines.map((l) => ({
+        po_no: l.po_no, sku_code: l.sku_code, sku_name: l.sku_name, qty: l.qty,
+      })),
       senderName,
     })
     await emit(
       sent
-        ? { step: "email", status: "ok", message: "Manufacturer notified" }
-        : { step: "email", status: "skipped", message: "No email on file for this manufacturer" }
+        ? { step: "email", status: "ok", message: `${destination} notified` }
+        : { step: "email", status: "skipped", message: `No email on file for ${destination}` }
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

@@ -4,23 +4,7 @@ import { usePathname } from "next/navigation"
 import { Search, Bell, Sun, Moon } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { useTheme } from "@/components/ThemeProvider"
-
-const LABELS: Record<string, string> = {
-  "/":                          "Dashboard",
-  "/masters/skus":              "SKUs",
-  "/masters/manufacturers":     "Manufacturers",
-  "/masters/vendors":           "Vendors",
-  "/masters/raw-materials":     "Raw Materials",
-  "/masters/packing-materials": "Packaging Material",
-  "/manufacturing":             "Manufacturing",
-  "/finance":                   "Finance & Accounting",
-  "/hr-payroll":                "HR & Payroll",
-  "/sales-crm":                 "Sales & CRM",
-  "/inventory":                 "Inventory",
-  "/reports":                   "Reports & Analytics",
-  "/approvals":                 "Approvals",
-  "/settings":                  "Settings",
-}
+import { PAGE_LABELS as LABELS } from "@/lib/pages"
 
 export default function TopBar() {
   const pathname = usePathname()

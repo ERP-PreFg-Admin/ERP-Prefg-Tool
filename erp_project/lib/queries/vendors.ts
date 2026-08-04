@@ -8,6 +8,8 @@
  *     gst_number, bank_name, ifsc_number, account_number)
  */
 
+import { scopeParams, type UserScope } from "@/lib/scope"
+
 /** Full-row column list shared by selectByCodeForMatch and its IN (?)-batched
  *  counterpart below — both need every field the edit-match diff compares.
  *  `v.id AS id` is included alongside `vendor_id` so the module-agnostic
@@ -70,6 +72,7 @@ export const vendors = {
     WHERE (? IS NULL OR v.code LIKE ? OR v.name LIKE ?)
       AND (? IS NULL OR v.type = ?)
       AND (? IS NULL OR vd.zone = ?)
+      AND (? IS NULL OR v.id IN (?))
     ORDER BY v.code ASC
     LIMIT ? OFFSET ?
   `,
@@ -88,6 +91,7 @@ export const vendors = {
     WHERE (? IS NULL OR v.code LIKE ? OR v.name LIKE ?)
       AND (? IS NULL OR v.type = ?)
       AND (? IS NULL OR vd.zone = ?)
+      AND (? IS NULL OR v.id IN (?))
     ORDER BY v.code ASC
   `,
 
@@ -102,6 +106,7 @@ export const vendors = {
     WHERE (? IS NULL OR v.code LIKE ? OR v.name LIKE ?)
       AND (? IS NULL OR v.type = ?)
       AND (? IS NULL OR vd.zone = ?)
+      AND (? IS NULL OR v.id IN (?))
   `,
 
   /** Unconditional count, used only to seed the next VEN-<serial> code. */
@@ -264,9 +269,11 @@ export const vendors = {
    *   const fp = vendors.filterParams(search, type, zone)
    *   paginate(vendors.selectPaginated, [...fp, limit, offset], vendors.countAll, fp, ...)
    */
-  filterParams(search: string | null, type: string | null, zone: string | null): unknown[] {
+  /** `scope` is required so a caller can't silently list every vendor — see
+   *  manufacturers.filterParams for the same reasoning. */
+  filterParams(search: string | null, type: string | null, zone: string | null, scope: UserScope): unknown[] {
     const like = search ? `%${search}%` : null
-    return [like, like, like, type, type, zone, zone]
+    return [like, like, like, type, type, zone, zone, ...scopeParams(scope.vendorIds)]
   },
 
 }

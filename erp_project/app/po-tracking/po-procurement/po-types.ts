@@ -15,6 +15,8 @@ export type PoRow = {
   expected_on: string | null
   received_qty: string | number | null
   invoice_no: string | null
+  /** Unicommerce's PO code for this row — inward POs only, null everywhere else. */
+  uniware_po_code: string | null
   destination: string | null
   status: PoStatus | null
   po_type: "normal" | "impromptu" | "inward" | null

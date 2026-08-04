@@ -11,6 +11,7 @@ import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { mfgLineActionSchema } from "@/lib/validation/manufacturing"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
+import { getUserScope, assertInScope } from "@/lib/scope"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 
@@ -19,6 +20,18 @@ export const POST = withGateway({
   access: { pageSlug: "/manufacturing", level: "editor" },
   handler: async ({ body, session, ctx }) => {
     const userId = Number(session.user.id)
+
+    // Entity scope, before any write. "create" names its manufacturer directly;
+    // "update" only carries the line id, so resolve the row's manufacturer
+    // first — otherwise an out-of-scope line could be edited by id.
+    const scope = await getUserScope(userId)
+    if (body.action === "create") {
+      assertInScope(scope, "mfg", body.mfg_id)
+    } else {
+      const rows = await query<{ mfg_id: number }>(manufacturingSql.selectLineById, [body.id])
+      if (rows.length === 0) throw new ApiError(404, "not_found", "Manufacturing line not found")
+      assertInScope(scope, "mfg", rows[0].mfg_id)
+    }
 
     if (body.action === "create") {
       const eventId = makeEventId("MFG_LINE", "create", `${body.mfg_id}-${body.bom_id}`)

@@ -52,6 +52,12 @@ const matrix: { role: string; page_slug: string; access_level: "none" | "viewer"
   { role: "developer",              page_slug: "/po-tracking", access_level: "editor" },
   { role: "production_head",        page_slug: "/po-tracking", access_level: "editor" },
   { role: "production_operations",  page_slug: "/po-tracking", access_level: "viewer" },
+
+  // Admin panel (users, permissions, activity). "/admin" has NO parent slug, so
+  // lib/permissions.ts can't fall back to "/" — without a row here the section
+  // is closed to everyone, and the only UI that could reopen it lives inside it.
+  { role: "developer", page_slug: "/admin", access_level: "editor" },
+  { role: "admin",     page_slug: "/admin", access_level: "editor" },
 ]
 
 async function main() {

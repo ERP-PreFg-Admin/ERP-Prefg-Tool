@@ -24,6 +24,7 @@ import { packingMaterials as pmSql } from "@/lib/queries/packing-materials"
 import { buildCsv, buildXlsx, buildExportFilename } from "@/lib/export"
 import { PM_VENDOR_EXPORT_COLUMNS, PM_MFG_EXPORT_COLUMNS } from "@/lib/export-configs"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { getUserScope } from "@/lib/scope"
 import logger from "@/lib/logger"
 
 const ROW_LIMIT = 50_000
@@ -43,6 +44,7 @@ export const GET = withGateway({
   const viewLabel = isMfg ? "MFG" : "VEN"
   const sheetName = isMfg ? "PM_MRM" : "PM_VRM"
 
+  const scope = await getUserScope(Number(session.user.id))
   let filterParams: unknown[]
   if (isMfg) {
     const mfgCode     = sp.get("mfg_code")           ?? ""
@@ -52,7 +54,7 @@ export const GET = withGateway({
     const makeFilter = sp.get("make") ?? ""
     filterParams = pmSql.mfgFilterParams(
       search || null, status || null, makeFilter || null, mfgCode || null,
-      mfgRateMin || null, mfgRateMax || null, mfgEffFrom || null
+      mfgRateMin || null, mfgRateMax || null, mfgEffFrom || null, scope
     )
   } else {
     const make        = sp.get("make")          ?? ""
@@ -62,7 +64,7 @@ export const GET = withGateway({
     const effectiveFrom = sp.get("effective_from") ?? ""
     filterParams = pmSql.vendorFilterParams(
       search || null, status || null, make || null,
-      vendorCode || null, rateMin || null, rateMax || null, effectiveFrom || null
+      vendorCode || null, rateMin || null, rateMax || null, effectiveFrom || null, scope
     )
   }
 

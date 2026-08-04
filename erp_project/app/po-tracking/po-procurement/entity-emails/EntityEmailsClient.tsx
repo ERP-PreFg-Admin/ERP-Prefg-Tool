@@ -42,6 +42,7 @@ export default function EntityEmailsClient({
   currentType,
   vendorOptions,
   mfgOptions,
+  warehouseOptions,
   canEdit,
 }: {
   rows: EntityEmailRow[]
@@ -52,6 +53,7 @@ export default function EntityEmailsClient({
   currentType: string
   vendorOptions: EntityOption[]
   mfgOptions: EntityOption[]
+  warehouseOptions: EntityOption[]
   canEdit: boolean
 }) {
   const router       = useRouter()
@@ -85,6 +87,7 @@ export default function EntityEmailsClient({
           <option value="">All Types</option>
           <option value="vendor">Vendor</option>
           <option value="mfg">Manufacturer</option>
+          <option value="warehouse">Warehouse</option>
         </select>
         <MasterToolbarActions>
           <Button
@@ -145,6 +148,7 @@ export default function EntityEmailsClient({
         onClose={() => setShowAdd(false)}
         vendorOptions={vendorOptions}
         mfgOptions={mfgOptions}
+        warehouseOptions={warehouseOptions}
         onSaved={() => { setShowAdd(false); router.refresh() }}
       />
     </>

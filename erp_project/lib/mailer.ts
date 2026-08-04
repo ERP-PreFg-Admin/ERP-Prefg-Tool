@@ -4,6 +4,7 @@ import { query } from "@/lib/db"
 import { generatePoPdf, type PoEmailData } from "@/lib/pdf/po-document"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { entityEmails } from "@/lib/queries/entity-emails"
+import { fetchPurchaseOrderPdf } from "@/lib/uniware"
 import { buildMultiSheetXlsx, type ExportColumn } from "@/lib/export"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
@@ -69,13 +70,20 @@ export async function fetchPoData(poId: number): Promise<PoEmailData | null> {
 }
 
 /**
- * All email addresses to notify for a manufacturer: the single primary
- * contact on details_mfg.email (if set) plus every address entered against
- * this manufacturer in the entity_emails contact list (/po-tracking/
- * po-procurement/entity-emails) — deduped case-insensitively.
+ * All email addresses to notify for one entity: an optional primary contact
+ * (details_mfg.email for a manufacturer; warehouses have none) plus every
+ * address entered against it in the entity_emails contact list
+ * (/po-tracking/po-procurement/entity-emails) — deduped case-insensitively.
+ *
+ * `entityCode` is whatever that list is keyed by: the mfg/vendor code, or a
+ * warehouse's name, which is what purchase_orders.destination stores.
  */
-export async function resolveMfgRecipients(mfgCode: string, primaryEmail: string | null): Promise<string[]> {
-  const rows = await query<{ email: string }>(entityEmails.selectByEntity, ["mfg", mfgCode])
+export async function resolveRecipients(
+  entityType: "mfg" | "vendor" | "warehouse",
+  entityCode: string,
+  primaryEmail: string | null = null
+): Promise<string[]> {
+  const rows = await query<{ email: string }>(entityEmails.selectByEntity, [entityType, entityCode])
   const seen = new Set<string>()
   const recipients: string[] = []
   for (const raw of [primaryEmail, ...rows.map((r) => r.email)]) {
@@ -97,20 +105,24 @@ type OngoingPoLine = { po_no: string; sku_code: string; sku_name: string | null;
 // etc.) just show up in the summary table with no attachment.
 const ATTACHABLE_STATUSES = new Set(["raised", "cancelled"])
 
+const escapeHtml = (s: string) =>
+  s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!))
+
 function poTableRows(lines: { po_no: string; sku_code: string; sku_name: string | null; qty: number }[]): string {
   return lines
     .map(
       (l) => `
         <tr>
-          <td style="padding:6px 12px;border-bottom:1px solid #eee">${l.po_no}</td>
-          <td style="padding:6px 12px;border-bottom:1px solid #eee">${l.sku_code}${l.sku_name ? " — " + l.sku_name : ""}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee">${escapeHtml(l.po_no)}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee">${escapeHtml(l.sku_code)}${l.sku_name ? " — " + escapeHtml(l.sku_name) : ""}</td>
           <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${Number(l.qty).toLocaleString("en-IN")}</td>
         </tr>`
     )
     .join("")
 }
 
-function poSection(title: string, lines: { po_no: string; sku_code: string; sku_name: string | null; qty: number }[]): string {
+export function poSection(title: string, lines: { po_no: string; sku_code: string; sku_name: string | null; qty: number }[]): string {
   if (lines.length === 0) return ""
   return `
     <h3 style="margin:20px 0 4px;font-size:14px">${title}</h3>
@@ -161,7 +173,7 @@ export async function sendMfgSelectionEmail(
     return false
   }
 
-  const recipients = await resolveMfgRecipients(mfg.code, mfg.email)
+  const recipients = await resolveRecipients("mfg", mfg.code, mfg.email)
   if (recipients.length === 0) {
     logger.warn({ ...ctx, mfgId, message: "sendMfgSelectionEmail: manufacturer has no email on file, skipping" })
     return false
@@ -240,10 +252,12 @@ export async function sendMfgSelectionEmail(
 
 // ── Inward invoice notification ──────────────────────────────────────────────
 // Sent when an invoice is turned into inward POs. Deliberately not
-// sendMfgSelectionEmail: that one reports PO status and attaches PO documents
-// we generate. Here the manufacturer already knows the order — what they need
-// is the paperwork for goods that have arrived, so the invoice we read is the
-// attachment and the mail is a covering note, not a report.
+// sendMfgSelectionEmail: that one reports PO status to the manufacturer and
+// attaches PO documents we generate. This one goes to the receiving warehouse
+// instead — the manufacturer already knows the order and shipped the goods; it
+// is the warehouse that needs the paperwork for stock arriving at their door.
+// So the invoice we read is the attachment, the SKU summary says what to
+// expect, and the mail is a covering note rather than a report.
 
 /** "2-AUG-26" — the format the MIS team uses in these subjects. */
 function subjectDate(value: string | null): string {
@@ -259,12 +273,15 @@ function subjectDate(value: string | null): string {
   return `${d.getDate()}-${mon}-${String(d.getFullYear()).slice(-2)}`
 }
 
-const escapeHtml = (s: string) =>
-  s.replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!))
-
 export type InwardInvoiceMail = {
+  /** Whose goods these are — named in the subject, not mailed. */
   mfgId: number
+  /**
+   * The receiving warehouse: purchase_orders.destination, which stores a
+   * master_warehouse.name. Recipients are the entity_emails rows filed under
+   * entity_type 'warehouse' with this exact name as the code.
+   */
+  destination: string
   invoiceNo: string
   /** Invoice date as entered on the review form (YYYY-MM-DD). */
   invoiceDate: string | null
@@ -272,22 +289,26 @@ export type InwardInvoiceMail = {
   uniwarePoCode: string | null
   /** The original invoice, attached as-is. */
   invoicePdf: { filename: string; content: Buffer } | null
+  /** The inward POs this invoice created — summarised in the body so the
+   *  warehouse can check what to expect without opening the PDF. */
+  items: { po_no: string; sku_code: string; sku_name: string | null; qty: number }[]
   /** Signed by whoever filed the invoice, not a name baked into the repo. */
   senderName: string
 }
 
 /**
- * Notify the manufacturer that an invoice has been inwarded.
+ * Notify the receiving warehouse that an invoice has been inwarded.
  *
  * Returns false (rather than throwing) when there's no one to send to — a
- * manufacturer with no email on file is a data gap, not a failure of the
- * invoice, which is already committed by the time this runs.
+ * warehouse with no email on file is a data gap, not a failure of the invoice,
+ * which is already committed by the time this runs.
  */
 export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<boolean> {
-  const { mfgId, invoiceNo, invoiceDate, uniwarePoCode, invoicePdf, senderName } = mail
+  const { mfgId, destination, invoiceNo, invoiceDate, uniwarePoCode, invoicePdf, items, senderName } = mail
 
-  const mfgRows = await query<{ code: string; name: string; email: string | null }>(
-    `SELECT m.code, m.name, d.email FROM master_mfgs m JOIN details_mfg d ON d.mfg_id = m.id WHERE m.id = ? LIMIT 1`,
+  // Only for the subject line — the manufacturer is not a recipient here.
+  const mfgRows = await query<{ code: string; name: string }>(
+    `SELECT code, name FROM master_mfgs WHERE id = ? LIMIT 1`,
     [mfgId]
   )
   const mfg = mfgRows[0]
@@ -296,25 +317,47 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
     return false
   }
 
-  const recipients = await resolveMfgRecipients(mfg.code, mfg.email)
+  const recipients = await resolveRecipients("warehouse", destination)
   if (recipients.length === 0) {
-    logger.warn({ ...ctx, mfgId, message: "sendInwardInvoiceEmail: manufacturer has no email on file, skipping" })
+    logger.warn({
+      ...ctx, mfgId, destination,
+      message: "sendInwardInvoiceEmail: warehouse has no email on file, skipping",
+    })
     return false
   }
 
+  // Subject format left as the MIS team wrote it, even though the audience
+  // moved — the destination is on the body's summary table instead.
   const dated = subjectDate(invoiceDate)
   const subject =
     `Create PO : ${mfg.name.toUpperCase()} || Invoice No : ${invoiceNo}` + (dated ? ` || ${dated}` : "")
 
   const attachments: { filename: string; content: Buffer }[] = []
   if (invoicePdf) attachments.push(invoicePdf)
-  // The Uniware PO belongs here too, but Unicommerce exposes no endpoint to
-  // download one — only create and approve. Add it here once that's available.
+
+  // The Uniware PO document alongside the invoice, so the warehouse has both
+  // halves of the paperwork. Best-effort: the goods are already booked and the
+  // invoice is the attachment that matters, so a Uniware hiccup downgrades the
+  // mail rather than blocking it.
+  if (uniwarePoCode) {
+    try {
+      const poPdf = await fetchPurchaseOrderPdf(uniwarePoCode)
+      // Codes carry slashes (GM/2627/PO/2006) — not a filename.
+      const safeCode = uniwarePoCode.replace(/[^a-zA-Z0-9._-]/g, "-")
+      attachments.push({ filename: `Uniware-PO-${safeCode}.pdf`, content: poPdf })
+    } catch (err: unknown) {
+      logger.error({
+        ...ctx, mfgId, destination, invoiceNo, uniwarePoCode,
+        err: err instanceof Error ? err.message : String(err),
+        message: "Uniware PO document could not be downloaded — sending without it",
+      })
+    }
+  }
 
   const eventId = makeEventId("PO_INWARD_INVOICE_EMAIL", "send", mfgId)
   recordRawEvent("PO_INWARD_INVOICE_EMAIL", eventId, {
-    mfgId, mfg_name: mfg.name, invoiceNo, uniwarePoCode,
-    mfg_email: recipients.join(", "), attachmentCount: attachments.length,
+    mfgId, mfg_name: mfg.name, destination, invoiceNo, uniwarePoCode,
+    warehouse_email: recipients.join(", "), attachmentCount: attachments.length,
   })
 
   try {
@@ -326,6 +369,7 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
         <div style="font-family:sans-serif;max-width:620px;margin:auto;color:#111;font-size:14px;line-height:1.6">
           <p style="margin:0">PFA</p>
           ${uniwarePoCode ? `<p style="margin:12px 0 0;font-weight:600">${escapeHtml(uniwarePoCode)}</p>` : ""}
+          ${poSection(`Items Inwarded at ${escapeHtml(destination)}`, items)}
           <p style="margin:20px 0 0">Thanks &amp; Regards<br>${escapeHtml(senderName)}<br>${escapeHtml(MAIL_SIGNATURE_TITLE)}</p>
         </div>
       `,
@@ -333,15 +377,15 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
     })
   } catch (sendErr: unknown) {
     const message = sendErr instanceof Error ? sendErr.message : String(sendErr)
-    logger.error({ ...ctx, eventId, mfgId, invoiceNo, err: message, message: "Inward invoice email send failed" })
-    recordFailedEvent("PO_INWARD_INVOICE_EMAIL", eventId, { mfgId, invoiceNo }, message)
+    logger.error({ ...ctx, eventId, mfgId, destination, invoiceNo, err: message, message: "Inward invoice email send failed" })
+    recordFailedEvent("PO_INWARD_INVOICE_EMAIL", eventId, { mfgId, destination, invoiceNo }, message)
     throw sendErr
   }
 
   logger.info({
-    ...ctx, eventId, mfgId, mfg_name: mfg.name, invoiceNo, uniwarePoCode,
-    mfg_email: recipients.join(", "), message: "Inward invoice email sent",
+    ...ctx, eventId, mfgId, mfg_name: mfg.name, destination, invoiceNo, uniwarePoCode,
+    warehouse_email: recipients.join(", "), message: "Inward invoice email sent to warehouse",
   })
-  recordProcessedEvent("PO_INWARD_INVOICE_EMAIL", eventId, { mfgId, invoiceNo, uniwarePoCode })
+  recordProcessedEvent("PO_INWARD_INVOICE_EMAIL", eventId, { mfgId, destination, invoiceNo, uniwarePoCode })
   return true
 }

@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
+import { getUserScope, inScope, scopeParams } from "@/lib/scope"
 import { redirect, notFound } from "next/navigation"
 import { timedQuery } from "@/lib/query-timing"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
@@ -63,6 +64,11 @@ export default async function ManufacturerDetailPage({
   const access = await resolveAccess(userId, session.user.roles, `/manufacturing/${id}`)
   if (access === "none") redirect("/auth/unauthorized")
 
+  // Page permission says whether the Cost Manager is usable at all; entity
+  // scope says which manufacturers. Both must pass.
+  const scope = await getUserScope(userId)
+  if (!inScope(scope, "mfg", id)) redirect("/auth/unauthorized")
+
   const sp = await searchParams
   const tabParam = String(sp.tab ?? "active")
   const tab = (VALID_TABS.includes(tabParam as MfgTab) ? tabParam : "active") as MfgTab
@@ -94,7 +100,14 @@ export default async function ManufacturerDetailPage({
         {tab === "misc_cost" && <MiscTabContent mfgId={id} />}
         {tab === "rm_vendor" && <RmVendorTabContent mfgId={id} />}
         {tab === "agreed_rates" && <AgreedRatesTabContent mfgId={id} />}
-        {tab === "final_costing" && <FinalCostingTabContent mfgId={id} />}
+        {tab === "final_costing" && (
+          // The min/max vendor-rate comparison spans every vendor, so this tab
+          // needs the vendor dimension of the scope too.
+          <FinalCostingTabContent
+            mfgId={id}
+            vendorScope={[...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds)]}
+          />
+        )}
         {tab === "common_rms" && <CommonRmsTable mfgId={id} />}
         {tab === "vendor_ing_mapping" && <VendorIngMappingClient mfgId={id} />}
       </div>
@@ -149,14 +162,14 @@ async function AgreedRatesTabContent({ mfgId }: { mfgId: number }) {
   return <AgreedRatesClient mfgId={mfgId} rmRows={rmRows} pmRows={pmRows} />
 }
 
-async function FinalCostingTabContent({ mfgId }: { mfgId: number }) {
+async function FinalCostingTabContent({ mfgId, vendorScope }: { mfgId: number; vendorScope: unknown[] }) {
   const [lineRows, materialCostRows, miscCostRows, bomLineInputRows, minMaxRmRows, minMaxPmRows] = await Promise.all([
     timedQuery<MfgLine>(manufacturingSql.selectLiveLinesByMfg, [mfgId], { label: "manufacturing.selectLiveLinesByMfg (costing)" }),
     timedQuery<{ bom_id: number; rm_cost: string; pm_cost: string }>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId], { label: "manufacturing.selectMaterialCostByMfg" }),
     timedQuery<{ bom_id: number; type: MiscCostType; cost: string }>(manufacturingSql.selectMiscCostsByMfg, [mfgId], { label: "manufacturing.selectMiscCostsByMfg" }),
     timedQuery<BomLineInputRow>(manufacturingSql.selectBomLineInputsByMfg, [mfgId], { label: "manufacturing.selectBomLineInputsByMfg" }),
-    timedQuery<MinMaxRateRow>(rawMaterials.selectMinMaxVrmRateByRm, [], { label: "rawMaterials.selectMinMaxVrmRateByRm" }),
-    timedQuery<MinMaxRateRow>(packingMaterials.selectMinMaxVrmRateByPm, [], { label: "packingMaterials.selectMinMaxVrmRateByPm" }),
+    timedQuery<MinMaxRateRow>(rawMaterials.selectMinMaxVrmRateByRm, vendorScope, { label: "rawMaterials.selectMinMaxVrmRateByRm" }),
+    timedQuery<MinMaxRateRow>(packingMaterials.selectMinMaxVrmRateByPm, vendorScope, { label: "packingMaterials.selectMinMaxVrmRateByPm" }),
   ])
 
   const materialByBom = new Map(materialCostRows.map((r) => [r.bom_id, { rm: Number(r.rm_cost), pm: Number(r.pm_cost) }]))

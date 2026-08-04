@@ -11,6 +11,7 @@ import { skus as skusSql } from "@/lib/queries/skus"
 import { manufacturers as mfgsSql } from "@/lib/queries/manufacturers"
 import { deleteFile } from "@/lib/s3"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { assertPoInScope } from "@/lib/po-guard"
 import { poIdParamSchema } from "@/lib/validation/purchase-order-detail"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
@@ -21,6 +22,9 @@ export const PUT = withGateway({
   handler: async ({ req, params, session }) => {
   const userId = Number(session.user.id)
   const poId = params.id
+  // PO ids are sequential integers, so the filtered list isn't a boundary —
+  // this refuses a PO belonging to an out-of-scope manufacturer/warehouse.
+  await assertPoInScope(Number(session.user.id), poId)
 
   const body = await req.json()
   const { mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, reason } = body
@@ -135,6 +139,9 @@ export const PATCH = withGateway({
   handler: async ({ req, params, session, ctx }) => {
   const userId = Number(session.user.id)
   const poId = params.id
+  // PO ids are sequential integers, so the filtered list isn't a boundary —
+  // this refuses a PO belonging to an out-of-scope manufacturer/warehouse.
+  await assertPoInScope(Number(session.user.id), poId)
 
   const { attachment_key } = await req.json()
 

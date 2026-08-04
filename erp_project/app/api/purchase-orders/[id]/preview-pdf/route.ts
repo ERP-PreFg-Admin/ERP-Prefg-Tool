@@ -8,6 +8,7 @@ import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { fetchPoData } from "@/lib/mailer"
 import { generatePoPdf } from "@/lib/pdf/po-document"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { assertPoInScope } from "@/lib/po-guard"
 import { ApiError } from "@/lib/gateway/errors"
 import { poIdParamSchema } from "@/lib/validation/purchase-order-detail"
 import logger from "@/lib/logger"
@@ -16,8 +17,11 @@ import { recordProcessedEvent, recordFailedEvent , makeEventId, recordRawEvent }
 export const GET = withGateway({
   paramsSchema: poIdParamSchema,
   access: { pageSlug: "/po-tracking", level: "viewer" },
-  handler: async ({ params, ctx }) => {
+  handler: async ({ params, session, ctx }) => {
     const poId = params.id
+    // PO ids are sequential integers, so the filtered list isn't a boundary —
+    // this refuses a PO belonging to an out-of-scope manufacturer/warehouse.
+    await assertPoInScope(Number(session.user.id), poId)
     const eventId = makeEventId("PO_PREVIEW_PDF", "preview", poId)
     recordRawEvent("PO_PREVIEW_PDF", eventId, { poId })
     logger.info({ ...ctx, poId, message: "PO PDF preview requested" })

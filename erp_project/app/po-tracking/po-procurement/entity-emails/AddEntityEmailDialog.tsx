@@ -9,8 +9,16 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
-type EntityType = "vendor" | "mfg"
+type EntityType = "vendor" | "mfg" | "warehouse"
 type EntityOption = { id: number; code: string; name: string }
+
+const TYPE_LABEL: Record<EntityType, string> = {
+  mfg: "Manufacturer",
+  vendor: "Vendor",
+  // Warehouses are keyed by name, not a code — that's what
+  // purchase_orders.destination stores, and what the inward mail looks up.
+  warehouse: "Warehouse",
+}
 type EmailRow = { email: string; purpose: string }
 
 const selectCls =
@@ -19,13 +27,14 @@ const selectCls =
 const emptyRow = (): EmailRow => ({ email: "", purpose: "" })
 
 export default function AddEntityEmailDialog({
-  open, onClose, onSaved, vendorOptions, mfgOptions,
+  open, onClose, onSaved, vendorOptions, mfgOptions, warehouseOptions,
 }: {
   open: boolean
   onClose: () => void
   onSaved: () => void
   vendorOptions: EntityOption[]
   mfgOptions: EntityOption[]
+  warehouseOptions: EntityOption[]
 }) {
   const [entityType, setEntityType] = useState<EntityType>("mfg")
   const [entityCode, setEntityCode] = useState("")
@@ -42,7 +51,10 @@ export default function AddEntityEmailDialog({
     setApiError("")
   }, [open])
 
-  const codeOptions = entityType === "vendor" ? vendorOptions : mfgOptions
+  const codeOptions =
+    entityType === "vendor" ? vendorOptions
+    : entityType === "warehouse" ? warehouseOptions
+    : mfgOptions
 
   function updateRow(i: number, patch: Partial<EmailRow>) {
     setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)))
@@ -98,10 +110,11 @@ export default function AddEntityEmailDialog({
               >
                 <option value="mfg">Manufacturer</option>
                 <option value="vendor">Vendor</option>
+                <option value="warehouse">Warehouse</option>
               </select>
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="ee-code">{entityType === "vendor" ? "Vendor" : "Manufacturer"}</Label>
+              <Label htmlFor="ee-code">{TYPE_LABEL[entityType]}</Label>
               <select id="ee-code" value={entityCode} className={selectCls} onChange={(e) => setEntityCode(e.target.value)}>
                 <option value="">— Select —</option>
                 {codeOptions.map((o) => (

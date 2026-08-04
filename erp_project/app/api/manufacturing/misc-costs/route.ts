@@ -14,13 +14,31 @@ import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { miscCostActionSchema, miscCostTypeSchema } from "@/lib/validation/manufacturing"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
+import { getUserScope, assertInScope } from "@/lib/scope"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 
 export const POST = withGateway({
   schema: miscCostActionSchema,
   access: { pageSlug: "/manufacturing", level: "editor" },
-  handler: async ({ req, body, ctx }) => {
+  handler: async ({ req, body, session, ctx }) => {
+    // Entity scope, before any write. Each action names its manufacturer
+    // differently: create in the body, update only by row id (resolve it),
+    // bulk in the mfg_id query param.
+    const scope = await getUserScope(Number(session.user.id))
+    if (body.action === "create-misc") {
+      assertInScope(scope, "mfg", body.mfg_id)
+    } else if (body.action === "update-misc") {
+      const owner = await query<{ mfg_id: number }>(manufacturingSql.selectMiscLineById, [body.id])
+      if (owner.length === 0) throw new ApiError(404, "not_found", "Misc. cost line not found")
+      assertInScope(scope, "mfg", owner[0].mfg_id)
+    } else {
+      // "bulk": the branch below validates this param itself, so only assert a
+      // well-formed value here — a missing one must still return 400, not 403.
+      const bulkMfgId = Number(req.nextUrl.searchParams.get("mfg_id"))
+      if (Number.isFinite(bulkMfgId) && bulkMfgId > 0) assertInScope(scope, "mfg", bulkMfgId)
+    }
+
     if (body.action === "create-misc") {
       const eventId = makeEventId("MFG_MISC_COST", "create", `${body.mfg_id}-${body.bom_id}-${body.type}`)
       const logCtx = { ...ctx, eventId, module: "MFG_MISC_COST_CREATE" }

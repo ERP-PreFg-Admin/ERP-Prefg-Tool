@@ -9,14 +9,19 @@ import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } 
 import type { PoolConnection } from "mysql2/promise"
 import logger from "@/lib/logger"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { getUserScope, scopeParams, assertInScope } from "@/lib/scope"
 import { ApiError } from "@/lib/gateway/errors"
 import { poActionSchema } from "@/lib/validation/purchase-orders"
 
-// GET /api/purchase-orders — list all POs with MFG + SKU details
+// GET /api/purchase-orders — list all POs the caller is scoped to, with MFG + SKU details
 export const GET = withGateway({
   access: { pageSlug: "/po-tracking", level: "viewer" },
-  handler: async () => {
-    const rows = await query<any>(purchaseOrdersSql.selectAll, [])
+  handler: async ({ session }) => {
+    const scope = await getUserScope(Number(session.user.id))
+    const rows = await query<any>(purchaseOrdersSql.selectAll, [
+      ...scopeParams(scope.mfgIds),
+      ...scopeParams(scope.warehouseNames),
+    ])
     return NextResponse.json(rows)
   },
 })
@@ -74,6 +79,12 @@ export const POST = withGateway({
   // ── end bulk ────────────────────────────────────────────────────────────────
 
   const { mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, reason, po_type } = body
+
+  // A user can't raise a PO against a manufacturer or into a warehouse they
+  // aren't scoped to, even though the dropdowns already exclude both.
+  const scope = await getUserScope(userId)
+  assertInScope(scope, "mfg", mfg_id)
+  if (destination) assertInScope(scope, "warehouse", destination)
 
   // Resolve brand from SKU and validate status in one query
   const skuRows = await query<{ status: string; brand: string | null }>(
