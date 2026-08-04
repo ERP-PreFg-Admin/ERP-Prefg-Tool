@@ -37,4 +37,21 @@ export const BOM_BULK_CSV_FIELDS: MasterField[] = [
       Number.isFinite(Number(raw)) && Number(raw) > 0 ? null : `must be a positive number (got "${raw}")`,
   },
   { key: "uom", label: "UOM", placeholder: "e.g. kg", sample: "kg" },
+  {
+    key: "reason", label: "Reason for Change",
+    placeholder: "Required if the SKU already has a BOM (once per SKU group)", sample: "",
+  },
+  {
+    key: "change_type", label: "Type of Change", type: "select",
+    placeholder: "Required if the SKU already has a BOM", sample: "",
+    options: [
+      { value: "rm", label: "RM change" },
+      { value: "pm", label: "PM change" },
+      { value: "both", label: "RM + PM change" },
+    ],
+    validate: (raw) =>
+      raw.trim() === "" || ["rm", "pm", "both"].includes(raw.trim().toLowerCase())
+        ? null
+        : `must be "rm", "pm", or "both" (got "${raw}")`,
+  },
 ]

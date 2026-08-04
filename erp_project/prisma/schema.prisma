@@ -294,8 +294,6 @@ model details_bom {
   mtrl_id                   Int
   amount                    Decimal                     @db.Decimal(12, 4)
   uom                       String?                     @db.VarChar(20)
-  effective_from            DateTime?                   @db.Date
-  effective_till            DateTime?                   @db.Date
   last_updated              DateTime?                   @default(now()) @db.Timestamp(0)
   status                    details_bom_status?         @default(active)
   updated_by                Int?
@@ -434,8 +432,6 @@ model history_bom {
   amount         Decimal?              @db.Decimal(12, 4)
   uom            String?               @db.VarChar(20)
   mtrl_cost      Decimal?              @db.Decimal(12, 4)
-  effective_from DateTime?             @db.Date
-  effective_till DateTime?             @db.Date
   last_updated   DateTime?             @default(now()) @db.Timestamp(0)
   status         history_bom_status?
   updated_by     Int?

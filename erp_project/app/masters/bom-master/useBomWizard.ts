@@ -52,6 +52,11 @@ export function useBomWizard({
   const [rmRows, setRmRows] = useState<BomLineRow[]>([])
   const [pmRows, setPmRows] = useState<BomLineRow[]>([])
   const [pendingArtifactFiles, setPendingArtifactFiles] = useState<File[]>([])
+  // Only required when existingBomId != null — i.e. Step 2 found this SKU
+  // already has an active BOM, so "Create New BOM Version" here is really an
+  // edit to an established recipe. Not required for a SKU's very first BOM.
+  const [reason, setReason] = useState("")
+  const [changeType, setChangeType] = useState<("rm" | "pm")[]>([])
 
   const isDirty = skuId != null || rmRows.length > 0 || pmRows.length > 0 || pendingArtifactFiles.length > 0
 
@@ -69,6 +74,8 @@ export function useBomWizard({
     setRmRows([])
     setPmRows([])
     setPendingArtifactFiles([])
+    setReason("")
+    setChangeType([])
     setLoading(false)
   }
 
@@ -154,7 +161,8 @@ export function useBomWizard({
   // effective_from is deliberately absent: it's optional, so a recipe can be
   // drafted before its start date is decided.
   const canProceedFromLines =
-    rmValid && allRmFieldsFilled && allPmFieldsFilled && effectiveFrom.trim().length > 0
+    rmValid && allRmFieldsFilled && allPmFieldsFilled && effectiveFrom.trim().length > 0 &&
+    (existingBomId == null || (reason.trim().length > 0 && changeType.length > 0))
 
   async function handleSubmit() {
     setError(null)
@@ -170,6 +178,10 @@ export function useBomWizard({
         setError("Every line requires a material and an amount.")
         return
       }
+    }
+    if (existingBomId != null && (!reason.trim() || changeType.length === 0)) {
+      setError("A reason and at least one type of change (RM/PM) are required when revising an existing BOM.")
+      return
     }
 
     setLoading(true)
@@ -197,6 +209,8 @@ export function useBomWizard({
           rm_lines: rmRows.map(toLine),
           pm_lines: pmRows.map(toLine),
           artifact_adds: artifactAdds,
+          reason: existingBomId != null ? reason.trim() : undefined,
+          change_type: existingBomId != null ? changeType : undefined,
         }),
       })
       const data = await res.json()
@@ -234,6 +248,10 @@ export function useBomWizard({
     setPmRows,
     pendingArtifactFiles,
     setPendingArtifactFiles,
+    reason,
+    setReason,
+    changeType,
+    setChangeType,
     requestClose,
     closeWizard,
     handleSelectSku,

@@ -17,9 +17,15 @@ type BomLineRowDiff = {
   fields: Record<string, { old: string; new: string }>
 }
 
+const CHANGE_TYPE_LABEL: Record<string, string> = { rm: "RM change", pm: "PM change" }
+
 function parseBomApprovalItems(items: Approval["items"]) {
   const modeItem = items.find((i) => i.field_name === "__mode__")
   const mode = modeItem?.new_value === "update-existing" ? "update-existing" : "new-version"
+
+  const reason = items.find((i) => i.field_name === "__reason__")?.new_value || null
+  const changeTypeItem = items.find((i) => i.field_name === "__change_type__")?.new_value
+  const changeTypes = changeTypeItem ? changeTypeItem.split(",").map((t) => CHANGE_TYPE_LABEL[t] ?? t) : []
 
   const lineMap = new Map<string, BomLineRowDiff>()
   for (const it of items) {
@@ -34,7 +40,7 @@ function parseBomApprovalItems(items: Approval["items"]) {
     if (field === "__removed__") entry.removed = true
     else entry.fields[field] = { old: it.old_value, new: it.new_value }
   }
-  return { mode, lines: [...lineMap.values()] }
+  return { mode, reason, changeTypes, lines: [...lineMap.values()] }
 }
 
 function materialLabel(mtrlType: "rm" | "pm", mtrlId: string, materialMap?: MaterialMap) {
@@ -44,7 +50,7 @@ function materialLabel(mtrlType: "rm" | "pm", mtrlId: string, materialMap?: Mate
 }
 
 export function BomLineDiffTable({ items, materialMap }: { items: Approval["items"]; materialMap?: MaterialMap }) {
-  const { mode, lines } = parseBomApprovalItems(items)
+  const { mode, reason, changeTypes, lines } = parseBomApprovalItems(items)
   const rmLines = lines.filter((l) => l.mtrlType === "rm")
   const pmLines = lines.filter((l) => l.mtrlType === "pm")
 
@@ -88,9 +94,20 @@ export function BomLineDiffTable({ items, materialMap }: { items: Approval["item
 
   return (
     <div className="space-y-4">
-      <Badge variant="secondary" className="text-[10px]">
-        {mode === "new-version" ? "New Version" : "Update Existing"}
-      </Badge>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="secondary" className="text-[10px]">
+          {mode === "new-version" ? "New Version" : "Update Existing"}
+        </Badge>
+        {changeTypes.map((label) => (
+          <Badge key={label} variant="secondary" className="text-[10px]">{label}</Badge>
+        ))}
+      </div>
+      {reason && (
+        <div className="rounded-md border border-border bg-muted/30 px-2.5 py-1.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">Reason for change</p>
+          <p className="text-sm">{reason}</p>
+        </div>
+      )}
       {rmLines.length > 0 && (
         <div className="space-y-3">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">

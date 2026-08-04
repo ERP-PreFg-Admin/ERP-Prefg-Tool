@@ -10,6 +10,7 @@ import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { approvalsSql, entityLabelSql } from "@/lib/queries/approvals"
 import { historySql } from "@/lib/queries/history"
+import { bom as bomSql } from "@/lib/queries/bom"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import logger from "@/lib/logger"
@@ -31,17 +32,40 @@ export const GET = withGateway({
     const logCtx = { ...ctx, route: "/api/approvals/entity-history", module: "GET_ENTITY_HISTORY" }
 
     try {
-      const rows = await query<any>(approvalsSql.listHistoryForEntity, [module, entityId])
+      let rows: any[]
+      if (module === "BOM") {
+        // RM/PM version independently, so a SKU can accumulate many
+        // master_bom rows (one per version) over time. Resolve the clicked
+        // BOM's sku_id, then pull every version's approval for that SKU so
+        // the dialog shows one linked recipe-edit trail, not just the single
+        // version that happened to be clicked.
+        const headerRows = await query<{ sku_id: number | null }>(bomSql.selectBomHeaderRawById, [entityId])
+        const skuId = headerRows[0]?.sku_id ?? null
+        if (skuId != null) {
+          const bomRows = await query<{ bom_id: number }>(bomSql.selectBomsBySkuId, [skuId])
+          const bomIds = bomRows.map((r) => r.bom_id)
+          rows = bomIds.length > 0 ? await query<any>(approvalsSql.listHistoryForBomIds, [bomIds]) : []
+        } else {
+          rows = await query<any>(approvalsSql.listHistoryForEntity, [module, entityId])
+        }
+      } else {
+        rows = await query<any>(approvalsSql.listHistoryForEntity, [module, entityId])
+      }
 
       const approvals = await Promise.all(
         rows.map(async (a) => {
+          // Use each row's OWN entity_id for label/remarks resolution, not
+          // the originally-clicked entityId — for BOM these can now differ
+          // (a linked trail spans multiple bom_ids); for every other module
+          // they're always the same value, so this is a no-op there.
+          const rowEntityId = a.entity_id
           const [items, labelRows, remarksRows] = await Promise.all([
             query<any>(approvalsSql.getItems, [a.id]),
-            query<any>(entityLabelSql[module], [entityId]),
+            query<any>(entityLabelSql[module], [rowEntityId]),
             // Only the currently-pending row (if any) can be reliably matched
             // to a history_masters_edits row — see selectPendingRemarks.
             a.status === "pending"
-              ? query<{ remarks: string | null }>(historySql.selectPendingRemarks, [module, entityId])
+              ? query<{ remarks: string | null }>(historySql.selectPendingRemarks, [module, rowEntityId])
               : Promise.resolve([]),
           ])
           const label = labelRows[0] ?? {}

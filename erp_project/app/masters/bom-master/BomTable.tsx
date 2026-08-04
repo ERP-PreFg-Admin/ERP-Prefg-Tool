@@ -6,7 +6,8 @@
  * and is passed in.
  */
 
-import { Pencil } from "lucide-react"
+import { Pencil, History as HistoryIcon, Factory } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
@@ -19,8 +20,9 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { PaginationBar } from "@/components/ui/pagination-bar"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { formatDate, LOCKED_STATUSES } from "./bom-format"
+import { formatDate, formatChangeType, LOCKED_STATUSES } from "./bom-format"
 import { StatusBadge } from "@/components/masters/StatusBadge"
 import type { BomListItem } from "@/types/masters"
 
@@ -36,6 +38,7 @@ export function BomTable({
   onRowClick,
   onPrefetch,
   onEdit,
+  onHistory,
 }: {
   rows: BomListItem[]
   total: number
@@ -48,6 +51,7 @@ export function BomTable({
   onRowClick: (bomId: number) => void
   onPrefetch: (bomId: number | null) => void
   onEdit: (bomId: number) => void
+  onHistory: (bomId: number) => void
 }) {
   return (
     <Card>
@@ -63,13 +67,16 @@ export function BomTable({
               <TableHead>Effective From</TableHead>
               <TableHead>Effective Till</TableHead>
               <TableHead>Status</TableHead>
-              {canEdit && <TableHead className="w-10" />}
+              <TableHead>Type of Change</TableHead>
+              <TableHead>Reason</TableHead>
+              <TableHead>Live Mfgs</TableHead>
+              <TableHead className="w-20">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={canEdit ? 8 : 7} className="text-center text-muted-foreground py-10">
+                <TableCell colSpan={11} className="text-center text-muted-foreground py-10">
                   {hasFilters ? "No BOM records match your filters." : "No records found."}
                 </TableCell>
               </TableRow>
@@ -96,27 +103,72 @@ export function BomTable({
                   <TableCell>
                     <StatusBadge status={row.status} />
                   </TableCell>
-                  {canEdit && (
-                    <TableCell>
+                  <TableCell className="text-sm whitespace-nowrap">{formatChangeType(row.change_type)}</TableCell>
+                  <TableCell className="text-sm max-w-[220px] truncate" title={row.change_reason ?? undefined}>
+                    {row.change_reason ?? "—"}
+                  </TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    {row.live_mfg_count > 0 ? (
+                      <TooltipProvider delayDuration={150}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Badge variant="outline" className="gap-1 cursor-default">
+                              {/* <Factory className="h-3 w-3" /> */}
+                              {row.live_mfg_count}
+                            </Badge>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-[280px]">
+                            {row.live_mfg_names ? (
+                              <div className="space-y-0.5">
+                                {row.live_mfg_names.split(", ").map((name) => (
+                                  <div key={name}>{name}</div>
+                                ))}
+                              </div>
+                            ) : (
+                              "—"
+                            )}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">0</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-0.5">
+                      {canEdit && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          disabled={LOCKED_STATUSES.has(row.status ?? "")}
+                          title={
+                            LOCKED_STATUSES.has(row.status ?? "")
+                              ? "This BOM has a pending approval"
+                              : "Edit"
+                          }
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (row.bom_id != null) onEdit(row.bom_id)
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                       <Button
                         size="icon"
                         variant="ghost"
                         className="h-7 w-7"
-                        disabled={LOCKED_STATUSES.has(row.status ?? "")}
-                        title={
-                          LOCKED_STATUSES.has(row.status ?? "")
-                            ? "This BOM has a pending approval"
-                            : "Edit"
-                        }
+                        title="History"
                         onClick={(e) => {
                           e.stopPropagation()
-                          if (row.bom_id != null) onEdit(row.bom_id)
+                          if (row.bom_id != null) onHistory(row.bom_id)
                         }}
                       >
-                        <Pencil className="h-3.5 w-3.5" />
+                        <HistoryIcon className="h-3.5 w-3.5" />
                       </Button>
-                    </TableCell>
-                  )}
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))
             )}

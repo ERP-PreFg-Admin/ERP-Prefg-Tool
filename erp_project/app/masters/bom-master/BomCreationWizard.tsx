@@ -122,6 +122,11 @@ export function BomCreationWizard({
                     pmMaterials={pmMaterials}
                     pendingArtifactFiles={wizard.pendingArtifactFiles}
                     onChangePendingArtifactFiles={wizard.setPendingArtifactFiles}
+                    isRevision={wizard.existingBomId != null}
+                    reason={wizard.reason}
+                    onChangeReason={wizard.setReason}
+                    changeType={wizard.changeType}
+                    onChangeChangeType={wizard.setChangeType}
                   />
                 )}
 
@@ -134,6 +139,9 @@ export function BomCreationWizard({
                     pmRows={wizard.pmRows}
                     rmMaterials={rmMaterials}
                     pmMaterials={pmMaterials}
+                    isRevision={wizard.existingBomId != null}
+                    reason={wizard.reason}
+                    changeType={wizard.changeType}
                   />
                 )}
               </div>

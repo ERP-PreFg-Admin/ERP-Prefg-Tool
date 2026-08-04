@@ -8,6 +8,15 @@
 // (see app/api/masters/bom-master/route.ts for how they're written at submit
 // time):
 //   - a "__mode__" sentinel item: new_value is "new-version" | "update-existing"
+//   - a "__reason__" / "__change_type__" sentinel item (optional — omitted
+//     for the very first BOM created for a SKU): the submitter's free-text
+//     reason and comma-joined "rm"/"pm" change-type tags. Neither is
+//     consumed here — parseBomLineItems below only cares about line:*/
+//     artifact:* items — they exist purely for the approval/history UI
+//     (app/approvals/approval-card/BomLineDiffTable.tsx). Kept as sentinel
+//     approval_items rather than a new approvals column so they don't
+//     collide with approvals.remarks, which already means the APPROVER's
+//     rejection note.
 //   - one item per (mtrl_type, mtrl_id, field) tuple: field_name =
 //     "line:<rm|pm>:<mtrl_id>:<field>", e.g. "line:rm:12:amount"
 //   - a dropped line (present before, absent from the new submission) gets a
@@ -38,6 +47,8 @@ import { skus as skuSql } from "@/lib/queries/skus"
 import { rawMaterials as rmSql } from "@/lib/queries/raw-materials"
 import { packingMaterials as pmSql } from "@/lib/queries/packing-materials"
 import { bom as bomSql } from "@/lib/queries/bom"
+import { approvalsSql } from "@/lib/queries/approvals"
+import { diffBomLines, type DiffableLine } from "@/lib/masters/bom-version"
 import { isRmTotalValid } from "@/lib/validation/bom"
 import { deleteFile } from "@/lib/s3"
 import { parseS3Import } from "@/lib/import-s3"
@@ -116,8 +127,7 @@ export const bomHandler: ModuleHandler = {
       for (const cur of currentRows as any[]) {
         await conn.execute(bomSql.archiveDetailLineToHistory, [
           cur.bom_id, cur.mtrl_type, cur.mtrl_id, cur.amount, cur.uom, null,
-          cur.effective_from, cur.effective_till, cur.status, cur.updated_by ?? approverId,
-          approverId,
+          cur.status, cur.updated_by ?? approverId, approverId,
         ])
       }
       // 2. Wipe current lines; the new set (minus removed ones) is reinserted below.
@@ -141,7 +151,7 @@ export const bomHandler: ModuleHandler = {
       if (mode === "new-version") {
         await conn.execute(bomSql.archiveDetailLineToHistory, [
           entityId, line.mtrlType, line.mtrlId, amount, uom, null,
-          null, null, "active", header.created_by, approverId,
+          "active", header.created_by, approverId,
         ])
       }
     }
@@ -182,7 +192,7 @@ export const bomHandler: ModuleHandler = {
       const siblingIds = (siblingRows as any[]).map((r) => r.id)
 
       if (siblingIds.length > 0) {
-        await conn.execute(bomSql.discontinueOtherActiveBomsForSku, [header.sku_id, entityId])
+        await conn.execute(bomSql.discontinueOverlappingActiveBomsForSku, [header.sku_id, entityId, header.effective_from])
         for (const siblingId of siblingIds) {
           const bomDeactivateEventId = makeEventId("BOM", "deactivate", siblingId)
           logger.info({ module: "BOM", eventId: bomDeactivateEventId, bomId: siblingId, skuId: header.sku_id, supersededBy: entityId, message: "BOM discontinued (superseded)" })
@@ -198,7 +208,7 @@ export const bomBulkHandler: ModuleHandler = {
     // No entity exists before approval — nothing to roll back on reject.
   },
 
-  async applyAndArchive(conn, _entityId, items, approverId) {
+  async applyAndArchive(conn, _entityId, items, approverId, raisedBy) {
     const s3Key = s3KeyOf(items, "BOM_BULK")
     const rows = await parseS3Import(s3Key)
     if (rows.length === 0) throw new Error("BOM_BULK: file has no data rows")
@@ -257,14 +267,59 @@ export const bomBulkHandler: ModuleHandler = {
           continue
         }
 
-        // Auto-generate bom_code when not supplied — same convention as the
-        // wizard's "suggest the next version's bom_code" (selectBomsBySkuId).
+        // Auto-generate bom_code when not supplied — same <sku_code>-RM<n>-PM<n>
+        // independent-version scheme the single-BOM wizard path uses (see
+        // lib/masters/bom-version.ts), so a bulk-uploaded BOM's code format
+        // never differs from a manually-created one.
         const providedCode = groupRows[0].bom_code?.trim()
-        const [existingBoms] = await conn.execute(bomSql.selectBomsBySkuId, [sku.id])
-        const bomCode = providedCode || `${skuCode}-BOM-V${(existingBoms as any[]).length + 1}`
+        const [priorRows] = await conn.execute(bomSql.selectMostRecentBomForSku, [sku.id])
+        const prior = (priorRows as { id: number; rm_version: number; pm_version: number }[])[0] ?? null
+        let priorLines: DiffableLine[] = []
+        if (prior) {
+          const [priorLineRows] = await conn.execute(bomSql.selectDetailLinesRawByBomId, [prior.id])
+          priorLines = (priorLineRows as any[]).map((r) => ({
+            mtrl_type: r.mtrl_type, mtrl_id: r.mtrl_id, amount: r.amount, uom: r.uom,
+          }))
+        }
+        const newLines: DiffableLine[] = lines.map((l) => ({
+          mtrl_type: l.mtrl_type, mtrl_id: l.mtrl_id, amount: l.amount, uom: l.uom,
+        }))
+        const { rmChanged, pmChanged } = diffBomLines(priorLines, newLines)
+        const rmVersion = !prior || rmChanged ? (prior?.rm_version ?? 0) + 1 : prior.rm_version
+        const pmVersion = !prior || pmChanged ? (prior?.pm_version ?? 0) + 1 : prior.pm_version
+        const bomCode = providedCode || `${skuCode}-RM${rmVersion}-PM${pmVersion}`
 
-        const [headerResult] = await conn.execute(bomSql.insertBomHeader, [bomCode, sku.id, approverId, STATUS.ACTIVE, effectiveFrom])
+        // Same "reason/change_type required once a prior BOM exists" rule the
+        // single-BOM path enforces — bulk upload is just a faster way to
+        // submit the SAME kind of change, not a different one, so it carries
+        // the same requirement (checked here again, authoritatively, even
+        // though check_duplicates already warned about it in the preview).
+        const reason = groupRows[0].reason?.trim() || null
+        const changeTypeRaw = groupRows[0].change_type?.trim().toLowerCase()
+        const changeType: ("rm" | "pm")[] =
+          changeTypeRaw === "both" ? ["rm", "pm"] : changeTypeRaw === "rm" || changeTypeRaw === "pm" ? [changeTypeRaw] : []
+        if (prior && (!reason || changeType.length === 0)) {
+          groupsSkipped++
+          skipReasons.push(`${skuCode}: reason and type of change are required — a BOM already exists for this SKU`)
+          continue
+        }
+
+        const [headerResult] = await conn.execute(bomSql.insertBomHeaderWithVersions, [
+          bomCode, sku.id, approverId, STATUS.ACTIVE, effectiveFrom, rmVersion, pmVersion,
+        ])
         const bomId = (headerResult as any).insertId
+
+        // Mirror the SAME "BOM" module approval record the single-BOM path
+        // raises at submit time (see app/api/masters/bom-master/route.ts) —
+        // already resolved/approved, since the data write above already
+        // happened. This is what makes a bulk-created version show up
+        // identically to a manual one in the row-level History dialog and
+        // the SKU-linked audit trail (both key off module='BOM' approvals).
+        const [approvalResult] = await conn.execute(approvalsSql.insertApproval, [raisedBy ?? approverId, "BOM", bomId, "create"])
+        const approvalId = (approvalResult as any).insertId
+        await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "__mode__", "", "new-version"])
+        if (reason) await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "__reason__", "", reason])
+        if (changeType.length > 0) await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "__change_type__", "", changeType.join(",")])
 
         for (const line of lines) {
           await conn.execute(bomSql.insertDetailLine, [
@@ -276,17 +331,29 @@ export const bomBulkHandler: ModuleHandler = {
           // lineage complete regardless of upload path.
           await conn.execute(bomSql.archiveDetailLineToHistory, [
             bomId, line.mtrl_type, line.mtrl_id, line.amount, line.uom, null,
-            null, null, "active", approverId, approverId,
+            "active", approverId, approverId,
           ])
+          // Line-level diff items for the synthetic approval above — every
+          // field is "new" (old_value "") since there's no prior state for a
+          // brand-new BOM header, same as create-full's own new-version mode.
+          await conn.execute(approvalsSql.insertApprovalItem, [approvalId, `line:${line.mtrl_type}:${line.mtrl_id}:__present__`, "1", "1"])
+          await conn.execute(approvalsSql.insertApprovalItem, [approvalId, `line:${line.mtrl_type}:${line.mtrl_id}:amount`, "", String(line.amount)])
+          await conn.execute(approvalsSql.insertApprovalItem, [approvalId, `line:${line.mtrl_type}:${line.mtrl_id}:uom`, "", line.uom ?? ""])
           linesInserted++
         }
+        // Already applied above — mark this synthetic approval resolved so
+        // it reads as "approved" in the audit trail rather than sitting
+        // pending forever.
+        await conn.execute(approvalsSql.markApproved, [approverId, approvalId])
 
         // Enforce "only one active BOM per SKU" — same invariant bomHandler
-        // applies for the single-BOM path.
+        // applies for the single-BOM path, gated the same way on effective_from
+        // overlap so a future-dated bulk-uploaded recipe doesn't prematurely
+        // discontinue the one it hasn't superseded yet.
         const [siblingRows] = await conn.execute(bomSql.selectOtherActiveBomsForSku, [sku.id, bomId])
         const siblingIds = (siblingRows as any[]).map((r) => r.id)
         if (siblingIds.length > 0) {
-          await conn.execute(bomSql.discontinueOtherActiveBomsForSku, [sku.id, bomId])
+          await conn.execute(bomSql.discontinueOverlappingActiveBomsForSku, [sku.id, bomId, effectiveFrom])
           for (const siblingId of siblingIds) {
             const deactivateEventId = makeEventId("BOM", "deactivate", siblingId)
             logger.info({ module: "BOM", eventId: deactivateEventId, bomId: siblingId, skuId: sku.id, supersededBy: bomId, message: "BOM discontinued (superseded by bulk upload)" })

@@ -27,3 +27,11 @@ export function formatDateInput(val: Date | string | null) {
 }
 
 export const LOCKED_STATUSES = new Set(["in_review", "in review"])
+
+const CHANGE_TYPE_LABEL: Record<string, string> = { rm: "RM change", pm: "PM change" }
+
+/** "rm,pm" (comma-joined approval_items.__change_type__ value) -> "RM change, PM change". */
+export function formatChangeType(val: string | null): string {
+  if (!val) return "—"
+  return val.split(",").map((t) => CHANGE_TYPE_LABEL[t] ?? t).join(", ")
+}

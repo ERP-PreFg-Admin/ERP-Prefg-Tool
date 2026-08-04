@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { BomLineEditorGrid, rmTotal, type BomLineRow, type BomMaterialOption } from "./BomLineEditorGrid"
 import { BomArtifactsEditor } from "./BomArtifactsEditor"
+import { ChangeTypeCheckboxes } from "./ChangeTypeCheckboxes"
 import { CSV_HEADER, buildBomCsvTemplate } from "./bom-csv"
 import type { EntryMethod } from "./useBomWizard"
 import type { Sku } from "@/types/masters"
@@ -120,6 +121,11 @@ export function Step4LineEntry({
   pmMaterials,
   pendingArtifactFiles,
   onChangePendingArtifactFiles,
+  isRevision,
+  reason,
+  onChangeReason,
+  changeType,
+  onChangeChangeType,
 }: {
   effectiveFrom: string
   onChangeEffectiveFrom: (v: string) => void
@@ -135,6 +141,13 @@ export function Step4LineEntry({
   pmMaterials: BomMaterialOption[]
   pendingArtifactFiles: File[]
   onChangePendingArtifactFiles: (files: File[]) => void
+  /** True when the picked SKU already has an active BOM — this submission
+   *  will be a revision, so reason + change type are required. */
+  isRevision: boolean
+  reason: string
+  onChangeReason: (v: string) => void
+  changeType: ("rm" | "pm")[]
+  onChangeChangeType: (v: ("rm" | "pm")[]) => void
 }) {
   return (
     <div className="space-y-4 py-2">
@@ -206,6 +219,17 @@ export function Step4LineEntry({
           onChangePendingRemoveIds={() => {}}
         />
       </div>
+
+      {isRevision && (
+        <div className="rounded-md border border-border bg-muted/30 px-3 py-2.5">
+          <ChangeTypeCheckboxes
+            reason={reason}
+            onChangeReason={onChangeReason}
+            changeType={changeType}
+            onChangeChangeType={onChangeChangeType}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -266,6 +290,9 @@ export function Step5Review({
   pmRows,
   rmMaterials,
   pmMaterials,
+  isRevision,
+  reason,
+  changeType,
 }: {
   skus: Sku[]
   skuId: number | null
@@ -274,6 +301,9 @@ export function Step5Review({
   pmRows: BomLineRow[]
   rmMaterials: BomMaterialOption[]
   pmMaterials: BomMaterialOption[]
+  isRevision: boolean
+  reason: string
+  changeType: ("rm" | "pm")[]
 }) {
   return (
     <div className="space-y-4 py-2 text-sm">
@@ -303,6 +333,19 @@ export function Step5Review({
         rows={pmRows}
         materials={pmMaterials}
       />
+
+      {isRevision && (
+        <div>
+          <p className="text-xs text-muted-foreground">Reason for change</p>
+          <p className="font-medium">{reason || "—"}</p>
+          <p className="text-xs text-muted-foreground mt-2">Type of change</p>
+          <p className="font-medium">
+            {changeType.length > 0
+              ? changeType.map((t) => (t === "rm" ? "RM change" : "PM change")).join(", ")
+              : "—"}
+          </p>
+        </div>
+      )}
 
       <p className="text-xs text-muted-foreground">
         Submitting will raise this BOM for approval. It becomes active once approved.

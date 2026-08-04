@@ -23,6 +23,7 @@ import {
 } from "@/components/masters/MasterToolbar"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
+import { EntityHistoryDialog } from "@/components/masters/EntityHistoryDialog"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { BomCreationWizard } from "./BomCreationWizard"
@@ -90,6 +91,9 @@ export default function BOMMasterComponent({
   const draftDirty = draftStatus !== currentStatus
 
   const panel = useBomDetailPanel()
+  // Row-level approval/audit-trail dialog — distinct from the archived-
+  // recipe-content "BOM History" page linked below.
+  const [historyBomId, setHistoryBomId] = useState<number | null>(null)
 
   return (
     <>
@@ -123,11 +127,11 @@ export default function BOMMasterComponent({
           <Button
             variant="outline"
             size="sm"
-            className="gap-1.5"
+            className="h-8 gap-1.5"
             onClick={() => router.push("/masters/bom-master/history")}
           >
             <History className="h-3.5 w-3.5" />
-            BOM History
+            Recipe Archive
           </Button>
           <DownloadButton
             endpoint="/api/masters/bom-master/export"
@@ -179,6 +183,7 @@ export default function BOMMasterComponent({
             onRowClick={panel.handleRowClick}
             onPrefetch={panel.prefetchDetail}
             onEdit={panel.openEditMode}
+            onHistory={setHistoryBomId}
           />
         </div>
 
@@ -223,6 +228,10 @@ export default function BOMMasterComponent({
         onChangePm={panel.setEditPmRows}
         effectiveFrom={panel.editEffectiveFrom}
         onChangeEffectiveFrom={panel.setEditEffectiveFrom}
+        reason={panel.editReason}
+        onChangeReason={panel.setEditReason}
+        changeType={panel.editChangeType}
+        onChangeChangeType={panel.setEditChangeType}
         rmMaterials={rmMaterials}
         pmMaterials={pmMaterials}
         saveError={panel.saveError}
@@ -239,6 +248,13 @@ export default function BOMMasterComponent({
         onChangePendingArtifactFiles={panel.setPendingArtifactFiles}
         pendingArtifactRemoveIds={panel.pendingArtifactRemoveIds}
         onChangePendingArtifactRemoveIds={panel.setPendingArtifactRemoveIds}
+      />
+
+      <EntityHistoryDialog
+        module="BOM"
+        entityId={historyBomId}
+        title="Recipe Edit History"
+        onClose={() => setHistoryBomId(null)}
       />
     </>
   )

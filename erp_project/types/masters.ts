@@ -250,8 +250,6 @@ export type BOM = {
   mtrl_cost: number | null;
   material_status: string | null;
   bom_status: string | null;
-  effective_from: Date | string | null;
-  effective_till: Date | string | null;
   last_updated: Date | string | null;
   created_by: string | null;
   mtrl_name: string | null;
@@ -272,6 +270,18 @@ export type BomListItem = {
   effective_from: Date | string | null;
   effective_till: Date | string | null;
   status: string | null;
+  /** From this BOM's own creating/editing approval's "__reason__" sentinel
+   *  item — null for a SKU's first-ever BOM or a bulk upload. */
+  change_reason: string | null;
+  /** Comma-joined "rm"/"pm" tags from the same approval's "__change_type__"
+   *  sentinel item — format with formatChangeType (bom-format.ts). */
+  change_type: string | null;
+  /** Count of master_bom_mfg rows with status='active' for this BOM — how
+   *  many manufacturers currently produce it. */
+  live_mfg_count: number;
+  /** "CODE — Name" per live manufacturer, comma-joined — tooltip source for
+   *  live_mfg_count. Null when live_mfg_count is 0. */
+  live_mfg_names: string | null;
 };
 
 /**
@@ -296,6 +306,9 @@ export type BomHistoryListItem = {
   approved_by: number | null;
   approved_by_name: string | null;
   approved_on: Date | string | null;
+  /** See BomListItem's same-named fields. */
+  change_reason: string | null;
+  change_type: string | null;
 };
 
 /** BOM detail side-panel payload: header + all material lines. */

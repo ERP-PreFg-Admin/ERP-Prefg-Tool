@@ -5,19 +5,18 @@
  * Real schema (verify against prisma/schema.prisma before adding queries —
  * master_bom has NO sku_code/mfg_id columns, only sku_id):
  *   master_bom(id, bom_code, sku_id, status, created_by, created_at, updated_by,
- *              updated_at, effective_from, effective_till)
+ *              updated_at, effective_from, effective_till, rm_version, pm_version)
  *   details_bom(id, bom_id → master_bom.id, mtrl_type, mtrl_id, amount, uom,
- *               effective_from, effective_till, status, updated_by, last_updated)
- *   history_bom — same shape as details_bom plus mtrl_cost; snapshot target for
- *               "update existing BOM in place" (see lib/approvals/module-handlers.ts)
+ *               status, updated_by, last_updated)
+ *   history_bom — same shape as details_bom plus mtrl_cost, approved_by, approved_on
  *
- * effective_from/effective_till live on the BOM HEADER (master_bom), one pair
- * per recipe — not per RM/PM line. effective_from is entered by the user when
- * the BOM is created/edited; effective_till is set automatically (to the
- * approval date) when a BOM is discontinued/superseded by a new version. The
- * same two columns still exist on details_bom/history_bom for legacy rows
- * (pre-dating this change) and are what the read-only BOM History page still
- * shows — new lines no longer populate them.
+ * effective_from/effective_till live ONLY on the BOM HEADER (master_bom), one
+ * pair per recipe — never per RM/PM line (details_bom/history_bom carried
+ * legacy copies of these columns before this convention was settled; they've
+ * since been dropped — see prisma/drop_bom_line_level_dates.sql). effective_from
+ * is entered by the user when the BOM is created/edited; effective_till is set
+ * automatically (to the approval date) when a BOM is discontinued/superseded
+ * by a new, overlapping version.
  *
  * IMPORTANT: master_bom_status's "in_review" enum member is @map("in review")
  * in prisma/schema.prisma — the ACTUAL value stored in the DB column has a
@@ -27,6 +26,49 @@
  */
 
 export const BOM_STATUS_IN_REVIEW = "in review"
+
+/**
+ * Correlated subqueries resolving a BOM header's own "__reason__" /
+ * "__change_type__" sentinel approval_items (written by create-full's
+ * new-version/update-existing submit — see app/api/masters/bom-master/route.ts
+ * and BomLineDiffTable.tsx for the write/read counterparts). Picks the most
+ * recently raised BOM approval for that bom_id in the rare case more than one
+ * exists (e.g. a rejected-then-resubmitted edit). NULL when the BOM was never
+ * submitted with this metadata (a SKU's first-ever BOM, or a bulk upload).
+ */
+const CHANGE_REASON_SUBQUERY = `(
+  SELECT ai.new_value
+  FROM approvals a
+  JOIN approval_items ai ON ai.approval_id = a.id AND ai.field_name = '__reason__'
+  WHERE a.module = 'BOM' AND a.entity_id = b.id
+  ORDER BY a.raised_on DESC LIMIT 1
+)`
+const CHANGE_TYPE_SUBQUERY = `(
+  SELECT ai.new_value
+  FROM approvals a
+  JOIN approval_items ai ON ai.approval_id = a.id AND ai.field_name = '__change_type__'
+  WHERE a.module = 'BOM' AND a.entity_id = b.id
+  ORDER BY a.raised_on DESC LIMIT 1
+)`
+
+/**
+ * Correlated subqueries resolving how many manufacturers (and which ones)
+ * currently produce this BOM — master_bom_mfg.status = 'active' is this
+ * table's own "live" marker (see prisma/rename_mfg_line_on_hold_to_inactive.sql),
+ * unrelated to master_bom.status. Feeds the BOM list's "Live Mfgs" column
+ * (count + hover tooltip of manufacturer code/name).
+ */
+const LIVE_MFG_COUNT_SUBQUERY = `(
+  SELECT COUNT(*)
+  FROM master_bom_mfg mbm
+  WHERE mbm.bom_id = b.id AND mbm.status = 'active'
+)`
+const LIVE_MFG_NAMES_SUBQUERY = `(
+  SELECT GROUP_CONCAT(CONCAT(m.code, ' — ', m.name) ORDER BY m.name SEPARATOR ', ')
+  FROM master_bom_mfg mbm
+  JOIN master_mfgs m ON m.id = mbm.mfg_id
+  WHERE mbm.bom_id = b.id AND mbm.status = 'active'
+)`
 
 export const bom = {
   // ============ SELECT QUERIES ============
@@ -175,10 +217,13 @@ export const bom = {
   `,
 
   /**
-   * Bare header lookup for existence/status checks before mutating. Params: [id]
+   * Bare header lookup for existence/status checks before mutating. Includes
+   * effective_from so callers (bomHandler.applyAndArchive, the update-status
+   * action) can pass it straight into the overlap-aware discontinue query
+   * without a second round-trip. Params: [id]
    */
   selectBomHeaderRawById: `
-    SELECT id, bom_code, sku_id, status, created_by
+    SELECT id, bom_code, sku_id, status, created_by, effective_from
     FROM master_bom
     WHERE id = ?
   `,
@@ -199,7 +244,7 @@ export const bom = {
    * Params: [bom_id]
    */
   selectDetailLinesRawByBomId: `
-    SELECT id, bom_id, mtrl_type, mtrl_id, amount, uom, effective_from, effective_till, status, updated_by
+    SELECT id, bom_id, mtrl_type, mtrl_id, amount, uom, status, updated_by
     FROM details_bom
     WHERE bom_id = ?
     ORDER BY mtrl_type ASC, mtrl_id ASC
@@ -208,13 +253,23 @@ export const bom = {
   /**
    * Paginated BOM listing, ONE ROW PER BOM HEADER (not per material line).
    * effective_from/effective_till are the BOM header's own columns (recipe-
-   * level, not aggregated from lines). Params: [like, like, like, status, status, LIMIT, OFFSET]
+   * level, not aggregated from lines). change_reason/change_type are pulled
+   * from this BOM's own creating/editing approval — see the "__reason__" /
+   * "__change_type__" sentinel approval_items written by the create-full
+   * action (app/api/masters/bom-master/route.ts) and rendered by
+   * BomLineDiffTable.tsx elsewhere; NULL for a SKU's very first BOM or a
+   * bulk-uploaded one, neither of which collects this metadata.
+   * Params: [like, like, like, status, status, LIMIT, OFFSET]
    */
   selectPaginatedGrouped: `
     SELECT
       b.id AS bom_id, b.bom_code, s.sku_code, s.name AS sku_name,
       b.created_at, b.effective_from, b.effective_till,
-      b.status AS status
+      b.status AS status,
+      ${CHANGE_REASON_SUBQUERY} AS change_reason,
+      ${CHANGE_TYPE_SUBQUERY} AS change_type,
+      ${LIVE_MFG_COUNT_SUBQUERY} AS live_mfg_count,
+      ${LIVE_MFG_NAMES_SUBQUERY} AS live_mfg_names
     FROM master_bom AS b
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
     WHERE b.status <> 'inactive'
@@ -234,7 +289,11 @@ export const bom = {
     SELECT
       b.id AS bom_id, b.bom_code, s.sku_code, s.name AS sku_name,
       b.created_at, b.effective_from, b.effective_till,
-      b.status AS status
+      b.status AS status,
+      ${CHANGE_REASON_SUBQUERY} AS change_reason,
+      ${CHANGE_TYPE_SUBQUERY} AS change_type,
+      ${LIVE_MFG_COUNT_SUBQUERY} AS live_mfg_count,
+      ${LIVE_MFG_NAMES_SUBQUERY} AS live_mfg_names
     FROM master_bom AS b
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
     WHERE b.status <> 'inactive'
@@ -277,7 +336,7 @@ export const bom = {
       b.bom_code, bd.bom_id, s.sku_code,
       bd.mtrl_id, bd.mtrl_type, bd.uom, bd.amount,
       NULL AS mtrl_cost, bd.status AS material_status, b.status AS bom_status,
-      bd.effective_from, bd.effective_till, bd.last_updated,
+      bd.last_updated,
       b.created_by,
       COALESCE(rm.name, pm.name) AS mtrl_name,
       COALESCE(rm.rm_code, pm.pm_code) AS mtrl_code,
@@ -294,20 +353,12 @@ export const bom = {
   // ============ WRITE QUERIES ============
 
   /**
-   * Insert a new BOM header. Parameters: [bom_code, sku_id, created_by, status, effective_from]
-   * Returns insertId to link detail lines to.
-   */
-  insertBomHeader: `
-    INSERT INTO master_bom (bom_code, sku_id, created_by, status, effective_from, created_at)
-    VALUES (?, ?, ?, ?, ?, NOW())
-  `,
-
-  /**
-   * Same as insertBomHeader, but also stamps rm_version/pm_version — used
-   * only by the single-BOM new-version submit path (app/api/masters/bom-master/route.ts),
-   * which computes these independently via lib/masters/bom-version.ts's
-   * diffBomLines. The CSV bulk-upload path (lib/approvals/handlers/bom.ts)
-   * keeps using plain insertBomHeader and the legacy bom_code format.
+   * Insert a new BOM header, stamping rm_version/pm_version — used by both
+   * the single-BOM wizard/edit path (app/api/masters/bom-master/route.ts) and
+   * the CSV bulk path (lib/approvals/handlers/bom.ts), which now share the
+   * same lib/masters/bom-version.ts diffBomLines-driven <sku>-RM<n>-PM<n>
+   * version scheme regardless of upload type.
+   * Parameters: [bom_code, sku_id, created_by, status, effective_from, rm_version, pm_version]
    */
   insertBomHeaderWithVersions: `
     INSERT INTO master_bom (bom_code, sku_id, created_by, status, effective_from, rm_version, pm_version, created_at)
@@ -335,12 +386,12 @@ export const bom = {
    * line-level record of every edit, per SKU, regardless of mode.
    * updated_by is the user who SUBMITTED this edit; approved_by/approved_on
    * are the user/time it was approved (same transaction as the approval).
-   * Parameters: [bom_id, mtrl_type, mtrl_id, amount, uom, mtrl_cost, effective_from, effective_till, status, updated_by, approved_by]
+   * Parameters: [bom_id, mtrl_type, mtrl_id, amount, uom, mtrl_cost, status, updated_by, approved_by]
    */
   archiveDetailLineToHistory: `
     INSERT INTO history_bom
-      (bom_id, mtrl_type, mtrl_id, amount, uom, mtrl_cost, effective_from, effective_till, status, updated_by, last_updated, approved_by, approved_on)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW())
+      (bom_id, mtrl_type, mtrl_id, amount, uom, mtrl_cost, status, updated_by, last_updated, approved_by, approved_on)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW())
   `,
 
   /**
@@ -364,9 +415,11 @@ export const bom = {
 
   /**
    * IDs of every OTHER active BOM for the same sku_id, read BEFORE
-   * deactivateOtherActiveBomsForSku runs — MariaDB's UPDATE has no RETURNING,
-   * so this is how the caller knows which BOMs it's about to deactivate (one
-   * bom.deactivated event per id, per event-catalog.md's fan-out design).
+   * discontinueOverlappingActiveBomsForSku runs — MariaDB's UPDATE has no
+   * RETURNING, so this is how the caller knows which BOMs it's about to
+   * deactivate (one bom.deactivated event per id, per event-catalog.md's
+   * fan-out design). Used for the pre-flight "existing active BOM" warning
+   * too, where it's purely informational (no mutation follows).
    * Parameters: [sku_id, keep_bom_id]
    */
   selectOtherActiveBomsForSku: `
@@ -376,16 +429,22 @@ export const bom = {
   `,
 
   /**
-   * Flip every OTHER active BOM for the same sku_id to discontinued —
-   * enforces "only one active BOM per SKU" after a new/updated BOM is
-   * activated, marks the superseded formulation as retired rather than
-   * merely inactive, and stamps its effective_till to today (the date it's
-   * being superseded). Parameters: [sku_id, keep_bom_id]
+   * Flip every OTHER active BOM for the same sku_id to discontinued, but
+   * ONLY if the new BOM's effective_from actually overlaps its window —
+   * enforces "only one active BOM per SKU" while still letting a future-
+   * dated recipe change wait to kick in without prematurely killing the
+   * one it hasn't yet superseded. A BOM's own effective_from is always
+   * <= today by definition of being active, so only the upper bound
+   * (effective_till) needs checking against the new BOM's effective_from.
+   * Marks the superseded formulation as retired rather than merely
+   * inactive, and stamps its effective_till to today (the date it's being
+   * superseded). Parameters: [sku_id, keep_bom_id, new_effective_from]
    */
-  discontinueOtherActiveBomsForSku: `
+  discontinueOverlappingActiveBomsForSku: `
     UPDATE master_bom
     SET status = 'discontinued', effective_till = CURDATE(), updated_at = NOW()
     WHERE sku_id = ? AND id <> ? AND status = 'active'
+      AND (effective_till IS NULL OR effective_till >= ?)
   `,
 
   /**
@@ -424,11 +483,16 @@ export const bom = {
     HAVING COUNT(*) > 1
   `,
 
-  // ============ HISTORY QUERIES (read-only "BOM History" page) ============
+  // ============ ARCHIVE QUERIES (read-only "Recipe Archive" page) ============
   // history_bom gets rows written by bomHandler.applyAndArchive (see
   // lib/approvals/module-handlers.ts) at approval time for EVERY approved BOM
   // version (new-version and the legacy update-existing in-place edit alike)
   // — a BOM with no history_bom rows has never been through an approval yet.
+  // The archive is scoped to status = 'inactive' ONLY — fully retired
+  // versions. A 'discontinued' BOM (superseded by a newer version, per
+  // discontinueOverlappingActiveBomsForSku) is still considered "live" per
+  // selectSkusWithMultipleLiveBoms's own comment, so it deliberately does NOT
+  // show here until someone manually flips it to inactive via update-status.
   // Grouped SKU-wise: every version of a SKU's BOM sorts together, oldest
   // first, so the full edit lineage reads top-to-bottom per SKU.
 
@@ -445,14 +509,17 @@ export const bom = {
       b.created_at, b.created_by, MAX(cu.name) AS created_by_name,
       b.updated_at, b.updated_by, MAX(uu.name) AS updated_by_name,
       MAX(h.approved_by) AS approved_by, MAX(au.name) AS approved_by_name,
-      MAX(h.approved_on) AS approved_on
+      MAX(h.approved_on) AS approved_on,
+      MAX(${CHANGE_REASON_SUBQUERY}) AS change_reason,
+      MAX(${CHANGE_TYPE_SUBQUERY}) AS change_type
     FROM history_bom AS h
     INNER JOIN master_bom AS b ON b.id = h.bom_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
     LEFT JOIN users cu ON cu.id = b.created_by
     LEFT JOIN users uu ON uu.id = b.updated_by
     LEFT JOIN users au ON au.id = h.approved_by
-    WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+    WHERE b.status = 'inactive'
+      AND (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
     GROUP BY b.id, b.bom_code, b.sku_id, s.sku_code, s.name, b.status,
              b.created_at, b.created_by, b.updated_at, b.updated_by
     ORDER BY s.sku_code ASC, b.created_at ASC
@@ -472,14 +539,17 @@ export const bom = {
       b.created_at, b.created_by, MAX(cu.name) AS created_by_name,
       b.updated_at, b.updated_by, MAX(uu.name) AS updated_by_name,
       MAX(h.approved_by) AS approved_by, MAX(au.name) AS approved_by_name,
-      MAX(h.approved_on) AS approved_on
+      MAX(h.approved_on) AS approved_on,
+      MAX(${CHANGE_REASON_SUBQUERY}) AS change_reason,
+      MAX(${CHANGE_TYPE_SUBQUERY}) AS change_type
     FROM history_bom AS h
     INNER JOIN master_bom AS b ON b.id = h.bom_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
     LEFT JOIN users cu ON cu.id = b.created_by
     LEFT JOIN users uu ON uu.id = b.updated_by
     LEFT JOIN users au ON au.id = h.approved_by
-    WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+    WHERE b.status = 'inactive'
+      AND (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
     GROUP BY b.id, b.bom_code, b.sku_id, s.sku_code, s.name, b.status,
              b.created_at, b.created_by, b.updated_at, b.updated_by
     ORDER BY s.sku_code ASC, b.created_at ASC
@@ -491,7 +561,8 @@ export const bom = {
     FROM history_bom AS h
     INNER JOIN master_bom AS b ON b.id = h.bom_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
-    WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+    WHERE b.status = 'inactive'
+      AND (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
   `,
 
   // ============ ARTIFACT QUERIES (bom_artifacts) ============
@@ -547,7 +618,7 @@ export const bom = {
       b.bom_code, h.bom_id, s.sku_code,
       h.mtrl_id, h.mtrl_type, h.uom, h.amount,
       h.mtrl_cost, h.status AS material_status, b.status AS bom_status,
-      h.effective_from, h.effective_till, h.last_updated,
+      h.last_updated,
       b.created_by,
       COALESCE(rm.name, pm.name) AS mtrl_name,
       COALESCE(rm.rm_code, pm.pm_code) AS mtrl_code,

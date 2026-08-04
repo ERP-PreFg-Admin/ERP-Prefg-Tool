@@ -44,6 +44,10 @@ export function useBomDetailPanel() {
   // Effective From for the NEW version being created — defaults to today,
   // editable before submit. Not seeded from the predecessor's own date.
   const [editEffectiveFrom, setEditEffectiveFrom] = useState("")
+  // Editing an existing BOM always requires a reason + at least one change
+  // type (RM/PM) — see lib/validation/bom.ts's bomCreateFullSchema comment.
+  const [editReason, setEditReason]       = useState("")
+  const [editChangeType, setEditChangeType] = useState<("rm" | "pm")[]>([])
   const [saving, setSaving]               = useState(false)
   const [saveError, setSaveError]         = useState<string | null>(null)
 
@@ -184,6 +188,8 @@ export function useBomDetailPanel() {
     setStatusError(null)
     setPendingArtifactFiles([])
     setPendingArtifactRemoveIds([])
+    setEditReason("")
+    setEditChangeType([])
     setSelectedBomId(null)
     const params = new URLSearchParams(searchParams.toString())
     params.delete("bomId")
@@ -200,6 +206,8 @@ export function useBomDetailPanel() {
     setStatusError(null)
     setPendingArtifactFiles([])
     setPendingArtifactRemoveIds([])
+    setEditReason("")
+    setEditChangeType([])
     const params = new URLSearchParams(searchParams.toString())
     params.set("bomId", String(bomId))
     router.push(`${pathname}?${params.toString()}`, { scroll: false })
@@ -212,6 +220,8 @@ export function useBomDetailPanel() {
     setStatusError(null)
     setPendingArtifactFiles([])
     setPendingArtifactRemoveIds([])
+    setEditReason("")
+    setEditChangeType([])
   }
 
   async function saveEdit() {
@@ -263,6 +273,10 @@ export function useBomDetailPanel() {
         return
       }
     }
+    if (!editReason.trim() || editChangeType.length === 0) {
+      setSaveError("A reason and at least one type of change (RM/PM) are required.")
+      return
+    }
 
     setSaving(true)
     try {
@@ -293,6 +307,8 @@ export function useBomDetailPanel() {
           pm_lines: editPmRows.map(toLine),
           artifact_adds: artifactAdds,
           artifact_removes: pendingArtifactRemoveIds,
+          reason: editReason.trim(),
+          change_type: editChangeType,
         }),
       })
       const data = await res.json()
@@ -301,6 +317,8 @@ export function useBomDetailPanel() {
       setEditSeededFor(null)
       setPendingArtifactFiles([])
       setPendingArtifactRemoveIds([])
+      setEditReason("")
+      setEditChangeType([])
       // Switch the panel over to the newly created version, not the
       // predecessor it's replacing.
       const newBomId: number = data.bom_id
@@ -363,6 +381,10 @@ export function useBomDetailPanel() {
     setEditPmRows,
     editEffectiveFrom,
     setEditEffectiveFrom,
+    editReason,
+    setEditReason,
+    editChangeType,
+    setEditChangeType,
     saving,
     saveError,
     editStatus,

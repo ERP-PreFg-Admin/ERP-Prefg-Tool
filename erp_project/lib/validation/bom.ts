@@ -47,6 +47,8 @@ export const bomArtifactAddSchema = z.object({
   file_name: z.string().trim().min(1).max(255),
 })
 
+export const bomChangeTypeSchema = z.enum(["rm", "pm"])
+
 export const bomCreateFullSchema = z
   .object({
     action: z.literal("create-full"),
@@ -54,7 +56,7 @@ export const bomCreateFullSchema = z
     sku_id: z.coerce.number().int().positive(),
     bom_id: z.coerce.number().int().positive().optional(), // required when mode === "update-existing"
     // For mode === "new-version" the server always computes its own
-    // <sku_code>RM<n>PM<n> code (see route.ts) — any client-sent value here is ignored.
+    // <sku_code>-RM<n>-PM<n> code (see route.ts) — any client-sent value here is ignored.
     bom_code: z.string().trim().min(1).max(50).optional(),
     // Recipe-level effective date — required when mode === "new-version".
     // update-existing doesn't touch it (the existing header's date stands).
@@ -67,6 +69,14 @@ export const bomCreateFullSchema = z
     // the only place bom_artifacts rows are actually written/deleted.
     artifact_adds: z.array(bomArtifactAddSchema).optional(),
     artifact_removes: z.array(z.coerce.number().int().positive()).optional(),
+    // Reason + type of change — required by route.ts whenever this submission
+    // is actually editing an existing BOM (mode === "update-existing", or
+    // mode === "new-version" against a SKU that already has a prior BOM).
+    // Not required for the very first BOM ever created for a SKU, so kept
+    // optional at the schema level; route.ts enforces the real gate once it
+    // knows whether a prior BOM exists.
+    reason: z.string().trim().max(500).optional(),
+    change_type: z.array(bomChangeTypeSchema).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.mode === "update-existing" && !data.bom_id) {

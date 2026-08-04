@@ -15,6 +15,7 @@ import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { BomLineEditorTable } from "./BomLineEditorTable"
+import { ChangeTypeCheckboxes } from "./ChangeTypeCheckboxes"
 import { BomArtifactsAddButton, BomArtifactsList } from "./BomArtifactsEditor"
 import { BOM_STATUS_VALUES } from "@/lib/validation/bom"
 import type { BomLineRow, BomMaterialOption } from "./BomLineEditorGrid"
@@ -38,6 +39,10 @@ export function BomEditDialog({
   onChangePm,
   effectiveFrom,
   onChangeEffectiveFrom,
+  reason,
+  onChangeReason,
+  changeType,
+  onChangeChangeType,
   rmMaterials,
   pmMaterials,
   saveError,
@@ -64,6 +69,11 @@ export function BomEditDialog({
   /** Effective From for the NEW version this save will create. */
   effectiveFrom: string
   onChangeEffectiveFrom: (v: string) => void
+  /** Required — editing an existing BOM always needs a reason + change type. */
+  reason: string
+  onChangeReason: (v: string) => void
+  changeType: ("rm" | "pm")[]
+  onChangeChangeType: (v: ("rm" | "pm")[]) => void
   rmMaterials: BomMaterialOption[]
   pmMaterials: BomMaterialOption[]
   saveError: string | null
@@ -156,6 +166,14 @@ export function BomEditDialog({
             onChangePendingFiles={onChangePendingArtifactFiles}
             pendingRemoveIds={pendingArtifactRemoveIds}
             onChangePendingRemoveIds={onChangePendingArtifactRemoveIds}
+            disabled={saving}
+          />
+
+          <ChangeTypeCheckboxes
+            reason={reason}
+            onChangeReason={onChangeReason}
+            changeType={changeType}
+            onChangeChangeType={onChangeChangeType}
             disabled={saving}
           />
         </div>

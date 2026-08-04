@@ -38,11 +38,11 @@ import logger from "@/lib/logger"
 import { stageBulkUploadApproval, uploadRowsAsCsv } from "@/lib/master-routes/bulk-approval"
 import { diffBomLines, type DiffableLine } from "@/lib/masters/bom-version"
 
-type BomHeaderRow = { id: number; bom_code: string; sku_id: number; status: string; created_by: number }
+type BomHeaderRow = { id: number; bom_code: string; sku_id: number; status: string; created_by: number; effective_from: string | null }
 type MostRecentBomRow = { id: number; bom_code: string; rm_version: number; pm_version: number }
 type BomDetailLineRow = {
   id: number; bom_id: number; mtrl_type: string; mtrl_id: number
-  amount: number; uom: string | null; effective_from: string; effective_till: string | null
+  amount: number; uom: string | null
   status: string; updated_by: number
   [key: string]: unknown
 }
@@ -107,7 +107,15 @@ export const POST = withGateway({
           const { rmChanged, pmChanged } = diffBomLines(priorLines, newLines)
           const rmVersion = !prior || rmChanged ? (prior?.rm_version ?? 0) + 1 : prior.rm_version
           const pmVersion = !prior || pmChanged ? (prior?.pm_version ?? 0) + 1 : prior.pm_version
-          bomCode = `${skuRow.sku_code}RM${rmVersion}PM${pmVersion}`
+          bomCode = `${skuRow.sku_code}-RM${rmVersion}-PM${pmVersion}`
+
+          // A prior BOM exists for this SKU — this submission is really an
+          // edit to an established recipe, so require the submitter to say
+          // why and what kind of change it is. The very first BOM ever
+          // created for a SKU (prior === null) has nothing to explain yet.
+          if (prior && (!body.reason?.trim() || !body.change_type?.length)) {
+            throw new ApiError(400, "reason_required", "A reason and type of change (RM/PM) are required when revising an existing BOM.")
+          }
 
           const [result] = await conn.execute(bomSql.insertBomHeaderWithVersions, [
             bomCode, body.sku_id, userId, BOM_STATUS_IN_REVIEW, body.effective_from!.trim(), rmVersion, pmVersion,
@@ -125,6 +133,12 @@ export const POST = withGateway({
           const pending = await query(approvalsSql.hasPending, ["BOM", bomId])
           if (pending.length > 0) {
             throw new ApiError(409, "pending_approval", "This BOM already has a pending approval.")
+          }
+          // update-existing is always an edit to an established BOM — reason
+          // and change type are mandatory here (unlike new-version's first-
+          // BOM-for-a-SKU exemption above).
+          if (!body.reason?.trim() || !body.change_type?.length) {
+            throw new ApiError(400, "reason_required", "A reason and type of change (RM/PM) are required when revising an existing BOM.")
           }
           await conn.execute(bomSql.setBomStatus, [BOM_STATUS_IN_REVIEW, bomId])
         }
@@ -144,6 +158,16 @@ export const POST = withGateway({
         )
         const approvalId = (approvalResult as ResultSetHeader).insertId
         await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "__mode__", "", body.mode])
+        // Reason + type of change — stored as sentinel approval_items (same
+        // convention as __mode__ above) rather than approvals.remarks, which
+        // is already used for the APPROVER's rejection note and would
+        // otherwise collide with the SUBMITTER's reason for this edit.
+        if (body.reason?.trim()) {
+          await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "__reason__", "", body.reason.trim()])
+        }
+        if (body.change_type?.length) {
+          await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "__change_type__", "", body.change_type.join(",")])
+        }
 
         const allLines = [...body.rm_lines, ...body.pm_lines]
         const seenKeys = new Set<string>()
@@ -242,7 +266,7 @@ export const POST = withGateway({
           const [siblingRows] = await conn.execute(bomSql.selectOtherActiveBomsForSku, [cur.sku_id, bom_id])
           const siblingIds = (siblingRows as { id: number }[]).map((r) => r.id)
           if (siblingIds.length > 0) {
-            await conn.execute(bomSql.discontinueOtherActiveBomsForSku, [cur.sku_id, bom_id])
+            await conn.execute(bomSql.discontinueOverlappingActiveBomsForSku, [cur.sku_id, bom_id, cur.effective_from])
             for (const siblingId of siblingIds) {
               const deactivateEventId = makeEventId("BOM", "deactivate", siblingId)
               logger.info({ module: "BOM", eventId: deactivateEventId, bomId: siblingId, skuId: cur.sku_id, supersededBy: bom_id, message: "BOM discontinued (superseded by manual status change)" })
@@ -287,12 +311,24 @@ export const POST = withGateway({
       const skuCache = new Map<string, SkuLookupRow | null>()
       const rmCache = new Map<string, MaterialLookupRow | null>()
       const pmCache = new Map<string, MaterialLookupRow | null>()
+      const priorBomCountCache = new Map<number, number>()
       async function resolveSku(code: string) {
         if (!skuCache.has(code)) {
           const found = await query<SkuLookupRow>(skuSql.selectByCode, [code])
           skuCache.set(code, found[0] ?? null)
         }
         return skuCache.get(code)
+      }
+      // Same "reason/change_type required once a SKU already has a BOM" rule
+      // create-full enforces for manual edits — mirrored here so a bulk row
+      // is flagged in the preview instead of only failing at approval time
+      // (see bomBulkHandler.applyAndArchive, the authoritative check).
+      async function hasPriorBom(skuId: number) {
+        if (!priorBomCountCache.has(skuId)) {
+          const found = await query(bomSql.selectBomsBySkuId, [skuId])
+          priorBomCountCache.set(skuId, found.length)
+        }
+        return (priorBomCountCache.get(skuId) ?? 0) > 0
       }
       async function resolveMaterial(type: "rm" | "pm", code: string) {
         const cache = type === "rm" ? rmCache : pmCache
@@ -383,6 +419,44 @@ export const POST = withGateway({
         }
         if (dates.size > 1) {
           const msg = `Inconsistent effective_from for SKU ${skuCode}: found ${[...dates].map((d) => `"${d}"`).join(", ")} — a SKU group can only have one effective_from`
+          for (const i of indices) (duplicates[i] ??= []).push(msg)
+        }
+      }
+
+      // Inconsistent reason/change_type within one SKU group — same rationale
+      // as bom_code/effective_from above: a group produces one BOM header, so
+      // applyAndArchive only reads the first row's reason/change_type.
+      for (const [skuCode, indices] of groups) {
+        const reasons = new Set<string>()
+        const changeTypes = new Set<string>()
+        for (const i of indices) {
+          const r = String(rows[i].reason ?? "").trim()
+          if (r) reasons.add(r)
+          const ct = String(rows[i].change_type ?? "").trim().toLowerCase()
+          if (ct) changeTypes.add(ct)
+        }
+        if (reasons.size > 1) {
+          const msg = `Inconsistent reason for SKU ${skuCode} — a SKU group can only have one reason`
+          for (const i of indices) (duplicates[i] ??= []).push(msg)
+        }
+        if (changeTypes.size > 1) {
+          const msg = `Inconsistent change_type for SKU ${skuCode} — a SKU group can only have one type of change`
+          for (const i of indices) (duplicates[i] ??= []).push(msg)
+        }
+      }
+
+      // Reason + type of change are required once a SKU already has a prior
+      // BOM (any status) — a bulk-uploaded revision is otherwise
+      // indistinguishable from a manual one, and manual edits require this.
+      // Not required for a SKU's very first BOM.
+      for (const [skuCode, indices] of groups) {
+        const sku = await resolveSku(skuCode)
+        if (!sku) continue
+        if (!(await hasPriorBom(sku.id))) continue
+        const reason = String(rows[indices[0]].reason ?? "").trim()
+        const changeType = String(rows[indices[0]].change_type ?? "").trim()
+        if (!reason || !changeType) {
+          const msg = `SKU ${skuCode} already has a BOM — reason and type of change are required`
           for (const i of indices) (duplicates[i] ??= []).push(msg)
         }
       }
