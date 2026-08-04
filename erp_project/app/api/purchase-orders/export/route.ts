@@ -17,6 +17,9 @@
  *   destination — exact destination/warehouse name
  *   sortBy      — column key (see SAFE_SORT_COLS in lib/queries/purchase-orders.ts)
  *   sortDir     — "asc" | "desc"
+ *   excludeInward — "1" to drop inward POs, matching what FG PO Tracking shows.
+ *                   Also drops the Uniware Code column, which only inward POs
+ *                   ever populate.
  *
  * Responses:
  *   200 — file attachment
@@ -31,6 +34,7 @@ import { purchaseOrdersSql, buildFilterParams } from "@/lib/queries/purchase-ord
 import { buildCsv, buildXlsx, buildExportFilename } from "@/lib/export"
 import { PO_PROCUREMENT_EXPORT_COLUMNS } from "@/lib/export-configs"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { getUserScope } from "@/lib/scope"
 import logger from "@/lib/logger"
 
 const ROW_LIMIT = 50_000
@@ -50,11 +54,19 @@ export const GET = withGateway({
     const destination = sp.get("destination") ?? ""
     const sortBy      = sp.get("sortBy")      ?? "date"
     const sortDir     = sp.get("sortDir") === "asc" ? "asc" : "desc"
+    const excludeInward = sp.get("excludeInward") === "1"
 
     const filterParams = buildFilterParams(
       search || null, status || null, mfgCode || null, poType || null,
       dateFrom || null, dateTo || null, sku || null, destination || null,
+      excludeInward,
+      await getUserScope(Number(session.user.id)),
     )
+    // Uniware only ever mirrors inward POs, so the column is empty in an export
+    // that has none. Filtered rather than kept as a second column config.
+    const columns = excludeInward
+      ? PO_PROCUREMENT_EXPORT_COLUMNS.filter((c) => c.key !== "uniware_po_code")
+      : PO_PROCUREMENT_EXPORT_COLUMNS
 
     try {
       const [{ total }] = await query<{ total: number }>(purchaseOrdersSql.countPaginated, filterParams)
@@ -74,7 +86,7 @@ export const GET = withGateway({
       logger.info({ ...ctx, userId: session.user.id, format, rowCount: rows.length, message: "PO Procurement export served" })
 
       if (format === "xlsx") {
-        const buffer = await buildXlsx("PO Procurement", PO_PROCUREMENT_EXPORT_COLUMNS, rows)
+        const buffer = await buildXlsx("PO Procurement", columns, rows)
         return new NextResponse(buffer, {
           status: 200,
           headers: {
@@ -84,7 +96,7 @@ export const GET = withGateway({
         })
       }
 
-      const csv = buildCsv(PO_PROCUREMENT_EXPORT_COLUMNS, rows)
+      const csv = buildCsv(columns, rows)
       return new NextResponse(csv, {
         status: 200,
         headers: {

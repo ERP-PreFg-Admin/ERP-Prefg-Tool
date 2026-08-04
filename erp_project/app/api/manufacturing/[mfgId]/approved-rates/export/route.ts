@@ -18,6 +18,7 @@ import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { getUserScope, assertInScope } from "@/lib/scope"
 import { mfgIdParamSchema } from "@/lib/validation/manufacturing"
 import { buildCsv, buildXlsx, buildExportFilename } from "@/lib/export"
 import { MFG_APPROVED_RM_RATES_EXPORT_COLUMNS, MFG_APPROVED_PM_RATES_EXPORT_COLUMNS } from "@/lib/export-configs"
@@ -27,8 +28,13 @@ import logger from "@/lib/logger"
 export const GET = withGateway({
   paramsSchema: mfgIdParamSchema,
   access: { pageSlug: "/manufacturing", level: "viewer" },
-  handler: async ({ req, params, ctx }) => {
+  handler: async ({ req, params, session, ctx }) => {
     const { mfgId } = params
+
+    // withGateway's pageSlug is a static string ("/manufacturing"), so it can't
+    // check the per-manufacturer slug the page checks. Entity scope is what
+    // keeps one manufacturer's cost data out of another user's reach here.
+    assertInScope(await getUserScope(Number(session.user.id)), "mfg", mfgId)
     const mode   = req.nextUrl.searchParams.get("mode") === "pm" ? "pm" : "rm"
     const format = req.nextUrl.searchParams.get("format") === "xlsx" ? "xlsx" : "csv"
 

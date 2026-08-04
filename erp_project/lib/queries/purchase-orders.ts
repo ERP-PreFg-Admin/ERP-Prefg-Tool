@@ -3,9 +3,12 @@
  *
  * Real table: purchase_orders
  * Columns: id, po_no, mfg_id, date, sku_code, bom_id, qty, unit_price,
- *          total_amount, expected_on, received_qty, invoice_no, status,
- *          po_type, email_sent_at, attachment_key, csv_source_key, destination
+ *          total_amount, expected_on, received_qty, invoice_no,
+ *          uniware_po_code, status, po_type, email_sent_at, attachment_key,
+ *          csv_source_key, destination, reference_po
  */
+
+import { scopeParams, type UserScope } from "@/lib/scope"
 
 // Overrides the stored status with a computed "partially_received" whenever
 // some (but not all) of the ordered qty has come in — terminal/manual states
@@ -18,8 +21,24 @@ const EFFECTIVE_STATUS_EXPR = `
   END
 `
 
+// The FG PO Tracking page never shows inward POs — those are the invoice desk's
+// records, not procurement's. Expressed as its own nullable flag rather than
+// folded into the po_type filter, which matches on equality and so can't say
+// "anything but this". Pass 1 to exclude, null to leave inward POs in.
+const EXCLUDE_INWARD = `AND (? IS NULL OR po.po_type <> 'inward')`
+
+// Per-user entity scope, appended to both shared WHERE fragments so the PO
+// list, the COUNT, the tab badges, the summary cards and the CSV/Excel export
+// are all scoped by one edit. Warehouse compares against `destination`, which
+// holds master_warehouse.name (there is no FK) — lib/scope.ts resolves ids to
+// names for exactly this reason.
+// Params: scopeParams(mfgIds) then scopeParams(warehouseNames), i.e. 4 values.
+const SCOPE_WHERE = `
+    AND (? IS NULL OR po.mfg_id      IN (?))
+    AND (? IS NULL OR po.destination IN (?))`
+
 // ── Shared WHERE fragment (all filters) ──────────────────────────────────────
-// Params (22): [like×6, status×4, mfgCode×2, poType×2, dateFrom×2, dateTo×2, sku×2, destination×2]
+// Params (23): [like×6, status×4, mfgCode×2, poType×2, dateFrom×2, dateTo×2, sku×2, destination×2, excludeInward]
 // The status filter matches an IN-list rather than a single value so the
 // "received" tab can also pull in short-closed POs and the PO Inwarding page's
 // "open" tab can span raised/punched/partially_received — see statusMatchValues().
@@ -32,9 +51,11 @@ const FULL_WHERE = `
     AND (? IS NULL OR po.date       <= ?)
     AND (? IS NULL OR po.sku_code    = ?)
     AND (? IS NULL OR po.destination = ?)
+    ${EXCLUDE_INWARD}
+    ${SCOPE_WHERE}
 `
 
-// Params (18): [like×6, mfgCode×2, poType×2, dateFrom×2, dateTo×2, sku×2, destination×2]
+// Params (19): [like×6, mfgCode×2, poType×2, dateFrom×2, dateTo×2, sku×2, destination×2, excludeInward]
 // Used by statusCounts and summaryStats which ignore the status filter.
 const SUMMARY_WHERE = `
   WHERE (? IS NULL OR po.po_no LIKE ? OR m.code LIKE ? OR m.name LIKE ? OR po.sku_code LIKE ? OR sk.name LIKE ?)
@@ -44,6 +65,8 @@ const SUMMARY_WHERE = `
     AND (? IS NULL OR po.date       <= ?)
     AND (? IS NULL OR po.sku_code    = ?)
     AND (? IS NULL OR po.destination = ?)
+    ${EXCLUDE_INWARD}
+    ${SCOPE_WHERE}
 `
 
 const FROM_JOINS = `
@@ -56,6 +79,7 @@ const SELECT_COLS = `
   SELECT
     po.id, po.po_no, po.date, po.sku_code, po.qty, po.unit_price,
     po.total_amount, po.expected_on, po.received_qty, po.invoice_no,
+    po.uniware_po_code,
     po.destination, ${EFFECTIVE_STATUS_EXPR} AS status, po.po_type, po.attachment_key,
     po.csv_source_key, po.email_sent_at,
     m.id   AS mfg_id, m.code AS mfg_code, m.name AS mfg_name,
@@ -77,10 +101,15 @@ const SAFE_SORT_COLS: Record<string, string> = {
 }
 
 export const purchaseOrdersSql = {
-  /** All POs joined with manufacturer name, SKU name, and who originally raised each PO. */
+  /**
+   * All POs joined with manufacturer name, SKU name, and who originally raised
+   * each PO. Params: scopeParams(mfgIds) + scopeParams(warehouseNames)
+   */
   selectAll: `
     ${SELECT_COLS}
     ${FROM_JOINS}
+    WHERE 1 = 1
+    ${SCOPE_WHERE}
     ORDER BY po.date DESC, po.id DESC
   `,
 
@@ -213,6 +242,18 @@ export const purchaseOrdersSql = {
   /** Set status on a purchase_orders row. Parameters: [status, id] */
   setStatus: `UPDATE purchase_orders SET status = ? WHERE id = ?`,
 
+  /**
+   * Stamp the Unicommerce PO code on the inward POs an invoice just created —
+   * all of them, because Uniware mirrors the whole invoice as one PO. Runs
+   * after the mirror succeeds but inside the same transaction, so a row never
+   * commits quoting a Uniware PO that doesn't exist.
+   * Parameters: [uniware_po_code, ...ids]
+   */
+  buildSetUniwarePoCode(count: number): string {
+    const placeholders = Array(count).fill("?").join(",")
+    return `UPDATE purchase_orders SET uniware_po_code = ? WHERE id IN (${placeholders})`
+  },
+
   /** Credit a manual goods-receipt qty to received_qty. Parameters: [qty, id] */
   incrementReceivedQtyManual: `UPDATE purchase_orders SET received_qty = COALESCE(received_qty, 0) + ? WHERE id = ?`,
 
@@ -229,6 +270,15 @@ export const purchaseOrdersSql = {
   `,
 
   /** Fetch MFG name for readable approval diff. Parameters: [id] */
+  /**
+   * The two columns entity scope is decided on, for a single PO. Used by
+   * assertPoInScope (lib/po-guard.ts) before any read or write that addresses a
+   * PO by id. Params: [id]
+   */
+  selectScopeById: `
+    SELECT id, mfg_id, destination FROM purchase_orders WHERE id = ? LIMIT 1
+  `,
+
   selectById: `
     SELECT po.id, po.po_no, po.sku_code, po.qty, po.expected_on,
            m.code AS mfg_code, m.name AS mfg_name
@@ -454,8 +504,16 @@ export function statusMatchValues(status: string | null): [unknown, unknown, unk
 }
 
 /**
- * Build the 22-element param array for selectPaginated / countPaginated.
+ * Build the 27-element param array for selectPaginated / countPaginated.
  * All-null values disable the corresponding filter.
+ *
+ * `excludeInward` is the FG PO Tracking page's standing filter — true there,
+ * false on PO Inwarding, which is where inward POs belong.
+ *
+ * `scope` is REQUIRED rather than defaulting to unrestricted: an omitted scope
+ * would silently show every manufacturer's POs, so the compiler flags any new
+ * caller that forgets it. Pass UNRESTRICTED explicitly if that's genuinely
+ * intended.
  */
 export function buildFilterParams(
   search:      string | null,
@@ -466,6 +524,8 @@ export function buildFilterParams(
   dateTo:      string | null,
   sku:         string | null,
   destination: string | null,
+  excludeInward = false,
+  scope:       UserScope,
 ): unknown[] {
   const like = search ? `%${search}%` : null
   const [statusA, statusB, statusC] = statusMatchValues(status)
@@ -478,12 +538,15 @@ export function buildFilterParams(
     dateTo,      dateTo,                // dateTo ×2
     sku,         sku,                   // sku ×2
     destination, destination,           // destination ×2
+    excludeInward ? 1 : null,           // excludeInward ×1
+    ...scopeParams(scope.mfgIds),         // entity scope: mfg ×2
+    ...scopeParams(scope.warehouseNames), // entity scope: warehouse ×2
   ]
 }
 
 /**
- * Build the 18-element param array for statusCounts / summaryStats
- * (same as buildFilterParams but without the status filter pair).
+ * Build the 23-element param array for statusCounts / summaryStats
+ * (same as buildFilterParams but without the status filter quad).
  */
 export function buildStatusCountParams(
   search:      string | null,
@@ -493,6 +556,8 @@ export function buildStatusCountParams(
   dateTo:      string | null,
   sku:         string | null,
   destination: string | null,
+  excludeInward = false,
+  scope:       UserScope,
 ): unknown[] {
   const like = search ? `%${search}%` : null
   return [
@@ -503,5 +568,8 @@ export function buildStatusCountParams(
     dateTo,      dateTo,                // dateTo ×2
     sku,         sku,                   // sku ×2
     destination, destination,           // destination ×2
+    excludeInward ? 1 : null,           // excludeInward ×1
+    ...scopeParams(scope.mfgIds),         // entity scope: mfg ×2
+    ...scopeParams(scope.warehouseNames), // entity scope: warehouse ×2
   ]
 }

@@ -14,6 +14,7 @@ import { manufacturers as mfgsSql } from "@/lib/queries/manufacturers"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { assertPoInScope } from "@/lib/po-guard"
 import { ApiError } from "@/lib/gateway/errors"
 import { poIdParamSchema, poSplitSchema } from "@/lib/validation/purchase-order-detail"
 
@@ -25,6 +26,9 @@ export const POST = withGateway({
   access: { pageSlug: "/po-tracking", level: "editor" },
   handler: async ({ body, params, session, ctx }) => {
     const poId = params.id
+    // PO ids are sequential integers, so the filtered list isn't a boundary —
+    // this refuses a PO belonging to an out-of-scope manufacturer/warehouse.
+    await assertPoInScope(Number(session.user.id), poId)
     const { splits } = body
 
     // Fetch the original PO

@@ -4,6 +4,8 @@ import "./globals.css";
 import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth";
 import { resolveAccess, type AccessLevel } from "@/lib/permissions";
+import { NAV_SLUGS } from "@/lib/pages";
+import { getUserScope, scopeParams, UNRESTRICTED } from "@/lib/scope";
 import ClientLayout from "@/components/ClientLayout";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { timedQuery } from "@/lib/query-timing";
@@ -18,21 +20,11 @@ import { manufacturingSql } from "@/lib/queries/manufacturing";
 // parent-slug fallback means e.g. "/po-tracking/po-procurement" naturally
 // inherits whatever's granted at "/po-tracking" if it has no override of its
 // own, so listing the real hrefs here doesn't require separate seeding.
-const SIDEBAR_SLUGS = [
-  "/masters",
-  "/masters/skus",
-  "/masters/manufacturers",
-  "/masters/vendors",
-  "/masters/bom-master",
-  "/masters/material-master",
-  "/masters/raw-materials",
-  "/masters/packing-materials",
-  "/po-tracking/mfg-overview",
-  "/po-tracking/po-procurement",
-  "/po-tracking/rm-pm-procurement",
-  "/po-tracking/po-inwarding",
-  "/approvals",
-] as const;
+//
+// Comes from lib/pages.ts, which is also what the /admin permissions grid
+// renders — one list, so a new page can't be lockable in one place and
+// invisible in the other.
+const SIDEBAR_SLUGS = NAV_SLUGS;
 
 const merriweatherHeading = Merriweather({ subsets: ["latin"], variable: "--font-heading" });
 const outfit = Outfit({ subsets: ["latin"], variable: "--font-sans" });
@@ -59,8 +51,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const user = session?.user
     ? { name: session.user.name, email: session.user.email }
     : undefined;
+  // Entity-scoped: out-of-scope manufacturers are absent from the sidebar
+  // entirely, not locked — the lock icon would still disclose the name.
+  const scope = session ? await getUserScope(Number(session.user.id)) : UNRESTRICTED;
   const mfgs = session
-    ? await timedQuery<{ id: number; name: string }>(manufacturingSql.selectActiveForNav, [], { label: "manufacturing.selectActiveForNav" })
+    ? await timedQuery<{ id: number; name: string }>(manufacturingSql.selectActiveForNav, scopeParams(scope.mfgIds), { label: "manufacturing.selectActiveForNav" })
     : [];
 
   // Resolve access for every sidebar destination up front (server-side, one

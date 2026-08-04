@@ -67,6 +67,9 @@ model purchase_orders {
   expected_on    DateTime?               @db.Date
   received_qty   Decimal?                @default(0.000) @db.Decimal(12, 3)
   invoice_no     String?                 @db.VarChar(100)
+  /// The Unicommerce PO this row was mirrored into. Shared by every inward PO
+  /// off the same invoice — Uniware's model is one PO for all SKUs.
+  uniware_po_code String?                @db.VarChar(64)
   destination    String?                 @db.VarChar(100)
   status         purchase_orders_status? @default(draft)
   attachment_key String?                 @db.Text
@@ -265,6 +268,45 @@ model user_page_permissions {
   @@index([user_id], map: "user_id")
 }
 
+/// Per-user data scoping — which manufacturers/vendors/warehouses a user may
+/// see. NO rows for a (user, entity_type) pair means unrestricted. See
+/// prisma/add_user_entity_scope.sql for the full semantics.
+model user_entity_scope {
+  user_id     Int
+  entity_type user_entity_scope_type
+  entity_id   Int
+  created_at  DateTime @default(now()) @db.DateTime(0)
+  created_by  Int?
+
+  @@id([user_id, entity_type, entity_id])
+  @@index([user_id], map: "idx_scope_user")
+}
+
+enum user_entity_scope_type {
+  mfg
+  vendor
+  warehouse
+}
+
+/// Per-request activity trail, written by lib/gateway/with-gateway.ts for every
+/// non-GET API request. No relation to `users` on purpose — see
+/// prisma/add_activity_log.sql.
+model activity_log {
+  id          BigInt   @id @default(autoincrement())
+  user_id     Int?
+  method      String   @db.VarChar(10)
+  path        String   @db.VarChar(255)
+  status      Int      @db.SmallInt
+  duration_ms Int
+  ip_address  String?  @db.VarChar(45)
+  user_agent  String?  @db.VarChar(255)
+  request_id  String?  @db.Char(36)
+  created_on  DateTime @db.DateTime(0)
+
+  @@index([user_id, id], map: "idx_activity_user")
+  @@index([created_on], map: "idx_activity_created")
+}
+
 model users {
   id                                     Int                       @id @default(autoincrement())
   name                                   String                    @db.VarChar(100)
@@ -416,12 +458,12 @@ model details_vendor {
 }
 
 model entity_emails {
-  id          Int       @id @default(autoincrement())
-  entity_type String    @db.VarChar(10)
-  entity_code String    @db.VarChar(50)
-  email       String    @db.VarChar(255)
-  purpose     String?   @db.VarChar(100)
-  created_at  DateTime? @default(now()) @db.Timestamp(0)
+  id          Int                       @id @default(autoincrement())
+  entity_type entity_emails_entity_type
+  entity_code String                    @db.VarChar(50)
+  email       String                    @db.VarChar(255)
+  purpose     String?                   @db.VarChar(100)
+  created_at  DateTime?                 @default(now()) @db.Timestamp(0)
 
   @@index([entity_type, entity_code], map: "idx_entity_emails_lookup")
 }
@@ -845,6 +887,12 @@ enum page_permissions_access {
   none
   viewer
   editor
+}
+
+enum entity_emails_entity_type {
+  vendor
+  mfg
+  warehouse
 }
 
 enum history_vrm_mtrl_type {

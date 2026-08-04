@@ -2,6 +2,8 @@ import 'dotenv/config'
 import { pool } from "../lib/db"
 import { rawMaterials } from "../lib/queries/raw-materials"
 import { packingMaterials } from "../lib/queries/packing-materials"
+// UNRESTRICTED: this script measures index usage, not scoping.
+import { UNRESTRICTED } from "../lib/scope"
 
 type ExplainRow = {
   table: string
@@ -61,22 +63,22 @@ async function main() {
   await explain(
     "rm_vrm_dynamic.selectVendorPaginated (status='active')",
     rawMaterials.selectVendorPaginated,
-    [...rawMaterials.vendorFilterParams(null, "active", null, null, null, null, null, null), 50, 0]
+    [...rawMaterials.vendorFilterParams(null, "active", null, null, null, null, null, null, UNRESTRICTED), 50, 0]
   )
   await explain(
     "rm_mrm_fixed.selectMfgPaginated (status='active')",
     rawMaterials.selectMfgPaginated,
-    [...rawMaterials.mfgFilterParams(null, "active", null, null, null, null, null), 50, 0]
+    [...rawMaterials.mfgFilterParams(null, "active", null, null, null, null, null, UNRESTRICTED), 50, 0]
   )
   await explain(
     "pm_vrm_dynamic.selectVendorPaginated (status='active')",
     packingMaterials.selectVendorPaginated,
-    [...packingMaterials.vendorFilterParams(null, "active", null, null, null, null, null), 50, 0]
+    [...packingMaterials.vendorFilterParams(null, "active", null, null, null, null, null, UNRESTRICTED), 50, 0]
   )
   await explain(
     "pm_mrm_fixed.selectMfgPaginated (status='active')",
     packingMaterials.selectMfgPaginated,
-    [...packingMaterials.mfgFilterParams(null, "active", null, null, null, null, null), 50, 0]
+    [...packingMaterials.mfgFilterParams(null, "active", null, null, null, null, null, UNRESTRICTED), 50, 0]
   )
 
   // ── Rate tables, status + curr_rate range (the other new composite index) ──
@@ -84,12 +86,12 @@ async function main() {
   await explain(
     "rm_vrm_dynamic.selectVendorPaginated (status + rate 10-500)",
     rawMaterials.selectVendorPaginated,
-    [...rawMaterials.vendorFilterParams(null, "active", null, null, null, "10", "500", null), 50, 0]
+    [...rawMaterials.vendorFilterParams(null, "active", null, null, null, "10", "500", null, UNRESTRICTED), 50, 0]
   )
   await explain(
     "pm_mrm_fixed.selectMfgPaginated (status + rate 10-500)",
     packingMaterials.selectMfgPaginated,
-    [...packingMaterials.mfgFilterParams(null, "active", null, null, "10", "500", null), 50, 0]
+    [...packingMaterials.mfgFilterParams(null, "active", null, null, "10", "500", null, UNRESTRICTED), 50, 0]
   )
 
   await pool.end()

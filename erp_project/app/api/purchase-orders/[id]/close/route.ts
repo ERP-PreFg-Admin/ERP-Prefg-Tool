@@ -8,6 +8,7 @@ import { NextResponse } from "next/server"
 import { query, execute } from "@/lib/db"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { assertPoInScope } from "@/lib/po-guard"
 import { poIdParamSchema } from "@/lib/validation/purchase-order-detail"
 import logger from "@/lib/logger"
 import { recordFailedEvent, recordProcessedEvent, recordRawEvent, makeEventId } from "@/lib/events"
@@ -20,6 +21,9 @@ export const POST = withGateway({
   handler: async ({ params, session, ctx }) => {
   const userId = Number(session.user.id)
   const poId = params.id
+  // PO ids are sequential integers, so the filtered list isn't a boundary —
+  // this refuses a PO belonging to an out-of-scope manufacturer/warehouse.
+  await assertPoInScope(Number(session.user.id), poId)
   const eventId = makeEventId("PO_CLOSE", "short-close", poId)
   const logCtx = { ...ctx, route: `/api/purchase-orders/${poId}/close`, eventId }
   recordRawEvent("PO_CLOSE", eventId, { poId, userId })

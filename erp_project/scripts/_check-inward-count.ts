@@ -5,16 +5,18 @@ import { query, pool } from "../lib/db"
 import {
   purchaseOrdersSql, buildStatusCountParams, buildFilterParams,
 } from "../lib/queries/purchase-orders"
+import { UNRESTRICTED } from "../lib/scope"
 
 async function main() {
-  const countParams = buildStatusCountParams(null, null, null, null, null, null, null)
+  // UNRESTRICTED: this script checks the count/filter mechanics, not scoping.
+  const countParams = buildStatusCountParams(null, null, null, null, null, null, null, false, UNRESTRICTED)
   console.log("statusCount param count:", countParams.length)
 
   const c = await query<{ cnt: number }>(purchaseOrdersSql.inwardCount, countParams)
   console.log("inwardCount ->", Number(c[0]?.cnt ?? 0))
 
   // What the tab actually selects: status = null, poType = 'inward'.
-  const filterParams = buildFilterParams(null, null, null, "inward", null, null, null, null)
+  const filterParams = buildFilterParams(null, null, null, "inward", null, null, null, null, false, UNRESTRICTED)
   const rows = await query<{ po_no: string; status: string; po_type: string }>(
     purchaseOrdersSql.buildSelectPaginated("expected_on", "asc"),
     [...filterParams, 50, 0]

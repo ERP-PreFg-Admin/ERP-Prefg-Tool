@@ -22,6 +22,7 @@ import { vendors as vendorSql } from "@/lib/queries/vendors"
 import { buildCsv, buildXlsx, buildExportFilename } from "@/lib/export"
 import { VENDOR_EXPORT_COLUMNS } from "@/lib/export-configs"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { getUserScope } from "@/lib/scope"
 import logger from "@/lib/logger"
 
 const ROW_LIMIT = 50_000
@@ -35,7 +36,7 @@ export const GET = withGateway({
   const type   = sp.get("type")   ?? ""
   const zone   = sp.get("zone")   ?? ""
 
-  const filterParams = vendorSql.filterParams(search || null, type || null, zone || null)
+  const filterParams = vendorSql.filterParams(search || null, type || null, zone || null, await getUserScope(Number(session.user.id)))
 
   try {
     const [{ total }] = await query<{ total: number }>(

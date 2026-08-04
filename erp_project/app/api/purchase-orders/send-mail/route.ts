@@ -4,6 +4,7 @@ import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { sendMfgSelectionEmail } from "@/lib/mailer"
 import { poSendMailSchema } from "@/lib/validation/purchase-orders"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { assertPoInScope } from "@/lib/po-guard"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 
@@ -19,8 +20,14 @@ import logger from "@/lib/logger"
 export const POST = withGateway({
   schema: poSendMailSchema,
   access: { pageSlug: "/po-tracking", level: "editor" },
-  handler: async ({ body, ctx }) => {
+  handler: async ({ body, session, ctx }) => {
     const poIds = body.po_ids.map(Number)
+
+    // Every id is checked, not just the first: this mails a manufacturer's PO
+    // lines out, so one out-of-scope id in the batch is a real disclosure.
+    for (const poId of poIds) {
+      await assertPoInScope(Number(session.user.id), poId)
+    }
 
     const eventId = makeEventId("PO_SELECTION_EMAIL", "send-batch")
     recordRawEvent("PO_SELECTION_EMAIL", eventId, { poIds })

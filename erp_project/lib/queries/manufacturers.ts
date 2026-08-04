@@ -3,6 +3,8 @@
  * Centralized queries for manufacturers table (mfgs)
  */
 
+import { scopeParams, type UserScope } from "@/lib/scope"
+
 /** Full-row column list shared by selectByCodeForMatch and its IN (?)-batched
  *  counterpart below — both need every field the edit-match diff compares. */
 const MFG_CANDIDATE_COLUMNS = `
@@ -52,6 +54,7 @@ export const manufacturers = {
     FROM master_mfgs AS mfg
     INNER JOIN details_mfg AS mfgd ON mfgd.mfg_id = mfg.id
     WHERE (? IS NULL OR mfg.code LIKE ? OR mfg.name LIKE ?)
+      AND (? IS NULL OR mfg.id IN (?))
     ORDER BY mfg.code ASC
     LIMIT ? OFFSET ?
   `,
@@ -70,6 +73,7 @@ export const manufacturers = {
     FROM master_mfgs AS mfg
     INNER JOIN details_mfg AS mfgd ON mfgd.mfg_id = mfg.id
     WHERE (? IS NULL OR mfg.code LIKE ? OR mfg.name LIKE ?)
+      AND (? IS NULL OR mfg.id IN (?))
     ORDER BY mfg.code ASC
   `,
 
@@ -82,6 +86,7 @@ export const manufacturers = {
     FROM master_mfgs AS mfg
     INNER JOIN details_mfg AS mfgd ON mfgd.mfg_id = mfg.id
     WHERE (? IS NULL OR mfg.code LIKE ? OR mfg.name LIKE ?)
+      AND (? IS NULL OR mfg.id IN (?))
   `,
 
   // ============ INSERT QUERIES ============
@@ -243,12 +248,16 @@ export const manufacturers = {
    * Build the filter parameter array for selectPaginated, selectAllFiltered, and countAll.
    * Centralises the repeated-param pattern so callers never have to count repetitions.
    *
+   * `scope` is required, not defaulted: an omitted scope would silently list
+   * every manufacturer, so the compiler flags a caller that forgets it. Pass
+   * UNRESTRICTED explicitly where that's genuinely intended.
+   *
    * Usage:
-   *   const fp = manufacturers.filterParams(search)
+   *   const fp = manufacturers.filterParams(search, scope)
    *   paginate(manufacturers.selectPaginated, [...fp, limit, offset], manufacturers.countAll, fp, ...)
    */
-  filterParams(search: string | null): unknown[] {
+  filterParams(search: string | null, scope: UserScope): unknown[] {
     const like = search ? `%${search}%` : null
-    return [like, like, like]
+    return [like, like, like, ...scopeParams(scope.mfgIds)]
   },
 }

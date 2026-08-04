@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
+import { getUserScope, scopeParams } from "@/lib/scope"
 import { redirect } from "next/navigation"
 import { timedQuery } from "@/lib/query-timing"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
@@ -15,9 +16,11 @@ export default async function ManufacturingOverviewPage() {
   const access = await resolveAccess(userId, session.user.roles, "/po-tracking/mfg-overview")
   if (access === "none") redirect("/auth/unauthorized")
 
+  // Both queries used to span every active manufacturer with no params at all.
+  const scope = await getUserScope(userId)
   const [rows, monthlyPoRows] = await Promise.all([
-    timedQuery<MfgOverviewRow>(manufacturingSql.overviewByMfg, [], { label: "manufacturing.overviewByMfg" }),
-    timedQuery<MfgMonthlyPoRow>(manufacturingSql.selectMonthlyPoSummaryAllMfgs, [], { label: "manufacturing.selectMonthlyPoSummaryAllMfgs" }),
+    timedQuery<MfgOverviewRow>(manufacturingSql.overviewByMfg, scopeParams(scope.mfgIds), { label: "manufacturing.overviewByMfg" }),
+    timedQuery<MfgMonthlyPoRow>(manufacturingSql.selectMonthlyPoSummaryAllMfgs, scopeParams(scope.mfgIds), { label: "manufacturing.selectMonthlyPoSummaryAllMfgs" }),
   ])
 
   return (

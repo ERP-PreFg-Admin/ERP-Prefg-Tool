@@ -36,6 +36,18 @@ export const permissions = {
     ON DUPLICATE KEY UPDATE access_level = VALUES(access_level)
   `,
 
+  /**
+   * Remove a role's grant for a page entirely, so the slug falls back to its
+   * parent again (lib/permissions.ts walks slugs upward). An explicit
+   * access_level = 'none' row BLOCKS that fallback — deleting is how the
+   * permissions grid sets a cell back to "inherit".
+   * Parameters: [role, page_slug]
+   */
+  deletePagePermission: `
+    DELETE FROM page_permissions
+    WHERE role = ? AND page_slug = ?
+  `,
+
   // ============ USER PAGE PERMISSIONS (User-specific) ============
 
   /**

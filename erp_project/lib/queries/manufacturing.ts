@@ -80,7 +80,7 @@ export const manufacturingSql = {
     ORDER BY sk.name ASC
   `,
 
-  /** Same as selectMonthlyPoSummaryByMfg but across every manufacturer at once — for the MFG Overview cards' mini table. */
+  /** Same as selectMonthlyPoSummaryByMfg but across every manufacturer at once — for the MFG Overview cards' mini table. Params: scopeParams(mfgIds) */
   selectMonthlyPoSummaryAllMfgs: `
     SELECT
       po.mfg_id, po.sku_code, sk.name AS sku_name,
@@ -90,6 +90,7 @@ export const manufacturingSql = {
     LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
     WHERE po.status NOT IN ('draft', 'cancelled', 'rejected')
       AND YEAR(po.date) = YEAR(CURDATE()) AND MONTH(po.date) = MONTH(CURDATE())
+      AND (? IS NULL OR po.mfg_id IN (?))
     GROUP BY po.mfg_id, po.sku_code, sk.name
     ORDER BY sk.name ASC
   `,
@@ -98,6 +99,7 @@ export const manufacturingSql = {
    * One row per active manufacturer with aggregated production + PO stats.
    * Production-share / fill-rate percentages are derived in application code
    * from these sums, not stored.
+   * Params: scopeParams(mfgIds)
    */
   overviewByMfg: `
     SELECT
@@ -119,16 +121,23 @@ export const manufacturingSql = {
       GROUP BY mfg_id
     ) po ON po.mfg_id = m.id
     WHERE d.status = 'active'
+      AND (? IS NULL OR m.id IN (?))
     GROUP BY m.id, m.code, m.name, po.open_pos, po.open_value
     ORDER BY m.code ASC
   `,
 
-  /** Active manufacturers for the sidebar's dynamic MFG Management tabs. */
+  /**
+   * Active manufacturers for the sidebar's dynamic MFG Management tabs.
+   * Entity-scoped: this runs on every authenticated request, so without the
+   * clause every user receives every manufacturer's name.
+   * Params: scopeParams(mfgIds)
+   */
   selectActiveForNav: `
     SELECT m.id, m.name
     FROM master_mfgs m
     INNER JOIN details_mfg d ON d.mfg_id = m.id
     WHERE d.status = 'active'
+      AND (? IS NULL OR m.id IN (?))
     ORDER BY m.code ASC
   `,
 

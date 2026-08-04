@@ -3,6 +3,8 @@
  * Centralized queries for raw materials table and related tables (rm_mrm, rm_vrm)
  */
 
+import { scopeParams, type UserScope } from "@/lib/scope"
+
 export const rawMaterials = {
   // ============ SELECT QUERIES ============
 
@@ -67,6 +69,12 @@ export const rawMaterials = {
    * rate is resolved via a correlated subquery (same "pick one row" pattern
    * as manufacturingSql.selectPmVendorByMfg) since MIN()/MAX() alone can't
    * say which vendor produced that extreme.
+   *
+   * Vendor-scoped: the clause appears THREE times — once in the aggregate and
+   * once in each correlated subquery. Scoping only the aggregate would compute
+   * an in-scope min/max but still resolve the NAME of an out-of-scope vendor
+   * that happens to quote the same rate.
+   * Params: scopeParams(vendorIds) × 3 (6 total)
    */
   selectMinMaxVrmRateByRm: `
     SELECT
@@ -79,18 +87,21 @@ export const rawMaterials = {
       WHERE status = 'active'
         AND effective_from <= CURDATE()
         AND (effective_to IS NULL OR effective_to >= CURDATE())
+        AND (? IS NULL OR vendor_id IN (?))
       GROUP BY rm_id
     ) agg
     LEFT JOIN master_vendors minv ON minv.id = (
       SELECT vendor_id FROM rm_vrm_dynamic
       WHERE rm_id = agg.rm_id AND curr_rate = agg.min_rate AND status = 'active'
         AND effective_from <= CURDATE() AND (effective_to IS NULL OR effective_to >= CURDATE())
+        AND (? IS NULL OR vendor_id IN (?))
       ORDER BY id LIMIT 1
     )
     LEFT JOIN master_vendors maxv ON maxv.id = (
       SELECT vendor_id FROM rm_vrm_dynamic
       WHERE rm_id = agg.rm_id AND curr_rate = agg.max_rate AND status = 'active'
         AND effective_from <= CURDATE() AND (effective_to IS NULL OR effective_to >= CURDATE())
+        AND (? IS NULL OR vendor_id IN (?))
       ORDER BY id LIMIT 1
     )
   `,
@@ -176,6 +187,7 @@ export const rawMaterials = {
       AND (? IS NULL OR rmv.curr_rate >= ?)
       AND (? IS NULL OR rmv.curr_rate <= ?)
       AND (? IS NULL OR rmv.effective_from >= ?)
+      AND (? IS NULL OR rmv.vendor_id IN (?))
     ORDER BY r.rm_code ASC
     LIMIT ? OFFSET ?
   `,
@@ -203,6 +215,7 @@ export const rawMaterials = {
       AND (? IS NULL OR rmv.curr_rate >= ?)
       AND (? IS NULL OR rmv.curr_rate <= ?)
       AND (? IS NULL OR rmv.effective_from >= ?)
+      AND (? IS NULL OR rmv.vendor_id IN (?))
     ORDER BY r.rm_code ASC
   `,
 
@@ -222,6 +235,7 @@ export const rawMaterials = {
       AND (? IS NULL OR rmv.curr_rate >= ?)
       AND (? IS NULL OR rmv.curr_rate <= ?)
       AND (? IS NULL OR rmv.effective_from >= ?)
+      AND (? IS NULL OR rmv.vendor_id IN (?))
   `,
 
   /** Distinct RM makes for the make filter dropdown. */
@@ -270,7 +284,8 @@ export const rawMaterials = {
     vendorCode: string | null,
     rateMin: string | null,
     rateMax: string | null,
-    effectiveFrom: string | null
+    effectiveFrom: string | null,
+    scope: UserScope,
   ): unknown[] {
     const like   = search     ? `%${search}%`     : null
     const vcLike = vendorCode ? `%${vendorCode}%` : null
@@ -285,6 +300,7 @@ export const rawMaterials = {
       rateMinNum, rateMinNum,
       rateMaxNum, rateMaxNum,
       effectiveFrom, effectiveFrom,
+      ...scopeParams(scope.vendorIds),
     ]
   },
 
@@ -308,6 +324,7 @@ export const rawMaterials = {
       AND (? IS NULL OR rmm.curr_rate >= ?)
       AND (? IS NULL OR rmm.curr_rate <= ?)
       AND (? IS NULL OR rmm.effective_from >= ?)
+      AND (? IS NULL OR rmm.mfg_id IN (?))
     ORDER BY r.rm_code ASC
     LIMIT ? OFFSET ?
   `,
@@ -332,6 +349,7 @@ export const rawMaterials = {
       AND (? IS NULL OR rmm.curr_rate >= ?)
       AND (? IS NULL OR rmm.curr_rate <= ?)
       AND (? IS NULL OR rmm.effective_from >= ?)
+      AND (? IS NULL OR rmm.mfg_id IN (?))
     ORDER BY r.rm_code ASC
   `,
 
@@ -347,6 +365,7 @@ export const rawMaterials = {
       AND (? IS NULL OR rmm.curr_rate >= ?)
       AND (? IS NULL OR rmm.curr_rate <= ?)
       AND (? IS NULL OR rmm.effective_from >= ?)
+      AND (? IS NULL OR rmm.mfg_id IN (?))
   `,
 
   /** Build the filter param array for all mfg-view queries. */
@@ -358,6 +377,7 @@ export const rawMaterials = {
     rateMin: string | null,
     rateMax: string | null,
     effectiveFrom: string | null,
+    scope: UserScope,
   ): unknown[] {
     const like       = search   ? `%${search}%`   : null
     const mfgLike    = mfgCode  ? `%${mfgCode}%`  : null
@@ -371,6 +391,7 @@ export const rawMaterials = {
       rateMinNum, rateMinNum,
       rateMaxNum, rateMaxNum,
       effectiveFrom, effectiveFrom,
+      ...scopeParams(scope.mfgIds),
     ]
   },
 

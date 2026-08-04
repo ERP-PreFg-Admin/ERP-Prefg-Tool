@@ -10,6 +10,7 @@ import { parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
 import { purchaseOrdersSql, buildFilterParams, buildStatusCountParams } from "@/lib/queries/purchase-orders"
 import { getPoDropdownOptions } from "@/lib/cached-reference-data"
+import { getUserScope, filterByScope } from "@/lib/scope"
 import type { PoRow } from "../po-procurement/po-types"
 import PoProcurementClient from "../po-procurement/PoProcurementClient"
 
@@ -51,8 +52,9 @@ export default async function PoInwardingPage({
   const status      = statusFilter === "all" || isInwardTab ? null : statusFilter || null
   const poTypeParam = isInwardTab ? "inward" : poType || null
 
-  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poTypeParam, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null)
-  const statusCountParams = buildStatusCountParams(search || null, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null)
+  const scope = await getUserScope(userId)
+  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poTypeParam, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, false, scope)
+  const statusCountParams = buildStatusCountParams(search || null, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, false, scope)
 
   const pageStart = performance.now()
   console.log(`[AUDIT] PO Inwarding load - page=${page}, size=${size}, search=${search || "none"}, status=${status ?? "all"}, sortBy=${sortBy}, sortDir=${sortDir}`)
@@ -65,7 +67,11 @@ export default async function PoInwardingPage({
     timedQuery<any>(purchaseOrdersSql.summaryStats, statusCountParams, { label: "summaryStats" }),
     getPoDropdownOptions(),
   ])
-  const { skus, mfgs, warehouses } = dropdownOptions
+  // Post-filtered, not filtered in the query: getPoDropdownOptions is an
+  // unstable_cache with no user component in its key.
+  const { skus } = dropdownOptions
+  const mfgs = filterByScope(dropdownOptions.mfgs, "id", scope.mfgIds)
+  const warehouses = filterByScope(dropdownOptions.warehouses, "name", scope.warehouseNames)
 
   const total = Number(countRows[0]?.total ?? 0)
   console.log(`[AUDIT] PO Inwarding complete: ${(performance.now() - pageStart).toFixed(2)}ms | ${rows.length}/${total} rows`)
