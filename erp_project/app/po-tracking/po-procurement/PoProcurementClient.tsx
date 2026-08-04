@@ -304,7 +304,9 @@ export default function PoProcurementClient({
                   <option value="">All Types</option>
                   <option value="normal">Normal</option>
                   <option value="impromptu">Impromptu</option>
-                  <option value="inward">Inward</option>
+                  {/* Procurement filters inward POs out at the query, so
+                      offering the type here would only ever return nothing. */}
+                  {isInwarding && <option value="inward">Inward</option>}
                 </select>
               </div>
               <div className="grid gap-1.5">
@@ -398,6 +400,7 @@ export default function PoProcurementClient({
         onToggleAll={toggleAll}
         selectable={!isInwarding}
         receiveOnly={isInwarding}
+        showUniwareCode={isInwarding}
       />
 
       {/* ── Pagination ── */}

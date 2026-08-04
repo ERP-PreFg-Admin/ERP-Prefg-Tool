@@ -257,6 +257,36 @@ export async function createPurchaseOrder(po: UniwarePoInput): Promise<{ purchas
   return { purchaseOrderCode: assigned }
 }
 
+/**
+ * Download the PO document Unicommerce renders for a code.
+ *
+ * Not a REST endpoint — this is the web UI's own print view (the page a user
+ * reaches from the PO screen), which is why the path sits outside
+ * /services/rest/v1. It does accept the OAuth bearer token, and unauthenticated
+ * it 302s to /login with an empty body rather than failing outright, so the
+ * response is checked for the PDF magic bytes: a login redirect must never be
+ * attached to an email as though it were the document.
+ */
+export async function fetchPurchaseOrderPdf(code: string): Promise<Buffer> {
+  const token = await getToken()
+  const url = `${BASE}/po/show?code=${encodeURIComponent(code)}&legacy=1`
+
+  const res = await fetch(url, {
+    headers: authHeaders(token),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  })
+  const buf = Buffer.from(await res.arrayBuffer())
+
+  if (!res.ok) {
+    throw new Error(`Uniware PO document ${code}: HTTP ${res.status}`)
+  }
+  if (buf.subarray(0, 5).toString("latin1") !== "%PDF-") {
+    const ct = res.headers.get("content-type") ?? "unknown"
+    throw new Error(`Uniware PO document ${code}: expected a PDF, got ${ct} (${buf.length} bytes)`)
+  }
+  return buf
+}
+
 export type UniwarePushResult = {
   po_no: string
   ok: boolean

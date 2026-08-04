@@ -34,6 +34,7 @@ export default function PoTable({
   onToggleAll,
   selectable = true,
   receiveOnly = false,
+  showUniwareCode = false,
 }: {
   rows: PoRow[]
   sessionUserId: number
@@ -53,6 +54,9 @@ export default function PoTable({
   /** PO Inwarding mode: receiving is the point, so Receive gets a labelled
    *  button and the procurement-side actions (edit, split, cancel) are hidden. */
   receiveOnly?: boolean
+  /** Only inward POs are mirrored to Unicommerce, so the column is dead weight
+   *  anywhere they aren't shown. PO Inwarding turns it on. */
+  showUniwareCode?: boolean
 }) {
   const router                                      = useRouter()
   const [shortCloseTarget, setShortCloseTarget]     = useState<number | null>(null)
@@ -94,6 +98,7 @@ export default function PoTable({
                   <SortHead colKey="unit_price"   {...sh}>Rate</SortHead>
                   <SortHead colKey="total_amount" {...sh}>Amount</SortHead>
                   <TableHead>Invoice No</TableHead>
+                  {showUniwareCode && <TableHead>Uniware Code</TableHead>}
                   <TableHead>Destination</TableHead>
                   <SortHead colKey="status"       {...sh}>Status</SortHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -103,7 +108,8 @@ export default function PoTable({
               <TableBody>
                 {rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={selectable ? 14 : 13} className="text-center text-muted-foreground py-10">
+                    {/* 13 fixed columns, plus whichever optional ones are on. */}
+                    <TableCell colSpan={13 + (selectable ? 1 : 0) + (showUniwareCode ? 1 : 0)} className="text-center text-muted-foreground py-10">
                       No purchase orders match your filters.
                     </TableCell>
                   </TableRow>
@@ -228,6 +234,12 @@ export default function PoTable({
                         <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
                           {r.invoice_no ?? "—"}
                         </TableCell>
+
+                        {showUniwareCode && (
+                          <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
+                            {r.uniware_po_code ?? "—"}
+                          </TableCell>
+                        )}
 
                         <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                           {r.destination ?? "—"}
