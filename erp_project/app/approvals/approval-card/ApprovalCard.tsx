@@ -2,12 +2,14 @@
 
 import { ChevronDown, ChevronRight, Clock, FileText } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { APPROVAL_STATUS_VARIANT, type ApprovalStatus } from "@/lib/constants"
 import type { Approval } from "../approvals-types"
-import { MODULE_LABEL, MODULE_COLOR, BULK_MODULES, HISTORY_STATUS_COLOR, getInitials, fmtDate } from "../approvals-types"
+import { MODULE_LABEL, MODULE_COLOR, MODULE_COLOR_FALLBACK, BULK_MODULES, getInitials, fmtDate } from "../approvals-types"
 import { EntityInfo } from "./EntityInfo"
 import { CsvFileCard } from "./CsvDiff"
 import { BomLineDiffTable } from "./BomLineDiffTable"
 import { FieldDiffTable } from "./FieldDiffTable"
+import { RejectionRemarksCallout } from "./FieldDiff"
 import { ApprovalActions } from "./ApprovalActions"
 import type { MaterialMap } from "./types"
 
@@ -33,11 +35,17 @@ export default function ApprovalCard({
    *  since its list can be much longer. */
   alwaysExpanded?: boolean
 }) {
-  const moduleColor = MODULE_COLOR[approval.module] ?? "bg-slate-50 text-slate-700 border-slate-200"
+  const moduleColor = MODULE_COLOR[approval.module] ?? MODULE_COLOR_FALLBACK
   const isBulk      = BULK_MODULES.has(approval.module)
   const isBom       = approval.module === "BOM"
   const rowCount    = approval.items.find(i => i.field_name === "row_count")?.new_value
   const showDiff    = isExpanded || alwaysExpanded
+  // BOM never calls insertHistoryEntry — its reason travels as a __reason__
+  // sentinel approval_item instead (see BomLineDiffTable.tsx's parser), so
+  // approval.reason is always null for this module.
+  const reasonText  = isBom
+    ? approval.items.find(i => i.field_name === "__reason__")?.new_value || null
+    : approval.reason
 
   return (
     <div className={`rounded-xl border border-border bg-card overflow-hidden transition-all ${isExpanded ? "ring-1 ring-primary/20 shadow-sm" : ""}`}>
@@ -56,9 +64,9 @@ export default function ApprovalCard({
                 {MODULE_LABEL[approval.module] ?? approval.module}
               </span>
               {approval.status && (
-                <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold capitalize tracking-wide ${HISTORY_STATUS_COLOR[approval.status] ?? "bg-slate-50 text-slate-700 border-slate-200"}`}>
+                <Badge variant={APPROVAL_STATUS_VARIANT[approval.status as ApprovalStatus]} className="capitalize">
                   {approval.status}
-                </span>
+                </Badge>
               )}
               {isBulk ? (
                 <Badge variant="secondary" className="gap-1 text-[10px] h-4">
@@ -108,11 +116,15 @@ export default function ApprovalCard({
               <span className="font-medium text-foreground">{approval.approved_by_name ?? "—"}</span>
               {approval.approved_on && <> on {fmtDate(approval.approved_on)}</>}
               {approval.status === "rejected" && approval.remarks && (
-                <p className="mt-1.5 rounded-md border border-red-100 bg-red-50 px-2.5 py-1.5 text-red-700">
-                  {approval.remarks}
-                </p>
+                <RejectionRemarksCallout remarks={approval.remarks} />
               )}
             </div>
+          )}
+          {!isBulk && reasonText && (
+            <p className="mb-2 text-xs text-foreground/90">
+              <span className="font-semibold uppercase tracking-wide text-[10px] text-muted-foreground mr-1.5">Reason</span>
+              {reasonText}
+            </p>
           )}
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
             {isBulk ? "Uploaded File" : isBom ? "Formulation Changes" : "Field Changes"}
@@ -124,7 +136,7 @@ export default function ApprovalCard({
               onOpen={onOpenCsvFile}
             />
           ) : isBom ? (
-            <BomLineDiffTable items={approval.items} materialMap={materialMap} />
+            <BomLineDiffTable items={approval.items} materialMap={materialMap} hideReason />
           ) : (
             <FieldDiffTable items={approval.items} />
           )}

@@ -7,8 +7,10 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
+import { Select } from "@/components/ui/select"
+import { useToast } from "@/components/ui/toast"
+import { RemarksField, PO_REASON_PRESETS } from "@/components/masters/RemarksField"
 import type { EditData, ImpromptuForm, MfgOption, SkuOption, WarehouseOption } from "./po-types"
 import { EMPTY_FORM } from "./po-types"
 import { useQuotedRate } from "./useQuotedRate"
@@ -25,6 +27,7 @@ export default function ImpromptuPODialog({
   editData?: EditData | null
 }) {
   const isEdit = !!editData
+  const { toast } = useToast()
 
   const [form, setForm]             = useState<ImpromptuForm>(EMPTY_FORM)
   const [errors, setErrors]         = useState<Partial<Record<keyof ImpromptuForm, string>>>({})
@@ -40,6 +43,7 @@ export default function ImpromptuPODialog({
   useEffect(() => {
     if (!open) return
     if (editData) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets form state each time the dialog is opened
       setForm({
         sku_code:   editData.sku_code ?? "",
         mfg_id:     String(editData.mfg_id),
@@ -111,11 +115,18 @@ export default function ImpromptuPODialog({
           })
 
       const data = await res.json()
-      if (!res.ok) { setApiError(data.error ?? "Failed to submit PO."); return }
+      if (!res.ok) {
+        const message = data.error ?? "Failed to submit PO."
+        setApiError(message)
+        toast({ title: "Couldn't submit PO", description: message, variant: "error" })
+        return
+      }
+      toast({ title: "Submitted for approval", description: `PO for ${form.sku_code} is now awaiting approval.`, variant: "success" })
       onCreated()
       onClose()
     } catch {
       setApiError("Network error. Please try again.")
+      toast({ title: "Couldn't submit PO", description: "Network error. Please try again.", variant: "error" })
     } finally {
       setSubmitting(false)
     }
@@ -123,9 +134,6 @@ export default function ImpromptuPODialog({
 
   const selectedSku  = skuOptions.find((s) => s.sku_code === form.sku_code)
   const skuNotActive = !!selectedSku && selectedSku.status !== "active"
-
-  const selectCls =
-    "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o && !submitting) onClose() }}>
@@ -165,12 +173,12 @@ export default function ImpromptuPODialog({
           {/* Manufacturer */}
           <div className="grid gap-1.5">
             <Label htmlFor="ipo-mfg">Manufacturer <span className="text-destructive">*</span></Label>
-            <select id="ipo-mfg" value={form.mfg_id} onChange={(e) => set("mfg_id", e.target.value)} className={selectCls}>
+            <Select id="ipo-mfg" value={form.mfg_id} onChange={(e) => set("mfg_id", e.target.value)} className="w-full">
               <option value="">— Select MFG —</option>
               {mfgOptions.map((m) => (
                 <option key={m.id} value={m.id}>{m.code} — {m.name}</option>
               ))}
-            </select>
+            </Select>
             {errors.mfg_id && <p className="text-xs text-destructive">{errors.mfg_id}</p>}
           </div>
 
@@ -210,27 +218,27 @@ export default function ImpromptuPODialog({
           {/* Destination — defaults to Mother Warehouse */}
           <div className="grid gap-1.5">
             <Label htmlFor="ipo-dest">Destination Warehouse</Label>
-            <select id="ipo-dest" value={form.destination} onChange={(e) => set("destination", e.target.value)} className={selectCls}>
+            <Select id="ipo-dest" value={form.destination} onChange={(e) => set("destination", e.target.value)} className="w-full">
               <option value="">— Select Warehouse (optional) —</option>
               {warehouseOptions.map((w) => (
                 <option key={w.id} value={w.name}>
                   {w.name}{w.zone ? ` — ${w.zone}` : ""} ({w.type})
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           {/* Remarks — mandatory for Impromptu POs */}
-          <div className="grid gap-1.5">
-            <Label htmlFor="ipo-reason">
-              Remarks <span className="text-destructive">*</span>
-            </Label>
-            <Textarea
-              id="ipo-reason" rows={2}
+          <div>
+            <RemarksField
+              id="ipo-reason"
+              helperText="Required for Impromptu POs — briefly explain why this PO is being raised."
               placeholder="Why is this PO being raised? Any special instructions…"
-              value={form.reason} onChange={(e) => set("reason", e.target.value)}
+              value={form.reason}
+              onChange={(v) => set("reason", v)}
+              presets={PO_REASON_PRESETS}
             />
-            {errors.reason && <p className="text-xs text-destructive">{errors.reason}</p>}
+            {errors.reason && <p className="mt-1 text-xs text-destructive">{errors.reason}</p>}
           </div>
 
           {apiError && <p className="text-sm text-destructive">{apiError}</p>}

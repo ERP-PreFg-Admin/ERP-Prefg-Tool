@@ -16,6 +16,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const stored = localStorage.getItem("theme") as Theme | null
     const initial =
       stored ?? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs React state with localStorage/matchMedia, both unavailable during SSR
     setTheme(initial)
     document.documentElement.classList.toggle("dark", initial === "dark")
   }, [])

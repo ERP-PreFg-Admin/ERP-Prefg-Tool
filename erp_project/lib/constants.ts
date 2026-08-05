@@ -22,3 +22,16 @@ export const APPROVAL_STATUS = {
 } as const
 
 export type ApprovalStatus = typeof APPROVAL_STATUS[keyof typeof APPROVAL_STATUS]
+
+/**
+ * The single mapping from an approval status to its badge variant — every
+ * approved/rejected/pending pill in the app (the /approvals queue, history,
+ * and the per-entity History table) reads this instead of hand-rolling its
+ * own bg/border/dark: classes, which is how "approved" ended up rendered in
+ * two different shades of green in different files.
+ */
+export const APPROVAL_STATUS_VARIANT: Record<ApprovalStatus, "success" | "destructive" | "warning"> = {
+  [APPROVAL_STATUS.APPROVED]: "success",
+  [APPROVAL_STATUS.REJECTED]: "destructive",
+  [APPROVAL_STATUS.PENDING]:  "warning",
+}

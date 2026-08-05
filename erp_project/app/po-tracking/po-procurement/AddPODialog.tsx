@@ -8,8 +8,9 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+import { Select } from "@/components/ui/select"
 import { useToast } from "@/components/ui/toast"
+import { RemarksField, PO_REASON_PRESETS } from "@/components/masters/RemarksField"
 import type { MfgOption, WarehouseOption } from "./po-types"
 import { useQuotedRate } from "./useQuotedRate"
 
@@ -24,9 +25,6 @@ type PoLineRowState = {
   expected_on: string
   destination: string
 }
-
-const selectCls =
-  "flex h-9 w-full rounded-md border border-input bg-background px-2 py-1 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
 
 // One SKU row — the quoted rate is fetched independently per row (display
 // only; submission re-fetches it fresh right before creating each PO, so a
@@ -68,10 +66,10 @@ function PoLineRow({
         />
       </td>
       <td className="px-2 py-1.5 align-top">
-        <select
+        <Select
           value={row.destination}
           onChange={(e) => onChange("destination", e.target.value)}
-          className={selectCls}
+          className="w-full text-xs"
         >
           <option value="">— Select —</option>
           {warehouseOptions.map((w) => (
@@ -79,7 +77,7 @@ function PoLineRow({
               {w.name}{w.zone ? ` — ${w.zone}` : ""} ({w.type})
             </option>
           ))}
-        </select>
+        </Select>
       </td>
       <td className="px-2 py-1.5 align-top">
         {error && <p className="text-[11px] text-destructive max-w-32">{error}</p>}
@@ -138,6 +136,7 @@ export default function AddPODialog({
   }, [open])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears rows when the dialog closes or the manufacturer selection is cleared
     if (!open || !mfgId) { setRows([]); return }
     setLoadingSkus(true)
     setSkusError("")
@@ -249,9 +248,11 @@ export default function AddPODialog({
     const errMap: Record<string, string> = {}
     for (const f of failed) errMap[f.sku_code] = f.message
     setRowErrors(errMap)
-    setApiError(
-      `${succeeded.length} PO${succeeded.length !== 1 ? "s" : ""} created, ${failed.length} failed — see errors below.`
-    )
+    const summary = succeeded.length > 0
+      ? `${succeeded.length} PO${succeeded.length !== 1 ? "s" : ""} created, ${failed.length} failed — see errors below.`
+      : `All ${failed.length} PO${failed.length !== 1 ? "s" : ""} failed — see errors below.`
+    setApiError(summary)
+    toast({ title: succeeded.length > 0 ? "Some POs failed" : "Couldn't create POs", description: summary, variant: "error" })
     if (succeeded.length > 0) onCreated()
   }
 
@@ -271,7 +272,7 @@ export default function AddPODialog({
           {/* Manufacturer — selected first; SKUs load once picked */}
           <div className="grid gap-1.5">
             <Label htmlFor="apo-mfg">Manufacturer <span className="text-destructive">*</span></Label>
-            <select
+            <Select
               id="apo-mfg" value={mfgId}
               onChange={(e) => setMfgId(e.target.value)}
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
@@ -280,7 +281,7 @@ export default function AddPODialog({
               {mfgOptions.map((m) => (
                 <option key={m.id} value={m.id}>{m.code} — {m.name}</option>
               ))}
-            </select>
+            </Select>
           </div>
 
           {/* SKU rows — one line per SKU: qty, rate, dispatch, destination */}
@@ -330,14 +331,15 @@ export default function AddPODialog({
 
           {/* Reason — mandatory only for Impromptu, applies to the whole batch */}
           <div className="grid gap-1.5">
-            <Label htmlFor="apo-reason">
-              Reason / Notes
-              {poType === "impromptu" && <span className="text-destructive"> *</span>}
-            </Label>
-            <Textarea
-              id="apo-reason" rows={2}
+            <RemarksField
+              id="apo-reason"
+              label="Reason / Notes"
+              required={poType === "impromptu"}
+              helperText={poType === "impromptu" ? "Required for Impromptu POs — briefly explain why these are being raised." : ""}
               placeholder="Why are these POs being raised? Any special instructions…"
-              value={reason} onChange={(e) => setReason(e.target.value)}
+              value={reason}
+              onChange={setReason}
+              presets={PO_REASON_PRESETS}
             />
           </div>
 

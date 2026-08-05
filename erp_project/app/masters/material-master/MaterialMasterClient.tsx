@@ -16,11 +16,14 @@
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { useRouter, usePathname, useSearchParams } from "next/navigation"
-import { History as HistoryIcon } from "lucide-react"
+import { useUrlFilters } from "@/lib/useUrlFilters"
+import { History as HistoryIcon, Pencil } from "lucide-react"
 import { SortableTableHead, StaticTableHead } from "@/components/ui/sortable-table-head"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { EmptyState } from "@/components/ui/empty-state"
+import { Select } from "@/components/ui/select"
+import { useFilterPanel, FilterToggleButton, FilterPanel, FilterField } from "@/components/masters/FilterPanel"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import {
   Table,
@@ -43,7 +46,7 @@ import { TruncatedCell } from "@/components/masters/TruncatedCell"
 import { EntityHistoryDialog } from "@/components/masters/EntityHistoryDialog"
 import type { MasterField } from "@/components/masters/field-config"
 import AddMaterialDialog from "./AddMaterialDialog"
-import EditMaterialDialog, { EditButton } from "./EditMaterialDialog"
+import EditMaterialDialog from "./EditMaterialDialog"
 
 const RM_CSV_FIELDS: MasterField[] = [
   { key: "rm_code",   label: "RM Code",   aliases: ["code"], placeholder: "e.g. RM-001",  sample: "RM-001" },
@@ -124,14 +127,15 @@ export default function MaterialMasterClient({
   currentType: string
   types: string[]
 }) {
-  const router       = useRouter()
-  const pathname     = usePathname()
-  const searchParams = useSearchParams()
+  const { navigate, router } = useUrlFilters()
 
   // Edit dialog state — which row is being edited (null = closed).
   const [editRow, setEditRow] = useState<AnyRow | null>(null)
   // History dialog state — which row's edit history is being viewed (null = closed).
   const [historyRow, setHistoryRow] = useState<AnyRow | null>(null)
+
+  // Filter panel open/close.
+  const filterPanel = useFilterPanel()
 
   // Draft filter state — selects only update these locally; the actual
   // server refetch fires only when "Apply" is clicked.
@@ -139,12 +143,12 @@ export default function MaterialMasterClient({
   const [draftMake,   setDraftMake]   = useState(currentMake)
   const [draftType,   setDraftType]   = useState(currentType)
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven status filter changes
   useEffect(() => setDraftStatus(currentStatus), [currentStatus])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven make filter changes
   useEffect(() => setDraftMake(currentMake), [currentMake])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven type filter changes
   useEffect(() => setDraftType(currentType), [currentType])
-
-  const draftDirty =
-    draftStatus !== currentStatus || draftMake !== currentMake || draftType !== currentType
 
   // Client-side sort state (sorts within the current DB page only).
   const [sortKey, setSortKey] = useState<string | null>(null)
@@ -159,20 +163,6 @@ export default function MaterialMasterClient({
       setSortKey(key)
       setSortDir("asc")
     }
-  }
-
-  /**
-   * Merge URL-param overrides, reset to page 1, then navigate.
-   * Preserves ?material= so switching status/search doesn't flip rm ↔ pm view.
-   */
-  function navigate(updates: Record<string, string>) {
-    const params = new URLSearchParams(searchParams.toString())
-    for (const [k, v] of Object.entries(updates)) {
-      if (v) params.set(k, v)
-      else   params.delete(k)
-    }
-    params.set("page", "1")
-    router.push(`${pathname}?${params.toString()}`)
   }
 
   // Sort within current page — rows are already DB-filtered and sliced.
@@ -196,9 +186,23 @@ export default function MaterialMasterClient({
     })
   }, [rows, columns, sortKey, sortDir])
 
+  const activeFilterCount = [currentStatus, currentMake, currentType].filter(Boolean).length
   const hasFilters = currentSearch || currentStatus || currentMake || currentType
   // router.refresh() re-runs the server page with current URL — keeps page + filters.
   const refresh    = () => router.refresh()
+
+  function applyFilters() {
+    navigate({ status: draftStatus, make: draftMake, type: draftType })
+    filterPanel.close()
+  }
+
+  function clearAllFilters() {
+    setDraftStatus("")
+    setDraftMake("")
+    setDraftType("")
+    navigate({ search: "", status: "", make: "", type: "" })
+    filterPanel.close()
+  }
 
   return (
     <>
@@ -213,54 +217,7 @@ export default function MaterialMasterClient({
           }
         />
 
-        <select
-          value={draftStatus || "all"}
-          onChange={(e) =>
-            setDraftStatus(e.target.value === "all" ? "" : e.target.value)
-          }
-          className="h-9 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <option value="all">All Status</option>
-          <option value="active">Active</option>
-          <option value="discontinued">Discontinued</option>
-        </select>
-
-        {/* {makes.length > 0 && (
-          <select
-            value={draftMake || "all"}
-            onChange={(e) => setDraftMake(e.target.value === "all" ? "" : e.target.value)}
-            className="h-9 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            <option value="all">All Makes</option>
-            {makes.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-        )} */}
-
-        {types.length > 0 && (
-          <select
-            value={draftType || "all"}
-            onChange={(e) => setDraftType(e.target.value === "all" ? "" : e.target.value)}
-            className="h-9 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            <option value="all">All Types</option>
-            {types.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-        )}
-
-        <Button
-          variant="outline"
-          size="lg"
-          onClick={() =>
-            navigate({
-              status: draftStatus,
-              make: draftMake,
-              type: draftType,
-            })
-          }
-          disabled={!draftDirty}
-        >
-          Apply
-        </Button>
+        <FilterToggleButton open={filterPanel.open} onToggle={filterPanel.toggle} activeCount={activeFilterCount} />
 
         <MasterToolbarActions>
           <DownloadButton
@@ -292,16 +249,52 @@ export default function MaterialMasterClient({
         </MasterToolbarActions>
       </MasterToolbar>
 
+      {/* ── Filter panel ── */}
+      <FilterPanel open={filterPanel.open} onClose={filterPanel.close} onApply={applyFilters} onClear={clearAllFilters}>
+        <FilterField label="Status">
+          <Select
+            className="w-full"
+            value={draftStatus || "all"}
+            onChange={(e) => setDraftStatus(e.target.value === "all" ? "" : e.target.value)}
+          >
+            <option value="all">All Status</option>
+            <option value="active">Active</option>
+            <option value="discontinued">Discontinued</option>
+          </Select>
+        </FilterField>
+
+        {makes.length > 0 && (
+          <FilterField label="Make">
+            <Select
+              className="w-full"
+              value={draftMake || "all"}
+              onChange={(e) => setDraftMake(e.target.value === "all" ? "" : e.target.value)}
+            >
+              <option value="all">All Makes</option>
+              {makes.map((m) => <option key={m} value={m}>{m}</option>)}
+            </Select>
+          </FilterField>
+        )}
+
+        {types.length > 0 && (
+          <FilterField label="Type">
+            <Select
+              className="w-full"
+              value={draftType || "all"}
+              onChange={(e) => setDraftType(e.target.value === "all" ? "" : e.target.value)}
+            >
+              <option value="all">All Types</option>
+              {types.map((t) => <option key={t} value={t}>{t}</option>)}
+            </Select>
+          </FilterField>
+        )}
+      </FilterPanel>
+
       {/* ── Table card ── */}
       <Card>
         <RecordCountHeader
           total={total}
-          onClearFilters={hasFilters ? () => {
-            setDraftStatus("")
-            setDraftMake("")
-            setDraftType("")
-            navigate({ search: "", status: "", make: "", type: "" })
-          } : undefined}
+          onClearFilters={hasFilters ? clearAllFilters : undefined}
         />
         <CardContent className="p-0">
           <Table className="[&_th]:whitespace-nowrap table-fixed">
@@ -319,7 +312,7 @@ export default function MaterialMasterClient({
                     {col.label}
                   </SortableTableHead>
                 ))}
-                <StaticTableHead width="80px">Action</StaticTableHead>
+                <StaticTableHead width="80px">Actions</StaticTableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -327,11 +320,9 @@ export default function MaterialMasterClient({
                 <TableRow>
                   <TableCell
                     colSpan={columns.length + 1}
-                    className="text-center text-muted-foreground py-10"
+                    className="text-center py-10"
                   >
-                    {hasFilters
-                      ? "No materials match your filters."
-                      : "No records found."}
+                    <EmptyState hasFilters={!!hasFilters} filteredMessage="No materials match your filters." />
                   </TableCell>
                 </TableRow>
               ) : (
@@ -348,18 +339,23 @@ export default function MaterialMasterClient({
                       </TableCell>
                     ))}
                     <TableCell className="flex items-center gap-1">
-                      <EditButton
+                      <Button
+                        size="icon"
+                        variant="ghost"
                         onClick={() => setEditRow(row)}
                         disabled={row.status === "in_review"}
-                        title={row.status === "in_review" ? "Pending approval — cannot edit" : undefined}
-                      />
-                      <button
+                        title={row.status === "in_review" ? "Pending approval — cannot edit" : "Edit"}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
                         onClick={() => setHistoryRow(row)}
-                        className="p-1.5 rounded-md transition-colors hover:bg-accent text-muted-foreground hover:text-foreground"
-                        title="View edit history"
+                        title="History"
                       >
                         <HistoryIcon className="h-4 w-4" />
-                      </button>
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))

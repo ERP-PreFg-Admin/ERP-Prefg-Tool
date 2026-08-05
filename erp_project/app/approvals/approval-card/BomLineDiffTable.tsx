@@ -6,11 +6,82 @@
  *  a separate boxed table per line, so a BOM approval reads as compactly as
  *  every other module's FieldDiffTable. */
 
+import { useState } from "react"
+import { ChevronDown, ChevronRight } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import type { Approval } from "../approvals-types"
 import { DiffTable } from "./DiffTable"
+import { DIFF_OLD_TEXT_CLASS, DIFF_OLD_CELL_CLASS, DIFF_NEW_CELL_CLASS } from "./FieldDiff"
 import type { DiffRow, MaterialMap } from "./types"
+
+const TYPE_TAG_COLOR: Record<"RM" | "PM", string> = {
+  RM: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/30 dark:text-rose-400 dark:border-rose-900/40",
+  PM: "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/30 dark:text-violet-400 dark:border-violet-900/40",
+}
+
+/** One consolidated table instead of RM/PM side by side — used where the
+ *  diff renders inside an already-narrow container (the entity History
+ *  table's Details cell), where splitting into two half-width columns
+ *  leaves material names wrapping badly with the value column mostly empty.
+ *  Collapsed by default — a BOM revision can touch ~30 lines at once, which
+ *  would otherwise dominate the whole History table. */
+function ConsolidatedDiffTable({ rows, newOnly }: { rows: (DiffRow & { tag: "RM" | "PM" })[]; newOnly: boolean }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="rounded-lg border border-border overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-1.5 bg-muted/40 px-3 py-1.5 text-left text-xs font-medium text-foreground hover:bg-muted/60 transition-colors"
+      >
+        {expanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
+        {rows.length} material change{rows.length !== 1 ? "s" : ""}
+      </button>
+      {expanded && (
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent bg-muted/40">
+            <TableHead className="h-7 text-[10px] font-semibold uppercase tracking-wide">Material</TableHead>
+            {!newOnly && <TableHead className="h-7 text-[10px] font-semibold uppercase tracking-wide">Old Value</TableHead>}
+            <TableHead className="h-7 text-[10px] font-semibold uppercase tracking-wide">{newOnly ? "Value" : "New Value"}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((r) => (
+            <TableRow key={r.key} className="hover:bg-transparent">
+              <TableCell className="py-1.5 align-top">
+                <div className="flex items-start gap-1.5">
+                  <span className={cn("shrink-0 rounded border px-1 py-0 text-[9px] font-semibold leading-[1.4]", TYPE_TAG_COLOR[r.tag])}>
+                    {r.tag}
+                  </span>
+                  <span className="text-xs font-medium text-foreground">{r.label}</span>
+                </div>
+              </TableCell>
+              {r.fullWidth ? (
+                <TableCell colSpan={newOnly ? 1 : 2} className="py-1.5 text-xs align-top">{r.fullWidth}</TableCell>
+              ) : (
+                <>
+                  {!newOnly && (
+                    <TableCell className={cn("py-1.5 text-xs font-medium align-top", DIFF_OLD_CELL_CLASS)}>
+                      {r.old}
+                    </TableCell>
+                  )}
+                  <TableCell className={cn("py-1.5 text-xs font-medium align-top", DIFF_NEW_CELL_CLASS)}>
+                    {r.new}
+                  </TableCell>
+                </>
+              )}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      )}
+    </div>
+  )
+}
 
 type BomLineRowDiff = {
   mtrlType: "rm" | "pm"
@@ -65,7 +136,7 @@ function lineToDiffRow(line: BomLineRowDiff, materialMap?: MaterialMap): DiffRow
       label,
       old: "",
       new: "",
-      fullWidth: <span className="text-red-700 dark:text-red-400 font-medium line-through">Line removed</span>,
+      fullWidth: <span className={cn(DIFF_OLD_TEXT_CLASS, "font-medium line-through")}>Line removed</span>,
     }
   }
 
@@ -92,7 +163,16 @@ function modeLabel(mode: "new-version" | "update-existing", isRevision: boolean)
   return isRevision ? "Recipe Change" : "Initial Recipe"
 }
 
-export function BomLineDiffTable({ items, materialMap }: { items: Approval["items"]; materialMap?: MaterialMap }) {
+export function BomLineDiffTable({ items, materialMap, hideReason, compact }: {
+  items: Approval["items"]
+  materialMap?: MaterialMap
+  /** Skips the inline reason paragraph — used by the entity History table,
+   *  which already shows the submitter's reason in its own column. */
+  hideReason?: boolean
+  /** Renders RM/PM as one consolidated table (see ConsolidatedDiffTable)
+   *  instead of side-by-side columns — used by the entity History table. */
+  compact?: boolean
+}) {
   const { mode, reason, changeTypes, lines } = parseBomApprovalItems(items)
   // A line with no field diffs is just the "__present__" bookkeeping marker
   // (update-existing carries one for every unchanged line so applyAndArchive
@@ -122,25 +202,35 @@ export function BomLineDiffTable({ items, materialMap }: { items: Approval["item
           <Badge key={label} variant="secondary" className="text-[10px]">{label}</Badge>
         ))}
       </div>
-      {reason && <p className="text-xs text-muted-foreground">{reason}</p>}
-      <div className={cn("grid gap-3", bothPresent ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1")}>
-        {rmRows.length > 0 && (
-          <div className="space-y-1.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Raw Materials (RM)
-            </p>
-            <DiffTable rows={rmRows} newOnly={newOnly} />
-          </div>
-        )}
-        {pmRows.length > 0 && (
-          <div className="space-y-1.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Packing Materials (PM)
-            </p>
-            <DiffTable rows={pmRows} newOnly={newOnly} />
-          </div>
-        )}
-      </div>
+      {reason && !hideReason && <p className="text-xs text-muted-foreground">{reason}</p>}
+      {compact ? (
+        <ConsolidatedDiffTable
+          rows={[
+            ...rmRows.map((r) => ({ ...r, tag: "RM" as const })),
+            ...pmRows.map((r) => ({ ...r, tag: "PM" as const })),
+          ]}
+          newOnly={newOnly}
+        />
+      ) : (
+        <div className={cn("grid gap-3", bothPresent ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1")}>
+          {rmRows.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Raw Materials (RM)
+              </p>
+              <DiffTable rows={rmRows} newOnly={newOnly} />
+            </div>
+          )}
+          {pmRows.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Packing Materials (PM)
+              </p>
+              <DiffTable rows={pmRows} newOnly={newOnly} />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

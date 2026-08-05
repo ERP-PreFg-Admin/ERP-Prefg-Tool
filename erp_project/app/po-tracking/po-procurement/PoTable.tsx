@@ -7,6 +7,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { EmptyState } from "@/components/ui/empty-state"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
@@ -115,8 +116,8 @@ export default function PoTable({
                 {rows.length === 0 ? (
                   <TableRow>
                     {/* 13 fixed columns, plus whichever optional ones are on. */}
-                    <TableCell colSpan={13 + (selectable ? 1 : 0) + (showUniwareCode ? 1 : 0)} className="text-center text-muted-foreground py-10">
-                      No purchase orders match your filters.
+                    <TableCell colSpan={13 + (selectable ? 1 : 0) + (showUniwareCode ? 1 : 0)} className="text-center py-10">
+                      <EmptyState message="No purchase orders match your filters." />
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -285,7 +286,7 @@ export default function PoTable({
                             {canEdit && (
                               <button
                                 onClick={() => onEdit?.(r)}
-                                className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 transition-colors"
+                                className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 transition-colors dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-950/70"
                               >
                                 <Pencil className="h-3 w-3" /> Edit
                               </button>

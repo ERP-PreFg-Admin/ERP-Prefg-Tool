@@ -10,6 +10,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { useToast } from "@/components/ui/toast"
 import { FormField } from "@/components/masters/FormField"
 import { ManagedFuzzyField } from "@/components/masters/ManagedFuzzyField"
 
@@ -67,6 +68,7 @@ export default function AddMaterialDialog({
   /** Called after a successful save so the parent can refresh the table. */
   onSuccess: () => void
 }) {
+  const { toast } = useToast()
   // Dialog open/close state.
   const [open, setOpen] = useState(false)
 
@@ -218,16 +220,20 @@ export default function AddMaterialDialog({
 
       if (!res.ok) {
         // Surface the server error message in the form.
-        setError(data.error ?? "Something went wrong.")
+        const message = data.error ?? "Something went wrong."
+        setError(message)
+        toast({ title: "Submission failed", description: message, variant: "error" })
         return
       }
 
       // Success — close the dialog, reset fields, and refresh the table.
+      toast({ title: "Submitted for approval", description: `${label} ${base.name} is now awaiting approval.`, variant: "success" })
       setOpen(false)
       reset()
       onSuccess()
     } catch {
       setError("Network error — please try again.")
+      toast({ title: "Submission failed", description: "Network error — please try again.", variant: "error" })
     } finally {
       setLoading(false)
     }

@@ -7,6 +7,8 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { useToast } from "@/components/ui/toast"
+import { Select } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import type { PoRow, SplitRow, WarehouseOption } from "./po-types"
 import { fmtInt, num } from "./po-utils"
@@ -25,9 +27,11 @@ export default function SplitPODialog({
   ])
   const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError]     = useState("")
+  const { toast } = useToast()
 
   useEffect(() => {
     if (open && po) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the split form each time the dialog is opened
       setRows([
         { destination: "", qty: "" },
       ])
@@ -77,19 +81,22 @@ export default function SplitPODialog({
         }),
       })
       const data = await res.json()
-      if (!res.ok) { setApiError(data.error ?? "Failed to split PO."); return }
-      console.log(`[split dialog] success — splits_created=${data.splits_created}`)
+      if (!res.ok) {
+        const message = data.error ?? "Failed to split PO."
+        setApiError(message)
+        toast({ title: "Couldn't split PO", description: message, variant: "error" })
+        return
+      }
+      toast({ title: "PO split", description: `${data.splits_created} new PO${data.splits_created === 1 ? "" : "s"} created.`, variant: "success" })
       onSplit()
       onClose()
     } catch {
       setApiError("Network error. Please try again.")
+      toast({ title: "Couldn't split PO", description: "Network error. Please try again.", variant: "error" })
     } finally {
       setSubmitting(false)
     }
   }
-
-  const selectCls =
-    "flex-1 h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o && !submitting) onClose() }}>
@@ -156,10 +163,10 @@ export default function SplitPODialog({
                       <div className="font-mono text-xs font-semibold">{String(i + 1).padStart(2, "0")}</div>
                       <div className="font-mono text-[9px] text-muted-foreground">S{String(i + 1).padStart(3, "0")}</div>
                     </div>
-                    <select
+                    <Select
                       value={row.destination}
                       onChange={(e) => setRow(i, "destination", e.target.value)}
-                      className={selectCls}
+                      className="flex-1"
                     >
                       <option value="">— Destination —</option>
                       {warehouseOptions.map((w) => (
@@ -167,7 +174,7 @@ export default function SplitPODialog({
                           {w.name}{w.zone ? ` — ${w.zone}` : ""} ({w.type})
                         </option>
                       ))}
-                    </select>
+                    </Select>
                     <Input
                       type="number" min={1} placeholder="Qty"
                       value={row.qty} onChange={(e) => setRow(i, "qty", e.target.value)}

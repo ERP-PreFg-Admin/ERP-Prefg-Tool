@@ -92,7 +92,9 @@ export function UserDialog({
       })
       onSuccess()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong")
+      const message = err instanceof Error ? err.message : "Something went wrong"
+      setError(message)
+      toast({ title: isNew ? "Couldn't add user" : "Couldn't save user", description: message, variant: "error" })
     } finally {
       setSaving(false)
     }

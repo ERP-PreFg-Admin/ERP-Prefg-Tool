@@ -26,7 +26,12 @@ export default function ShortClosePODialog({
         toast({ title: "PO short closed", variant: "success" })
         onDone()
         onClose()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        toast({ title: "Couldn't short close PO", description: data.error, variant: "error" })
       }
+    } catch {
+      toast({ title: "Couldn't short close PO", description: "Network error. Please try again.", variant: "error" })
     } finally {
       setLoading(false)
     }

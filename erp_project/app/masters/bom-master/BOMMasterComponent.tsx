@@ -14,7 +14,7 @@
  */
 
 import { useState } from "react"
-import { useRouter, usePathname, useSearchParams } from "next/navigation"
+import { useUrlFilters } from "@/lib/useUrlFilters"
 import { History } from "lucide-react"
 import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import {
@@ -25,6 +25,8 @@ import { DownloadButton } from "@/components/masters/DownloadButton"
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { EntityHistoryDialog } from "@/components/masters/EntityHistoryDialog"
 import { Button } from "@/components/ui/button"
+import { Select } from "@/components/ui/select"
+import { useFilterPanel, FilterToggleButton, FilterPanel, FilterField } from "@/components/masters/FilterPanel"
 import { cn } from "@/lib/utils"
 import { BomCreationWizard } from "./BomCreationWizard"
 import { BOM_BULK_CSV_FIELDS } from "./bom-bulk-fields"
@@ -59,25 +61,13 @@ export default function BOMMasterComponent({
   pmMaterials: BomMaterialOption[]
   accessLevel: AccessLevel
 }) {
-  const router       = useRouter()
-  const pathname     = usePathname()
-  const searchParams = useSearchParams()
+  const { navigate, router } = useUrlFilters()
   const canEdit      = accessLevel === "editor"
-
-  /** Merge URL-param overrides and reset to page 1. */
-  function navigate(updates: Record<string, string>) {
-    const params = new URLSearchParams(searchParams.toString())
-    for (const [k, v] of Object.entries(updates)) {
-      if (v) params.set(k, v)
-      else   params.delete(k)
-    }
-    params.set("page", "1")
-    router.push(`${pathname}?${params.toString()}`)
-  }
 
   const hasFilters = Boolean(currentSearch || currentStatus)
   const refresh    = () => router.refresh()
 
+  const filterPanel = useFilterPanel()
   // Draft status — the select only updates this locally; the actual server
   // refetch fires only when "Apply" is clicked. Resynced from the URL-driven
   // prop during render (not an effect) when it changes underneath us — see
@@ -88,7 +78,19 @@ export default function BOMMasterComponent({
     setPrevStatus(currentStatus)
     setDraftStatus(currentStatus)
   }
-  const draftDirty = draftStatus !== currentStatus
+
+  const activeFilterCount = currentStatus ? 1 : 0
+
+  function applyFilters() {
+    navigate({ status: draftStatus })
+    filterPanel.close()
+  }
+
+  function clearAllFilters() {
+    setDraftStatus("")
+    navigate({ search: "", status: "" })
+    filterPanel.close()
+  }
 
   const panel = useBomDetailPanel()
   // Row-level approval/audit-trail dialog — distinct from the archived-
@@ -104,24 +106,7 @@ export default function BOMMasterComponent({
           placeholder="Search by BOM code or SKU code…"
         />
 
-        {/* BOM status filter */}
-        <select
-          value={draftStatus || "all"}
-          onChange={(e) =>
-            setDraftStatus(e.target.value === "all" ? "" : e.target.value)
-          }
-          className="h-9 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <option value="all">All Statuses</option>
-          <option value="draft">Draft</option>
-          <option value="active">Active</option>
-          <option value="in review">In Review</option>
-          <option value="discontinued">Discontinued</option>
-        </select>
-
-        <Button variant="outline" size="lg" onClick={() => navigate({ status: draftStatus })} disabled={!draftDirty}>
-          Apply
-        </Button>
+        <FilterToggleButton open={filterPanel.open} onToggle={filterPanel.toggle} activeCount={activeFilterCount} />
 
         <MasterToolbarActions>
           <Button
@@ -160,6 +145,23 @@ export default function BOMMasterComponent({
           )}
         </MasterToolbarActions>
       </MasterToolbar>
+
+      {/* ── Filter panel ── */}
+      <FilterPanel open={filterPanel.open} onClose={filterPanel.close} onApply={applyFilters} onClear={clearAllFilters}>
+        <FilterField label="Status">
+          <Select
+            className="w-full"
+            value={draftStatus || "all"}
+            onChange={(e) => setDraftStatus(e.target.value === "all" ? "" : e.target.value)}
+          >
+            <option value="all">All Statuses</option>
+            <option value="draft">Draft</option>
+            <option value="active">Active</option>
+            <option value="in review">In Review</option>
+            <option value="discontinued">Discontinued</option>
+          </Select>
+        </FilterField>
+      </FilterPanel>
 
       {/* ── Split-panel layout ── */}
       <div className="flex gap-4 items-start">

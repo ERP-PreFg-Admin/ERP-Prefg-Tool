@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Pencil } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -12,8 +11,9 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+import { useToast } from "@/components/ui/toast"
 import { RejectionBanner, type RejectionInfo } from "@/components/masters/ApprovalBanners"
+import { RemarksField, EDIT_REMARK_PRESETS } from "@/components/masters/RemarksField"
 import { FormField } from "@/components/masters/FormField"
 import { ManagedFuzzyField } from "@/components/masters/ManagedFuzzyField"
 
@@ -32,6 +32,7 @@ export default function EditMaterialDialog({
   onClose: () => void
   onSuccess: () => void
 }) {
+  const { toast } = useToast()
   const [loading, setLoading]     = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError]         = useState<string | null>(null)
@@ -55,6 +56,7 @@ export default function EditMaterialDialog({
 
   useEffect(() => {
     if (!row) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resets form state to the newly-opened material's fields
     setName(String(row.name ?? ""))
     setMake(String(row.make ?? ""))
     setInci(String(row.inci_name ?? ""))
@@ -123,7 +125,12 @@ export default function EditMaterialDialog({
       })
 
       const data = await res.json()
-      if (!res.ok) { setError(data.error ?? "Something went wrong."); return }
+      if (!res.ok) {
+        const message = data.error ?? "Something went wrong."
+        setError(message)
+        toast({ title: "Submission failed", description: message, variant: "error" })
+        return
+      }
 
       if (data.message === "No changes detected.") {
         onClose()
@@ -131,9 +138,11 @@ export default function EditMaterialDialog({
       }
 
       setSubmitted(true)
+      toast({ title: "Submitted for approval", description: `${label} ${row?.[codeKey] ?? ""} edit is now awaiting approval.`, variant: "success" })
       setTimeout(() => { onSuccess(); onClose() }, 1500)
     } catch {
       setError("Network error — please try again.")
+      toast({ title: "Submission failed", description: "Network error — please try again.", variant: "error" })
     } finally {
       setLoading(false)
     }
@@ -265,17 +274,13 @@ export default function EditMaterialDialog({
           />
 
           {/* Remarks — mandatory reason for this edit, archived to history_masters_edits */}
-          <div className="col-span-2 flex flex-col gap-1.5">
-            <Label htmlFor="edit-remarks">
-              Remarks <span className="text-destructive">*</span>
-            </Label>
-            <p className="text-xs text-muted-foreground">Remarks are required for every edit — briefly explain the reason for this change.</p>
-            <Textarea
+          <div className="col-span-2">
+            <RemarksField
               id="edit-remarks"
               value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
+              onChange={setRemarks}
               disabled={!canEdit}
-              placeholder="Reason for this change…"
+              presets={EDIT_REMARK_PRESETS}
             />
           </div>
         </div>
@@ -293,32 +298,5 @@ export default function EditMaterialDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
-
-// ─── Row-level trigger button ─────────────────────────────────────────────────
-
-export function EditButton({
-  onClick,
-  disabled,
-  title,
-}: {
-  onClick: () => void
-  disabled?: boolean
-  title?: string
-}) {
-  return (
-    <button
-      onClick={() => !disabled && onClick()}
-      disabled={disabled}
-      className={`p-1.5 rounded-md transition-colors ${
-        disabled
-          ? "opacity-40 cursor-not-allowed text-muted-foreground"
-          : "hover:bg-accent text-muted-foreground hover:text-foreground"
-      }`}
-      title={title ?? "Edit material"}
-    >
-      <Pencil className="h-4 w-4" />
-    </button>
   )
 }

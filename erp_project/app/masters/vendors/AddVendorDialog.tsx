@@ -12,6 +12,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { FileUpload } from "@/components/ui/FileUpload"
+import { useToast } from "@/components/ui/toast"
 import { ZONE_OPTIONS } from "@/components/masters/field-config"
 import { FormField } from "@/components/masters/FormField"
 import { cn } from "@/lib/utils"
@@ -57,6 +58,7 @@ type Step = "details" | "documents"
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function AddVendorDialog({ onSuccess }: { onSuccess?: () => void }) {
+  const { toast } = useToast()
   const [open, setOpen]               = useState(false)
   const [step, setStep]               = useState<Step>("details")
   const [form, setForm]               = useState<Record<string, string>>({ type: "rm" })
@@ -114,10 +116,13 @@ export function AddVendorDialog({ onSuccess }: { onSuccess?: () => void }) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Failed to add vendor")
+      toast({ title: "Submitted for approval", description: `Vendor ${form.name} is now awaiting approval.`, variant: "success" })
       setOpen(false)
       onSuccess?.()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong")
+      const message = err instanceof Error ? err.message : "Something went wrong"
+      setError(message)
+      toast({ title: "Submission failed", description: message, variant: "error" })
     } finally {
       setLoading(false)
     }

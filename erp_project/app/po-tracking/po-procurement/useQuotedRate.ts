@@ -14,6 +14,7 @@ export function useQuotedRate(skuCode: string, mfgId: string) {
   const [error, setError] = useState("")
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale rate/error when the SKU or manufacturer selection is cleared
     if (!skuCode || !mfgId) { setRate(null); setError(""); setLoading(false); return }
     let cancelled = false
     setLoading(true)

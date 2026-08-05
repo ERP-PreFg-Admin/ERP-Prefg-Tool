@@ -10,6 +10,7 @@ import { Pencil, History as HistoryIcon, Factory } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { EmptyState } from "@/components/ui/empty-state"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import {
   Table,
@@ -68,17 +69,17 @@ export function BomTable({
               <TableHead>Effective From</TableHead>
               <TableHead>Effective Till</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Type of Change</TableHead>
+              <TableHead>RM/PM Change?</TableHead>
               <TableHead>Reason</TableHead>
-              <TableHead>Live Mfgs</TableHead>
+              <TableHead>Live At</TableHead>
               <TableHead className="w-20">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="text-center text-muted-foreground py-10">
-                  {hasFilters ? "No BOM records match your filters." : "No records found."}
+                <TableCell colSpan={11} className="text-center py-10">
+                  <EmptyState hasFilters={hasFilters} filteredMessage="No BOM records match your filters." />
                 </TableCell>
               </TableRow>
             ) : (

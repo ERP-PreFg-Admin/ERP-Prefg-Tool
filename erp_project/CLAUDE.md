@@ -15,12 +15,15 @@ Next.js 16 App Router · React 19 · TypeScript · Tailwind CSS v4 · Prisma 7 (
 | `npm run dev` | Start dev server |
 | `npm run build` | Verify production build |
 | `npm run lint` | Run ESLint |
-| `npm run db:generate` | Regenerate Prisma client after schema changes |
-| `npm run db:migrate` | Create + apply a migration |
-| `npm run db:push` | Quick schema sync (local dev only) |
-| `npm run db:studio` | Open Prisma Studio |
-| `npm run db:seed` | Seed permissions and sample data |
-| `npm run db:test` | Verify DB connection |
+| `npm run db:seed` | Seed `page_permissions` (`/admin`, `/approvals` deny-by-default rows) |
+| `npm run db:test` | Verify DB connection (`SELECT NOW()`) |
+| `npx prisma generate` | Regenerate Prisma client after schema changes |
+| `npx prisma migrate dev --name <name>` | Create + apply a migration locally |
+| `npx prisma migrate deploy` | Apply pending migrations in production/staging |
+| `npx prisma db push` | Quick schema sync, no migration file (local dev only) |
+| `npx prisma studio` | Open Prisma Studio |
+
+There is **no `db:generate` / `db:migrate` / `db:push` / `db:studio` npm alias** — only `db:seed` and `db:test` are defined in `package.json`. Use the raw `npx prisma …` commands above for everything else. Restart the dev server after any `prisma migrate` or `prisma db push` to pick up schema changes. See `docs/environment-and-scripts.md` for the full env var and script reference.
 
 ---
 

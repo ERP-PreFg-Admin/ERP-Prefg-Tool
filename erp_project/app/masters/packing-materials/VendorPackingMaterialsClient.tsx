@@ -9,7 +9,7 @@
 
 import { useState } from "react"
 import { GitCompare, Pencil, History as HistoryIcon } from "lucide-react"
-import { IconActionButton } from "@/components/ui/icon-action-button"
+import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/masters/StatusBadge"
 import { TruncatedCell } from "@/components/masters/TruncatedCell"
 import type { PMVendor, Vendor, Mfg } from "@/types/masters"
@@ -104,22 +104,31 @@ export default function VendorPackingMaterialsClient({
                   <StatusBadge status={typedRow.status} />
                 </span>
               )}
-              <IconActionButton
-                icon={Pencil}
+              <Button
+                size="icon"
+                variant="ghost"
                 onClick={() => setEditRow(typedRow)}
                 disabled={isLocked}
                 title={isLocked ? "Pending approval — cannot edit" : "Edit rate"}
-              />
-              <IconActionButton
-                icon={GitCompare}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
                 onClick={() => setSelectedRow(typedRow)}
                 title="View vendor comparison"
-              />
-              <IconActionButton
-                icon={HistoryIcon}
+              >
+                <GitCompare className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
                 onClick={() => setHistoryRow(typedRow)}
                 title="View rate history"
-              />
+              >
+                <HistoryIcon className="h-4 w-4" />
+              </Button>
             </div>
           )
         }}

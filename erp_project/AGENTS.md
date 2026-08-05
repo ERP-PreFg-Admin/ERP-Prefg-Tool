@@ -11,10 +11,12 @@ Use this repository as a Next.js 16 App Router + React 19 + TypeScript + Tailwin
 - `npm run dev` — start the app
 - `npm run build` — verify production build
 - `npm run lint` — verify code quality
-- `npm run db:generate` — regenerate Prisma client after schema updates
-- `npm run db:migrate` — create/apply migrations during development
-- `npm run db:push` — quick schema sync for local experiments
 - `npm run db:test` — confirm the database connection
+- `npx prisma generate` — regenerate Prisma client after schema updates
+- `npx prisma migrate dev --name <name>` — create/apply migrations during development
+- `npx prisma db push` — quick schema sync for local experiments
+
+There is no `db:generate` / `db:migrate` / `db:push` npm alias — those are raw `npx prisma` commands.
 
 ## Working conventions
 - Prefer TypeScript and existing Next.js patterns over ad-hoc scripts.

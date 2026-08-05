@@ -5,9 +5,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+import { useToast } from "@/components/ui/toast"
 import { CostImpactAlert } from "@/components/masters/CostImpactAlert"
 import { RejectionBanner, type RejectionInfo } from "@/components/masters/ApprovalBanners"
+import { RemarksField, RATE_REMARK_PRESETS } from "@/components/masters/RemarksField"
+import { Select } from "@/components/ui/select"
 import type { RM, Mfg } from "@/types/masters"
 
 export function EditRmVendorRateDialog({
@@ -21,6 +23,7 @@ export function EditRmVendorRateDialog({
   onSuccess: () => void
   onClose: () => void
 }) {
+  const { toast } = useToast()
   const [form, setForm] = useState({
     curr_rate: "",
     moq: "",
@@ -39,6 +42,7 @@ export function EditRmVendorRateDialog({
 
   useEffect(() => {
     if (row) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets form state to the newly-opened rate row's fields
       setForm({
         curr_rate: row.curr_rate ?? "",
         moq: row.moq ? String(row.moq) : "",
@@ -115,11 +119,18 @@ export function EditRmVendorRateDialog({
         }),
       })
       const data = await res.json()
-      if (!res.ok) { setError(data.error ?? "Failed to save"); return }
+      if (!res.ok) {
+        const message = data.error ?? "Failed to save"
+        setError(message)
+        toast({ title: "Submission failed", description: message, variant: "error" })
+        return
+      }
       setSubmitted(true)
+      toast({ title: "Submitted for approval", description: `${row!.name} rate edit is now awaiting approval.`, variant: "success" })
       setTimeout(() => { onSuccess(); onClose() }, 1500)
     } catch {
       setError("Network error")
+      toast({ title: "Submission failed", description: "Network error — please try again.", variant: "error" })
     } finally {
       setSaving(false)
     }
@@ -158,7 +169,7 @@ export function EditRmVendorRateDialog({
             </div>
             <div className="grid gap-1">
               <Label>UOM</Label>
-              <select
+              <Select
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 value={form.uom}
                 onChange={(e) => set("uom", e.target.value)}
@@ -167,7 +178,7 @@ export function EditRmVendorRateDialog({
                 {["kg", "g", "l", "ml", "pcs", "m"].map((u) => (
                   <option key={u} value={u}>{u}</option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div className="grid gap-1">
               <Label>Effective From</Label>
@@ -182,7 +193,7 @@ export function EditRmVendorRateDialog({
             </div>
             <div className="grid gap-1">
               <Label>Manufacturer</Label>
-              <select
+              <Select
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 value={form.mfg_id}
                 onChange={(e) => set("mfg_id", e.target.value)}
@@ -192,15 +203,17 @@ export function EditRmVendorRateDialog({
                 {manufacturers.map((m) => (
                   <option key={m.mfg_id} value={m.mfg_id}>{m.name} ({m.code})</option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
 
-          <div className="grid gap-1">
-            <Label>Remarks <span className="text-destructive">*</span></Label>
-            <p className="text-xs text-muted-foreground">Remarks are required for every edit — briefly explain the reason for this change.</p>
-            <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} disabled={!canEdit} placeholder="Reason for this change…" />
-          </div>
+          <RemarksField
+            id="rm-vendor-rate-remarks"
+            value={remarks}
+            onChange={setRemarks}
+            disabled={!canEdit}
+            presets={RATE_REMARK_PRESETS}
+          />
 
           {submitted && <p className="text-sm text-emerald-600 font-medium">Edit submitted for approval.</p>}
           {error && <p className="text-sm text-destructive">{error}</p>}
@@ -209,7 +222,7 @@ export function EditRmVendorRateDialog({
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={handleSave} disabled={saving || !canEdit || submitted || !remarks.trim()}>
-            {saving ? "Saving…" : "Save"}
+            {saving ? "Submitting…" : "Submit for Approval"}
           </Button>
         </DialogFooter>
       </DialogContent>

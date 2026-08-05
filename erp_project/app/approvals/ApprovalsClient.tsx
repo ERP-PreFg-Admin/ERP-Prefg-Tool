@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody } from "@/components/ui/table"
 import { useToast } from "@/components/ui/toast"
 import type { Approval } from "./approvals-types"
-import { MODULE_LABEL, MODULE_COLOR, BULK_MODULES, groupKeyFor, isNewRecord } from "./approvals-types"
+import { MODULE_LABEL, MODULE_COLOR, MODULE_COLOR_FALLBACK, BULK_MODULES, groupKeyFor, isNewRecord } from "./approvals-types"
 import ApprovalCard, { ApprovalRow, type MaterialMap } from "./ApprovalCard"
 import RejectDialog from "./RejectDialog"
 import BulkApproveDialog from "./BulkApproveDialog"
@@ -231,7 +231,7 @@ export default function ApprovalsClient({
         <div className="space-y-1.5 px-4 pb-6">
           {groupedApprovals.map(({ module, items }) => {
             const isGroupOpen = expandedGroups.has(module)
-            const moduleColor = MODULE_COLOR[module] ?? "bg-slate-50 text-slate-700 border-slate-200"
+            const moduleColor = MODULE_COLOR[module] ?? MODULE_COLOR_FALLBACK
 
             return (
               <div

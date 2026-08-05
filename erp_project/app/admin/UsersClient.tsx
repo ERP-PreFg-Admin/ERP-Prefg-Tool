@@ -164,7 +164,7 @@ export default function UsersClient({
                 <TableHead className="w-24">Status</TableHead>
                 <TableHead className="w-44">Last login</TableHead>
                 <TableHead className="w-44">Added</TableHead>
-                <TableHead className="w-16 text-right">Edit</TableHead>
+                <TableHead className="w-16 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

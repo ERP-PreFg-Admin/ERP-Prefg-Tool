@@ -22,6 +22,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { FileUpload } from "@/components/ui/FileUpload"
+import { useToast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import type { Mfg } from "@/types/masters"
 
@@ -57,6 +58,7 @@ export function ManufacturerDocumentsDialog({
   onClose: () => void
   onSuccess?: () => void
 }) {
+  const { toast } = useToast()
   const [docs, setDocs]               = useState<Record<DocKey, string | null>>(EMPTY_DOCS)
   const [uploadingTabs, setUploadingTabs] = useState<Record<DocKey, boolean>>(EMPTY_UPLOADING)
   const [loading, setLoading]         = useState(false)
@@ -67,6 +69,7 @@ export function ManufacturerDocumentsDialog({
 
   useEffect(() => {
     if (!mfg) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resets doc state to the newly-opened manufacturer's files
     setDocs({
       gst_certificate_key:  mfg.gst_certificate_key,
       cancelled_cheque_key: mfg.cancelled_cheque_key,
@@ -93,9 +96,12 @@ export function ManufacturerDocumentsDialog({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Failed to save documents")
       setSubmitted(true)
+      toast({ title: "Submitted for approval", description: `${mfg.name}'s documents are now awaiting approval.`, variant: "success" })
       onSuccess?.()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong")
+      const message = err instanceof Error ? err.message : "Something went wrong"
+      setError(message)
+      toast({ title: "Submission failed", description: message, variant: "error" })
     } finally {
       setLoading(false)
     }
@@ -109,14 +115,14 @@ export function ManufacturerDocumentsDialog({
         </DialogHeader>
 
         {submitted && (
-          <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 mb-4 text-sm text-green-800">
+          <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 mb-4 text-sm text-green-800 dark:border-green-900/40 dark:bg-green-950/30 dark:text-green-400">
             <CheckCircle2 className="h-4 w-4 shrink-0" />
             Documents submitted for approval. The manufacturer is locked until the approval is resolved.
           </div>
         )}
 
         {!submitted && mfg.status === "in_review" && (
-          <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 mb-4 text-sm text-blue-800">
+          <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 mb-4 text-sm text-blue-800 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-400">
             <Clock className="h-4 w-4 shrink-0" />
             A change is pending approval. Documents cannot be updated until it is resolved.
           </div>

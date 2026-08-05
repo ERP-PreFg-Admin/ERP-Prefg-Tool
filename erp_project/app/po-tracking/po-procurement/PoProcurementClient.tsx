@@ -1,6 +1,6 @@
 "use client"
 
-import { useRouter, usePathname, useSearchParams } from "next/navigation"
+import { useUrlFilters } from "@/lib/useUrlFilters"
 import { useMemo, useState } from "react"
 import {
   FileClock, FileStack, FileUp, Filter, IndianRupee, Mail, PackageCheck, PackageOpen, Plus, Send, X,
@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label"
 import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
+import { Select } from "@/components/ui/select"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { cn } from "@/lib/utils"
@@ -35,9 +36,6 @@ import SplitPODialog from "./SplitPODialog"
 import PoSelectionBar from "./PoSelectionBar"
 
 type SortDir = "asc" | "desc"
-
-const selectCls =
-  "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
 
 // Dot color shown on each status tab — mirrors the Badge variant used for
 // that status elsewhere on the page, so the color means the same thing everywhere.
@@ -120,9 +118,7 @@ export default function PoProcurementClient({
   mode?: "procurement" | "inwarding"
 }) {
   const isInwarding = mode === "inwarding"
-  const router       = useRouter()
-  const pathname     = usePathname()
-  const searchParams = useSearchParams()
+  const { navigate, router } = useUrlFilters()
 
   const [showAddPO,      setShowAddPO]      = useState(false)
   const [showAddInvoice, setShowAddInvoice] = useState(false)
@@ -169,16 +165,6 @@ export default function PoProcurementClient({
     () => [{ id: 0, sku_code: "", name: "All SKUs", status: "active" }, ...skuOptions],
     [skuOptions]
   )
-
-  function navigate(updates: Record<string, string>) {
-    const params = new URLSearchParams(searchParams.toString())
-    for (const [k, v] of Object.entries(updates)) {
-      if (v) params.set(k, v)
-      else   params.delete(k)
-    }
-    params.set("page", "1")
-    router.push(`${pathname}?${params.toString()}`)
-  }
 
   function applyFilters() {
     navigate({
@@ -292,23 +278,23 @@ export default function PoProcurementClient({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="grid gap-1.5">
                 <Label className="text-xs">Manufacturer</Label>
-                <select
+                <Select
                   value={draftMfgCode}
                   onChange={(e) => setDraftMfgCode(e.target.value)}
-                  className={selectCls}
+                  className="w-full"
                 >
                   <option value="">All Manufacturers</option>
                   {mfgOptions.map((m) => (
                     <option key={m.id} value={m.code}>{m.code} — {m.name}</option>
                   ))}
-                </select>
+                </Select>
               </div>
               <div className="grid gap-1.5">
                 <Label className="text-xs">PO Type</Label>
-                <select
+                <Select
                   value={draftPoType}
                   onChange={(e) => setDraftPoType(e.target.value)}
-                  className={selectCls}
+                  className="w-full"
                 >
                   <option value="">All Types</option>
                   <option value="normal">Normal</option>
@@ -316,7 +302,7 @@ export default function PoProcurementClient({
                   {/* Procurement filters inward POs out at the query, so
                       offering the type here would only ever return nothing. */}
                   {isInwarding && <option value="inward">Inward</option>}
-                </select>
+                </Select>
               </div>
               <div className="grid gap-1.5">
                 <Label className="text-xs">Date From</Label>
@@ -350,10 +336,10 @@ export default function PoProcurementClient({
               </div>
               <div className="grid gap-1.5">
                 <Label className="text-xs">Destination</Label>
-                <select
+                <Select
                   value={draftDestination}
                   onChange={(e) => setDraftDestination(e.target.value)}
-                  className={selectCls}
+                  className="w-full"
                 >
                   <option value="">All Destinations</option>
                   {warehouseOptions.map((w) => (
@@ -361,7 +347,7 @@ export default function PoProcurementClient({
                       {w.name}{w.zone ? ` — ${w.zone}` : ""} ({w.type})
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-4">

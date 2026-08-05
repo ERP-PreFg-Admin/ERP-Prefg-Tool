@@ -3,12 +3,11 @@
 import { useState } from "react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import type { InvoiceForm } from "./invoice-form"
 import type { MfgOption, WarehouseOption } from "../po-procurement/po-types"
 
-const selectCls =
-  "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
 const textareaCls =
   "w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
 
@@ -102,21 +101,21 @@ export function InvoiceFields({
         <div className="col-span-full"><SectionHead>Where it came from, where it&apos;s going</SectionHead></div>
         <div className="grid gap-1.5">
           <Label className="text-xs">Manufacturer <span className="text-destructive">*</span></Label>
-          <select value={form.mfgId} onChange={(e) => onChangeMfg(e.target.value)} className={selectCls}>
+          <Select value={form.mfgId} onChange={(e) => onChangeMfg(e.target.value)} className="w-full">
             <option value="">— Select MFG —</option>
             {mfgOptions.map((m) => (
               <option key={m.id} value={m.id}>{m.code} — {m.name}</option>
             ))}
-          </select>
+          </Select>
           <ParsedHint value={form.parsedFrom} />
         </div>
 
         <div className="grid gap-1.5">
           <Label className="text-xs">Destination <span className="text-destructive">*</span></Label>
-          <select
+          <Select
             value={form.destination}
             onChange={(e) => setField("destination", e.target.value)}
-            className={selectCls}
+            className="w-full"
           >
             <option value="">— Select Warehouse —</option>
             {warehouseOptions.map((w) => (
@@ -124,7 +123,7 @@ export function InvoiceFields({
                 {w.name}{w.zone ? ` — ${w.zone}` : ""} ({w.type})
               </option>
             ))}
-          </select>
+          </Select>
           <ParsedHint value={form.parsedDest} />
         </div>
 

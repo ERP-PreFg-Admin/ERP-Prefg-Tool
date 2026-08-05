@@ -9,6 +9,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import { DownloadButton } from "@/components/masters/DownloadButton"
+import { useToast } from "@/components/ui/toast"
 import type { MfgLine, MfgLineStatus } from "@/types/masters"
 import { fmtDate } from "../mfg-utils"
 import LineDialog, { type BomOption } from "./LineDialog"
@@ -46,6 +47,7 @@ export default function ManufacturingLinesClient({
   liveBomsBySkuCode?: Map<string, LiveBomInfo>
 }) {
   const router = useRouter()
+  const { toast } = useToast()
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [dialogTarget, setDialogTarget] = useState<MfgLine | null | "new">(null)
@@ -74,7 +76,15 @@ export default function ManufacturingLinesClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "update-status", bom_id: bomId, status: "inactive" }),
       })
-      if (res.ok) router.refresh()
+      if (res.ok) {
+        toast({ title: "Line paused", variant: "success" })
+        router.refresh()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        toast({ title: "Couldn't pause line", description: data.error, variant: "error" })
+      }
+    } catch {
+      toast({ title: "Couldn't pause line", description: "Network error. Please try again.", variant: "error" })
     } finally {
       setPausingBomId(null)
     }

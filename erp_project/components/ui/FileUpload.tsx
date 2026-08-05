@@ -45,6 +45,7 @@ export function FileUpload({
   // Manufacturer Documents dialog stays mounted across different manufacturers
   // and only learns the right key via an effect one render after opening) — the
   // useState initializer above only runs once, so re-sync on every prop change.
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resyncs local key when the parent's currentKey prop changes
   useEffect(() => setLocalKey(currentKey), [currentKey])
 
   // In deferred mode the parent controls the pending file; derive display state from it.

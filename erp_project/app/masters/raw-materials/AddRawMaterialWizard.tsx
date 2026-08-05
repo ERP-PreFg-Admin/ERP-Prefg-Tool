@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils"
 import type { Vendor, Mfg } from "@/types/masters"
 import { useToast } from "@/components/ui/toast"
+import { Select } from "@/components/ui/select"
 
 // Existing RM material — the wizard only connects vendors/manufacturers to
 // one of these; creating a brand-new material happens on the Material
@@ -241,7 +242,9 @@ export function AddRawMaterialWizard({
       })
       onSuccess()
     } catch (e: any) {
-      setError(e.message || "An error occurred")
+      const message = e.message || "An error occurred"
+      setError(message)
+      toast({ title: "Couldn't add rates", description: message, variant: "error" })
     } finally {
       setLoading(false)
     }
@@ -459,7 +462,7 @@ export function AddRawMaterialWizard({
                       {vendorEntries.map((entry, i) => (
                         <div key={i} className="space-y-1.5">
                           <div className={cn(vendorRowGridCls, "items-center")}>
-                            <select
+                            <Select
                               className={inputCls}
                               value={entry.vendor_id ?? ""}
                               onChange={(e) => selectVendor(i, Number(e.target.value))}
@@ -470,8 +473,8 @@ export function AddRawMaterialWizard({
                                   {v.name} ({v.code})
                                 </option>
                               ))}
-                            </select>
-                            <select
+                            </Select>
+                            <Select
                               className={inputCls}
                               value={entry.mfg_id ?? ""}
                               onChange={(e) => selectMfgForVendor(i, Number(e.target.value))}
@@ -482,7 +485,7 @@ export function AddRawMaterialWizard({
                                   {m.name} ({m.code})
                                 </option>
                               ))}
-                            </select>
+                            </Select>
                             <input
                               type="number"
                               step="0.01"
@@ -502,13 +505,13 @@ export function AddRawMaterialWizard({
                               onChange={(e) => updateVendorEntry(i, "moq", e.target.value.replace(/[^\d]/g, ""))}
                               onBlur={(e) => checkExistingRate(i, entry.vendor_id, e.target.value)}
                             />
-                            <select
+                            <Select
                               className={inputCls}
                               value={entry.rate_uom}
                               onChange={(e) => updateVendorEntry(i, "rate_uom", e.target.value)}
                             >
                               {UOM_OPTIONS.map((u) => <option key={u} value={u}>{u}</option>)}
-                            </select>
+                            </Select>
                             <button
                               type="button"
                               onClick={() => removeVendorEntry(i)}
@@ -561,7 +564,7 @@ export function AddRawMaterialWizard({
                     </div>
                     {mfgEntries.map((entry, i) => (
                       <div key={i} className={cn(mfgRowGridCls, "items-center")}>
-                        <select
+                        <Select
                           className={inputCls}
                           value={entry.mfg_id ?? ""}
                           onChange={(e) => selectMfgInEntry(i, Number(e.target.value))}
@@ -572,8 +575,8 @@ export function AddRawMaterialWizard({
                               {m.name} ({m.code})
                             </option>
                           ))}
-                        </select>
-                        <select
+                        </Select>
+                        <Select
                           className={inputCls}
                           value={entry.approved_vendor_id ?? ""}
                           onChange={(e) => selectVendorForMfg(i, Number(e.target.value))}
@@ -584,7 +587,7 @@ export function AddRawMaterialWizard({
                               {v.name} ({v.code})
                             </option>
                           ))}
-                        </select>
+                        </Select>
                         <input
                           type="number"
                           step="0.01"
@@ -594,13 +597,13 @@ export function AddRawMaterialWizard({
                           value={entry.curr_rate}
                           onChange={(e) => updateMfgEntry(i, "curr_rate", e.target.value)}
                         />
-                        <select
+                        <Select
                           className={inputCls}
                           value={entry.rate_uom}
                           onChange={(e) => updateMfgEntry(i, "rate_uom", e.target.value)}
                         >
                           {UOM_OPTIONS.map((u) => <option key={u} value={u}>{u}</option>)}
-                        </select>
+                        </Select>
                         <input
                           type="date"
                           className={inputCls}

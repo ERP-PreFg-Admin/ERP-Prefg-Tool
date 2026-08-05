@@ -32,7 +32,7 @@ function formatDateTime(val: string | null) {
 }
 
 /** history_mrm.status is a plain boolean/tinyint; history_vrm.status is a status enum string — normalize both. */
-function StatusBadge({ status }: { status: RateHistoryEntry["status"] }) {
+function RateStatusBadge({ status }: { status: RateHistoryEntry["status"] }) {
   if (typeof status === "boolean" || typeof status === "number") {
     return status
       ? <Badge variant="success">Active</Badge>
@@ -63,6 +63,7 @@ export function RateHistoryDialog({
     if (!row) return
     const entityId = kind === "mfg" ? row.mfg_id : row.vendor_id
     if (!entityId) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale results before the new row's fetch resolves
     setLoading(true)
     setError(null)
     const basePath = materialType === "rm" ? "raw-materials" : "packing-materials"
@@ -101,7 +102,7 @@ export function RateHistoryDialog({
                 <span className="text-sm font-medium">
                   ₹{entry.rate != null ? Number(entry.rate).toFixed(2) : "—"}
                 </span>
-                <StatusBadge status={entry.status} />
+                <RateStatusBadge status={entry.status} />
               </div>
 
               <p className="text-xs text-muted-foreground">

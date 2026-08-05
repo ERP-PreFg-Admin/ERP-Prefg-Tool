@@ -41,6 +41,7 @@ export function UrlSearchInput({
 
   // When the server re-renders with a new initialValue (e.g. after "Clear filters"),
   // sync the visible input so it matches the URL state.
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resyncs the visible input when the URL-driven initialValue changes
   useEffect(() => { setValue(initialValue) }, [initialValue])
 
   function handleChange(v: string) {

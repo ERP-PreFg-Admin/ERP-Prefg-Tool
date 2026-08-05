@@ -71,6 +71,7 @@ export function useBomHistoryPanel() {
 
   useEffect(() => {
     if (selectedBomId == null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale detail when the selection is cleared
       setDetail(null)
       setDetailError(null)
       return
