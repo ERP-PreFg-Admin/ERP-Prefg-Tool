@@ -50,6 +50,50 @@ export const STATUS_KEYS = Object.keys(STATUS_CONFIG)
 export const TABS = ["all", ...STATUS_KEYS] as const
 export type TabKey = (typeof TABS)[number]
 
+/* ── Inwarding detail panel ───────────────────────────────────────────────── */
+
+/** Order-side reconciliation numbers. Read from the order, not the loaded row,
+ *  so the panel renders for a PO that isn't on the current page. */
+export type InwardingHeader = {
+  id: number
+  po_no: string
+  status: PoStatus | null
+  qty: string | number
+  received_qty: string | number | null
+  mfg_code: string
+  mfg_name: string
+}
+
+/** One supplier-invoice line inwarded against the PO. */
+export type InwardingLine = {
+  invoice_id: number
+  invoice_no: string
+  invoice_date: string | null
+  invoice_total: string | number | null
+  attachment_key: string | null
+  uniware_po_code: string | null
+  created_at: string | null
+  created_by_name: string | null
+  line_no: number
+  /** `created` — this line raised the PO. `received` — booked against an existing one. */
+  link_type: "created" | "received"
+  sku_code: string | null
+  sku_name: string | null
+  batch: string | null
+  expiry: string | null
+  rate: string | number | null
+  line_qty: string | number
+  line_total: string | number | null
+}
+
+export type InwardingResponse = {
+  po: InwardingHeader
+  lines: InwardingLine[]
+  /** received_qty minus the invoiced total. Derived, never correlated — see the
+   *  route's header comment for why this is a number and not a list. */
+  withoutInvoice: number
+}
+
 /**
  * Tab bar for the PO Inwarding page — only the statuses that desk cares about,
  * led by "open": a pseudo-status (never stored) that spans raised + punched +
