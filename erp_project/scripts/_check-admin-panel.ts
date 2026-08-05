@@ -61,9 +61,11 @@ async function main() {
   assert.ok("roles" in users[0] && "last_login" in users[0], "roles + last_login are projected")
   assert.equal((await query(usersSql.selectById, [users[0].id])).length, 1, "selectById returns one row")
   assert.equal((await query(usersSql.existsById, [99999999])).length, 0, "existsById rejects an unknown id")
-  const roles = await query<{ role: string }>(usersSql.selectDistinctRoles)
-  assert.ok(roles.length > 0, "derived role list is not empty")
-  console.log(`users ok: ${users.length} users, roles:`, roles.map((r) => r.role).join(", "))
+  // Role strings actually stored. The list the UI offers is declared in
+  // lib/roles.ts — scripts/_check-role-taxonomy.ts asserts the two agree.
+  const roles = await query<{ role: string }>(usersSql.selectRoleStringsInUse)
+  assert.ok(roles.length > 0, "some role is assigned or granted")
+  console.log(`users ok: ${users.length} users, roles in use:`, roles.map((r) => r.role).join(", "))
 
   // ── permissions upsert + the newly added delete, on a throwaway role ──────
   await execute(permissions.upsertPagePermission, [PROBE_ROLE, "/admin", "viewer"])

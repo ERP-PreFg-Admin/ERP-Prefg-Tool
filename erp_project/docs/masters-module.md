@@ -123,6 +123,22 @@ Top toolbar that renders:
 
 Controlled text input. On change, filters the displayed rows in the Client Component by matching the search term against row values. Client-side only — does not hit the API.
 
+### The rest of `components/masters/`
+
+Extracted from per-page copies; **reuse these rather than re-rolling the same block in a new master page.**
+
+| Component | What it is |
+|-----------|-----------|
+| `FormField` | One "Label + Input\|select" row driven by a `FormFieldConfig`, so an add/edit dialog renders its whole form as `fields.map(f => <FormField … />)`. Keep the plain `<select>` — every one of these dialogs relies on it. |
+| `ApprovalBanners` | The `InReviewBanner` (blue, locked) and rejection banner every approval-aware edit dialog needs, plus the `RejectionInfo` shape returned by `GET /api/approvals/entity` |
+| `RateHistoryDialog` | Generic RM/PM × mfg/vendor rate history. `RmRateHistoryDialog` and `PmRateHistoryDialog` were byte-for-byte identical apart from the id field name and API base path, so both collapsed into this. Shows the superseded rate **plus who changed it and why** (`history_vrm`/`history_mrm`.`remarks`, `changed_by`). |
+| `MaterialComparisonDialog` | The shared shell for every rate-comparison dialog (vendor vs vendor, mfg vs mfg) |
+| `EntityHistoryDialog` | Generic per-entity History dialog for every master. Reads the **same** `approvals`/`approval_items` trail `/approvals/history` browses, scoped to one entity, and reuses `ApprovalCard` read-only (`isApprover=false`) rather than a second diff renderer — so it shows the real field-level old→new diff for every edit ever raised against the row, pending or resolved. |
+| `RecordCountHeader` | The `"{n} records[, matching "x"]"` card header every master list opens with |
+| `TruncatedCell` | Ellipsised table cell that opens the full text in a dialog on click — for free-text columns (names, INCI names) that overflow a fixed-width table |
+| `ManagedFuzzyField` | "Pick from known options, or type a brand-new one" — toggles a `FuzzySelect` (options + "＋ Add new") with a plain text input. Used by RM Make / INCI Name on both add and edit dialogs. |
+| `StatusBadge` | Shared status pill, used by masters *and* the admin Users table |
+
 ## Edit Actions — Vendors and Manufacturers
 
 Vendors and Manufacturers support in-place editing via a pencil (✏) button in each table row. Clicking it opens a pre-populated dialog.
@@ -147,10 +163,12 @@ Every master except BOM/Recipe (which has its own dedicated history page — see
 
 | Dialog | File | Backed by |
 |--------|------|-----------|
-| Manufacturer | `EditHistoryDialog.tsx` (`app/masters/manufacturers/`) | `GET /api/masters/manufacturers/history` |
-| Vendor | `EditHistoryDialog.tsx` (`app/masters/vendors/`) | `GET /api/masters/vendors/history` |
-| RM rate | `RmRateHistoryDialog.tsx` | `GET /api/masters/raw-materials/mrm-history` / `vrm-history` |
-| PM rate | `PmRateHistoryDialog.tsx` | `GET /api/masters/packing-materials/mrm-history` / `vrm-history` |
+| Any master entity | `components/masters/EntityHistoryDialog.tsx` | `GET /api/masters/<entity>/history` (per-entity `approvals` trail) |
+| RM / PM rate | `components/masters/RateHistoryDialog.tsx` | `GET /api/masters/raw-materials/mrm-history` \| `vrm-history` · same two for `packing-materials` |
+
+> The per-page copies (`app/masters/manufacturers/EditHistoryDialog.tsx`, `app/masters/vendors/EditHistoryDialog.tsx`, `RmRateHistoryDialog.tsx`, `PmRateHistoryDialog.tsx`) are **gone** — they collapsed into those two shared components.
+
+**Edits now require a reason.** SKU, vendor, manufacturer and material-master update schemas all carry `remarks: z.string().trim().min(1, "Remarks are required")`, archived to `history_masters_edits.remarks`; rate edits archive `remarks` + `changed_by` to `history_vrm`/`history_mrm` so the Rate History popup can show who changed a rate and why. `historySql.selectPendingRemarks` reads back the submitter's reason for a currently pending edit (a reliable 1:1 lookup, since `hasPending` already guarantees at most one pending approval per `(module, entity_id)`).
 
 Each row shown is one entry in the generic `history_masters_edits` audit table (`lib/queries/history.ts`), populated **alongside** (not instead of) the `approvals`/`approval_items` pending-review mechanism: `insertHistoryEntry` (`lib/master-routes/history-utils.ts`) writes one row per create/edit/delete submission with an auto-incrementing `version_no` per `(module, entity_id)`, and the shared approve/reject route calls `resolvePendingHistoryEntry` to mark that same row approved/rejected — safe to call unconditionally even for modules that don't participate. Each entry shows who submitted it, who approved/rejected it, and when.
 
@@ -199,6 +217,19 @@ Each endpoint supports two actions:
 - `bulk` — does **not** insert rows directly. It uploads the whole validated row set as one CSV to S3 (`uploadRowsAsCsv`) and stages the **entire file as a single pending approval** (module `RM_VRM_BULK` / `RM_RATE_BULK` / `PM_VRM_BULK` / `PM_RATE_BULK`) via `stageBulkUploadApproval`. The real per-row insert only happens in that module's `applyAndArchive` handler once an approver approves the batch — see `lib/approvals/module-handlers.ts` and `lib/approvals/handlers/raw-materials.ts` / `packing-materials.ts`.
 
 Base-material bulk uploads (RM/PM/Vendor/Manufacturer `action: "bulk"` on the main `/api/masters/*` routes) follow the same approval-staged pattern — see the updated CSV Import Workflow section below.
+
+### A CSV row can be an edit, not just a new record
+
+`lib/master-routes/edit-match.ts` resolves whether a row updates an existing record: **exact match on the record's own business code** (`code` for manufacturers/vendors, `rm_code`/`pm_code` for material master). No code ⇒ always a new record. Name/GST/registered-name are deliberately *not* used to guess — a rename, or a legitimately reused GST, is entirely valid on a genuinely new record too.
+
+This changes how a mixed file is staged (`stageRmBulkRows` and its manufacturer/vendor/PM equivalents):
+
+| Row kind | What happens |
+|----------|--------------|
+| New record | Bundled with the others into **one** `*_BULK` pending approval; nothing is inserted until it's approved |
+| Recognised as an edit | Submitted **immediately as its own real single-entity approval** (`RM_MAT`, `MFG`, …), so it gets the normal field-level diff and the entity gets locked to `in_review` like any other edit |
+
+`check_duplicates` returns `{ duplicates, editMatches }` so the preview can label those rows as edits (requiring remarks) rather than blocking them as duplicates.
 
 ---
 
@@ -326,6 +357,12 @@ draft → in_review → active → inactive
 ```
 
 A SKU can have multiple BOMs (different versions or different manufacturing sites). The currently active BOM is referenced by `sku_details.curr_bom_id`.
+
+### BOM Code Versioning — `<sku_code>RM<n>PM<n>`
+
+`master_bom.rm_version` and `pm_version` bump **independently**: creating a new BOM version increments only the side (RM lines or PM lines) that actually changed versus the SKU's immediately-prior BOM. `lib/masters/bom-version.ts`' `diffBomLines` compares the RM-line set and the PM-line set separately — any addition, removal, or `amount`/`uom` change on a side marks that side changed.
+
+Applies to **new (non-backfilled), non-bulk** BOMs only — the `new-version` path in `app/api/masters/bom-master/route.ts`. Both columns default to `1`, so pre-existing rows are untouched (`prisma/add_manufacturing_v2_columns.sql`).
 
 ### BOMMasterComponent
 

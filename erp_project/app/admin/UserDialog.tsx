@@ -10,6 +10,7 @@
  */
 
 import { useState } from "react"
+import { X } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -18,9 +19,10 @@ import { Badge } from "@/components/ui/badge"
 import { SegmentedToggle } from "@/components/ui/segmented-toggle"
 import { useToast } from "@/components/ui/toast"
 import { STATUS } from "@/lib/constants"
-import { cn } from "@/lib/utils"
+import { roleLabel, isKnownRole } from "@/lib/roles"
 import type { AdminUser } from "@/lib/queries/users"
-import { splitRoles } from "./UsersClient"
+import { splitRoles } from "./authority"
+import { RolePicker } from "./RolePicker"
 
 const STATUS_OPTIONS = [
   { key: STATUS.ACTIVE, label: "Active" },
@@ -31,12 +33,10 @@ type StatusKey = (typeof STATUS_OPTIONS)[number]["key"]
 
 export function UserDialog({
   target,
-  knownRoles,
   onClose,
   onSuccess,
 }: {
   target: AdminUser | "new" | null
-  knownRoles: string[]
   onClose: () => void
   onSuccess: () => void
 }) {
@@ -51,22 +51,16 @@ export function UserDialog({
   const [email, setEmail] = useState(user?.email ?? "")
   const [status, setStatus] = useState<StatusKey>((user?.status as StatusKey) ?? STATUS.ACTIVE)
   const [roles, setRoles] = useState<string[]>(splitRoles(user?.roles ?? null))
-  const [newRole, setNewRole] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const toggleRole = (role: string) =>
-    setRoles((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]))
-
-  function addNewRole() {
-    const role = newRole.trim().toLowerCase()
-    if (!role) return
-    if (!roles.includes(role)) setRoles([...roles, role])
-    setNewRole("")
+  // Roles come from the declared taxonomy (lib/roles.ts). There is deliberately
+  // no free-text input any more: it used to create a permanent new role from a
+  // typo, and the API now rejects anything outside the list.
+  function addRole(key: string) {
+    if (!key || roles.includes(key)) return
+    setRoles((prev) => [...prev, key])
   }
-
-  // knownRoles plus any role added in this session that isn't in the list yet.
-  const roleChoices = [...new Set([...knownRoles, ...roles])].sort()
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -148,40 +142,42 @@ export function UserDialog({
 
           <div className="space-y-1.5">
             <Label>Roles</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {roleChoices.map((role) => {
-                const on = roles.includes(role)
-                return (
-                  <button key={role} type="button" onClick={() => toggleRole(role)}>
-                    <Badge
-                      variant={on ? "default" : "outline"}
-                      className={cn("cursor-pointer", !on && "text-muted-foreground")}
+            {/* An adder: `value=""` so nothing stays highlighted after a pick,
+                and `taken` greys out what this user already holds. */}
+            <RolePicker value="" onChange={addRole} taken={roles} />
+
+            {roles.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No roles — this user can sign in but reach nothing.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {roles.map((role) => (
+                  <Badge
+                    key={role}
+                    variant={isKnownRole(role) ? "secondary" : "destructive"}
+                    className="gap-1 pr-1"
+                    title={isKnownRole(role) ? role : "Unrecognised role — remove it"}
+                  >
+                    {roleLabel(role)}
+                    <button
+                      type="button"
+                      onClick={() => setRoles((prev) => prev.filter((r) => r !== role))}
+                      aria-label={`Remove ${roleLabel(role)}`}
+                      className="rounded hover:bg-background/60"
                     >
-                      {role}
-                    </Badge>
-                  </button>
-                )
-              })}
-            </div>
-            <div className="flex gap-2 pt-1">
-              <Input
-                value={newRole}
-                onChange={(e) => setNewRole(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault()
-                    addNewRole()
-                  }
-                }}
-                placeholder="New role name"
-                className="h-8 text-xs"
-              />
-              <Button type="button" variant="outline" size="sm" onClick={addNewRole}>
-                Add role
-              </Button>
-            </div>
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+
+            {/* The designation echo that used to sit here is gone: the ladder
+                marks Head as the approver at the moment of the choice, which is
+                what that line was for. */}
             <p className="text-xs text-muted-foreground">
-              A role only grants access once it has page permissions — set those on the Permissions tab.
+              A role grants nothing until it has page permissions — set those on the Permissions tab.
             </p>
           </div>
 

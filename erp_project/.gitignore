@@ -49,3 +49,6 @@ logs/*
 
 #Invoices
 /Invoices
+
+# Scripts for my personal development
+/scripts/*

@@ -28,6 +28,7 @@ import type { ResultSetHeader, PoolConnection } from "mysql2/promise"
 import { pool, query } from "@/lib/db"
 import { usersSql, type AdminUser } from "@/lib/queries/users"
 import { STATUS } from "@/lib/constants"
+import { ROLE_KEYS } from "@/lib/roles"
 import { EMAIL_REGEX } from "@/lib/validation/shared"
 import logger from "@/lib/logger"
 import { withGateway } from "@/lib/gateway/with-gateway"
@@ -35,11 +36,15 @@ import { ApiError } from "@/lib/gateway/errors"
 
 const ADMIN_PAGE = "/admin"
 
-/** Roles are free text; normalize so "Admin" and " admin " can't become two roles. */
+/**
+ * Roles must be keys from the declared taxonomy (lib/roles.ts). Validated rather
+ * than accepted as free text: the old version let a typo in the admin dialog
+ * create a permanent phantom role that then showed up for everyone.
+ */
 const rolesField = z
-  .array(z.string().trim().min(1))
+  .array(z.enum(ROLE_KEYS))
   .default([])
-  .transform((roles) => [...new Set(roles.map((r) => r.toLowerCase()))])
+  .transform((roles) => [...new Set(roles)])
 
 const createSchema = z.object({
   name: z.string().trim().min(1),

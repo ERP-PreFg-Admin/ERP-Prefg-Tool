@@ -1,6 +1,6 @@
 # Authentication & Permissions
 
-> **Related docs:** [Architecture](./architecture.md) · [Database Schema](./database-schema.md) · [API Reference](./api-reference.md)
+> **Related docs:** [Architecture](./architecture.md) · [Database Schema](./database-schema.md) · [API Reference](./api-reference.md) · [Admin Panel & Data Scoping](./admin-and-data-scoping.md)
 
 ## Authentication Stack
 
@@ -56,27 +56,44 @@ What it does **not** do:
 - Check page-level permissions (that happens inside each server component)
 - Authorise API routes (each route calls `auth()` manually)
 
-## Two-Layer RBAC
+## Three Access Dimensions
 
-Access control is a two-layer system. Both layers are resolved by `lib/permissions.ts:resolveAccess()`.
+| Dimension | Question | Where | Managed in |
+|-----------|----------|-------|-----------|
+| Role grant (`page_permissions`) | Can this role open this screen? | `lib/permissions.ts` → `resolveAccess()` | `/admin/permissions` |
+| Per-user override (`user_page_permissions`) | …with an exception for this one person? | same | `/admin/permissions` |
+| **Entity scope** (`user_entity_scope`) | **Whose rows does this person see on it?** | `lib/scope.ts` | `/admin/data-access` |
 
-### Layer 1 — Role-based (`page_permissions` table)
+The first two are resolved together by `resolveAccess()` and produce `none` / `viewer` / `editor`. The third is independent and orthogonal: a user needs page access to reach `/manufacturing` at all, **and** an in-scope manufacturer to see a given one. See [Admin Panel & Data Scoping](./admin-and-data-scoping.md) for the scoping model in full.
 
-Every role has a default access level for each page slug. Seeded by `npm run db:seed` (source: `scripts/seed-permissions.ts`).
+### Roles are a declared list (`lib/roles.ts`)
 
-| Role | `/` | `/manufacturing` | `/inventory` | `/finance` | `/hr-payroll` | `/sales-crm` | `/reports` | `/sheet-viewer` | `/masters` | `/po-tracking` |
-|------|-----|-----------------|-------------|-----------|--------------|-------------|-----------|----------------|-----------|---------------|
-| `developer` | editor | editor | editor | editor | editor | editor | editor | editor | editor | editor |
-| `production_operations` | viewer | editor | viewer | none | none | none | viewer | viewer | none | viewer |
-| `production_head` | viewer | editor | viewer | none | viewer | viewer | editor | editor | none | editor |
-| `cost_creator` | viewer | viewer | viewer | editor | none | none | editor | editor | none | none |
-| `bom_creator` | viewer | editor | viewer | viewer | none | none | viewer | viewer | none | none |
+Roles used to be free text — `user_roles.role` and `page_permissions.role` are `VARCHAR(100)`, and the admin UI derived its list by unioning those two tables, so a typo created a permanent phantom role. The taxonomy is now declared: **4 domains (RM · PM · Production · Cost) × 3 designations (Head · Lead · Executive)**, keyed `${domain}_${designation}`, plus the two system roles `developer` and `admin`. The users and permissions routes validate with `z.enum(ROLE_KEYS)`.
 
-> Roles not listed for a slug default to `"none"` — the user will be redirected to `/auth/unauthorized`.
+Nothing in the app branches on a role name — there is no `if (role === ...)` anywhere. **A role's only power is the `page_permissions` rows attached to it.**
 
-### Layer 2 — User-specific overrides (`user_page_permissions` table)
+Existing databases are migrated by `prisma/migrate_role_taxonomy.sql`, which also clears every `page_permissions` row outside `developer`/`admin` — access is granted from the tool now, not seeded.
 
-A per-user entry for a given `page_slug` completely overrides the role-based access for that page. Managed by developers via `/api/admin/user-permissions`. Useful for granting a single user elevated or restricted access without changing their role.
+### Layer 1 — Role grants (`page_permissions`)
+
+`npm run db:seed` (`scripts/seed-permissions.ts`) no longer seeds a role × page matrix. It seeds exactly two rules, both because their slugs have **no parent** for the parent-walk to fall back to, which makes them deny-by-default with no way to fix from inside the UI:
+
+| Slug | Seeded for | Why |
+|------|-----------|-----|
+| `/admin` | `developer`, `admin` (`editor`) | Otherwise nobody can open the admin panel |
+| `/approvals` | the four `*_head` roles (`editor`) | Approvals are done by Head; derived from `APPROVER_ROLES` so a new domain can't be added without its Head getting approval rights |
+
+Everything else is granted from `/admin > Permissions`. A role with no rows for a slug resolves to `"none"` and the user is redirected to `/auth/unauthorized`.
+
+### Layer 2 — User-specific overrides (`user_page_permissions`)
+
+A per-user entry for a `page_slug` overrides the role-based access **at that slug level**. Managed via `/api/admin/user-permissions`. Useful for granting a single user elevated or restricted access without changing their role.
+
+> **The order that surprises people:** `resolveAccess` walks the slug up its parents and checks **override then role at each level** before moving up. So a role grant on `/masters/vendors` beats an override on `/masters` — depth wins before layer does. `app/admin/authority.ts` mirrors this walk for display; any change to `resolveAccess` belongs there too.
+
+### Removing a grant: `DELETE`, not `'none'`
+
+`Inherit` in the admin UI means *no row at all* and is sent as a `DELETE`. An explicit `access_level = 'none'` row **stops** the parent-slug walk — a stronger and different statement than having no row.
 
 ## `resolveAccess()` — The Decision Function
 
@@ -93,7 +110,7 @@ flowchart TD
     G --> H["Return best access_level"]
 ```
 
-Access levels rank: `none` (0) < `viewer` (1) < `editor` (2). A user with both `production_operations` (viewer for `/reports`) and a user override (editor for `/reports`) gets `editor`.
+Access levels rank: `none` (0) < `viewer` (1) < `editor` (2). Across multiple roles the **best** level wins; an override at the same slug replaces the role result outright.
 
 ### Using access in a server component
 
@@ -116,33 +133,39 @@ export default async function SkusPage() {
 
 ### Using access in an API route
 
+API routes do **not** check auth by hand any more. `withGateway()` (`lib/gateway/with-gateway.ts`) resolves the session, enforces the access rule, validates the body with Zod, stamps a request context, logs the request and records the `activity_log` row:
+
 ```ts
-import { auth } from "@/lib/auth";
-import { NextResponse } from "next/server";
-
-export async function POST(req: Request) {
-  const session = await auth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  // For developer-only routes:
-  if (!session.user.roles.includes("developer")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-  // ...
-}
+export const POST = withGateway({
+  schema: myZodSchema,
+  access: { pageSlug: "/admin", level: "editor" },
+  handler: async ({ body, params, session, ctx }) => {
+    // session is guaranteed; body is typed and validated
+    return NextResponse.json({ ok: true })
+  },
+})
 ```
 
-> **Note:** The current codebase checks auth manually in every route. The planned `withGateway()` wrapper in [docs/architecture-evolution.md](./architecture-evolution.md) will centralise this.
+- Missing session → `401`; insufficient access → `403`; schema failure → `400`, all before the handler runs.
+- Errors are serialised as `{ error, code, details?, requestId }` by `toErrorResponse`; throw `ApiError(status, code, message)` for anything you want surfaced to the user.
+- **Entity scope is not part of `access`** — routes that address a single record must additionally call `assertInScope(...)` (or `assertPoInScope` for POs). Route-level scoping is opt-in per route, by design.
 
-## Admin Permission Endpoints
+### Activity logging
 
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/api/admin/permissions` | GET | developer role | List all role-page permissions |
-| `/api/admin/permissions` | POST | developer role | Upsert a role-page permission |
-| `/api/admin/user-permissions` | GET | developer role | List user-specific overrides (optionally filtered by `?user_id=`) |
-| `/api/admin/user-permissions` | POST | developer role | Upsert a user-specific override |
-| `/api/admin/user-permissions` | DELETE | developer role | Remove a user-specific override |
+Every **non-GET** request through `withGateway` writes one `activity_log` row (method, path, status, duration, IP, user-agent, `request_id`) — fire-and-forget, so an audit-row failure can never fail the request it describes. GETs are skipped deliberately: every page load and dropdown fetch would land a row for no audit value. Read at `/admin/activity`, unioned with `session_history`.
+
+## Admin Endpoints
+
+All of these are gated on the `/admin` page slug (`viewer` to read, `editor` to write) rather than a hardcoded role check. Managed from the [admin panel](./admin-and-data-scoping.md).
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/admin/users` | POST · PATCH | Create / update a user and replace their roles. No DELETE — deactivate with `status = 'inactive'`. |
+| `/api/admin/permissions` | GET · POST · DELETE | Role-page grants. `DELETE` clears the row so the slug inherits from its parent again. |
+| `/api/admin/user-permissions` | GET · POST · DELETE | Per-user overrides (`?user_id=` filters the GET) |
+| `/api/admin/entity-scope` | PUT | Replaces one `(user, entity_type)` scope set. `entity_ids: null` (or `[]`) clears it, which means **unrestricted**. |
+
+Both permission-writing routes and the entity-scope route call the guards in `lib/admin-guards.ts` so an admin cannot lock themselves out of `/admin`, or change their own data scope, from the UI.
 
 ## Session Lifecycle (Database Side)
 

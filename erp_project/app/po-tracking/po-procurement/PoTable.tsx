@@ -35,11 +35,17 @@ export default function PoTable({
   selectable = true,
   receiveOnly = false,
   showUniwareCode = false,
+  selectedPoId = null,
+  onOpenInwarding,
 }: {
   rows: PoRow[]
   sessionUserId: number
   onEdit?: (row: PoRow) => void
   onSplit?: (row: PoRow) => void
+  /** PO whose inwarding panel is open — highlights the row it belongs to. */
+  selectedPoId?: number | null
+  /** Opens the inwarding detail panel. Absent = the PO number isn't clickable. */
+  onOpenInwarding?: (row: PoRow) => void
   sortBy: string
   sortDir: SortDir
   onSort: (key: string) => void
@@ -133,6 +139,14 @@ export default function PoTable({
 
                     const menuActions: MenuAction[] = []
 
+                    if (onOpenInwarding) {
+                      menuActions.push({
+                        label:   "Inwarding",
+                        icon:    <PackageCheck className="h-3.5 w-3.5" />,
+                        onClick: () => onOpenInwarding(r),
+                      })
+                    }
+
                     menuActions.push({
                       label:   "History",
                       icon:    <History className="h-3.5 w-3.5" />,
@@ -177,7 +191,9 @@ export default function PoTable({
                         // skips it, and brought back on hover if it's being read.
                         className={cn(
                           "transition-colors",
-                          status === "cancelled" && "opacity-55 hover:opacity-100"
+                          status === "cancelled" && "opacity-55 hover:opacity-100",
+                          // Ties the open panel to the row it describes.
+                          selectedPoId === r.id && "bg-primary/5"
                         )}
                       >
                         {selectable && (
@@ -190,9 +206,23 @@ export default function PoTable({
                             />
                           </TableCell>
                         )}
-                        {/* PO Number */}
+                        {/* PO Number — the row's identity, so it's the click target
+                            for the inwarding panel. Not the whole row: that would
+                            fight the select checkbox and the action menu. */}
                         <TableCell className="font-mono text-xs font-medium whitespace-nowrap">
-                          {r.po_no}
+                          {onOpenInwarding ? (
+                            <button
+                              type="button"
+                              onClick={() => onOpenInwarding(r)}
+                              aria-expanded={selectedPoId === r.id}
+                              title="View inwarding against this PO"
+                              className="rounded underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                              {r.po_no}
+                            </button>
+                          ) : (
+                            r.po_no
+                          )}
                           {(r.po_type === "impromptu" || isImpromptu(r.po_no)) && (
                             <Badge variant="warning" className="ml-1.5 px-1.5 py-0 text-[10px]">IMP</Badge>
                           )}

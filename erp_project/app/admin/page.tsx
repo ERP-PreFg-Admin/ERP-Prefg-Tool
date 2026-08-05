@@ -15,16 +15,9 @@ export default async function AdminUsersPage() {
   const session = await auth()
   const access = await resolveAccess(parseInt(session!.user.id), session!.user.roles, "/admin")
 
-  const [users, roleRows] = await Promise.all([
-    timedQuery<AdminUser>(usersSql.selectAll, [], { label: "users.selectAll" }),
-    timedQuery<{ role: string }>(usersSql.selectDistinctRoles, [], { label: "users.selectDistinctRoles" }),
-  ])
+  // Roles come from lib/roles.ts, not the DB — the old derived list let a typo
+  // in the dialog invent a permanent role.
+  const users = await timedQuery<AdminUser>(usersSql.selectAll, [], { label: "users.selectAll" })
 
-  return (
-    <UsersClient
-      users={users}
-      roles={roleRows.map((r) => r.role)}
-      canEdit={access === "editor"}
-    />
-  )
+  return <UsersClient users={users} canEdit={access === "editor"} />
 }

@@ -13,17 +13,22 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { query, execute } from "@/lib/db"
 import { permissions } from "@/lib/queries/permissions"
+import { ROLE_KEYS } from "@/lib/roles"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { assertNotSelfLockout } from "@/lib/admin-guards"
 
+// `role` is validated against the declared taxonomy (lib/roles.ts). It used to be
+// a free-text string that this route — unlike the users route — did not even
+// lowercase, so a POST could create a page_permissions row no user string would
+// ever match, silently granting nothing.
 const upsertPagePermissionSchema = z.object({
-  role: z.string().trim().min(1),
+  role: z.enum(ROLE_KEYS),
   page_slug: z.string().trim().min(1),
   access_level: z.enum(["none", "viewer", "editor"]),
 })
 
 const deletePagePermissionSchema = z.object({
-  role: z.string().trim().min(1),
+  role: z.enum(ROLE_KEYS),
   page_slug: z.string().trim().min(1),
 })
 

@@ -66,11 +66,12 @@ export const usersSql = {
   deleteRoles: `DELETE FROM user_roles WHERE user_id = ?`,
 
   /**
-   * Every role name known to the system. There is no `roles` table — role is a
-   * free-text VarChar in both places it's stored, so the union of the two IS
-   * the role list.
+   * Every distinct role string actually present in the DB. NOT the role list the
+   * UI offers — that is declared in lib/roles.ts. This exists only so
+   * scripts/_check-role-taxonomy.ts can assert nothing outside the taxonomy
+   * survived prisma/migrate_role_taxonomy.sql.
    */
-  selectDistinctRoles: `
+  selectRoleStringsInUse: `
     SELECT role FROM (
       SELECT DISTINCT role FROM user_roles
       UNION
