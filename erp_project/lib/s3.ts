@@ -66,14 +66,27 @@ export async function getPresignedDownloadUrl(key: string, expiresIn = 900): Pro
   )
 }
 
-/** Presigned URL that forces inline display in the browser (text/plain) instead of triggering a download. */
+/**
+ * Presigned URL that displays the object in the browser instead of downloading it.
+ *
+ * Only Content-Disposition is overridden. It used to also send
+ * `ResponseContentType: "text/plain"` to coax CSVs into rendering inline, but
+ * S3's response-content-type overrides the object's stored type for *every*
+ * caller — so a PDF came back labelled text/plain and the browser rendered the
+ * raw PDF source (`%PDF-1.4`, the ASCII85 streams) as text instead of opening
+ * its viewer.
+ *
+ * Every object is stored with a correct ContentType already (see uploadFile
+ * callers), so letting the stored type through is both simpler and right. CSVs
+ * no longer need the hack either: they're previewed as a table by
+ * /api/files/preview, which parses them server-side.
+ */
 export async function getPresignedViewUrl(key: string, expiresIn = 900): Promise<string> {
   return getSignedUrl(
     getClient(),
     new GetObjectCommand({
       Bucket:                     FILES_BUCKET,
       Key:                        key,
-      ResponseContentType:        "text/plain",
       ResponseContentDisposition: "inline",
     }),
     { expiresIn }
