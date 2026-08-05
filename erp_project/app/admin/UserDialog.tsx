@@ -10,17 +10,21 @@
  */
 
 import { useState } from "react"
+import { X } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { SegmentedToggle } from "@/components/ui/segmented-toggle"
+import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { useToast } from "@/components/ui/toast"
 import { STATUS } from "@/lib/constants"
-import { cn } from "@/lib/utils"
+import {
+  ROLES, roleLabel, isKnownRole, designationsOf, DESIGNATION_LABELS, type Role,
+} from "@/lib/roles"
 import type { AdminUser } from "@/lib/queries/users"
-import { splitRoles } from "./UsersClient"
+import { splitRoles } from "./authority"
 
 const STATUS_OPTIONS = [
   { key: STATUS.ACTIVE, label: "Active" },
@@ -31,12 +35,10 @@ type StatusKey = (typeof STATUS_OPTIONS)[number]["key"]
 
 export function UserDialog({
   target,
-  knownRoles,
   onClose,
   onSuccess,
 }: {
   target: AdminUser | "new" | null
-  knownRoles: string[]
   onClose: () => void
   onSuccess: () => void
 }) {
@@ -51,22 +53,18 @@ export function UserDialog({
   const [email, setEmail] = useState(user?.email ?? "")
   const [status, setStatus] = useState<StatusKey>((user?.status as StatusKey) ?? STATUS.ACTIVE)
   const [roles, setRoles] = useState<string[]>(splitRoles(user?.roles ?? null))
-  const [newRole, setNewRole] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const toggleRole = (role: string) =>
-    setRoles((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]))
+  // Roles come from the declared taxonomy (lib/roles.ts). There is deliberately
+  // no free-text input any more: it used to create a permanent new role from a
+  // typo, and the API now rejects anything outside the list.
+  const available = ROLES.filter((r) => !roles.includes(r.key))
 
-  function addNewRole() {
-    const role = newRole.trim().toLowerCase()
-    if (!role) return
-    if (!roles.includes(role)) setRoles([...roles, role])
-    setNewRole("")
+  function addRole(key: string) {
+    if (!key || roles.includes(key)) return
+    setRoles((prev) => [...prev, key])
   }
-
-  // knownRoles plus any role added in this session that isn't in the list yet.
-  const roleChoices = [...new Set([...knownRoles, ...roles])].sort()
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -148,40 +146,64 @@ export function UserDialog({
 
           <div className="space-y-1.5">
             <Label>Roles</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {roleChoices.map((role) => {
-                const on = roles.includes(role)
-                return (
-                  <button key={role} type="button" onClick={() => toggleRole(role)}>
-                    <Badge
-                      variant={on ? "default" : "outline"}
-                      className={cn("cursor-pointer", !on && "text-muted-foreground")}
+            <FuzzySelect<Role>
+              options={available}
+              // Always "" — this is an adder, so it clears after each pick.
+              value=""
+              onChange={addRole}
+              placeholder={available.length === 0 ? "All roles added" : "Search and add a role…"}
+              getLabel={(r) => `${r.group} · ${r.label}`}
+              getValue={(r) => r.key}
+              searchKeys={["label", "key", "group"]}
+            />
+
+            {roles.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No roles — this user can sign in but reach nothing.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {roles.map((role) => (
+                  <Badge
+                    key={role}
+                    variant={isKnownRole(role) ? "secondary" : "destructive"}
+                    className="gap-1 pr-1"
+                    title={isKnownRole(role) ? role : "Unrecognised role — remove it"}
+                  >
+                    {roleLabel(role)}
+                    <button
+                      type="button"
+                      onClick={() => setRoles((prev) => prev.filter((r) => r !== role))}
+                      aria-label={`Remove ${roleLabel(role)}`}
+                      className="rounded hover:bg-background/60"
                     >
-                      {role}
-                    </Badge>
-                  </button>
-                )
-              })}
-            </div>
-            <div className="flex gap-2 pt-1">
-              <Input
-                value={newRole}
-                onChange={(e) => setNewRole(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault()
-                    addNewRole()
-                  }
-                }}
-                placeholder="New role name"
-                className="h-8 text-xs"
-              />
-              <Button type="button" variant="outline" size="sm" onClick={addNewRole}>
-                Add role
-              </Button>
-            </div>
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+
+            {/* Designation isn't picked, it's conferred — "rm_head" carries it.
+                Echoing it back makes the consequence of a role choice visible at
+                the moment it's made, since Head is what gates approvals. */}
+            {roles.length > 0 && (() => {
+              const designations = designationsOf(roles)
+              if (designations.length === 0) return null
+              return (
+                <p className="text-xs text-muted-foreground pt-0.5">
+                  Designation:{" "}
+                  <span className="text-foreground font-medium">
+                    {designations.map((d) => DESIGNATION_LABELS[d]).join(", ")}
+                  </span>
+                  {designations.includes("head") && " — can approve submissions"}
+                </p>
+              )
+            })()}
+
             <p className="text-xs text-muted-foreground">
-              A role only grants access once it has page permissions — set those on the Permissions tab.
+              A role only grants access once it has page permissions — set those on the Permissions
+              tab. Approvals are done by the Head of each function.
             </p>
           </div>
 

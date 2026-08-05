@@ -206,7 +206,7 @@ export default function ApprovalsClient({
           {!isApprover && (
             <div className="flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
               <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
-              View only — admin or manager role required
+              View only — approvals are done by the Head of each function
             </div>
           )}
           <Button variant="outline" size="sm" className="gap-1.5" onClick={() => router.push("/approvals/history")}>

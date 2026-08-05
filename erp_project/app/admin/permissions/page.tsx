@@ -30,22 +30,35 @@ export default async function AdminPermissionsPage({
   const sp = await searchParams
   const selectedUserId = Number(sp.user) > 0 ? Number(sp.user) : null
 
-  const [rolePermissions, users, roleRows, overrides] = await Promise.all([
+  // The role list is declared in lib/roles.ts, not derived from the DB — see
+  // that file's header for why the old union-of-two-tables approach went away.
+  // allOverrides feeds the roster's per-user resolution — it is the same table
+  // as `overrides` below, unfiltered. A couple of dozen rows, so one read beats
+  // a query per user.
+  const [rolePermissions, users, allOverrides] = await Promise.all([
     timedQuery<RolePermission>(permissionsSql.selectPagePermissions, [], { label: "permissions.selectPagePermissions" }),
     timedQuery<AdminUser>(usersSql.selectAll, [], { label: "users.selectAll" }),
-    timedQuery<{ role: string }>(usersSql.selectDistinctRoles, [], { label: "users.selectDistinctRoles" }),
-    selectedUserId
-      ? timedQuery<UserOverride>(permissionsSql.selectUserPagePermissionsByUserId, [selectedUserId], { label: "permissions.selectUserPagePermissionsByUserId" })
-      : Promise.resolve([] as UserOverride[]),
+    timedQuery<UserOverride>(permissionsSql.selectUserPagePermissions, [], { label: "permissions.selectUserPagePermissions" }),
   ])
+  const overrides = selectedUserId
+    ? allOverrides.filter((o) => o.user_id === selectedUserId)
+    : []
 
   return (
     <PermissionsClient
       rolePermissions={rolePermissions}
-      roles={roleRows.map((r) => r.role)}
-      users={users.map((u) => ({ id: u.id, name: u.name, email: u.email }))}
+      // Roles travel with the user so the overrides panel can resolve what the
+      // user actually ends up with, not just which override rows exist.
+      users={users.map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        status: u.status,
+        roles: u.roles ? u.roles.split(",").filter(Boolean) : [],
+      }))}
       selectedUserId={selectedUserId}
       overrides={overrides}
+      allOverrides={allOverrides}
       canEdit={access === "editor"}
     />
   )
