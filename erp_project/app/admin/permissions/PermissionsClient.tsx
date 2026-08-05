@@ -39,6 +39,7 @@ import { PAGES, PAGE_SECTIONS } from "@/lib/pages"
 import { ROLES, roleLabel, designationsOf, DESIGNATION_LABELS, type Role } from "@/lib/roles"
 import { cn } from "@/lib/utils"
 import UserAccessTable, { type RosterUser } from "./UserAccessTable"
+import { RolePicker } from "../RolePicker"
 import {
   resolveForDisplay, roleLookup, rolesLookup, railClass, provenanceLabel,
   EFFECT_LABEL, EFFECT_TEXT, EFFECT_DOT,
@@ -414,39 +415,27 @@ export default function PermissionsClient({
           <CardTitle className="font-heading text-base">Role permissions</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="sm:max-w-sm">
-            <FuzzySelect<Role>
-              options={ROLES}
-              value={roleKey}
-              onChange={setRoleKey}
-              placeholder="Search for a role…"
-              getLabel={(r) => {
-                const n = grantCount(r.key)
-                return `${r.group} · ${r.label}${n ? ` (${n} page${n === 1 ? "" : "s"})` : ""}`
-              }}
-              getValue={(r) => r.key}
-              searchKeys={["label", "key", "group"]}
-            />
-          </div>
+          {/* A selector, not an adder: `value` holds the current role so it
+              stays highlighted and the picker opens on its type. The grant
+              count rides along on each option, as it did on the old list. */}
+          <RolePicker
+            value={roleKey}
+            onChange={setRoleKey}
+            suffixFor={(key) => {
+              const n = grantCount(key)
+              return n ? `(${n})` : ""
+            }}
+          />
 
           {!selectedRole ? (
             <p className="text-muted-foreground text-sm">
-              Pick a role to grant it access. Roles with no grants can sign in but reach nothing.
+              Pick a role to grant it access. A role with no grants can sign in but reach nothing.
             </p>
           ) : (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <Badge variant={selectedRole.approver ? "warning" : "outline"}>
-                    {selectedRole.designation
-                      ? `${selectedRole.group} — ${selectedRole.designation}`
-                      : "System role"}
-                  </Badge>
-                  <span className="font-mono text-xs text-muted-foreground">{selectedRole.key}</span>
-                  {selectedRole.approver && (
-                    <span className="text-xs text-muted-foreground">Approves submissions</span>
-                  )}
-                </div>
+              {/* The role's own badge / key / approver note used to repeat here.
+                  The picker above states all three at the point of choice. */}
+              <div className="flex justify-end">
                 <RailLegend />
               </div>
               <div className="overflow-x-auto">

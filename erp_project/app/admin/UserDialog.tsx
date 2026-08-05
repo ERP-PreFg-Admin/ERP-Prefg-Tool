@@ -17,14 +17,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { SegmentedToggle } from "@/components/ui/segmented-toggle"
-import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { useToast } from "@/components/ui/toast"
 import { STATUS } from "@/lib/constants"
-import {
-  ROLES, roleLabel, isKnownRole, designationsOf, DESIGNATION_LABELS, type Role,
-} from "@/lib/roles"
+import { roleLabel, isKnownRole } from "@/lib/roles"
 import type { AdminUser } from "@/lib/queries/users"
 import { splitRoles } from "./authority"
+import { RolePicker } from "./RolePicker"
 
 const STATUS_OPTIONS = [
   { key: STATUS.ACTIVE, label: "Active" },
@@ -59,8 +57,6 @@ export function UserDialog({
   // Roles come from the declared taxonomy (lib/roles.ts). There is deliberately
   // no free-text input any more: it used to create a permanent new role from a
   // typo, and the API now rejects anything outside the list.
-  const available = ROLES.filter((r) => !roles.includes(r.key))
-
   function addRole(key: string) {
     if (!key || roles.includes(key)) return
     setRoles((prev) => [...prev, key])
@@ -146,16 +142,9 @@ export function UserDialog({
 
           <div className="space-y-1.5">
             <Label>Roles</Label>
-            <FuzzySelect<Role>
-              options={available}
-              // Always "" — this is an adder, so it clears after each pick.
-              value=""
-              onChange={addRole}
-              placeholder={available.length === 0 ? "All roles added" : "Search and add a role…"}
-              getLabel={(r) => `${r.group} · ${r.label}`}
-              getValue={(r) => r.key}
-              searchKeys={["label", "key", "group"]}
-            />
+            {/* An adder: `value=""` so nothing stays highlighted after a pick,
+                and `taken` greys out what this user already holds. */}
+            <RolePicker value="" onChange={addRole} taken={roles} />
 
             {roles.length === 0 ? (
               <p className="text-xs text-muted-foreground">
@@ -184,26 +173,11 @@ export function UserDialog({
               </div>
             )}
 
-            {/* Designation isn't picked, it's conferred — "rm_head" carries it.
-                Echoing it back makes the consequence of a role choice visible at
-                the moment it's made, since Head is what gates approvals. */}
-            {roles.length > 0 && (() => {
-              const designations = designationsOf(roles)
-              if (designations.length === 0) return null
-              return (
-                <p className="text-xs text-muted-foreground pt-0.5">
-                  Designation:{" "}
-                  <span className="text-foreground font-medium">
-                    {designations.map((d) => DESIGNATION_LABELS[d]).join(", ")}
-                  </span>
-                  {designations.includes("head") && " — can approve submissions"}
-                </p>
-              )
-            })()}
-
+            {/* The designation echo that used to sit here is gone: the ladder
+                marks Head as the approver at the moment of the choice, which is
+                what that line was for. */}
             <p className="text-xs text-muted-foreground">
-              A role only grants access once it has page permissions — set those on the Permissions
-              tab. Approvals are done by the Head of each function.
+              A role grants nothing until it has page permissions — set those on the Permissions tab.
             </p>
           </div>
 
