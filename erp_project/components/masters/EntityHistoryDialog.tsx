@@ -17,6 +17,7 @@ import { History as HistoryIcon, Loader2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import ApprovalCard from "@/app/approvals/ApprovalCard"
 import type { Approval } from "@/app/approvals/approvals-types"
+import type { MaterialMap } from "@/app/approvals/ApprovalCard"
 
 export function EntityHistoryDialog({
   module,
@@ -32,6 +33,9 @@ export function EntityHistoryDialog({
   onClose: () => void
 }) {
   const [approvals, setApprovals] = useState<Approval[]>([])
+  // Only ever populated for module="BOM" (see the API route) — resolves
+  // RM/PM ids in BomLineDiffTable to material name/code instead of "#123".
+  const [materialMap, setMaterialMap] = useState<MaterialMap | undefined>(undefined)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
@@ -43,7 +47,10 @@ export function EntityHistoryDialog({
     setError(null)
     fetch(`/api/approvals/entity-history?module=${module}&entity_id=${entityId}`)
       .then((r) => r.json())
-      .then((data) => setApprovals(data.approvals ?? []))
+      .then((data) => {
+        setApprovals(data.approvals ?? [])
+        setMaterialMap(data.materialMap)
+      })
       .catch(() => setError("Failed to load history"))
       .finally(() => setLoading(false))
   }, [module, entityId])
@@ -80,6 +87,7 @@ export function EntityHistoryDialog({
                 onApprove={() => {}}
                 onReject={() => {}}
                 onOpenCsvFile={() => {}}
+                materialMap={materialMap}
               />
             ))
           )}

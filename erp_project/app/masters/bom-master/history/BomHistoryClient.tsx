@@ -64,7 +64,7 @@ export default function BomHistoryClient({
             onClick={() => router.push("/masters/bom-master")}
           >
             <ArrowLeft className="h-3.5 w-3.5" />
-            Back to BOM Master
+            Back to Recipe Master
           </Button>
         </MasterToolbarActions>
       </MasterToolbar>

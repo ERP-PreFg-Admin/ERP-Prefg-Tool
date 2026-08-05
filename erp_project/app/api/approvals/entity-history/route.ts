@@ -11,6 +11,8 @@ import { query } from "@/lib/db"
 import { approvalsSql, entityLabelSql } from "@/lib/queries/approvals"
 import { historySql } from "@/lib/queries/history"
 import { bom as bomSql } from "@/lib/queries/bom"
+import { getActiveRmMaterialOptions, getActivePmMaterialOptions } from "@/lib/cached-reference-data"
+import { buildMaterialMap } from "@/app/approvals/material-map"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import logger from "@/lib/logger"
@@ -52,6 +54,14 @@ export const GET = withGateway({
         rows = await query<any>(approvalsSql.listHistoryForEntity, [module, entityId])
       }
 
+      // BOM's approval_items reference RM/PM by bare mtrl_id (see
+      // BomLineDiffTable.tsx) — resolve a materialMap the same way the
+      // pending-approvals and /approvals/history pages do, so this dialog
+      // shows material names/codes instead of falling back to "#123".
+      const materialMap = module === "BOM"
+        ? buildMaterialMap(...await Promise.all([getActiveRmMaterialOptions(), getActivePmMaterialOptions()]))
+        : undefined
+
       const approvals = await Promise.all(
         rows.map(async (a) => {
           // Use each row's OWN entity_id for label/remarks resolution, not
@@ -84,7 +94,7 @@ export const GET = withGateway({
         })
       )
 
-      return NextResponse.json({ approvals })
+      return NextResponse.json({ approvals, materialMap })
     } catch (err: any) {
       logger.error({ ...logCtx, err: err.message, stack: err.stack, message: "Failed to fetch entity history" })
       if (err instanceof ApiError) throw err

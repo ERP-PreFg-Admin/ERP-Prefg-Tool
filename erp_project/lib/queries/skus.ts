@@ -214,6 +214,28 @@ export const skus = {
    */
   setStatus: `UPDATE master_skus SET status = ? WHERE id = ?`,
 
+  /**
+   * Point a SKU at its currently-active BOM — called whenever a BOM
+   * transitions TO 'active' (bomHandler.applyAndArchive on approval,
+   * bomBulkHandler.applyAndArchive, and the update-status action), so
+   * master_skus.active_bom_id never goes stale. This is what the SKU
+   * master list's bom_code column resolves (see skus.selectPaginated's
+   * active_bom_id -> app/masters/skus/page.tsx's selectBomCodesByIds join).
+   * Parameters: [bom_id, sku_id]
+   */
+  setActiveBomId: `UPDATE master_skus SET active_bom_id = ? WHERE id = ?`,
+
+  /**
+   * Clear a SKU's active_bom_id, but ONLY if it still points at the BOM
+   * being deactivated — guards against clobbering a newer BOM that already
+   * took over active_bom_id in the same transaction. Used when a BOM's
+   * status is changed away from 'active' directly (the update-status
+   * action) — without this, master_skus.active_bom_id would keep pointing
+   * at a no-longer-active BOM.
+   * Parameters: [sku_id, bom_id]
+   */
+  clearActiveBomIdIfMatches: `UPDATE master_skus SET active_bom_id = NULL WHERE id = ? AND active_bom_id = ?`,
+
   /** Fetch SKU status by sku_code — used to gate PO creation. Parameters: [sku_code] */
   selectStatusByCode: `SELECT status FROM master_skus WHERE sku_code = ? LIMIT 1`,
 

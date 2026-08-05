@@ -263,6 +263,10 @@ export const POST = withGateway({
         // on approval — otherwise downstream costing/reporting queries that
         // join details_bom on status='active' assuming a single row break.
         if (status === "active" && cur.sku_id) {
+          // Keep master_skus.active_bom_id in sync — same as
+          // bomHandler.applyAndArchive does on approval.
+          await conn.execute(skuSql.setActiveBomId, [bom_id, cur.sku_id])
+
           const [siblingRows] = await conn.execute(bomSql.selectOtherActiveBomsForSku, [cur.sku_id, bom_id])
           const siblingIds = (siblingRows as { id: number }[]).map((r) => r.id)
           if (siblingIds.length > 0) {
@@ -273,6 +277,12 @@ export const POST = withGateway({
               recordProcessedEvent("BOM", deactivateEventId, { bomId: siblingId, skuId: cur.sku_id, supersededBy: bom_id })
             }
           }
+        } else if (cur.sku_id) {
+          // Manually moving THIS BOM away from 'active' — clear
+          // active_bom_id if it was still the one pointed to, so the SKU
+          // master list doesn't keep showing a no-longer-active bom_code.
+          // No-op if another BOM already took over active_bom_id.
+          await conn.execute(skuSql.clearActiveBomIdIfMatches, [cur.sku_id, bom_id])
         }
 
         await conn.commit()

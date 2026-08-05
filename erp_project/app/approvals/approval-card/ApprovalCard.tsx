@@ -98,7 +98,11 @@ export default function ApprovalCard({
       {/* Diff */}
       {showDiff && (
         <div className="border-t border-border bg-muted/20 px-4 py-3">
-          {approval.status && (
+          {/* entity-history's query selects a.status unconditionally (unlike
+              listPending, which never includes it), so a still-pending row
+              reaches this component with status="pending" too — only
+              "approved"/"rejected" actually mean this approval was resolved. */}
+          {(approval.status === "approved" || approval.status === "rejected") && (
             <div className="mb-2 text-xs text-muted-foreground">
               {approval.status === "approved" ? "Approved" : "Rejected"} by{" "}
               <span className="font-medium text-foreground">{approval.approved_by_name ?? "—"}</span>

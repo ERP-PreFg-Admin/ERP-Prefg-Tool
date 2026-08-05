@@ -184,6 +184,12 @@ export const bomHandler: ModuleHandler = {
     recordProcessedEvent("BOM", bomActivateEventId, { bomId: entityId, skuId: header.sku_id, approverId })
 
     if (header.sku_id) {
+      // Keep master_skus.active_bom_id pointed at the version that's
+      // actually active — otherwise the SKU master list's bom_code column
+      // (resolved from active_bom_id) goes stale the moment a new version
+      // is approved.
+      await conn.execute(skuSql.setActiveBomId, [entityId, header.sku_id])
+
       // Read the sibling ids BEFORE deactivating — MariaDB's UPDATE has no
       // RETURNING, so this is the only way to know which BOMs are about to
       // be deactivated and log/emit one event per sibling, not one for the
@@ -308,6 +314,11 @@ export const bomBulkHandler: ModuleHandler = {
           bomCode, sku.id, approverId, STATUS.ACTIVE, effectiveFrom, rmVersion, pmVersion,
         ])
         const bomId = (headerResult as any).insertId
+
+        // Keep master_skus.active_bom_id in sync — same as bomHandler's
+        // single-BOM path does on approval, otherwise a bulk-created BOM
+        // never shows up as the SKU's current recipe on the SKU master list.
+        await conn.execute(skuSql.setActiveBomId, [bomId, sku.id])
 
         // Mirror the SAME "BOM" module approval record the single-BOM path
         // raises at submit time (see app/api/masters/bom-master/route.ts) —

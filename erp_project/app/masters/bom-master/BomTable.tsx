@@ -22,7 +22,8 @@ import {
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { formatDate, formatChangeType, LOCKED_STATUSES } from "./bom-format"
+import { formatDate, LOCKED_STATUSES } from "./bom-format"
+import { ChangeTypeBadges } from "./ChangeTypeBadges"
 import { StatusBadge } from "@/components/masters/StatusBadge"
 import type { BomListItem } from "@/types/masters"
 
@@ -103,9 +104,9 @@ export function BomTable({
                   <TableCell>
                     <StatusBadge status={row.status} />
                   </TableCell>
-                  <TableCell className="text-sm whitespace-nowrap">{formatChangeType(row.change_type)}</TableCell>
+                  <TableCell className="whitespace-nowrap"><ChangeTypeBadges value={row.change_type} /></TableCell>
                   <TableCell className="text-sm max-w-[220px] truncate" title={row.change_reason ?? undefined}>
-                    {row.change_reason ?? "—"}
+                    {row.change_reason ?? <span className="text-muted-foreground/50">—</span>}
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     {row.live_mfg_count > 0 ? (
