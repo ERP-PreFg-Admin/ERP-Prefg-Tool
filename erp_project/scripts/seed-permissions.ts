@@ -1,57 +1,29 @@
+// Seeds the minimum page_permissions rows the tool needs to be usable at all.
+//   npx tsx scripts/seed-permissions.ts
+//
+// Everything else is granted from /admin > Permissions. This replaces the old
+// 51-row matrix for roles nobody held (production_operations, cost_creator,
+// bom_creator) — see prisma/migrate_role_taxonomy.sql for that cleanup.
+//
+// Only two rules are seeded, both because their slugs have NO parent for
+// lib/permissions.ts' parent-walk to fall back to, which makes them
+// deny-by-default with no way to fix it from inside the UI:
+//   /admin      -> developer + admin, or nobody can open the admin panel
+//   /approvals  -> the four Heads, since approvals are done by Head
+//
+// Idempotent. Safe to re-run.
 import 'dotenv/config'
 import { execute, pool } from "../lib/db"
+import { APPROVER_ROLES } from "../lib/roles"
 
-const matrix: { role: string; page_slug: string; access_level: "none" | "viewer" | "editor" }[] = [
-  // production_operations
-  { role: "production_operations", page_slug: "/",               access_level: "viewer" },
-  { role: "production_operations", page_slug: "/manufacturing",  access_level: "editor" },
-  { role: "production_operations", page_slug: "/inventory",      access_level: "viewer" },
-  { role: "production_operations", page_slug: "/finance",        access_level: "none"   },
-  { role: "production_operations", page_slug: "/hr-payroll",     access_level: "none"   },
-  { role: "production_operations", page_slug: "/sales-crm",      access_level: "none"   },
-  { role: "production_operations", page_slug: "/reports",        access_level: "viewer" },
+type Row = { role: string; page_slug: string; access_level: "none" | "viewer" | "editor" }
 
-  // production_head
-  { role: "production_head", page_slug: "/",               access_level: "viewer" },
-  { role: "production_head", page_slug: "/manufacturing",  access_level: "editor" },
-  { role: "production_head", page_slug: "/inventory",      access_level: "viewer" },
-  { role: "production_head", page_slug: "/finance",        access_level: "none"   },
-  { role: "production_head", page_slug: "/hr-payroll",     access_level: "viewer" },
-  { role: "production_head", page_slug: "/sales-crm",      access_level: "viewer" },
-  { role: "production_head", page_slug: "/reports",        access_level: "editor" },
-
-  // cost_creator
-  { role: "cost_creator", page_slug: "/",               access_level: "viewer" },
-  { role: "cost_creator", page_slug: "/manufacturing",  access_level: "viewer" },
-  { role: "cost_creator", page_slug: "/inventory",      access_level: "viewer" },
-  { role: "cost_creator", page_slug: "/finance",        access_level: "editor" },
-  { role: "cost_creator", page_slug: "/hr-payroll",     access_level: "none"   },
-  { role: "cost_creator", page_slug: "/sales-crm",      access_level: "none"   },
-  { role: "cost_creator", page_slug: "/reports",        access_level: "editor" },
-
-  // bom_creator
-  { role: "bom_creator", page_slug: "/",               access_level: "viewer" },
-  { role: "bom_creator", page_slug: "/manufacturing",  access_level: "editor" },
-  { role: "bom_creator", page_slug: "/inventory",      access_level: "viewer" },
-  { role: "bom_creator", page_slug: "/finance",        access_level: "viewer" },
-  { role: "bom_creator", page_slug: "/hr-payroll",     access_level: "none"   },
-  { role: "bom_creator", page_slug: "/sales-crm",      access_level: "none"   },
-  { role: "bom_creator", page_slug: "/reports",        access_level: "viewer" },
-
-  // developer
-  { role: "developer", page_slug: "/",               access_level: "editor" },
-  { role: "developer", page_slug: "/manufacturing",  access_level: "editor" },
-  { role: "developer", page_slug: "/inventory",      access_level: "editor" },
-  { role: "developer", page_slug: "/finance",        access_level: "editor" },
-  { role: "developer", page_slug: "/hr-payroll",     access_level: "editor" },
-  { role: "developer", page_slug: "/sales-crm",      access_level: "editor" },
-  { role: "developer", page_slug: "/reports",        access_level: "editor" },
-  {role: "developer", page_slug: "/masters",        access_level: "editor" },
-
-  // PO Tracking module (PO Procurement + placeholders). Gated under one slug.
-  { role: "developer",              page_slug: "/po-tracking", access_level: "editor" },
-  { role: "production_head",        page_slug: "/po-tracking", access_level: "editor" },
-  { role: "production_operations",  page_slug: "/po-tracking", access_level: "viewer" },
+const matrix: Row[] = [
+  { role: "developer", page_slug: "/admin", access_level: "editor" },
+  { role: "admin", page_slug: "/admin", access_level: "editor" },
+  // Derived from the taxonomy so a new domain can't be added without its Head
+  // getting approval rights.
+  ...APPROVER_ROLES.map((role): Row => ({ role, page_slug: "/approvals", access_level: "editor" })),
 ]
 
 async function main() {
@@ -63,7 +35,9 @@ async function main() {
       [row.role, row.page_slug, row.access_level]
     )
   }
-  console.log(`Seeded ${matrix.length} permission rows.`)
+  console.log(`Seeded ${matrix.length} permission rows:`)
+  for (const r of matrix) console.log(`  ${r.role} -> ${r.page_slug} ${r.access_level}`)
+  console.log("Everything else is granted from /admin > Permissions.")
   await pool.end()
 }
 

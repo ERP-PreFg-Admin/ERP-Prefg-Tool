@@ -11,6 +11,7 @@ import { bomIdParamSchema } from "@/lib/validation/bom"
 import { query } from "@/lib/db"
 import { bom } from "@/lib/queries/bom"
 import type { BOM, BomArtifact, BomDetailResponse } from "@/types/masters"
+import type { BOM, BomArtifact, BomDetailResponse } from "@/types/masters"
 
 export const GET = withGateway({
   paramsSchema: bomIdParamSchema,
@@ -24,11 +25,13 @@ export const GET = withGateway({
       query<Omit<BomDetailResponse, "lines" | "artifacts">>(bom.selectHeaderById, [params.id]),
       query<BOM>(bom.selectHistoryLinesByBomId, [params.id]),
       query<BomArtifact>(bom.selectArtifactsByBomId, [params.id]),
+      query<BomArtifact>(bom.selectArtifactsByBomId, [params.id]),
     ])
     const header = headerRows[0]
     if (!header) throw new ApiError(404, "not_found", "BOM not found.")
     if (lines.length === 0) throw new ApiError(404, "no_history", "This BOM has no archived revisions.")
 
+    const response: BomDetailResponse = { ...header, lines, artifacts }
     const response: BomDetailResponse = { ...header, lines, artifacts }
     return NextResponse.json(response)
   },

@@ -19,17 +19,19 @@ import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { computeWastage, computeTotalCosting } from "@/lib/costing/final-costing"
 import type { MiscCostType } from "@/types/masters"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { getUserScope, assertInScope } from "@/lib/scope"
 import { ApiError } from "@/lib/gateway/errors"
 import { quoteRateQuerySchema } from "@/lib/validation/purchase-order-detail"
 
 export const GET = withGateway({
   access: { pageSlug: "/po-tracking", level: "viewer" },
-  handler: async ({ req }) => {
+  handler: async ({ req, session }) => {
     const parsed = quoteRateQuerySchema.safeParse(Object.fromEntries(req.nextUrl.searchParams))
     if (!parsed.success) {
       throw new ApiError(400, "validation_error", "Invalid query parameters", parsed.error.flatten())
     }
     const { sku_code: skuCode, mfg_id: mfgId } = parsed.data
+    assertInScope(await getUserScope(Number(session.user.id)), "mfg", mfgId)
 
     const [lineRows, materialCostRows, miscCostRows] = await Promise.all([
       query<{ bom_id: number; sku_code: string }>(manufacturingSql.selectLiveLinesByMfg, [mfgId]),

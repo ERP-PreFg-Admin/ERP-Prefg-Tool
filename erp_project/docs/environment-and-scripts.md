@@ -41,6 +41,28 @@ Required to send PO PDFs to manufacturers via Gmail SMTP.
 |----------|----------|---------|---------|
 | `GMAIL_USER` | Yes | — | Gmail address used as the sender (e.g. `procurement@mcaffeine.com`) |
 | `GMAIL_APP_PASSWORD` | Yes | — | [Gmail App Password](https://support.google.com/accounts/answer/185833) — not the account password. 2FA must be enabled on the account. |
+| `MAIL_SIGNATURE_TITLE` | No | `MIS Executive` | Job title printed under the sender's name on inward-invoice emails. The name itself comes from whoever filed the invoice, so only the title is configured. |
+
+### Nanonets (invoice extraction)
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `NANONET_API_KEY` | Yes | — | Key for `extraction-api.nanonets.com`, used by `lib/nanonets.ts` to read supplier-invoice PDFs |
+
+### Uniware (Unicommerce)
+
+**Optional** — if these are unset the app simply doesn't push POs to Uniware (`uniwareEnabled()` returns false and the mirror step is skipped) rather than failing at boot.
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `UNIWARE_BASE_URL` | No | `""` | Tenant base URL. Empty ⇒ integration disabled. |
+| `UNIWARE_USER_NAME` | No | `""` | OAuth username |
+| `UNIWARE_PASSWORD` | No | `""` | OAuth password |
+| `UNIWARE_CLIENT_ID` | No | `my-trusted-client` | Unicommerce's stock public OAuth client — no per-tenant value to configure |
+| `UNIWARE_FACILITY` | No | `TEST_FACILITY` | `purchaseOrder/create` is facility-scoped, so this decides where a PO lands |
+| `UNIWARE_VENDOR_CODE` | No | `Test_Vendor` | Uniware vendors are configured per facility and are **not** `master_mfgs.code` (pushing that fails with `Vendor [...] is not configured for the facility`) |
+
+> ⚠️ `UNIWARE_FACILITY` and `UNIWARE_VENDOR_CODE` both default to sandbox values and **must be overridden before going live**, or every PO lands against the test vendor in the test facility. See [PO Inwarding](./po-inwarding.md).
 
 ### Observability
 
@@ -69,7 +91,7 @@ These are hardcoded in `lib/db.ts`. Change them there if your environment requir
 | `npm run build` | Compile a production build — run before every merge to catch type errors |
 | `npm run start` | Serve the production build (requires `npm run build` first) |
 | `npm run lint` | Run ESLint — must pass before committing |
-| `npm run db:seed` | Upsert the role × page_slug × access_level matrix into `page_permissions` |
+| `npm run db:seed` | Seed the minimum `page_permissions` rows the tool needs to be usable at all — see below |
 | `npm run db:test` | Run a `SELECT NOW()` to verify the database connection and SSL |
 
 ## Prisma Commands
@@ -90,9 +112,29 @@ Prisma is used for **schema definition and migrations only** — the Prisma Clie
 
 | File | Purpose | When to run |
 |------|---------|------------|
-| `scripts/seed-permissions.ts` | Writes the role × page_slug × access_level matrix into `page_permissions`. Uses `ON DUPLICATE KEY UPDATE` so it is safe to re-run. | After adding a new role, a new page slug, or when setting up a fresh database. Run with `npm run db:seed`. |
+| `scripts/seed-permissions.ts` | Seeds **two rules only**: `/admin` → `developer` + `admin`, and `/approvals` → the four `*_head` roles (derived from `APPROVER_ROLES`, so a new domain can't be added without its Head getting approval rights). Both slugs have no parent for `lib/permissions.ts`' walk to fall back to, which makes them deny-by-default with no way to fix from inside the UI. Everything else is granted from `/admin > Permissions`. Idempotent. | On a fresh database, or after adding a domain to `lib/roles.ts`. Run with `npm run db:seed`. |
 | `scripts/seed-test-users.js` | Creates sample user accounts for development and testing. | Once, on a fresh development database. Run with `npx tsx scripts/seed-test-users.js`. |
 | `scripts/test-connection.js` | Verifies database connectivity by running a `SELECT NOW()`. Exits with code 1 on failure. | Any time you want to confirm the DB connection is healthy. Run with `npm run db:test`. |
+| `scripts/sync-skus-from-dwh.ts`, `backfill-rm-codes.ts`, `list-s3.ts`, `explain-check.ts`, `invoice_reading_nanonets.ts`, `add_uniware_inward_po.js` | One-off data / integration utilities: DWH SKU sync, RM code backfill, S3 listing, `EXPLAIN` on the heavy queries, a standalone Nanonets parse, a standalone Uniware inward-PO push | As needed, via `npx tsx scripts/<file>` |
+
+> The old 51-row role × page matrix in `seed-permissions.ts` is gone — it granted access to roles nobody held (`production_operations`, `cost_creator`, `bom_creator`). `prisma/migrate_role_taxonomy.sql` cleans those out of an existing database.
+
+### `_check-*.ts` verification scripts
+
+Ad-hoc assertions written alongside each feature, run with `npx tsx scripts/<file>`. They hit the real database, so they are read-mostly and safe to re-run; keep adding one per non-trivial change rather than verifying by clicking.
+
+| Script | Verifies |
+|--------|----------|
+| `_check-admin-panel.ts` | The admin tabs' queries and mutations |
+| `_check-admin-authority.ts` | `app/admin/authority.ts` resolves effect + provenance the same way `resolveAccess` does |
+| `_check-role-taxonomy.ts` | No role string outside `lib/roles.ts` survived the migration |
+| `_check-entity-scope.ts` | `lib/scope.ts` helpers and the scoped queries (including that unrestricted users see exactly what they did before) |
+| `_check-invoice-mapping.ts` | Fuzzy invoice → masters matching |
+| `_check-inward-count.ts`, `_check-inward-sequence.ts`, `_check-inward-mail-summary.ts` | Invoice inwarding: rows written, step order, the warehouse mail summary |
+| `_check-uniware-push.ts`, `_check-uniware-po-pdf.ts` | Uniware PO create and PO-document fetch |
+| `_check-backdated-po.ts` | Inward POs take the invoice's own date as `expected_on` |
+| `_check-po-status-filter.ts` | The PO list's status/`po_type` filter values, including the `inward` tab |
+| `_check-sku-dedup.ts` | SKU de-duplication |
 
 ## Google Sheets Integration
 

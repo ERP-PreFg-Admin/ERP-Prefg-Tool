@@ -13,6 +13,7 @@ import { redirect } from "next/navigation"
 import { parsePaginationParams, paginate } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
 import { entityEmails } from "@/lib/queries/entity-emails"
+import { getUserScope, filterByScope } from "@/lib/scope"
 import EntityEmailsClient from "./EntityEmailsClient"
 
 export const dynamic = "force-dynamic"
@@ -37,7 +38,9 @@ export default async function EntityEmailsPage({
   const like = search     ? `%${search}%` : null
   const type = typeFilter ? typeFilter    : null
 
-  const [result, vendorOptions, mfgOptions] = await Promise.all([
+  const scope = await getUserScope(userId)
+
+  const [result, allVendorOptions, allMfgOptions, allWarehouseOptions] = await Promise.all([
     paginate<{
       id: number
       entity_type: string
@@ -55,14 +58,21 @@ export default async function EntityEmailsPage({
     ),
     timedQuery<{ id: number; code: string; name: string }>(entityEmails.vendorOptions, [], { label: "entityEmails.vendorOptions" }),
     timedQuery<{ id: number; code: string; name: string }>(entityEmails.mfgOptions, [], { label: "entityEmails.mfgOptions" }),
+    timedQuery<{ id: number; code: string; name: string }>(entityEmails.warehouseOptions, [], { label: "entityEmails.warehouseOptions" }),
   ])
+
+  // These three were ungated full lists of every vendor, manufacturer and
+  // warehouse. warehouseOptions aliases `name AS code`, so it scopes on name.
+  const vendorOptions = filterByScope(allVendorOptions, "id", scope.vendorIds)
+  const mfgOptions = filterByScope(allMfgOptions, "id", scope.mfgIds)
+  const warehouseOptions = filterByScope(allWarehouseOptions, "name", scope.warehouseNames)
 
   return (
     <div className="p-6">
       <div className="mb-5">
         <h1 className="text-2xl font-bold tracking-tight">Emails</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Vendor and manufacturer contact emails, by purpose
+          Vendor, manufacturer and warehouse contact emails, by purpose
         </p>
       </div>
       <EntityEmailsClient
@@ -74,6 +84,7 @@ export default async function EntityEmailsPage({
         currentType={typeFilter}
         vendorOptions={vendorOptions}
         mfgOptions={mfgOptions}
+        warehouseOptions={warehouseOptions}
         canEdit={canEdit}
       />
     </div>

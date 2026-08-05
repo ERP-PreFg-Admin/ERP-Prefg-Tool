@@ -3,6 +3,8 @@
  * Centralized queries for the pm table and related rate tables (pm_vrm_dynamic, pm_mrm_fixed)
  */
 
+import { scopeParams, type UserScope } from "@/lib/scope"
+
 export const packingMaterials = {
   /** Get all packing materials (base data only, no rate joins) */
   selectAll: `
@@ -43,7 +45,9 @@ export const packingMaterials = {
    * Cheapest and most expensive currently-effective vendor (VRM) rate per PM,
    * across ALL vendors (not scoped to any one manufacturer). Mirrors
    * rawMaterials.selectMinMaxVrmRateByRm — see that query's comment for the
-   * correlated-subquery vendor-resolution rationale.
+   * correlated-subquery vendor-resolution rationale and why the vendor-scope
+   * clause has to appear in all three places.
+   * Params: scopeParams(vendorIds) × 3 (6 total)
    */
   selectMinMaxVrmRateByPm: `
     SELECT
@@ -56,18 +60,21 @@ export const packingMaterials = {
       WHERE status = 'active'
         AND effective_from <= CURDATE()
         AND (effective_to IS NULL OR effective_to >= CURDATE())
+        AND (? IS NULL OR vendor_id IN (?))
       GROUP BY pm_id
     ) agg
     LEFT JOIN master_vendors minv ON minv.id = (
       SELECT vendor_id FROM pm_vrm_dynamic
       WHERE pm_id = agg.pm_id AND curr_rate = agg.min_rate AND status = 'active'
         AND effective_from <= CURDATE() AND (effective_to IS NULL OR effective_to >= CURDATE())
+        AND (? IS NULL OR vendor_id IN (?))
       ORDER BY id LIMIT 1
     )
     LEFT JOIN master_vendors maxv ON maxv.id = (
       SELECT vendor_id FROM pm_vrm_dynamic
       WHERE pm_id = agg.pm_id AND curr_rate = agg.max_rate AND status = 'active'
         AND effective_from <= CURDATE() AND (effective_to IS NULL OR effective_to >= CURDATE())
+        AND (? IS NULL OR vendor_id IN (?))
       ORDER BY id LIMIT 1
     )
   `,
@@ -162,6 +169,7 @@ export const packingMaterials = {
       AND (? IS NULL OR pmv.curr_rate >= ?)
       AND (? IS NULL OR pmv.curr_rate <= ?)
       AND (? IS NULL OR pmv.effective_from >= ?)
+      AND (? IS NULL OR pmv.vendor_id IN (?))
     ORDER BY p.pm_code ASC
     LIMIT ? OFFSET ?
   `,
@@ -183,6 +191,7 @@ export const packingMaterials = {
       AND (? IS NULL OR pmv.curr_rate >= ?)
       AND (? IS NULL OR pmv.curr_rate <= ?)
       AND (? IS NULL OR pmv.effective_from >= ?)
+      AND (? IS NULL OR pmv.vendor_id IN (?))
     ORDER BY p.pm_code ASC
   `,
 
@@ -197,6 +206,7 @@ export const packingMaterials = {
       AND (? IS NULL OR pmv.curr_rate >= ?)
       AND (? IS NULL OR pmv.curr_rate <= ?)
       AND (? IS NULL OR pmv.effective_from >= ?)
+      AND (? IS NULL OR pmv.vendor_id IN (?))
   `,
 
   /** Distinct PM types for the make filter dropdown. */
@@ -221,7 +231,8 @@ export const packingMaterials = {
     vendorCode: string | null,
     rateMin: string | null,
     rateMax: string | null,
-    effectiveFrom: string | null
+    effectiveFrom: string | null,
+    scope: UserScope,
   ): unknown[] {
     const like   = search     ? `%${search}%`     : null
     const vcLike = vendorCode ? `%${vendorCode}%` : null
@@ -235,6 +246,7 @@ export const packingMaterials = {
       rateMinNum, rateMinNum,
       rateMaxNum, rateMaxNum,
       effectiveFrom, effectiveFrom,
+      ...scopeParams(scope.vendorIds),
     ]
   },
 
@@ -257,6 +269,7 @@ export const packingMaterials = {
       AND (? IS NULL OR pmm.curr_rate >= ?)
       AND (? IS NULL OR pmm.curr_rate <= ?)
       AND (? IS NULL OR pmm.effective_from >= ?)
+      AND (? IS NULL OR pmm.mfg_id IN (?))
     ORDER BY p.pm_code ASC
     LIMIT ? OFFSET ?
   `,
@@ -276,6 +289,7 @@ export const packingMaterials = {
       AND (? IS NULL OR pmm.curr_rate >= ?)
       AND (? IS NULL OR pmm.curr_rate <= ?)
       AND (? IS NULL OR pmm.effective_from >= ?)
+      AND (? IS NULL OR pmm.mfg_id IN (?))
     ORDER BY p.pm_code ASC
   `,
 
@@ -290,6 +304,7 @@ export const packingMaterials = {
       AND (? IS NULL OR pmm.curr_rate >= ?)
       AND (? IS NULL OR pmm.curr_rate <= ?)
       AND (? IS NULL OR pmm.effective_from >= ?)
+      AND (? IS NULL OR pmm.mfg_id IN (?))
   `,
 
   /** Build the filter param array for all mfg-view queries. */
@@ -301,6 +316,7 @@ export const packingMaterials = {
     rateMin: string | null,
     rateMax: string | null,
     effectiveFrom: string | null,
+    scope: UserScope,
   ): unknown[] {
     const like       = search   ? `%${search}%`   : null
     const mfgLike    = mfgCode  ? `%${mfgCode}%`  : null
@@ -314,6 +330,7 @@ export const packingMaterials = {
       rateMinNum, rateMinNum,
       rateMaxNum, rateMaxNum,
       effectiveFrom, effectiveFrom,
+      ...scopeParams(scope.mfgIds),
     ]
   },
 

@@ -70,16 +70,50 @@ export const supplierInvoicesSql = {
     ORDER BY sii.line_no
   `,
 
-  /** Full invoice header + lines for one PO — "which invoice brought this in?".
-   *  Matches either link, so it answers for the inward PO and for the order it
-   *  fulfilled. Parameters: [po_id, po_id] */
+  /** Invoice lines inwarded against one PO — "which invoice brought this in?".
+   *  Matches either link, so it answers both for an inward PO and for the
+   *  pre-existing order it fulfilled. Backs the FG PO Tracking inwarding panel.
+   *
+   *  mfg_code/mfg_name are deliberately absent: they belong to the order, not
+   *  the line, and would repeat identically on every row. The panel takes them
+   *  from the order row instead (see selectInwardingHeader).
+   *
+   *  Parameters: [po_id, po_id] */
   selectByPoId: `
-    SELECT si.*, sii.line_no, sii.link_type, sii.sku_code, sii.batch,
-           sii.qty AS line_qty, sii.total_amount AS line_total
+    SELECT si.id            AS invoice_id,
+           si.invoice_no,
+           si.invoice_date,
+           si.invoice_total,
+           si.attachment_key,
+           si.uniware_po_code,
+           si.created_at,
+           u.name           AS created_by_name,
+           sii.line_no,
+           sii.link_type,
+           sii.sku_code,
+           sii.sku_name,
+           sii.batch,
+           sii.expiry,
+           sii.rate,
+           sii.qty          AS line_qty,
+           sii.total_amount AS line_total
     FROM supplier_invoice_items sii
     INNER JOIN supplier_invoices si ON si.id = sii.invoice_id
+    LEFT  JOIN users u ON u.id = si.created_by
     WHERE sii.po_id = ? OR sii.received_against_po_id = ?
-    ORDER BY sii.line_no
+    ORDER BY si.invoice_date DESC, si.id DESC, sii.line_no
+  `,
+
+  /** Order header for the inwarding panel — the reconciliation numbers come
+   *  from the order itself, not from whatever the table happened to load, so
+   *  the panel renders for a PO that isn't on the current page.
+   *  Parameters: [po_id] */
+  selectInwardingHeader: `
+    SELECT po.id, po.po_no, po.status, po.qty, po.received_qty,
+           m.code AS mfg_code, m.name AS mfg_name
+    FROM purchase_orders po
+    INNER JOIN master_mfgs m ON m.id = po.mfg_id
+    WHERE po.id = ?
   `,
 
   /** Invoice history list, newest first. Parameters: [limit, offset] */

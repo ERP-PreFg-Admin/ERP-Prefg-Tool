@@ -5,6 +5,7 @@ import { parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
 import { purchaseOrdersSql, buildFilterParams, buildStatusCountParams } from "@/lib/queries/purchase-orders"
 import { getPoDropdownOptions } from "@/lib/cached-reference-data"
+import { getUserScope, filterByScope } from "@/lib/scope"
 import type { PoRow } from "./po-types"
 import PoProcurementClient from "./PoProcurementClient"
 
@@ -36,8 +37,13 @@ export default async function PoProcurementPage({
 
   const status = statusFilter || null
 
-  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null)
-  const statusCountParams = buildStatusCountParams(search || null, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null)
+  // Inward POs are excluded outright here: they're raised by the invoice desk
+  // against goods already received, so they're not procurement's to track and
+  // they distort every tab count and summary card on this page. PO Inwarding is
+  // where they live.
+  const scope = await getUserScope(userId)
+  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, true, scope)
+  const statusCountParams = buildStatusCountParams(search || null, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, true, scope)
 
   const pageStart = performance.now()
   console.log(`[AUDIT] PO Procurement load - page=${page}, size=${size}, search=${search || "none"}, status=${status ?? "all"}, sortBy=${sortBy}, sortDir=${sortDir}`)
@@ -49,7 +55,11 @@ export default async function PoProcurementPage({
     timedQuery<any>(purchaseOrdersSql.summaryStats, statusCountParams, { label: "summaryStats" }),
     getPoDropdownOptions(),
   ])
-  const { skus, mfgs, warehouses } = dropdownOptions
+  // getPoDropdownOptions is an unstable_cache keyed without any user component,
+  // so it can't filter internally — post-filter here instead of losing the cache.
+  const { skus } = dropdownOptions
+  const mfgs = filterByScope(dropdownOptions.mfgs, "id", scope.mfgIds)
+  const warehouses = filterByScope(dropdownOptions.warehouses, "name", scope.warehouseNames)
 
   const total = Number(countRows[0]?.total ?? 0)
   console.log(`[AUDIT] PO Procurement complete: ${(performance.now() - pageStart).toFixed(2)}ms | ${rows.length}/${total} rows`)

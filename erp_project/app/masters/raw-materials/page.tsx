@@ -13,6 +13,7 @@
 
 import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
+import { getUserScope, filterByScope } from "@/lib/scope"
 import { redirect } from "next/navigation"
 import { parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
@@ -39,6 +40,8 @@ export default async function RawMaterialsPage({
   const access = await resolveAccess(userId, session.user.roles, "/masters/raw-materials")
   if (access === "none") redirect("/auth/unauthorized")
 
+  const scope = await getUserScope(userId)
+
   // ── Read URL params ────────────────────────────────────────────────────────
   const sp     = await searchParams
   const isMfg  = String(sp.view ?? "") === "manufacturer"
@@ -64,10 +67,15 @@ export default async function RawMaterialsPage({
   // ── Parallel fetch: reference lists + paginated view data ─────────────────
   // vendorList and mfgList are fetched in full for the Add wizard dropdowns.
   // Cached (see lib/cached-reference-data.ts) — these barely change request to request.
-  const [vendorList, mfgList] = await Promise.all([
+  const [allVendors, allMfgs] = await Promise.all([
     getVendorReferenceList(),
     getManufacturerReferenceList(),
   ])
+  // Both lists are process-wide unstable_cache entries keyed without a user,
+  // so they are post-filtered rather than filtered in the query — otherwise
+  // the Add-rates wizard would offer entities the user can't see.
+  const vendorList = filterByScope(allVendors, "vendor_id", scope.vendorIds)
+  const mfgList = filterByScope(allMfgs, "id", scope.mfgIds)
 
   let body: React.ReactNode
 
@@ -75,7 +83,7 @@ export default async function RawMaterialsPage({
     // Manufacturer view — query rm_mrm × rm with all active filters
     const mfp = rawMaterials.mfgFilterParams(
       search || null, statusFilter || null, typeFilter || null,
-      mfgCodeFilter || null, mfgRateMinFilter || null, mfgRateMaxFilter || null, mfgEffFromFilter || null
+      mfgCodeFilter || null, mfgRateMinFilter || null, mfgRateMaxFilter || null, mfgEffFromFilter || null, scope
     )
     let rows: RMByMfg[]
     let total: number
@@ -84,7 +92,7 @@ export default async function RawMaterialsPage({
     if (search) {
       const noSearchMfp = rawMaterials.mfgFilterParams(
         null, statusFilter || null, typeFilter || null,
-        mfgCodeFilter || null, mfgRateMinFilter || null, mfgRateMaxFilter || null, mfgEffFromFilter || null
+        mfgCodeFilter || null, mfgRateMinFilter || null, mfgRateMaxFilter || null, mfgEffFromFilter || null, scope
       )
       const allMatching = await timedQuery<RMByMfg>(rawMaterials.selectMfgAllFiltered, noSearchMfp, { label: "selectMfgAllFiltered" })
       const ranked = fuzzyRank(allMatching, search, ["rm_code", "name"])
@@ -122,7 +130,7 @@ export default async function RawMaterialsPage({
     const vfp = rawMaterials.vendorFilterParams(
       search || null, statusFilter || null, makeFilter || null, typeFilter || null,
       vendorCodeFilter || null, rateMinFilter || null, rateMaxFilter || null,
-      effectiveFromFilter || null
+      effectiveFromFilter || null, scope
     )
     let rows: RM[]
     let total: number
@@ -132,7 +140,7 @@ export default async function RawMaterialsPage({
       const noSearchVfp = rawMaterials.vendorFilterParams(
         null, statusFilter || null, makeFilter || null, typeFilter || null,
         vendorCodeFilter || null, rateMinFilter || null, rateMaxFilter || null,
-        effectiveFromFilter || null
+        effectiveFromFilter || null, scope
       )
       const allMatching = await timedQuery<RM>(rawMaterials.selectVendorAllFiltered, noSearchVfp, { label: "selectVendorAllFiltered" })
       const ranked = fuzzyRank(allMatching, search, ["rm_code", "name"])

@@ -20,6 +20,7 @@ import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { rawMaterials } from "@/lib/queries/raw-materials"
 import { packingMaterials } from "@/lib/queries/packing-materials"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { getUserScope, assertInScope, scopeParams } from "@/lib/scope"
 import { mfgIdParamSchema } from "@/lib/validation/manufacturing"
 import { buildCsv, buildMultiSheetXlsx, buildExportFilename } from "@/lib/export"
 import { FINAL_COSTING_DETAILED_SUMMARY_COLUMNS, FINAL_COSTING_DETAILED_LINE_COLUMNS } from "@/lib/export-configs"
@@ -59,8 +60,17 @@ function pctDelta(delta: number, base: number): number {
 export const GET = withGateway({
   paramsSchema: mfgIdParamSchema,
   access: { pageSlug: "/manufacturing", level: "viewer" },
-  handler: async ({ req, params, ctx }) => {
+  handler: async ({ req, params, session, ctx }) => {
     const { mfgId } = params
+
+    // withGateway's pageSlug is a static string ("/manufacturing"), so it can't
+    // check the per-manufacturer slug the page checks. Entity scope is what
+    // keeps one manufacturer's cost data out of another user's reach here.
+    const scope = await getUserScope(Number(session.user.id))
+    assertInScope(scope, "mfg", mfgId)
+    // The two min/max rate queries below span every vendor, so they carry the
+    // vendor scope as well — this workbook names the cheapest/priciest vendor.
+    const vendorScope = [...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds)]
     const format = req.nextUrl.searchParams.get("format") === "xlsx" ? "xlsx" : "csv"
 
     try {
@@ -69,8 +79,8 @@ export const GET = withGateway({
         query<MaterialCostRow>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId]),
         query<MiscCostRow>(manufacturingSql.selectMiscCostsByMfg, [mfgId]),
         query<BomLineDetailRow>(manufacturingSql.selectBomLineDetailByMfg, [mfgId, mfgId, mfgId]),
-        query<MinMaxRateRow>(rawMaterials.selectMinMaxVrmRateByRm, []),
-        query<MinMaxRateRow>(packingMaterials.selectMinMaxVrmRateByPm, []),
+        query<MinMaxRateRow>(rawMaterials.selectMinMaxVrmRateByRm, vendorScope),
+        query<MinMaxRateRow>(packingMaterials.selectMinMaxVrmRateByPm, vendorScope),
       ])
 
       const materialByBom = new Map(materialCostRows.map((r) => [r.bom_id, { rm: Number(r.rm_cost), pm: Number(r.pm_cost) }]))

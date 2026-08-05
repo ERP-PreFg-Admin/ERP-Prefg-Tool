@@ -14,6 +14,7 @@
 
 import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
+import { getUserScope } from "@/lib/scope"
 import { redirect } from "next/navigation"
 import { parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
@@ -41,7 +42,8 @@ export default async function VendorsPage({
   const typeFilter = String(sp.type   ?? "")
   const zoneFilter = String(sp.zone   ?? "")
 
-  const fp = vendors.filterParams(search || null, typeFilter || null, zoneFilter || null)
+  const scope = await getUserScope(userId)
+  const fp = vendors.filterParams(search || null, typeFilter || null, zoneFilter || null, scope)
 
   const pageStart = performance.now()
   console.log(`[AUDIT] Vendors load - page=${page}, size=${size}, search=${search || "none"}, type=${typeFilter || "all"}, zone=${zoneFilter || "all"}`)
@@ -52,7 +54,7 @@ export default async function VendorsPage({
   const zoneRows = await timedQuery<{ zone: string }>(vendors.selectDistinctZones, [], { label: "selectDistinctZones" })
 
   if (search) {
-    const noSearchFp = vendors.filterParams(null, typeFilter || null, zoneFilter || null)
+    const noSearchFp = vendors.filterParams(null, typeFilter || null, zoneFilter || null, scope)
     const allMatching = await timedQuery<Vendor>(vendors.selectAllFiltered, noSearchFp, { label: "selectAllFiltered" })
     const ranked = fuzzyRank(allMatching, search, ["code", "name"])
     total = ranked.length

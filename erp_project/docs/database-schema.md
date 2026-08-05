@@ -70,15 +70,23 @@ erDiagram
 
 **`users`** — System user accounts. Only users with `status = 'active'` can sign in. Populated manually or via the seed script; Google OAuth matches on `email`.
 
-**`user_roles`** — Many-to-many role assignments. Composite PK `(user_id, role)`. Roles are arbitrary strings; the seeded values are `developer`, `production_operations`, `production_head`, `cost_creator`, `bom_creator`.
+**`user_roles`** — Many-to-many role assignments. Composite PK `(user_id, role)`. The column is a plain `VARCHAR(100)`, but the **valid values are declared in `lib/roles.ts`** and validated with `z.enum(ROLE_KEYS)` at the API boundary: `developer`, `admin`, and `{rm,pm,production,cost}_{head,lead,executive}`. Existing databases are converted by `prisma/migrate_role_taxonomy.sql`; `scripts/_check-role-taxonomy.ts` asserts no legacy strings survived.
 
 **`sessions`** — One active row per signed-in session. `session_id` is a UUID. `is_active = false` means the user signed out or the session was revoked.
 
 **`session_history`** — Append-only audit log. Events: `login`, `logout`, `expired`, `revoked`, `token_refreshed`.
 
-**`page_permissions`** — Role-based access matrix. Unique key `(role, page_slug)`. Access levels: `none`, `viewer`, `editor`. Seeded by `npm run db:seed`.
+**`page_permissions`** — Role-based access grants. Unique key `(role, page_slug)`. Access levels: `none`, `viewer`, `editor`. `npm run db:seed` now seeds only `/admin` (developer + admin) and `/approvals` (the four `*_head` roles) — the slugs with no parent to inherit from. Everything else is granted from `/admin > Permissions`. Slugs themselves are declared in `lib/pages.ts`.
 
-**`user_page_permissions`** — Per-user overrides that take precedence over role-based permissions. Managed via `/api/admin/user-permissions`.
+**`user_page_permissions`** — Per-user overrides that take precedence over the role grant **at the same slug level**. Managed via `/api/admin/user-permissions`. Note the resolution order: `resolveAccess` checks override *then* role at each slug before walking up to the parent, so a role grant on a deeper slug beats an override on a shallower one.
+
+**`user_entity_scope`** — Per-user data scoping: which manufacturers / vendors / warehouses a user's rows are limited to. PK `(user_id, entity_type, entity_id)`; `entity_type` is `ENUM('mfg','vendor','warehouse')`.
+
+> **The absence of rows for a `(user_id, entity_type)` pair means UNRESTRICTED**, not "nothing". Rows present = allow-list. That's why there is no "all" marker row: an admin narrows access by adding rows and widens it by deleting them, and existing users kept working the day it shipped.
+
+No FK on `entity_id` — it points at three different tables depending on `entity_type`. Warehouses are stored by `master_warehouse.id`, but `purchase_orders.destination` / `supplier_invoices.destination` are unindexed `VARCHAR` copies of `master_warehouse.name`, so `lib/scope.ts` resolves warehouse ids to names once per request and every warehouse predicate compares names. See [Admin Panel & Data Scoping](./admin-and-data-scoping.md).
+
+**`activity_log`** — Per-request user activity trail, for `/admin > Activity`. Written from exactly one place (`lib/gateway/with-gateway.ts`), fire-and-forget, for every **non-GET** request; GETs are skipped deliberately. No FK on `user_id` (it's `NULL` when the request 401s before a session resolves, and this is the highest-volume table in the app). `created_on` is **IST**, written as `CONVERT_TZ(NOW(), '+00:00', '+05:30')` because the DB session runs in UTC. `request_id` ties the row back to its Winston log lines. Indexed on `(user_id, id)` and `created_on`.
 
 ---
 
@@ -481,11 +489,23 @@ erDiagram
 
 **`vendor_details`** — Location, GST number, and banking details (`bank_name`, `ifsc_number`, `account_number`) for a vendor. `status` enum: `active`, `inactive`, `in_review`, `draft`, `rejected`.
 
-**`purchase_orders`** — Purchase orders issued to manufacturers. `po_no` is unique. `received_qty` defaults to 0. `status` enum: `draft`, `raised`, `punched`, `partially_received`, `received`, `short_closed`, `cancelled`, `rejected`; typical lifecycle is `draft` → `raised` → `punched` → `partially_received` → `received` (or `short_closed` / `cancelled` / `rejected`). `po_type` enum: `normal`, `impromptu` (default) — set to `normal` on both manual bulk-CSV creates and PO splits. `reference_po` links a split-off child PO back to its parent `po_no` (splitting adjusts the parent's `qty`/`total_amount` directly and does not touch `status`/`received_qty`, since a split is not a receiving event). `csv_source_key` records the S3 key of the bulk-upload CSV a row was created from. `email_sent_at` timestamps the vendor notification email.
+**`purchase_orders`** — Purchase orders issued to manufacturers. `po_no` is unique. `received_qty` defaults to 0. `status` enum: `draft`, `raised`, `punched`, `partially_received`, `received`, `short_closed`, `cancelled`, `rejected`; typical lifecycle is `draft` → `raised` → `punched` → `partially_received` → `received` (or `short_closed` / `cancelled` / `rejected`). `po_type` enum: `normal`, `impromptu` (default), **`inward`** — `normal` on manual bulk-CSV creates and PO splits, `inward` on POs auto-raised from a parsed supplier invoice. `reference_po` links a split-off child PO back to its parent `po_no` (splitting adjusts the parent's `qty`/`total_amount` directly and does not touch `status`/`received_qty`, since a split is not a receiving event). `csv_source_key` records the S3 key of the bulk-upload CSV a row was created from. `email_sent_at` timestamps the vendor notification email. **`uniware_po_code`** holds the Unicommerce PO code an invoice's inward POs were mirrored under — our model is one PO per SKU while Uniware's mirror is one PO carrying every SKU on the invoice, so a whole invoice's inward POs share one code, stamped on each row rather than joined so the PO list doesn't grow a join. `NULL` for every non-inward PO and for inward POs raised while Uniware was unconfigured.
 
-**`history_pos`** — Audit trail for the PO bulk-CSV create/update flow. One row per changed field for an `update` action; a single summary row (`field_name`/`old_value`/`new_value` all null) for a `create` action — mirrors the `approval_items` diff-per-field convention. `action_type` enum: `create`, `update`.
+**`supplier_invoices`** — Header of a supplier invoice inwarded on the PO Inwarding screen: invoice number/date, currency, e-way bill, vehicle number, both GSTINs, bill-to / ship-to blocks, the printed buyer PO reference, the grand total, the S3 key of the original PDF, the receiving `destination` (a `master_warehouse.name`), and `uniware_po_code`. **`UNIQUE (mfg_id, invoice_no)`** — re-submitting the same invoice is a DB error rather than a second round of credited `received_qty`; keyed on both columns because two manufacturers can each legitimately issue "INV-001".
 
-**`entity_emails`** — Per-vendor/manufacturer email addresses used by the PO email flow (e.g. multiple recipients per `purpose`). Looked up by `(entity_type, entity_code)`.
+**`supplier_invoice_items`** — One row per invoice line, `UNIQUE (invoice_id, line_no)`, `ON DELETE CASCADE` from the header. Keeps both the printed item code (`parsed_sku_code`) and the mapped one (`sku_code`). Two PO links, because a line can relate to two orders:
+
+| Column | Meaning |
+|--------|---------|
+| `po_id` | The inward PO **this line raised** (always set on new rows) |
+| `received_against_po_id` | The pre-existing PO it was **booked against**, when there is one |
+| `link_type` | `created` = plain inward line · `received` = it also credited an existing order |
+
+`mfg_date` / `expiry` are `VARCHAR(20)`, not `DATE`: invoices often print them month-only (`Jun-2026`). `gst_percent` is the tax *rate* (e.g. `18`), not the tax amount. See [PO Inwarding](./po-inwarding.md).
+
+**`history_pos`** — Audit trail for the PO bulk-CSV create/update flow, and for goods receipts booked through `lib/po-receive.ts` (both the manual and the invoice path). One row per changed field for an `update` action; a single summary row (`field_name`/`old_value`/`new_value` all null) for a `create` action — mirrors the `approval_items` diff-per-field convention. `action_type` enum: `create`, `update`.
+
+**`entity_emails`** — Per-vendor/manufacturer/**warehouse** email addresses used by the mail flows (multiple recipients per `purpose`). Looked up by `(entity_type, entity_code)`. `entity_type` is `ENUM('vendor','mfg','warehouse')` — the `warehouse` value was added for the inward-invoice notification, whose `entity_code` is the `master_warehouse.name` that `purchase_orders.destination` stores. It was previously `ENUM('vendor','mfg')`, so inserting `'warehouse'` was **silently coerced to `''`** rather than rejected; `prisma/add_warehouse_entity_email_type.sql` widens the column and repairs the blank rows.
 
 **`approvals`** — Generic approval request header. `module` and `entity_id` identify what is being approved. `status` enum: `pending`, `approved`, `rejected`, `withdrawn`.
 
@@ -507,6 +527,29 @@ erDiagram
 | `mtrl_type` | Discriminator to distinguish `rm` vs `pm` in polymorphic tables | `bom_details.mtrl_type`, `vrm_history.mtrl_type` |
 
 ---
+
+## Hand-Written Migrations (`prisma/*.sql`)
+
+Schema changes applied straight to RDS are kept as commented SQL files alongside `schema.prisma`, which is then updated to match. Each file's header states what it does, why, and whether it is re-runnable.
+
+> The RDS instance is **MySQL 8.0** — there is **no `ADD COLUMN IF NOT EXISTS`**. Files that add columns are therefore *not* re-runnable (a second run errors on the duplicate column); `CREATE TABLE IF NOT EXISTS`, `MODIFY COLUMN` and `INSERT … ON DUPLICATE KEY UPDATE` ones are. **Run each on both schemas (test and prod), and keep `prisma/schema.prisma` in sync.**
+
+| File | Change | Re-runnable |
+|------|--------|-------------|
+| `add_user_entity_scope.sql` | `user_entity_scope` table | Yes |
+| `add_activity_log.sql` | `activity_log` table + bootstrap `/admin` permission rows | Yes |
+| `migrate_role_taxonomy.sql` | Remap/clear roles to the `lib/roles.ts` taxonomy; reset `page_permissions` to developer/admin + the four Heads on `/approvals` | Yes |
+| `add_supplier_invoices.sql` | `supplier_invoices` + `supplier_invoice_items` | Yes |
+| `add_inward_po_type.sql` | `purchase_orders.po_type` ← adds `inward` | Yes |
+| `add_invoice_item_reference_po.sql` | `supplier_invoice_items.received_against_po_id` + backfill from the old single-link shape | No |
+| `add_invoice_uniware_po_code.sql` | `supplier_invoices.uniware_po_code` | No |
+| `add_po_uniware_code.sql` | `purchase_orders.uniware_po_code` + backfill via the invoice line that raised each | No |
+| `add_warehouse_entity_email_type.sql` | `entity_emails.entity_type` ← adds `warehouse`, repairs rows coerced to `''` | Yes |
+| `add_rate_history_columns.sql` | `history_vrm` / `history_mrm` ← `remarks`, `changed_by` (no FK, matching those tables' loosely-typed style) | No |
+| `add_manufacturing_v2_columns.sql` | `master_bom` ← `rm_version`, `pm_version` (default 1, so existing rows are untouched); reassigns the removed `tech_transfer` line status to `active` | No |
+| `rename_mfg_line_on_hold_to_inactive.sql` | `master_bom_mfg.status`: `on_hold` → `inactive` (data only — the column is `VARCHAR(50)`, not an enum) | Yes |
+| `fix_details_bom_columns.sql` | Repairs `details_bom` after live drift: `mtrl_amount` → `amount` (widened to `DECIMAL(12,4)` because RM lines store a formulation percentage), `updated_on` → `last_updated`, adds `effective_from`/`effective_till`. Every BOM master, costing and BOM-approval query failed with `ER_BAD_FIELD_ERROR` until it ran. | No |
+| `restore_details_bom_amounts.sql` | Restores the formulation amounts the same drift zeroed, from the `history_bom` approval snapshots. Only touches rows still at `0`, so re-running can't overwrite a hand-re-entered amount. Recovers BOMs 1 and 6 only — 2/3/4/5 have no snapshot and must be re-entered. | Yes |
 
 ## How to Add a New Table
 

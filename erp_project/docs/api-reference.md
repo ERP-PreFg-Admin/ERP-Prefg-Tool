@@ -11,9 +11,11 @@ All mutation endpoints follow this pattern:
 - **Error shape:** `{ error: string }` with an appropriate HTTP status code
 - **Success shape:** Varies per action (documented below)
 
-> **No Zod validation yet.** Fields are validated with manual `if (!x?.trim())` guards. The planned `withGateway()` layer in [docs/architecture-evolution.md](./architecture-evolution.md) will centralise validation and error formatting.
+> **`withGateway()` + Zod is now the standard**, not a plan. Every route is wrapped by `lib/gateway/with-gateway.ts`, which resolves the session, enforces an `access: { pageSlug, level }` rule, validates the body/params with Zod, stamps a request context, logs the request, and writes the `activity_log` row for every non-GET. Error shape on this layer is `{ error, code, details?, requestId }`; auth/access failures return `401`/`403` automatically, schema failures `400`. Throw `ApiError(status, code, message)` for anything that should reach the user.
 >
-> **Update:** `withGateway()` (in `lib/gateway/with-gateway.ts`) plus Zod schemas have since landed and are used by the Purchase Order detail routes (`split`, `receive`, `cancel`, `send-mail`, `export`, `history`, `mfg-skus`), the manufacturing cost-master exports, and the bulk CSV rate-upload routes documented below. Routes on this layer have a slightly different error shape than the pattern above: `{ error: string, code: string, details?: unknown, requestId: string }`, and auth/access-check failures return `401`/`403` automatically. Routes not yet migrated still follow the plain `{ error: string }` shape described above.
+> **Entity scope is not part of `access`.** A route that addresses one record by id must additionally call `assertInScope(scope, "mfg" | "vendor" | "warehouse", id)` — or `assertPoInScope(userId, poId)` for purchase orders. Ids are sequential integers, so a scoped user could otherwise reach another manufacturer's record by guessing. Routes carrying a scope guard today: every `/api/purchase-orders/**`, every `/api/manufacturing/**`, and the vendor/manufacturer/RM/PM export and history routes. See [Admin Panel & Data Scoping](./admin-and-data-scoping.md).
+>
+> **Master edits require `remarks`.** SKU, vendor, manufacturer and material-master update schemas all carry `remarks: z.string().trim().min(1)` — the reason is archived to `history_masters_edits.remarks` and shown in the record's history dialog and on the approval card. Rate edits archive `remarks` + `changed_by` to `history_vrm` / `history_mrm`.
 
 ---
 
@@ -1228,15 +1230,18 @@ Each row is resolved to a `bom_misc` line via `sku_code` + `mfg_id`; rows with a
 
 ### Cost-master export endpoints
 
-**Files:** `app/api/manufacturing/[mfgId]/agreed-rates/export/route.ts`, `.../approved-rates/export/route.ts`, `.../approved-rates/history/export/route.ts`, `.../misc-costs/export/route.ts`
+**Files:** `app/api/manufacturing/[mfgId]/agreed-rates/export/route.ts`, `.../approved-rates/export/route.ts`, `.../approved-rates/history/export/route.ts`, `.../misc-costs/export/route.ts`, `.../final-costing/export/route.ts`, `.../final-costing/detailed-export/route.ts`, `.../lines/export/route.ts`
 
-Export the manufacturer cost-master tabs (Agreed Rates, Approved Procurement Rates, Approved Rates history, Misc. Costs) as CSV or Excel — same rows/queries as the corresponding client component, so the export always matches what's on screen.
+Export the manufacturer cost-master tabs (Agreed Rates, Approved Procurement Rates, Approved Rates history, Misc. Costs, Agreed Final Costing, manufacturing lines) as CSV or Excel — same rows/queries as the corresponding client component, so the export always matches what's on screen.
 
 ```
 GET /api/manufacturing/3/agreed-rates/export?mode=rm&format=csv
 GET /api/manufacturing/3/approved-rates/export?mode=pm&format=xlsx
 GET /api/manufacturing/3/approved-rates/history/export?mode=rm&format=csv
 GET /api/manufacturing/3/misc-costs/export?format=xlsx
+GET /api/manufacturing/3/final-costing/export?format=csv
+GET /api/manufacturing/3/final-costing/detailed-export?format=xlsx
+GET /api/manufacturing/3/lines/export?format=csv
 ```
 
 | Query param | Required | Notes |
@@ -1244,7 +1249,11 @@ GET /api/manufacturing/3/misc-costs/export?format=xlsx
 | `mode` | No | `"rm"` (default) \| `"pm"` — not applicable to `misc-costs/export` (all 4 cost types are exported together, distinguished by a `Type` column) |
 | `format` | No | `"csv"` (default) \| `"xlsx"` |
 
-**Response:** `200` — file attachment. `400` if `mfgId` is invalid; `401`/`403` per the usual auth/access rules; `500` on a server error.
+`lines/export` **lost its status segment**: it was `lines/[status]/export`, and now exports every manufacturing line for the manufacturer as one merged list (matching `ManufacturingLinesClient`, which merged its status tabs into a single list).
+
+`final-costing/detailed-export` is the **"Detailed Breakup (Negotiation)"** export: a two-sheet workbook showing where the agreed MRM rate sits relative to the cheapest / most expensive vendor rate currently on offer for each RM/PM component, at both SKU-total and per-material line level. `format=csv` emits the Summary sheet only (CSV has no sheets); `xlsx` emits both.
+
+**Response:** `200` — file attachment. `400` if `mfgId` is invalid; `401`/`403` per the usual auth/access rules (**including `403 out_of_scope` when `mfgId` is outside the caller's entity scope**); `500` on a server error.
 
 ---
 
@@ -1291,7 +1300,37 @@ GET /api/google-sheet?url=https://docs.google.com/spreadsheets/d/SHEET_ID/edit#g
 
 ## Admin Endpoints
 
-All admin endpoints require the `"developer"` role. Non-developer requests receive `403 { error: "Forbidden" }`.
+Gated on the **`/admin` page slug** (`viewer` to read, `editor` to write) rather than a hardcoded role check — so admin access is itself granted from the admin panel. `/admin` has no parent slug, so it is deny-by-default; `scripts/seed-permissions.ts` and `prisma/add_activity_log.sql` seed `developer` + `admin`.
+
+Reads for the admin screens happen **server-side** in each tab's `page.tsx` (like masters pages). These routes are mutations, plus the two permission reads the grid needs.
+
+### `POST /api/admin/users`
+
+Create a user. Inserts `users` + one `user_roles` row per role in one transaction.
+
+```json
+// Request body
+{ "name": "Asha R", "email": "asha@mcaffeine.com", "status": "active", "roles": ["rm_lead"] }
+
+// Response 200
+{ "ok": true, "user": { "id": 31, "name": "Asha R", "email": "asha@mcaffeine.com", "status": "active", "roles": "rm_lead", "last_login": null } }
+
+// Response 409 — users.email is UNIQUE
+{ "error": "A user with the email asha@mcaffeine.com already exists", "code": "duplicate", ... }
+```
+
+- **Nothing is emailed.** The row *is* the whitelist — `lib/auth.ts`' `signIn` callback matches on `email` + `status`, so the person can sign in with Google as soon as it exists. The email is lowercased on insert because `signIn` looks it up verbatim.
+- `roles` is validated with `z.enum(ROLE_KEYS)` from `lib/roles.ts` and de-duplicated. Free text is rejected: the old version let a typo in the dialog create a permanent phantom role.
+
+### `PATCH /api/admin/users`
+
+Update `name` / `status` and replace the user's roles wholesale. `404` if the id doesn't exist.
+
+```json
+{ "id": 31, "name": "Asha Rao", "status": "inactive", "roles": ["rm_lead", "cost_executive"] }
+```
+
+**There is deliberately no `DELETE`** — `users.id` is referenced by `approvals`, `sessions`, `session_history`, `master_*` and `supplier_invoices`. Deactivation is `status = 'inactive'`, which `signIn` already refuses.
 
 ### `GET /api/admin/permissions`
 
@@ -1307,14 +1346,29 @@ Returns all role-page permission entries.
 
 ### `POST /api/admin/permissions`
 
-Upsert a role-page permission. Uses `ON DUPLICATE KEY UPDATE` — safe to call multiple times.
+Upsert a role-page grant. Uses `ON DUPLICATE KEY UPDATE` — safe to call multiple times. `role` must be a key from `lib/roles.ts` (it used to be free text that this route didn't even lowercase, so a POST could create a row no user string would ever match, silently granting nothing).
 
 ```json
 // Request body
-{ "role": "bom_creator", "page_slug": "/masters", "access_level": "editor" }
+{ "role": "rm_lead", "page_slug": "/masters", "access_level": "editor" }
 
 // Response 200
-{ "id": 45, "role": "bom_creator", "page_slug": "/masters", "access_level": "editor" }
+{ "id": 45, "role": "rm_lead", "page_slug": "/masters", "access_level": "editor" }
+
+// Response 400 — the change would remove the caller's own /admin access
+{ "error": "That change would remove your own access to Administration. Ask another admin to make it.", "code": "self_lockout", ... }
+```
+
+### `DELETE /api/admin/permissions`
+
+Removes the grant so the slug **inherits from its parent** again. This is what the admin UI's "Inherit" option sends — an explicit `access_level: 'none'` row would instead *stop* the parent walk, which is a different and stronger statement.
+
+```json
+// Request body
+{ "role": "rm_lead", "page_slug": "/masters" }
+
+// Response 200
+{ "ok": true }
 ```
 
 ### `GET /api/admin/user-permissions?user_id=<id>`
@@ -1351,6 +1405,73 @@ Remove a user-specific override (restoring role-based access for that page).
 // Response 200
 { "ok": true }
 ```
+
+### `PUT /api/admin/entity-scope`
+
+Replaces **one** `(user_id, entity_type)` scope set in a transaction. The other two entity types are untouched, so the UI can save one section at a time.
+
+```json
+// Request body — restrict this user to two manufacturers
+{ "user_id": 12, "entity_type": "mfg", "entity_ids": [3, 7] }
+
+// Request body — clear the restriction (UNRESTRICTED: they see every manufacturer again)
+{ "user_id": 12, "entity_type": "mfg", "entity_ids": null }
+
+// Response 200
+{ "ok": true, "entity_type": "mfg", "entity_ids": [3, 7] }
+
+// Response 400 — you cannot change your own scope, in either direction
+{ "error": "You can't change your own data access. Ask another admin to make this change.", "code": "self_scope", ... }
+```
+
+`entity_type` is `mfg` | `vendor` | `warehouse`. `[]` is treated the same as `null` rather than as "nothing" — a scope of nothing would lock the user out of every screen with no way for them to say so. `404` if the user doesn't exist. See [Admin Panel & Data Scoping](./admin-and-data-scoping.md) for why absence of rows means unrestricted.
+
+---
+
+## Invoice Inwarding Endpoints
+
+Full flow documented in [PO Inwarding](./po-inwarding.md).
+
+### `POST /api/purchase-orders/invoice/parse`
+
+Multipart (`file`) → parse a supplier-invoice PDF with Nanonets and return the fields for review. Nothing is stored: the PDF is not written to S3 here, so an abandoned review leaves no orphaned object.
+
+```json
+// Response 200
+{ "ok": true, "parsed": { "invoice_number": "INV-001", "date": "05-Jul-25", "line_items": [ ... ], ... } }
+```
+
+`400` empty / non-PDF / over the 10 MB cap · `422 unparseable` when nothing usable came back · `502 parse_failed` on an extractor error. `runtime = "nodejs"`, `maxDuration = 300` — extraction measures **50–70 s** on a one-page invoice.
+
+### `POST /api/purchase-orders/invoice`
+
+Multipart (`file` = the PDF, `payload` = the reviewed invoice as JSON, validated with `invoiceInwardSchema`). Commits the whole sequence and answers with **newline-delimited JSON step events** (`application/x-ndjson`) rather than one body:
+
+```
+{"step":"s3","status":"ok"}
+{"step":"po","status":"ok","data":{...}}
+{"step":"uniware","status":"ok","data":{"purchaseOrderCode":"GM/2627/PO/2006"}}
+{"step":"email","status":"skipped","message":"warehouse has no email on file"}
+{"done":true,"outcome":{"ok":true,"created":[...],"received":[...],"uniwarePoCode":"..."}}
+```
+
+**The status is always `200` once streaming starts** — headers are on the wire before a later step can fail, so failure travels as an event (`outcome.ok = false`, `outcome.failedStep`), not a status code. Pre-flight failures (`400 sku_not_found`, `400 sku_not_active`, duplicate `(mfg_id, invoice_no)`) are also delivered as the terminal event.
+
+### `GET /api/purchase-orders/invoice`
+
+Invoice history list. `?limit` (clamped 1–100, default 25) `&offset`. Returns `{ invoices, total, limit, offset }`.
+
+### `GET /api/purchase-orders/invoice/[id]`
+
+One invoice: header, its line items, and the POs each line resolved to — both the inward PO it raised and the order it was received against. `404` if unknown.
+
+### `GET /api/purchase-orders/open-for-receive?mfg_id=`
+
+Open POs (`raised` / `partially_received`) for one manufacturer, for the Add Invoice dialog's per-line **Reference PO** picker. Entity-scope checked. An unparseable/missing `mfg_id` returns `{ pos: [] }` rather than a `400` — the dialog calls it before a manufacturer has been picked.
+
+### `GET /api/files/preview?key=`
+
+Parses a bulk-upload CSV/Excel file **server-side** (the same `parseS3Import` the bulk-approval import uses) and returns `{ headers, rows }`, so approvers see the file as a table instead of a raw download. Rejects keys containing `..`.
 
 ---
 

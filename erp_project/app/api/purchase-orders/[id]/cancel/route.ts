@@ -12,6 +12,7 @@ import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import logger from "@/lib/logger"
 import { recordFailedEvent, recordRawEvent, makeEventId, recordProcessedEvent } from "@/lib/events"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { assertPoInScope } from "@/lib/po-guard"
 import { ApiError } from "@/lib/gateway/errors"
 import { poIdParamSchema, poCancelSchema } from "@/lib/validation/purchase-order-detail"
 
@@ -23,6 +24,9 @@ export const POST = withGateway({
   access: { pageSlug: "/po-tracking", level: "editor" },
   handler: async ({ params, body, session, ctx }) => {
     const poId = params.id
+    // PO ids are sequential integers, so the filtered list isn't a boundary —
+    // this refuses a PO belonging to an out-of-scope manufacturer/warehouse.
+    await assertPoInScope(Number(session.user.id), poId)
     const { reason } = body
     const userId = Number(session.user.id)
 

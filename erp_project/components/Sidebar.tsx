@@ -48,6 +48,9 @@ const NAV: NavItem[] = [
   {
     label: "Approvals", href: "/approvals", icon: CheckSquare,
   },
+  {
+    label: "Administration", href: "/admin", icon: Settings,
+  },
 ]
 
 interface SidebarProps {

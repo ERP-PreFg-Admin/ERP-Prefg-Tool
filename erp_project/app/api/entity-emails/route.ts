@@ -1,4 +1,5 @@
-// API route for the entity_emails contact list (vendor/manufacturer email by purpose).
+// API route for the entity_emails contact list (vendor/manufacturer/warehouse
+// email by purpose — a warehouse is keyed by its master_warehouse.name).
 //
 // POST /api/entity-emails → { entity_type, entity_code, emails: [{ email, purpose? }, ...] }
 //   — direct insert (one row per email, same entity), no approval flow (this is an

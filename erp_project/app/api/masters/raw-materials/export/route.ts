@@ -24,6 +24,7 @@ import { rawMaterials as rmSql } from "@/lib/queries/raw-materials"
 import { buildCsv, buildXlsx, buildExportFilename } from "@/lib/export"
 import { RM_VENDOR_EXPORT_COLUMNS, RM_MFG_EXPORT_COLUMNS } from "@/lib/export-configs"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { getUserScope } from "@/lib/scope"
 import logger from "@/lib/logger"
 
 const ROW_LIMIT = 50_000
@@ -43,6 +44,7 @@ export const GET = withGateway({
   const viewLabel = isMfg ? "MRM"  : "VRM"
   const sheetName = isMfg ? "RM_MRM"   : "RM_VRM"
 
+  const scope = await getUserScope(Number(session.user.id))
   let filterParams: unknown[]
   let filename: string
   if (isMfg) {
@@ -53,7 +55,7 @@ export const GET = withGateway({
     const typeFilter = sp.get("type") ?? ""
     filterParams = rmSql.mfgFilterParams(
       search || null, status || null, typeFilter || null, mfgCode || null,
-      mfgRateMin || null, mfgRateMax || null, mfgEffFrom || null
+      mfgRateMin || null, mfgRateMax || null, mfgEffFrom || null, scope
     )
     filename = buildExportFilename(`RM_${viewLabel}`, format, {
       search:             search      || null,
@@ -72,7 +74,7 @@ export const GET = withGateway({
     const typeFilter2 = sp.get("type") ?? ""
     filterParams = rmSql.vendorFilterParams(
       search || null, status || null, make || null, typeFilter2 || null,
-      vendorCode || null, rateMin || null, rateMax || null, effectiveFrom || null
+      vendorCode || null, rateMin || null, rateMax || null, effectiveFrom || null, scope
     )
     filename = buildExportFilename(`raw_materials_${viewLabel}`, format, {
       search:         search         || null,

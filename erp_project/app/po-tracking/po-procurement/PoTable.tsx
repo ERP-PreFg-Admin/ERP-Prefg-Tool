@@ -34,11 +34,18 @@ export default function PoTable({
   onToggleAll,
   selectable = true,
   receiveOnly = false,
+  showUniwareCode = false,
+  selectedPoId = null,
+  onOpenInwarding,
 }: {
   rows: PoRow[]
   sessionUserId: number
   onEdit?: (row: PoRow) => void
   onSplit?: (row: PoRow) => void
+  /** PO whose inwarding panel is open — highlights the row it belongs to. */
+  selectedPoId?: number | null
+  /** Opens the inwarding detail panel. Absent = the PO number isn't clickable. */
+  onOpenInwarding?: (row: PoRow) => void
   sortBy: string
   sortDir: SortDir
   onSort: (key: string) => void
@@ -53,6 +60,9 @@ export default function PoTable({
   /** PO Inwarding mode: receiving is the point, so Receive gets a labelled
    *  button and the procurement-side actions (edit, split, cancel) are hidden. */
   receiveOnly?: boolean
+  /** Only inward POs are mirrored to Unicommerce, so the column is dead weight
+   *  anywhere they aren't shown. PO Inwarding turns it on. */
+  showUniwareCode?: boolean
 }) {
   const router                                      = useRouter()
   const [shortCloseTarget, setShortCloseTarget]     = useState<number | null>(null)
@@ -94,6 +104,7 @@ export default function PoTable({
                   <SortHead colKey="unit_price"   {...sh}>Rate</SortHead>
                   <SortHead colKey="total_amount" {...sh}>Amount</SortHead>
                   <TableHead>Invoice No</TableHead>
+                  {showUniwareCode && <TableHead>Uniware Code</TableHead>}
                   <TableHead>Destination</TableHead>
                   <SortHead colKey="status"       {...sh}>Status</SortHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -103,7 +114,8 @@ export default function PoTable({
               <TableBody>
                 {rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={selectable ? 14 : 13} className="text-center text-muted-foreground py-10">
+                    {/* 13 fixed columns, plus whichever optional ones are on. */}
+                    <TableCell colSpan={13 + (selectable ? 1 : 0) + (showUniwareCode ? 1 : 0)} className="text-center text-muted-foreground py-10">
                       No purchase orders match your filters.
                     </TableCell>
                   </TableRow>
@@ -126,6 +138,14 @@ export default function PoTable({
                     const hasAttachment = !!r.attachment_key
 
                     const menuActions: MenuAction[] = []
+
+                    if (onOpenInwarding) {
+                      menuActions.push({
+                        label:   "Inwarding",
+                        icon:    <PackageCheck className="h-3.5 w-3.5" />,
+                        onClick: () => onOpenInwarding(r),
+                      })
+                    }
 
                     menuActions.push({
                       label:   "History",
@@ -171,7 +191,9 @@ export default function PoTable({
                         // skips it, and brought back on hover if it's being read.
                         className={cn(
                           "transition-colors",
-                          status === "cancelled" && "opacity-55 hover:opacity-100"
+                          status === "cancelled" && "opacity-55 hover:opacity-100",
+                          // Ties the open panel to the row it describes.
+                          selectedPoId === r.id && "bg-primary/5"
                         )}
                       >
                         {selectable && (
@@ -184,9 +206,23 @@ export default function PoTable({
                             />
                           </TableCell>
                         )}
-                        {/* PO Number */}
+                        {/* PO Number — the row's identity, so it's the click target
+                            for the inwarding panel. Not the whole row: that would
+                            fight the select checkbox and the action menu. */}
                         <TableCell className="font-mono text-xs font-medium whitespace-nowrap">
-                          {r.po_no}
+                          {onOpenInwarding ? (
+                            <button
+                              type="button"
+                              onClick={() => onOpenInwarding(r)}
+                              aria-expanded={selectedPoId === r.id}
+                              title="View inwarding against this PO"
+                              className="rounded underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                              {r.po_no}
+                            </button>
+                          ) : (
+                            r.po_no
+                          )}
                           {(r.po_type === "impromptu" || isImpromptu(r.po_no)) && (
                             <Badge variant="warning" className="ml-1.5 px-1.5 py-0 text-[10px]">IMP</Badge>
                           )}
@@ -228,6 +264,12 @@ export default function PoTable({
                         <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
                           {r.invoice_no ?? "—"}
                         </TableCell>
+
+                        {showUniwareCode && (
+                          <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
+                            {r.uniware_po_code ?? "—"}
+                          </TableCell>
+                        )}
 
                         <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                           {r.destination ?? "—"}

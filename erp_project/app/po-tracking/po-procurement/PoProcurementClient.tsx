@@ -24,6 +24,9 @@ import { INWARD_TABS, STATUS_CONFIG, TAB_LABEL, TABS } from "./po-types"
 import { fmtInt, fmtMoney } from "./po-utils"
 import { PO_BULK_CSV_FIELDS } from "./po-bulk-fields"
 import PoTable from "./PoTable"
+import PoHistoryDialog from "./PoHistoryDialog"
+import InwardingPanel from "./InwardingPanel"
+import { useInwardingPanel } from "./useInwardingPanel"
 import AddInvoiceDialog from "../po-inwarding/AddInvoiceDialog"
 import InvoiceHistoryDialog from "../po-inwarding/InvoiceHistoryDialog"
 import AddPODialog from "./AddPODialog"
@@ -127,6 +130,12 @@ export default function PoProcurementClient({
   const [showFilters,    setShowFilters]    = useState(false)
   const [editTarget,   setEditTarget]   = useState<PoRow | null>(null)
   const [splitTarget,  setSplitTarget]  = useState<PoRow | null>(null)
+
+  // Inwarding detail panel — URL-synced ?inwardFor=, fetch + cache.
+  const inwarding = useInwardingPanel()
+  // Driven by the panel's "Full receipt log" link. PoTable owns a separate
+  // instance for its row menu; neither can be open while the other is.
+  const [panelHistoryTarget, setPanelHistoryTarget] = useState<{ id: number; po_no: string } | null>(null)
 
   // ── Gmail-style PO selection → review (grouped by mfg) → send mail ────────
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -304,7 +313,9 @@ export default function PoProcurementClient({
                   <option value="">All Types</option>
                   <option value="normal">Normal</option>
                   <option value="impromptu">Impromptu</option>
-                  <option value="inward">Inward</option>
+                  {/* Procurement filters inward POs out at the query, so
+                      offering the type here would only ever return nothing. */}
+                  {isInwarding && <option value="inward">Inward</option>}
                 </select>
               </div>
               <div className="grid gap-1.5">
@@ -384,24 +395,65 @@ export default function PoProcurementClient({
         </TabsList>
       </Tabs>
 
-      {/* ── Table ── */}
-      <PoTable
-        rows={rows}
-        sessionUserId={sessionUserId}
-        onEdit={setEditTarget}
-        onSplit={setSplitTarget}
-        sortBy={currentSortBy}
-        sortDir={currentSortDir}
-        onSort={handleSort}
-        selectedIds={selectedIds}
-        onToggleRow={toggleRow}
-        onToggleAll={toggleAll}
-        selectable={!isInwarding}
-        receiveOnly={isInwarding}
-      />
+      {/* ── Table + inwarding panel — split-pane, same shape as Recipe Master's
+             BOMMasterComponent: the table narrows to make room and the panel
+             sticks to its top edge, capped to the viewport so a long invoice
+             list scrolls internally. ── */}
+      <div className="flex gap-4 items-start">
+        <div
+          className={cn(
+            "min-w-0 transition-all duration-300 ease-in-out",
+            inwarding.selectedPoId != null ? "w-[58%] shrink-0" : "w-full"
+          )}
+        >
+          <PoTable
+            rows={rows}
+            sessionUserId={sessionUserId}
+            onEdit={setEditTarget}
+            onSplit={setSplitTarget}
+            sortBy={currentSortBy}
+            sortDir={currentSortDir}
+            onSort={handleSort}
+            selectedIds={selectedIds}
+            onToggleRow={toggleRow}
+            onToggleAll={toggleAll}
+            selectable={!isInwarding}
+            receiveOnly={isInwarding}
+            showUniwareCode={isInwarding}
+            selectedPoId={inwarding.selectedPoId}
+            onOpenInwarding={(r) => inwarding.openFor(r.id)}
+          />
+        </div>
+
+        <div
+          className={cn(
+            "min-w-0 overflow-hidden transition-all duration-300 ease-in-out sticky top-6",
+            inwarding.selectedPoId != null ? "flex-1 opacity-100" : "w-0 flex-none opacity-0"
+          )}
+        >
+          {inwarding.selectedPoId != null && (
+            <InwardingPanel
+              detail={inwarding.detail}
+              loading={inwarding.loading}
+              error={inwarding.error}
+              onClose={inwarding.close}
+              onRetry={inwarding.retry}
+              onOpenHistory={() => setPanelHistoryTarget(inwarding.detail?.po ?? null)}
+            />
+          )}
+        </div>
+      </div>
 
       {/* ── Pagination ── */}
       <PaginationBar page={page} pageSize={pageSize} total={total} />
+
+      {/* Receipt log reached from the panel. PoTable owns its own instance for
+          the row menu; this one is driven by the panel's link. */}
+      <PoHistoryDialog
+        poId={panelHistoryTarget?.id ?? null}
+        poNo={panelHistoryTarget?.po_no ?? null}
+        onClose={() => setPanelHistoryTarget(null)}
+      />
 
       {/* ── Dialogs — procurement-only writes; inwarding's Receive dialog lives in PoTable ── */}
       {isInwarding ? (

@@ -1,9 +1,10 @@
 /**
  * Entity Emails Queries
  *
- * Lightweight contact list mapping a vendor/manufacturer code to an email
- * address for a given purpose (e.g. "PO", "invoice", "quality"). Independent
- * of details_vendor/details_mfg — not part of the approval workflow.
+ * Lightweight contact list mapping a vendor/manufacturer code — or a warehouse
+ * name — to an email address for a given purpose (e.g. "PO", "invoice",
+ * "quality"). Independent of details_vendor/details_mfg — not part of the
+ * approval workflow.
  */
 
 export const entityEmails = {
@@ -44,4 +45,15 @@ export const entityEmails = {
 
   /** Lightweight code/name list for the "mfg" entity type dropdown. */
   mfgOptions: `SELECT id, code, name FROM master_mfgs ORDER BY code ASC`,
+
+  /**
+   * Same shape for the "warehouse" dropdown. A warehouse has no code — its
+   * name is the key, because that is what purchase_orders.destination stores
+   * and what the inward-invoice mail looks recipients up by.
+   */
+  warehouseOptions: `
+    SELECT id, name AS code, location AS name
+    FROM master_warehouse
+    ORDER BY name ASC
+  `,
 }

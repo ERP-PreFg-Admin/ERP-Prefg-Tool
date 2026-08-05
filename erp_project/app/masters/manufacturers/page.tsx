@@ -8,6 +8,7 @@
 
 import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
+import { getUserScope } from "@/lib/scope"
 import { redirect } from "next/navigation"
 import { parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
@@ -32,7 +33,8 @@ export default async function ManufacturersPage({
   const sp     = await searchParams
   const { page, size, offset } = parsePaginationParams(sp)
   const search = String(sp.search ?? "")
-  const fp     = manufacturers.filterParams(search || null)
+  const scope  = await getUserScope(userId)
+  const fp     = manufacturers.filterParams(search || null, scope)
 
   const pageStart = performance.now()
   console.log(`[AUDIT] Manufacturers load - page=${page}, size=${size}, search=${search || "none"}`)
@@ -41,7 +43,7 @@ export default async function ManufacturersPage({
   let total: number
 
   if (search) {
-    const allMatching = await timedQuery<Mfg>(manufacturers.selectAllFiltered, manufacturers.filterParams(null), { label: "selectAllFiltered" })
+    const allMatching = await timedQuery<Mfg>(manufacturers.selectAllFiltered, manufacturers.filterParams(null, scope), { label: "selectAllFiltered" })
     const ranked = fuzzyRank(allMatching, search, ["code", "name"])
     total = ranked.length
     rows = ranked.slice(offset, offset + size)

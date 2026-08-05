@@ -46,14 +46,14 @@ const STEP_LABEL: Record<InwardStep, string> = {
   s3:      "Invoice stored",
   po:      "Inward POs created",
   uniware: "Sent to Uniware",
-  email:   "Manufacturer notified",
+  email:   "Warehouse notified",
 }
 
 const STEP_PROGRESS: Record<InwardStep, string> = {
   s3:      "Storing invoice…",
   po:      "Creating inward POs…",
   uniware: "Sending to Uniware…",
-  email:   "Notifying manufacturer…",
+  email:   "Notifying warehouse…",
 }
 
 export default function AddInvoiceDialog({

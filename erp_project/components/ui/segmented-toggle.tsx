@@ -28,6 +28,7 @@ export function SegmentedToggle<T extends string>({
   const itemClass = (isActive: boolean) =>
     cn(
       "rounded-md font-medium transition-colors",
+      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
       size === "xs" ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-sm",
       isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
     )
@@ -47,6 +48,7 @@ export function SegmentedToggle<T extends string>({
           <button
             key={opt.key}
             type="button"
+            aria-pressed={isActive}
             onClick={() => onSelect?.(opt.key)}
             className={itemClass(isActive)}
           >
