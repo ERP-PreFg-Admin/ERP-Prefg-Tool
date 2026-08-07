@@ -1,9 +1,15 @@
 // POST /api/purchase-orders/[id]/split
 // Split a raised PO into N child POs (one or more) across (optionally different) manufacturers.
 //
-// Parent PO qty is reduced by the split total (total_amount recalculated to match);
-// status and received_qty are never touched — a split is not a receiving event.
-// short_closed is set manually only (for intentional early closure with large remainder)
+// The parent is NOT written to. A PO is a legal document: the quantity on it is
+// the quantity that was ordered, and it stays that way for the life of the row.
+// The split is recorded entirely as children carrying reference_po = parent
+// po_no, and how much has been "knocked off" is derived from them at read time
+// (see the split expressions in lib/queries/purchase-orders.ts). status and
+// received_qty are likewise untouched — a split is not a receiving event.
+//
+// Splits are one level deep: a child cannot itself be split, which keeps the
+// master the whole truth about an order and the allocation maths a single sum.
 
 import { NextResponse } from "next/server"
 import type { PoolConnection } from "mysql2/promise"
@@ -42,11 +48,32 @@ export const POST = withGateway({
         `Cannot split a PO with status '${po.status}'. Allowed: draft, raised, punched, partially_received.`
       )
     }
+    if (po.reference_po) {
+      throw new ApiError(
+        409,
+        "not_splittable",
+        `${po.po_no} is itself a split of ${po.reference_po}. Splits are one level deep — split the original PO instead.`
+      )
+    }
 
-    const remaining  = Number(po.qty) - Number(po.received_qty ?? 0)
+    // What this PO can still hand out: its quantity, less what has arrived, less
+    // what earlier splits already took. The parent's qty no longer shrinks when
+    // it is split, so subtracting existing allocation is what stops the same
+    // units being split away twice.
+    const [childSummary] = await query<{ allocated_qty: string; seq: number }>(
+      purchaseOrdersSql.childSplitSummary, [po.po_no, po.po_no]
+    )
+    const allocated  = Number(childSummary?.allocated_qty ?? 0)
+    const remaining  = Number(po.qty) - Number(po.received_qty ?? 0) - allocated
     const splitTotal = splits.reduce((sum, s) => sum + Number(s.qty), 0)
     if (splitTotal > remaining) {
-      throw new ApiError(400, "over_limit", `Split total (${splitTotal}) exceeds remaining qty (${remaining}).`)
+      throw new ApiError(
+        400,
+        "over_limit",
+        allocated > 0
+          ? `Split total (${splitTotal}) exceeds the ${remaining} still unallocated on ${po.po_no} — ${allocated} is already on earlier splits.`
+          : `Split total (${splitTotal}) exceeds remaining qty (${remaining}).`
+      )
     }
 
     const userId = Number(session.user.id)
@@ -72,14 +99,25 @@ export const POST = withGateway({
 
       for (let i = 0; i < splits.length; i++) {
         const { mfg_id, destination, qty } = splits[i]
-        const childPoNo = `${po.po_no}-S${String(i + 1).padStart(3, "0")}`
+        // Numbered from how many children this PO already has, not from the
+        // loop index: a second split of the same parent would otherwise re-issue
+        // -S001. Cancelled children still count, so a spent number is never
+        // handed out again.
+        const childPoNo = `${po.po_no}-S${String(Number(childSummary?.seq ?? 0) + i + 1).padStart(3, "0")}`
         const mfg = mfgMap[mfg_id]
 
         const [childResult] = await conn.execute(
           purchaseOrdersSql.insertSplit,
-          [childPoNo, mfg_id, po.sku_code, Number(qty), po.expected_on, childStatus, destination || null, po.po_no]
+          [childPoNo, mfg_id, po.sku_code, po.bom_id, Number(qty), po.expected_on, childStatus, destination || null, po.po_no]
         )
         const childId = (childResult as any).insertId
+
+        // The only audit trail a split leaves: the parent row itself doesn't
+        // change, so without this there would be no record on the PO that part
+        // of it was handed off, and to which order.
+        await conn.execute(purchaseOrdersSql.insertPoHistory, [
+          poId, po.po_no, "update", "split", "", `${childPoNo} — ${qty}`, null, userId,
+        ])
 
         // If parent was draft, each child needs its own approval record
         if (isParentDraft) {
@@ -99,12 +137,6 @@ export const POST = withGateway({
           }
         }
       }
-
-      // Reduce parent qty by the split total — status and received_qty are untouched
-      const newQty         = Number(po.qty) - splitTotal
-      const newTotalAmount = newQty * Number(po.unit_price ?? 0)
-      await conn.execute(purchaseOrdersSql.setQtyAndTotalAfterSplit, [newQty, newTotalAmount, poId])
-      logger.info({ ...logCtx, parentPoId: poId, newQty, newTotalAmount, message: "PO split reduced parent qty" })
 
       await conn.commit()
       recordProcessedEvent("PO_SPLIT", eventId, { parentPoId: poId, splitsCreated: splits.length })

@@ -140,6 +140,9 @@ export const PO_PROCUREMENT_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "sku_code",      label: "SKU",                 type: "text"   },
   { key: "sku_name",      label: "SKU Name",            type: "text"   },
   { key: "sku_status",    label: "SKU Status",          type: "text"   },
+  // Exported because the bulk importer requires it — a downloaded file has to
+  // be re-uploadable without hand-adding the column.
+  { key: "bom_code",      label: "BOM Code",            type: "text"   },
   { key: "qty",           label: "PO Qty",              type: "number" },
   { key: "received_qty",  label: "Received Qty",        type: "number" },
   { key: "unit_price",    label: "Rate",                type: "number" },

@@ -11,16 +11,18 @@ import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
 import { useToast } from "@/components/ui/toast"
 import { RemarksField, PO_REASON_PRESETS } from "@/components/masters/RemarksField"
-import type { MfgOption, WarehouseOption } from "./po-types"
+import type { BomChoice, MfgOption, MfgSkuOption, WarehouseOption } from "./po-types"
 import { useQuotedRate } from "./useQuotedRate"
 
 type PoType = "normal" | "impromptu"
 
-type MfgSkuOption = { sku_code: string; sku_name: string }
-
 type PoLineRowState = {
   sku_code: string
   sku_name: string
+  /** The recipes this manufacturer produces the SKU under, active first. */
+  boms: BomChoice[]
+  /** Selected recipe, as a string because it comes back off a <Select>. */
+  bom_id: string
   qty: string
   expected_on: string
   destination: string
@@ -48,6 +50,28 @@ function PoLineRow({
         <div className="font-mono text-xs font-medium">{row.sku_code}</div>
         <div className="text-[11px] text-muted-foreground max-w-40 truncate">{row.sku_name}</div>
       </td>
+      {/* BOM — one recipe is the norm, so it reads as text; only a SKU this
+          manufacturer builds two ways makes the user choose. */}
+      <td className="px-2 py-1.5 align-top">
+        {row.boms.length === 0 ? (
+          <span className="text-[11px] text-destructive">No BOM on this line</span>
+        ) : row.boms.length === 1 ? (
+          <span className="font-mono text-[11px] text-muted-foreground">{row.boms[0].bom_code}</span>
+        ) : (
+          <Select
+            value={row.bom_id}
+            onChange={(e) => onChange("bom_id", e.target.value)}
+            className="h-8 w-40 text-xs"
+          >
+            {row.boms.map((b) => (
+              <option key={b.bom_id} value={String(b.bom_id)}>
+                {b.bom_code}{b.status !== "active" ? ` (${b.status})` : ""}
+              </option>
+            ))}
+          </Select>
+        )}
+      </td>
+
       <td className="px-2 py-1.5 align-top">
         <Input
           type="number" min={0} placeholder="0" value={row.qty}
@@ -148,6 +172,10 @@ export default function AddPODialog({
           (data.skus ?? []).map((s) => ({
             sku_code: s.sku_code,
             sku_name: s.sku_name,
+            boms: s.boms ?? [],
+            // The API sorts active recipes first, so the default is the live
+            // one whenever there is a choice to make.
+            bom_id: s.boms?.[0] ? String(s.boms[0].bom_id) : "",
             qty: "",
             expected_on: "",
             destination: defaultDest,
@@ -179,7 +207,8 @@ export default function AddPODialog({
 
     const errs: Record<string, string> = {}
     for (const r of filled) {
-      if (!r.expected_on) errs[r.sku_code] = "Expected dispatch date is required."
+      if (!r.bom_id) errs[r.sku_code] = "No BOM on this manufacturer's line for this SKU — it can't be ordered."
+      else if (!r.expected_on) errs[r.sku_code] = "Expected dispatch date is required."
       else if (r.expected_on < today) errs[r.sku_code] = "Backdating is not allowed."
     }
     if (Object.keys(errs).length > 0) { setRowErrors(errs); return }
@@ -207,6 +236,7 @@ export default function AddPODialog({
             po_type:      poType,
             mfg_id:       Number(mfgId),
             sku_code:     r.sku_code,
+            bom_id:       Number(r.bom_id),
             qty:          Number(r.qty),
             unit_price:   unitPrice,
             total_amount: totalAmt,
@@ -303,6 +333,7 @@ export default function AddPODialog({
                 <thead className="bg-muted/50">
                   <tr>
                     <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">SKU</th>
+                    <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">BOM</th>
                     <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">PO Qty</th>
                     <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">Rate / Unit</th>
                     <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">Expected Dispatch</th>

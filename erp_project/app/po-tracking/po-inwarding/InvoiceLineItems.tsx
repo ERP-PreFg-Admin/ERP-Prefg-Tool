@@ -100,8 +100,14 @@ export function InvoiceLineItems({
                         value={r.reference_po_id}
                         onChange={(v) => setRow(i, "reference_po_id", v)}
                         getValue={(o) => String(o.id)}
-                        getLabel={(o) => `${o.po_no} — ${o.sku_code ?? "—"} · ${Number(o.remaining)} left`}
-                        searchKeys={["po_no", "sku_code", "sku_name"]}
+                        // Splits are listed alongside the orders they came off,
+                        // and for the same SKU and manufacturer the two are
+                        // otherwise indistinguishable — hence "split of".
+                        getLabel={(o) =>
+                          `${o.po_no} — ${o.sku_code ?? "—"} · ${Number(o.remaining)} left`
+                          + (o.reference_po ? ` · split of ${o.reference_po}` : "")
+                        }
+                        searchKeys={["po_no", "sku_code", "sku_name", "reference_po"]}
                         placeholder="Receive against…"
                         className="text-xs"
                       />

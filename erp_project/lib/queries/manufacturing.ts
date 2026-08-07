@@ -230,6 +230,23 @@ export const manufacturingSql = {
     ORDER BY sk.sku_code ASC
   `,
 
+  /**
+   * Same production lines as selectActiveSkusForMfg, but one row per recipe
+   * rather than one per SKU — the Add PO dialog needs the BOM behind each line
+   * so the PO it raises records which recipe it was ordered against. A SKU with
+   * two live recipes for this manufacturer comes back twice and the dialog asks
+   * which one; active BOMs sort first so the common single-choice case defaults
+   * to the right thing. Params: [mfg_id]
+   */
+  selectOrderableBomsForMfg: `
+    SELECT sk.sku_code, sk.name AS sku_name, b.id AS bom_id, b.bom_code, b.status AS bom_status
+    FROM master_bom_mfg mbm
+    INNER JOIN master_bom  b  ON b.id  = mbm.bom_id
+    INNER JOIN master_skus sk ON sk.id = b.sku_id
+    WHERE mbm.mfg_id = ? AND mbm.status IN ('active', 'discontinued') AND sk.status = 'active'
+    ORDER BY sk.sku_code ASC, (b.status = 'active') DESC, b.bom_code ASC
+  `,
+
   /** Resolve one SKU code to the bom_id this manufacturer produces it under — for the bulk misc-cost CSV importer. Params: [mfg_id, sku_code] */
   selectMfgLineBySkuCode: `
     SELECT DISTINCT mbm.bom_id AS id

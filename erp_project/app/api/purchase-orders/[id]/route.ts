@@ -27,10 +27,11 @@ export const PUT = withGateway({
   await assertPoInScope(Number(session.user.id), poId)
 
   const body = await req.json()
-  const { mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, reason } = body
+  const { mfg_id, sku_code, bom_id, qty, unit_price, total_amount, expected_on, destination, reason } = body
 
   if (!mfg_id)                  return NextResponse.json({ error: "Manufacturer is required." }, { status: 400 })
   if (!sku_code)                 return NextResponse.json({ error: "SKU is required." }, { status: 400 })
+  if (!bom_id)                  return NextResponse.json({ error: "BOM is required." }, { status: 400 })
   if (!qty || Number(qty) <= 0) return NextResponse.json({ error: "Quantity must be greater than 0." }, { status: 400 })
 
   // No backdating on expected dispatch
@@ -47,6 +48,20 @@ export const PUT = withGateway({
   if (skuRows[0].status !== "active") {
     return NextResponse.json(
       { error: `SKU is currently '${skuRows[0].status.replace(/_/g, " ")}' and cannot be used for a PO.` },
+      { status: 400 }
+    )
+  }
+
+  // Re-checked on every edit, not just when the SKU changes: an edit that
+  // switches SKU must switch recipe with it, and the same mfg/SKU pairing rule
+  // the create path applies decides what's allowed.
+  const bomRows = await query<{ id: number; bom_code: string }>(
+    purchaseOrdersSql.selectBomForMfgSku, [Number(mfg_id), Number(bom_id), sku_code]
+  )
+  const bom = bomRows[0]
+  if (!bom) {
+    return NextResponse.json(
+      { error: `That BOM isn't a recipe this manufacturer produces ${sku_code} under. Pick one of the SKU's listed BOMs.` },
       { status: 400 }
     )
   }
@@ -89,7 +104,7 @@ export const PUT = withGateway({
 
     // Update PO fields
     await conn.execute(purchaseOrdersSql.updateDraft, [
-      Number(mfg_id), sku_code, Number(qty), unitPrice, totalAmount, expected_on || null, destination || null, poId,
+      Number(mfg_id), sku_code, bom.id, Number(qty), unitPrice, totalAmount, expected_on || null, destination || null, poId,
     ])
 
     // Fetch MFG details for readable diff
@@ -105,6 +120,7 @@ export const PUT = withGateway({
       ["po_no",        "", po.po_no],
       ["manufacturer", "", `${mfg.code} — ${mfg.name}`],
       ["sku_code",     "", sku_code],
+      ["bom_code",     "", bom.bom_code],
       ["qty",          "", String(qty)],
       ["expected_on",  "", expected_on || ""],
       ["destination",  "", destination || ""],

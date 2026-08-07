@@ -1,6 +1,8 @@
 // POST /api/purchase-orders/[id]/cancel
-// Fully cancel a raised PO. Distinct from Short Close: cancellation voids
-// the whole PO rather than accepting partial fulfillment as final.
+// Fully cancel a raised PO that is still 100% open. Distinct from Short Close:
+// cancellation voids the whole PO, so it stops being available as soon as any
+// qty has been received — from then on Short Close is the only way to close the
+// order out, and it keeps the receipt.
 // Notifying the manufacturer is a separate, explicit step — see the PO
 // Procurement table's checkbox selection + "Review & Send Mail" flow
 // (POST /api/purchase-orders/send-mail) — cancelling no longer sends an
@@ -16,7 +18,13 @@ import { assertPoInScope } from "@/lib/po-guard"
 import { ApiError } from "@/lib/gateway/errors"
 import { poIdParamSchema, poCancelSchema } from "@/lib/validation/purchase-order-detail"
 
-const CANCELLABLE = new Set(["raised", "punched", "partially_received"])
+// Cancellation voids the entire order, so it is only available while the order
+// is entirely unfulfilled. The moment any qty is booked against a PO there is a
+// receipt to reconcile, and the correct close-out is Short Close — which keeps
+// what arrived and writes off only the balance. partially_received isn't listed
+// because it is exactly that case; the received_qty check below is what
+// actually enforces it (that status is derived, so it never appears here).
+const CANCELLABLE = new Set(["raised", "punched"])
 
 export const POST = withGateway({
   paramsSchema: poIdParamSchema,
@@ -34,7 +42,7 @@ export const POST = withGateway({
     recordRawEvent("PO_CANCEL", eventId, { poId, userId, reason })
 
     try {
-      const poRows = await query<{ id: number; po_no: string; status: string }>(
+      const poRows = await query<{ id: number; po_no: string; status: string; qty: string; received_qty: string }>(
         purchaseOrdersSql.selectForEdit,
         [poId]
       )
@@ -45,7 +53,31 @@ export const POST = withGateway({
         throw new ApiError(
           409,
           "not_cancellable",
-          `Cannot cancel a PO with status '${po.status}'. Allowed: raised, punched, partially_received.`
+          `Cannot cancel a PO with status '${po.status}'. Allowed: raised, punched.`
+        )
+      }
+
+      // A split PO can't be voided out from under its children — they'd be left
+      // pointing at a cancelled order. Cancelling the children first releases
+      // their quantity back to this PO, which can then be cancelled normally.
+      const childRows = await query<{ allocated_qty: string; seq: number }>(
+        purchaseOrdersSql.childSplitSummary, [po.po_no, po.po_no]
+      )
+      const allocated = Number(childRows[0]?.allocated_qty ?? 0)
+      if (allocated > 0) {
+        throw new ApiError(
+          409,
+          "not_cancellable",
+          `${po.po_no} has ${allocated} on live split POs. Cancel those splits first, then cancel this one.`
+        )
+      }
+
+      const receivedQty = Number(po.received_qty ?? 0)
+      if (receivedQty > 0) {
+        throw new ApiError(
+          409,
+          "not_cancellable",
+          `PO ${po.po_no} already has ${receivedQty} of ${Number(po.qty)} received. Only a fully open PO can be cancelled — short close it instead to write off the balance.`
         )
       }
 

@@ -97,7 +97,17 @@ export async function resolveRecipients(
   return recipients
 }
 
-type SelectedPoLine = { id: number; po_no: string; sku_code: string; sku_name: string | null; qty: number; status: string }
+export type SelectedPoLine = {
+  id: number
+  po_no: string
+  sku_code: string
+  sku_name: string | null
+  qty: number
+  status: string
+  /** Set when this PO is a split of another — the parent's po_no. */
+  reference_po?: string | null
+  destination?: string | null
+}
 type OngoingPoLine = { po_no: string; sku_code: string; sku_name: string | null; qty: number }
 
 // Statuses worth attaching a PDF copy for — the two actions this flow exists
@@ -122,6 +132,38 @@ function poTableRows(lines: { po_no: string; sku_code: string; sku_name: string 
     .join("")
 }
 
+/**
+ * The split-PO table. A split needs two columns the others don't — the order it
+ * came off, so the manufacturer can reconcile it against paperwork they already
+ * hold, and the destination, since splitting a PO is usually about sending part
+ * of it somewhere else.
+ */
+function splitSection(lines: SelectedPoLine[]): string {
+  if (lines.length === 0) return ""
+  return `
+    <h3 style="margin:20px 0 4px;font-size:14px">Split Purchase Orders</h3>
+    <p style="margin:0 0 6px;font-size:12px;color:#555">
+      Part of an existing order, re-issued as its own PO. The original PO number is shown against each line.
+    </p>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <tr style="background:#f5f5f5">
+        <td style="padding:6px 12px;font-weight:600">PO No.</td>
+        <td style="padding:6px 12px;font-weight:600">Split From</td>
+        <td style="padding:6px 12px;font-weight:600">SKU</td>
+        <td style="padding:6px 12px;font-weight:600">Deliver To</td>
+        <td style="padding:6px 12px;font-weight:600;text-align:right">Quantity</td>
+      </tr>
+      ${lines.map((l) => `
+        <tr>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee">${escapeHtml(l.po_no)}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee">${escapeHtml(l.reference_po ?? "—")}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee">${escapeHtml(l.sku_code)}${l.sku_name ? " — " + escapeHtml(l.sku_name) : ""}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee">${escapeHtml(l.destination ?? "—")}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${Number(l.qty).toLocaleString("en-IN")}</td>
+        </tr>`).join("")}
+    </table>`
+}
+
 export function poSection(title: string, lines: { po_no: string; sku_code: string; sku_name: string | null; qty: number }[]): string {
   if (lines.length === 0) return ""
   return `
@@ -140,6 +182,16 @@ const PO_SHEET_COLUMNS: ExportColumn[] = [
   { key: "po_no", label: "PO No.", type: "text" },
   { key: "sku_code", label: "SKU Code", type: "text" },
   { key: "sku_name", label: "SKU Name", type: "text" },
+  { key: "qty", label: "Quantity", type: "number" },
+]
+
+// Splits carry the order they came off and where they're going — see splitSection.
+const SPLIT_SHEET_COLUMNS: ExportColumn[] = [
+  { key: "po_no", label: "PO No.", type: "text" },
+  { key: "reference_po", label: "Split From", type: "text" },
+  { key: "sku_code", label: "SKU Code", type: "text" },
+  { key: "sku_name", label: "SKU Name", type: "text" },
+  { key: "destination", label: "Deliver To", type: "text" },
   { key: "qty", label: "Quantity", type: "number" },
 ]
 
@@ -184,9 +236,13 @@ export async function sendMfgSelectionEmail(
     po_no: r.po_no, sku_code: r.sku_code, sku_name: r.sku_name, qty: Number(r.qty),
   }))
 
-  // Selected lines split into the three tables the summary shows — any other
-  // selected status (e.g. punched, received) isn't part of this summary.
-  const raisedLines    = selected.filter((l) => l.status === "raised")
+  // Selected lines split into the tables the summary shows — any other selected
+  // status (e.g. punched, received) isn't part of this summary. Splits come out
+  // of the raised list into their own section: they are raised, but "newly
+  // raised" reads as new demand, and a split is a re-issue of demand the
+  // manufacturer already has on an order it can be pointed back at.
+  const splitLines     = selected.filter((l) => l.status === "raised" && !!l.reference_po)
+  const raisedLines    = selected.filter((l) => l.status === "raised" && !l.reference_po)
   const cancelledLines = selected.filter((l) => l.status === "cancelled")
 
   const attachments: { filename: string; content: Buffer }[] = []
@@ -206,9 +262,10 @@ export async function sendMfgSelectionEmail(
   }
 
   const xlsxBuffer = await buildMultiSheetXlsx([
-    { name: "Raised",    columns: PO_SHEET_COLUMNS, rows: toSheetRows(raisedLines) },
-    { name: "Cancelled", columns: PO_SHEET_COLUMNS, rows: toSheetRows(cancelledLines) },
-    { name: "Open",      columns: PO_SHEET_COLUMNS, rows: toSheetRows(openLines) },
+    { name: "Raised",    columns: PO_SHEET_COLUMNS,       rows: toSheetRows(raisedLines) },
+    { name: "Splits",    columns: SPLIT_SHEET_COLUMNS,    rows: splitLines.map((l) => ({ ...l, reference_po: l.reference_po ?? "", destination: l.destination ?? "" })) },
+    { name: "Cancelled", columns: PO_SHEET_COLUMNS,       rows: toSheetRows(cancelledLines) },
+    { name: "Open",      columns: PO_SHEET_COLUMNS,       rows: toSheetRows(openLines) },
   ])
   attachments.push({ filename: `PO-Summary-${mfg.code}.xlsx`, content: Buffer.from(xlsxBuffer) })
 
@@ -227,6 +284,7 @@ export async function sendMfgSelectionEmail(
           <h2 style="margin-bottom:4px">PO Update: ${mfg.name}</h2>
           <p style="color:#555;margin-top:0">Please find the latest status of the following purchase orders${pdfsAttached > 0 ? " (PDFs attached for raised/cancelled POs; full details in the attached Excel)" : " (full details in the attached Excel)"}.</p>
           ${poSection("Newly Raised Purchase Orders", raisedLines)}
+          ${splitSection(splitLines)}
           ${poSection("Cancelled Purchase Orders", cancelledLines)}
           ${poSection("Remaining Open Purchase Orders", openLines)}
           <p style="font-size:12px;color:#888;margin-top:20px">

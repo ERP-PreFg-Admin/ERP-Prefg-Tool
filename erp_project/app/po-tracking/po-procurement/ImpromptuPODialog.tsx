@@ -11,7 +11,7 @@ import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { Select } from "@/components/ui/select"
 import { useToast } from "@/components/ui/toast"
 import { RemarksField, PO_REASON_PRESETS } from "@/components/masters/RemarksField"
-import type { EditData, ImpromptuForm, MfgOption, SkuOption, WarehouseOption } from "./po-types"
+import type { EditData, ImpromptuForm, MfgOption, MfgSkuOption, SkuOption, WarehouseOption } from "./po-types"
 import { EMPTY_FORM } from "./po-types"
 import { useQuotedRate } from "./useQuotedRate"
 
@@ -30,6 +30,9 @@ export default function ImpromptuPODialog({
   const { toast } = useToast()
 
   const [form, setForm]             = useState<ImpromptuForm>(EMPTY_FORM)
+  // Recipes per SKU for the chosen manufacturer — the PO records which one it
+  // is for, and only this manufacturer's own production lines are offerable.
+  const [mfgSkus, setMfgSkus]       = useState<MfgSkuOption[]>([])
   const [errors, setErrors]         = useState<Partial<Record<keyof ImpromptuForm, string>>>({})
   const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError]     = useState("")
@@ -47,6 +50,7 @@ export default function ImpromptuPODialog({
       setForm({
         sku_code:   editData.sku_code ?? "",
         mfg_id:     String(editData.mfg_id),
+        bom_id:     editData.bom_id ? String(editData.bom_id) : "",
         qty:        String(editData.qty),
         expected_on: editData.expected_on
           ? new Date(editData.expected_on).toISOString().slice(0, 10)
@@ -61,6 +65,31 @@ export default function ImpromptuPODialog({
     setApiError("")
   }, [open, editData]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Reloaded whenever the manufacturer changes: which recipes are offerable is
+  // a property of that manufacturer's production lines, not of the SKU alone.
+  useEffect(() => {
+    if (!open || !form.mfg_id) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale lines when the dialog closes or the manufacturer is cleared
+      setMfgSkus([])
+      return
+    }
+    let cancelled = false
+    fetch(`/api/purchase-orders/mfg-skus?mfg_id=${form.mfg_id}`)
+      .then((r) => r.json())
+      .then((data: { skus?: MfgSkuOption[] }) => { if (!cancelled) setMfgSkus(data.skus ?? []) })
+      .catch(() => { if (!cancelled) setMfgSkus([]) })
+    return () => { cancelled = true }
+  }, [open, form.mfg_id])
+
+  const bomChoices = mfgSkus.find((s) => s.sku_code === form.sku_code)?.boms ?? []
+
+  // Derived rather than corrected in an effect: when the SKU or manufacturer
+  // changes, whatever was picked before may not be on the new list, and the
+  // first entry (the API sorts active recipes first) is the right default.
+  const selectedBomId = bomChoices.some((b) => String(b.bom_id) === form.bom_id)
+    ? form.bom_id
+    : bomChoices[0] ? String(bomChoices[0].bom_id) : ""
+
   function set(field: keyof ImpromptuForm, value: string) {
     setForm((f) => ({ ...f, [field]: value }))
     setErrors((e) => ({ ...e, [field]: "" }))
@@ -71,6 +100,7 @@ export default function ImpromptuPODialog({
     const e: Partial<Record<keyof ImpromptuForm, string>> = {}
     if (!form.sku_code)                        e.sku_code    = "SKU is required."
     if (!form.mfg_id)                          e.mfg_id      = "Manufacturer is required."
+    if (!selectedBomId)                        e.bom_id      = "BOM is required — this manufacturer has no production line for this SKU."
     if (!form.qty || Number(form.qty) <= 0)    e.qty         = "Enter a valid quantity."
     if (!form.expected_on)                     e.expected_on = "Expected dispatch date is required."
     if (form.expected_on && form.expected_on < today)
@@ -95,6 +125,7 @@ export default function ImpromptuPODialog({
       const payload = {
         mfg_id:       Number(form.mfg_id),
         sku_code:     form.sku_code,
+        bom_id:       Number(selectedBomId),
         qty:          Number(form.qty),
         unit_price:   unitPrice,
         total_amount: totalAmt,
@@ -180,6 +211,30 @@ export default function ImpromptuPODialog({
               ))}
             </Select>
             {errors.mfg_id && <p className="text-xs text-destructive">{errors.mfg_id}</p>}
+          </div>
+
+          {/* BOM — the recipe this PO is for. Comes from the manufacturer's
+              production lines for the chosen SKU, so it only fills in once both
+              are picked. */}
+          <div className="grid gap-1.5">
+            <Label htmlFor="ipo-bom">BOM <span className="text-destructive">*</span></Label>
+            <Select
+              id="ipo-bom" value={selectedBomId} onChange={(e) => set("bom_id", e.target.value)}
+              className="w-full" disabled={bomChoices.length === 0}
+            >
+              {bomChoices.length === 0 ? (
+                <option value="">
+                  {form.sku_code && form.mfg_id ? "— No BOM for this SKU/MFG —" : "— Select SKU and MFG first —"}
+                </option>
+              ) : (
+                bomChoices.map((b) => (
+                  <option key={b.bom_id} value={String(b.bom_id)}>
+                    {b.bom_code}{b.status !== "active" ? ` (${b.status})` : ""}
+                  </option>
+                ))
+              )}
+            </Select>
+            {errors.bom_id && <p className="text-xs text-destructive">{errors.bom_id}</p>}
           </div>
 
           {/* Quantity + Rate */}

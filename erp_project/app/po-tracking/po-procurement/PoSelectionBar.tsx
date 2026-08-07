@@ -100,7 +100,18 @@ function ReviewSendDialog({
                   const cfg = STATUS_CONFIG[status] ?? { label: status, variant: "secondary" as BadgeVariant }
                   return (
                     <div key={r.id} className="flex items-center justify-between px-3 py-1.5">
-                      <span>{r.po_no} — {r.sku_code}</span>
+                      <span>
+                        {r.po_no} — {r.sku_code}
+                        {/* Named here too: this is the last screen before the
+                            mail goes out, and a split is the one line whose
+                            quantity won't match any order the manufacturer
+                            already holds. */}
+                        {r.reference_po && (
+                          <span className="ml-1.5 text-[11px] text-violet-600 dark:text-violet-400">
+                            split of {r.reference_po}
+                          </span>
+                        )}
+                      </span>
                       <span className="flex items-center gap-2">
                         <span className="tabular-nums text-muted-foreground">Qty {fmtInt(r.qty)}</span>
                         <Badge variant={cfg.variant}>{cfg.label}</Badge>

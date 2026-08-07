@@ -78,7 +78,7 @@ export const POST = withGateway({
   }
   // ── end bulk ────────────────────────────────────────────────────────────────
 
-  const { mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, reason, po_type } = body
+  const { mfg_id, sku_code, bom_id, qty, unit_price, total_amount, expected_on, destination, reason, po_type } = body
 
   // A user can't raise a PO against a manufacturer or into a warehouse they
   // aren't scoped to, even though the dropdowns already exclude both.
@@ -96,6 +96,21 @@ export const POST = withGateway({
       400,
       "sku_not_active",
       `SKU is currently '${skuRows[0].status.replace(/_/g, " ")}' and cannot be used for a new PO.`
+    )
+  }
+
+  // The recipe this PO is for. Checked against both the SKU and the
+  // manufacturer's production lines, so the PO can't record a BOM for a
+  // different SKU or one this manufacturer doesn't build.
+  const bomRows = await query<{ id: number; bom_code: string; status: string | null }>(
+    purchaseOrdersSql.selectBomForMfgSku, [Number(mfg_id), Number(bom_id), sku_code]
+  )
+  const bom = bomRows[0]
+  if (!bom) {
+    throw new ApiError(
+      400,
+      "bom_invalid",
+      `That BOM isn't a recipe this manufacturer produces ${sku_code} under. Pick one of the SKU's listed BOMs.`
     )
   }
 
@@ -128,7 +143,7 @@ export const POST = withGateway({
     await conn.beginTransaction()
     try {
       const [poResult] = await conn.execute(purchaseOrdersSql.insertNormal, [
-        po_no, Number(mfg_id), sku_code, Number(qty), unitPrice, totalAmount, expected_on || null, destination || null,
+        po_no, Number(mfg_id), sku_code, bom.id, Number(qty), unitPrice, totalAmount, expected_on || null, destination || null,
       ])
       const poId = (poResult as any).insertId
       await conn.commit()
@@ -154,7 +169,7 @@ export const POST = withGateway({
   await conn.beginTransaction()
   try {
     const [poResult] = await conn.execute(purchaseOrdersSql.insert, [
-      po_no, Number(mfg_id), sku_code, Number(qty), unitPrice, totalAmount, expected_on || null, po_type, destination || null,
+      po_no, Number(mfg_id), sku_code, bom.id, Number(qty), unitPrice, totalAmount, expected_on || null, po_type, destination || null,
     ])
     const poId = (poResult as any).insertId
 
@@ -168,6 +183,7 @@ export const POST = withGateway({
       ["po_no",        "", po_no],
       ["manufacturer", "", `${mfg.code} — ${mfg.name}`],
       ["sku_code",     "", sku_code],
+      ["bom_code",     "", bom.bom_code],
       ["qty",          "", String(qty)],
       ["expected_on",  "", expected_on || ""],
       ["destination",  "", destination || ""],

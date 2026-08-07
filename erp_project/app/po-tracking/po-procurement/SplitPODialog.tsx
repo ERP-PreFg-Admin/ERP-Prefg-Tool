@@ -43,7 +43,11 @@ export default function SplitPODialog({
 
   const total      = num(po.qty)
   const received   = num(po.received_qty)
-  const remaining  = total - received
+  // Splitting doesn't touch po.qty — that's the quantity on the document and it
+  // stays — so anything earlier splits already took has to come off here, or the
+  // same units could be handed out twice.
+  const allocated  = num(po.split_qty)
+  const remaining  = total - received - allocated
   const splitTotal = rows.reduce((s, r) => s + num(r.qty), 0)
   const overLimit  = splitTotal > remaining
   const leftover   = Math.max(0, remaining - splitTotal)
@@ -124,9 +128,17 @@ export default function SplitPODialog({
               <span className="font-heading text-lg font-semibold leading-tight mt-0.5">{po.po_no}</span>
               <span className="text-[11px] text-muted-foreground truncate" title={po.mfg_name}>{po.mfg_name}</span>
 
+              {/* Total is the ordered quantity and stays that way — the split
+                  is recorded on the new POs, not by editing this one. */}
               <div className="mt-3 space-y-1 text-[11px] font-mono text-muted-foreground">
-                <div className="flex justify-between"><span>Total</span><span className="text-foreground">{fmtInt(total)}</span></div>
+                <div className="flex justify-between"><span>Ordered</span><span className="text-foreground">{fmtInt(total)}</span></div>
                 <div className="flex justify-between"><span>Received</span><span className="text-foreground">{fmtInt(received)}</span></div>
+                {allocated > 0 && (
+                  <div className="flex justify-between">
+                    <span>On splits</span>
+                    <span className="text-violet-600 dark:text-violet-400">{fmtInt(allocated)}</span>
+                  </div>
+                )}
               </div>
 
               <div className="mt-4 pt-3 border-t border-dashed border-border sm:border-t-0 sm:pt-0 sm:mt-auto">

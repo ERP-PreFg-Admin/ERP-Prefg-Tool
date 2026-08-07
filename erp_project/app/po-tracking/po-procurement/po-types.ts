@@ -9,16 +9,45 @@ export type PoRow = {
   sku_code: string | null
   sku_name: string | null
   sku_status: string | null
+  /** The recipe this PO is against. Null on POs raised before bom_code became a
+   *  bulk-upload column, and on anything raised from the Add PO dialog. */
+  bom_id: number | null
+  bom_code: string | null
   qty: string | number
   unit_price: string | number | null
   total_amount: string | number | null
   expected_on: string | null
   received_qty: string | number | null
+  /* ── Splits ────────────────────────────────────────────────────────────────
+   * A split hands part of a PO to child POs. The parent's `qty` never changes —
+   * it is what was legally ordered — so everything below is derived from the
+   * children at read time. */
+  /** Set on a child: the po_no of the PO it was split off. Null on a master. */
+  reference_po: string | null
+  /** Live (non-cancelled) children. > 0 means this row is a split master. */
+  child_count: number
+  /** Total quantity handed to those children. */
+  split_qty: string | number
+  /** Allocated but not yet received — the amber part of the progress bar. */
+  pending_split_qty: string | number
+  /** This PO's receipts plus all its children's. The figure the table shows. */
+  received_total: string | number
   invoice_no: string | null
   /** Unicommerce's PO code for this row — inward POs only, null everywhere else. */
   uniware_po_code: string | null
   destination: string | null
+  /**
+   * What the row shows. Derived server-side: partial receipts become
+   * `partially_received`, and a raised PO the manufacturer hasn't been mailed
+   * about yet reads back as `draft` until the send stamps `email_sent_at`.
+   */
   status: PoStatus | null
+  /**
+   * The status actually stored on the row, before either derivation. Only for
+   * gating actions the API validates against the stored value — the edit
+   * action, which is limited to POs still awaiting approval.
+   */
+  raw_status: PoStatus | null
   po_type: "normal" | "impromptu" | "inward" | null
   attachment_key: string | null
   csv_source_key: string | null
@@ -39,7 +68,7 @@ export type BadgeVariant = "default" | "secondary" | "success" | "warning" | "in
 export const STATUS_CONFIG: Record<string, { label: string; variant: BadgeVariant }> = {
   draft:              { label: "Draft",               variant: "outline" },
   raised:             { label: "Raised",              variant: "secondary" },
-  punched:            { label: "Inward POs",           variant: "default" },
+  // punched:            { label: "Inward POs",           variant: "default" },
   short_closed:       { label: "Short Closed",        variant: "warning" },
   partially_received: { label: "Partially Received",  variant: "info" },
   received:           { label: "Received",            variant: "success" },
@@ -47,7 +76,14 @@ export const STATUS_CONFIG: Record<string, { label: string; variant: BadgeVarian
 }
 
 export const STATUS_KEYS = Object.keys(STATUS_CONFIG)
-export const TABS = ["all", ...STATUS_KEYS] as const
+
+/**
+ * FG PO Tracking's tab bar. "punched" is deliberately absent: it labels inward
+ * POs, which have their own page (/po-tracking/po-inwarding), and this page
+ * already filters them out of every query. STATUS_CONFIG still carries the
+ * status so a punched row anywhere else renders with the right badge.
+ */
+export const TABS = ["all", ...STATUS_KEYS.filter((k) => k !== "punched")] as const
 export type TabKey = (typeof TABS)[number]
 
 /* ── Inwarding detail panel ───────────────────────────────────────────────── */
@@ -121,6 +157,8 @@ export const PAGE_SIZE = 20
 export type ImpromptuForm = {
   sku_code: string
   mfg_id: string
+  /** Selected recipe id as a string — it comes off a <Select>. */
+  bom_id: string
   qty: string
   expected_on: string
   destination: string
@@ -131,6 +169,7 @@ export type EditData = {
   id: number
   mfg_id: number
   sku_code: string
+  bom_id: number | null
   qty: number | string
   unit_price: number | string | null
   expected_on: string | null
@@ -138,8 +177,12 @@ export type EditData = {
 }
 
 export const EMPTY_FORM: ImpromptuForm = {
-  sku_code: "", mfg_id: "", qty: "", expected_on: "", destination: "", reason: "",
+  sku_code: "", mfg_id: "", bom_id: "", qty: "", expected_on: "", destination: "", reason: "",
 }
+
+/** One recipe a manufacturer produces a SKU under — /api/purchase-orders/mfg-skus. */
+export type BomChoice = { bom_id: number; bom_code: string; status: string | null }
+export type MfgSkuOption = { sku_code: string; sku_name: string; boms?: BomChoice[] }
 
 export type SplitRow = { destination: string; qty: string }
 

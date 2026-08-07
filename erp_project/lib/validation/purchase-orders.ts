@@ -14,6 +14,10 @@ export const poCreateSchema = z
       message: "Manufacturer is required.",
     }),
     sku_code: z.string().trim().min(1, "SKU is required."),
+    // Which recipe the PO is against. Required, so every PO can be traced back
+    // to what was actually meant to be made; the route additionally checks the
+    // BOM belongs to this SKU and this manufacturer.
+    bom_id: z.coerce.number().int().positive("BOM is required."),
     qty: z.union([z.number(), z.string()]),
     unit_price: z.union([z.number(), z.string()]).optional().nullable(),
     total_amount: z.union([z.number(), z.string()]).optional().nullable(),

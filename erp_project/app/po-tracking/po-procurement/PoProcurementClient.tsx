@@ -3,7 +3,7 @@
 import { useUrlFilters } from "@/lib/useUrlFilters"
 import { useMemo, useState } from "react"
 import {
-  FileClock, FileStack, FileUp, Filter, IndianRupee, Mail, PackageCheck, PackageOpen, Plus, Send, X,
+  CalendarClock, FileClock, FileUp, Filter, Mail, PackageCheck, PackageOpen, Percent, Plus, Send, X,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils"
 
 import type { MfgOption, PoRow, SkuOption, TabKey, WarehouseOption } from "./po-types"
 import { INWARD_TABS, STATUS_CONFIG, TAB_LABEL, TABS } from "./po-types"
-import { fmtInt, fmtMoney } from "./po-utils"
+import { fmtInt } from "./po-utils"
 import { PO_BULK_CSV_FIELDS } from "./po-bulk-fields"
 import PoTable from "./PoTable"
 import PoHistoryDialog from "./PoHistoryDialog"
@@ -50,7 +50,7 @@ const TAB_DOT: Record<string, string> = {
   cancelled: "bg-destructive",
 }
 
-function SummaryCard({ icon: Icon, label, value, accent }: { icon: LucideIcon; label: string; value: string; accent: string }) {
+function SummaryCard({ icon: Icon, label, value, hint, accent }: { icon: LucideIcon; label: string; value: string; hint?: string; accent: string }) {
   return (
     // Hover lift is subtle on purpose — these aren't clickable, so the response
     // is just enough to make the strip feel alive rather than inviting a click.
@@ -64,6 +64,9 @@ function SummaryCard({ icon: Icon, label, value, accent }: { icon: LucideIcon; l
               needing a second colour; the number carries the weight instead. */}
           <div className="text-[10px] font-medium uppercase tracking-[0.06em] text-muted-foreground">{label}</div>
           <div className="mt-1 truncate text-lg font-semibold leading-none tracking-tight tabular-nums">{value}</div>
+          {/* The denominator behind the number, so a quantity is never read
+              without the base it was measured against. */}
+          {hint && <div className="mt-1 truncate text-[10px] leading-none text-muted-foreground">{hint}</div>}
         </div>
       </CardContent>
     </Card>
@@ -72,6 +75,7 @@ function SummaryCard({ icon: Icon, label, value, accent }: { icon: LucideIcon; l
 
 export default function PoProcurementClient({
   rows,
+  childrenByParent,
   total,
   page,
   pageSize,
@@ -94,6 +98,8 @@ export default function PoProcurementClient({
   mode = "procurement",
 }: {
   rows: PoRow[]
+  /** Split children keyed by their parent's po_no — the expandable section. */
+  childrenByParent: Record<string, PoRow[]>
   total: number
   page: number
   pageSize: number
@@ -108,7 +114,8 @@ export default function PoProcurementClient({
   currentSku: string
   currentDestination: string
   statusCounts: Record<string, number>
-  summary: { total: number; raised: number; punched: number; partiallyReceived: number; openValue: number }
+  /** Quantities, not PO counts — see summaryStats in lib/queries/purchase-orders.ts. */
+  summary: { total: number; openQty: number; committedQty: number; receivedQty: number; overdueQty: number; overduePos: number; draftPos: number }
   skuOptions: SkuOption[]
   mfgOptions: MfgOption[]
   warehouseOptions: WarehouseOption[]
@@ -135,6 +142,17 @@ export default function PoProcurementClient({
 
   // ── Gmail-style PO selection → review (grouped by mfg) → send mail ────────
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+
+  // Every row a checkbox can reach: the masters on this page plus the children
+  // of any of them. Selection has to survive collapsing a row, so it is keyed on
+  // the full set rather than what happens to be expanded.
+  const selectableRows = useMemo(
+    () => [
+      ...rows.filter((r) => Number(r.child_count) === 0),
+      ...rows.flatMap((r) => childrenByParent[r.po_no] ?? []),
+    ],
+    [rows, childrenByParent]
+  )
 
   function toggleRow(id: number) {
     setSelectedIds((prev) => {
@@ -195,6 +213,10 @@ export default function PoProcurementClient({
     navigate({ sortBy: key, sortDir: newDir })
   }
 
+  // Divided here rather than in SQL so "nothing ordered" reads as "—" instead
+  // of a 0% that looks like a supply failure.
+  const fillRate = summary.committedQty > 0 ? (summary.receivedQty / summary.committedQty) * 100 : null
+
   const hasActiveFilters = !!(currentMfgCode || currentPoType || currentDateFrom || currentDateTo || currentSku || currentDestination)
   const afterAction = () => router.refresh()
   const activeTab = (currentStatus || "all") as TabKey
@@ -204,11 +226,31 @@ export default function PoProcurementClient({
 
       {/* ── Summary strip ── */}
       <div className="text-sm grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-        <SummaryCard icon={FileStack}     label="Total POs"          value={fmtInt(summary.total)}    accent="bg-muted text-muted-foreground" />
-        <SummaryCard icon={Send}          label="Raised"             value={fmtInt(summary.raised)}   accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" />
-        <SummaryCard icon={PackageCheck}  label="Punched"            value={fmtInt(summary.punched)}  accent="bg-primary/10 text-primary" />
-        <SummaryCard icon={PackageOpen}   label="Partially Received" value={fmtInt(summary.partiallyReceived)} accent="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" />
-        <SummaryCard icon={IndianRupee}   label="Value of Open POs"  value={fmtMoney(summary.openValue)} accent="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" />
+        <SummaryCard
+          icon={PackageOpen} label="Open Qty" value={fmtInt(summary.openQty)}
+          hint={`across ${fmtInt(summary.total)} PO${summary.total === 1 ? "" : "s"}`}
+          accent="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+        />
+        <SummaryCard
+          icon={PackageCheck} label="Received Qty" value={fmtInt(summary.receivedQty)}
+          hint={`of ${fmtInt(summary.committedQty)} ordered`}
+          accent="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+        />
+        <SummaryCard
+          icon={Percent} label="Fill Rate" value={fillRate === null ? "—" : `${fillRate.toFixed(1)}%`}
+          hint={fillRate === null ? "nothing ordered yet" : "received ÷ ordered"}
+          accent="bg-primary/10 text-primary"
+        />
+        <SummaryCard
+          icon={CalendarClock} label="Overdue Qty" value={fmtInt(summary.overdueQty)}
+          hint={`on ${fmtInt(summary.overduePos)} PO${summary.overduePos === 1 ? "" : "s"} past due`}
+          accent="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+        />
+        <SummaryCard
+          icon={Send} label="Draft (Not Mailed)" value={fmtInt(summary.draftPos)}
+          hint="not yet sent to the mfg"
+          accent="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+        />
       </div>
 
       {/* ── Toolbar ── */}
@@ -394,6 +436,7 @@ export default function PoProcurementClient({
         >
           <PoTable
             rows={rows}
+            childrenByParent={childrenByParent}
             sessionUserId={sessionUserId}
             onEdit={setEditTarget}
             onSplit={setSplitTarget}
@@ -477,6 +520,7 @@ export default function PoProcurementClient({
           id:          editTarget.id,
           mfg_id:      editTarget.mfg_id,
           sku_code:    editTarget.sku_code ?? "",
+          bom_id:      editTarget.bom_id,
           qty:         editTarget.qty,
           unit_price:  editTarget.unit_price,
           expected_on: editTarget.expected_on,
@@ -493,7 +537,7 @@ export default function PoProcurementClient({
       />
 
       <PoSelectionBar
-        selectedRows={rows.filter((r) => selectedIds.has(r.id))}
+        selectedRows={selectableRows.filter((r) => selectedIds.has(r.id))}
         onClear={() => setSelectedIds(new Set())}
         onSubmitted={() => { setSelectedIds(new Set()); afterAction() }}
       />
