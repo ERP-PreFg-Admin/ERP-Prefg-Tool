@@ -1,14 +1,21 @@
 // POST /api/v1/purchase-orders/[id]/split
 // Split a raised PO into N child POs (one or more) across (optionally different) manufacturers.
 //
-// Parent PO qty is reduced by the split total (total_amount recalculated to match);
-// status and received_qty are never touched — a split is not a receiving event.
-// short_closed is set manually only (for intentional early closure with large remainder)
+// The parent is NOT written to. A PO is a legal document: the quantity on it is
+// the quantity that was ordered, and it stays that way for the life of the row.
+// The split is recorded entirely as children carrying reference_po = parent
+// po_no, and how much has been "knocked off" is derived from them at read time
+// (see the split expressions in lib/queries/purchase-orders.ts). status and
+// received_qty are likewise untouched — a split is not a receiving event.
+//
+// Splits are one level deep: a child cannot itself be split, which keeps the
+// master the whole truth about an order and the allocation maths a single sum.
 
 import { NextResponse } from "next/server"
 import type { PoolConnection } from "mysql2/promise"
 import { query, pool } from "@/lib/db"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
+import { approvalsSql } from "@/lib/queries/approvals"
 import { manufacturers as mfgsSql } from "@/lib/queries/manufacturers"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
@@ -16,10 +23,8 @@ import { withGateway } from "@/lib/gateway/with-gateway"
 import { assertPoInScope } from "@/lib/po-guard"
 import { ApiError } from "@/lib/gateway/errors"
 import { poIdParamSchema, poSplitSchema } from "@/lib/validation/purchase-order-detail"
-// The quantity math and the child/approval writes live in lib/po-split.ts so
-// they are reachable from tests/db/po-split.test.ts — same reason receiving
-// lives in lib/po-receive.ts.
-import { splitPo, assertSplittable, remainingQty, splitTotalOf, type SplitParentPo } from "@/lib/po-split"
+
+const SPLITTABLE = new Set(["draft", "raised", "punched", "partially_received"])
 
 export const POST = withGateway({
   paramsSchema: poIdParamSchema,
@@ -33,16 +38,44 @@ export const POST = withGateway({
     const { splits } = body
 
     // Fetch the original PO
-    const poRows = await query<SplitParentPo>(purchaseOrdersSql.selectForSplit, [poId])
+    const poRows = await query<any>(purchaseOrdersSql.selectForSplit, [poId])
     const po = poRows[0]
     if (!po) throw new ApiError(404, "not_found", "PO not found.")
+    if (!SPLITTABLE.has(po.status)) {
+      throw new ApiError(
+        409,
+        "not_splittable",
+        `Cannot split a PO with status '${po.status}'. Allowed: draft, raised, punched, partially_received.`
+      )
+    }
+    if (po.reference_po) {
+      throw new ApiError(
+        409,
+        "not_splittable",
+        `${po.po_no} is itself a split of ${po.reference_po}. Splits are one level deep — split the original PO instead.`
+      )
+    }
 
-    // Status and quantity guards — validated before the transaction opens so a
-    // rejected split never takes a connection.
-    assertSplittable(po, splits)
+    // What this PO can still hand out: its quantity, less what has arrived, less
+    // what earlier splits already took. The parent's qty no longer shrinks when
+    // it is split, so subtracting existing allocation is what stops the same
+    // units being split away twice.
+    const [childSummary] = await query<{ allocated_qty: string; seq: number }>(
+      purchaseOrdersSql.childSplitSummary, [po.po_no, po.po_no]
+    )
+    const allocated  = Number(childSummary?.allocated_qty ?? 0)
+    const remaining  = Number(po.qty) - Number(po.received_qty ?? 0) - allocated
+    const splitTotal = splits.reduce((sum, s) => sum + Number(s.qty), 0)
+    if (splitTotal > remaining) {
+      throw new ApiError(
+        400,
+        "over_limit",
+        allocated > 0
+          ? `Split total (${splitTotal}) exceeds the ${remaining} still unallocated on ${po.po_no} — ${allocated} is already on earlier splits.`
+          : `Split total (${splitTotal}) exceeds remaining qty (${remaining}).`
+      )
+    }
 
-    const remaining  = remainingQty(po)
-    const splitTotal = splitTotalOf(splits)
     const userId = Number(session.user.id)
 
     const eventId = makeEventId("PO_SPLIT", "split", poId)
@@ -61,26 +94,62 @@ export const POST = withGateway({
     const conn: PoolConnection = await pool.getConnection()
     await conn.beginTransaction()
     try {
-      const { newQty, newTotalAmount, parentClosed } = await splitPo(conn, po, splits, userId, mfgMap)
-      logger.info({ ...logCtx, parentPoId: poId, newQty, newTotalAmount, parentClosed, message: "PO split reduced parent qty" })
+      const isParentDraft = po.status === "draft"
+      const childStatus   = isParentDraft ? "draft" : "raised"
+
+      for (let i = 0; i < splits.length; i++) {
+        const { mfg_id, destination, qty } = splits[i]
+        // Numbered from how many children this PO already has, not from the
+        // loop index: a second split of the same parent would otherwise re-issue
+        // -S001. Cancelled children still count, so a spent number is never
+        // handed out again.
+        const childPoNo = `${po.po_no}-S${String(Number(childSummary?.seq ?? 0) + i + 1).padStart(3, "0")}`
+        const mfg = mfgMap[mfg_id]
+
+        // recipe_id is passed LAST, followed by the two resolver params: the
+        // child inherits the parent's stamped recipe, falling back to the live
+        // line for parents raised before that column existed. See insertSplit.
+        const [childResult] = await conn.execute(
+          purchaseOrdersSql.insertSplit,
+          [childPoNo, mfg_id, po.sku_code, Number(qty), po.expected_on, childStatus,
+           destination || null, po.po_no, po.recipe_id ?? null, mfg_id, po.sku_code]
+        )
+        const childId = (childResult as any).insertId
+
+        // The only audit trail a split leaves: the parent row itself doesn't
+        // change, so without this there would be no record on the PO that part
+        // of it was handed off, and to which order.
+        await conn.execute(purchaseOrdersSql.insertPoHistory, [
+          poId, po.po_no, "update", "split", "", `${childPoNo} — ${qty}`, null, userId,
+        ])
+
+        // If parent was draft, each child needs its own approval record
+        if (isParentDraft) {
+          const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, "PO", childId, "create"])
+          const approvalId = (ar as any).insertId
+          const items: [string, string, string][] = [
+            ["po_no",        "", childPoNo],
+            ["manufacturer", "", `${mfg.code} — ${mfg.name}`],
+            ["sku_code",     "", po.sku_code],
+            ["qty",          "", String(qty)],
+            ["expected_on",  "", po.expected_on || ""],
+            ["destination",  "", destination || ""],
+            ["split_from",   "", po.po_no],
+          ]
+          for (const [field, oldVal, newVal] of items) {
+            await conn.execute(approvalsSql.insertApprovalItem, [approvalId, field, oldVal, newVal])
+          }
+        }
+      }
 
       await conn.commit()
-      recordProcessedEvent("PO_SPLIT", eventId, { parentPoId: poId, splitsCreated: splits.length, parentClosed })
+      recordProcessedEvent("PO_SPLIT", eventId, { parentPoId: poId, splitsCreated: splits.length })
       logger.info({ ...logCtx, parentPoId: poId, splitsCreated: splits.length, message: "PO split succeeded" })
-      return NextResponse.json({ ok: true, splits_created: splits.length, parent_closed: parentClosed })
+      return NextResponse.json({ ok: true, splits_created: splits.length })
     } catch (err: any) {
       await conn.rollback()
       recordFailedEvent("PO_SPLIT", eventId, { parentPoId: poId, splits }, err.message)
       logger.error({ ...logCtx, parentPoId: poId, error: err.message, message: "PO split failed" })
-      // Child numbers now continue the existing sequence, so a duplicate can only
-      // come from two splits of the same parent racing. That is retryable, and a
-      // 409 says so — a 500 reads as "the app is broken".
-      if (err.code === "ER_DUP_ENTRY") {
-        throw new ApiError(409, "concurrent_split", "Another split of this PO is in progress. Try again.")
-      }
-      // ApiError from splitPo's own guards (not_splittable / over_limit) must keep
-      // its status instead of being flattened into a 500.
-      if (err instanceof ApiError) throw err
       throw new ApiError(500, "internal", "Database error: " + err.message)
     } finally {
       conn.release()

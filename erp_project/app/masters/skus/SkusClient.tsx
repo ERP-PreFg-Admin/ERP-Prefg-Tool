@@ -12,12 +12,11 @@
  * re-renders with the DB-filtered slice.
  */
 
-import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
-import { Filter, X, Pencil, History as HistoryIcon, Layers, AlertTriangle } from "lucide-react"
+import { useUrlFilters } from "@/lib/useUrlFilters"
+import { Pencil, History as HistoryIcon, Layers, AlertTriangle } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
-import { Label } from "@/components/ui/label"
 import {
   Table,
   TableBody,
@@ -27,7 +26,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
-import { ToggleButton } from "@/components/ui/toggle-button"
+import { Select } from "@/components/ui/select"
+import { useFilterPanel, FilterToggleButton, FilterPanel, FilterField } from "@/components/masters/FilterPanel"
 import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import {
@@ -37,6 +37,7 @@ import {
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import { StatusBadge } from "@/components/masters/StatusBadge"
 import { EntityHistoryDialog } from "@/components/masters/EntityHistoryDialog"
+import { EmptyState } from "@/components/ui/empty-state"
 import { EditSkuDialog } from "./EditSkuDialog"
 import { SkuVariantsDialog } from "./SkuVariantsDialog"
 import type { Sku } from "@/types/masters"
@@ -64,6 +65,7 @@ export default function SkusClient({
   currentSkuType,
   currentCategory,
   currentSubcategory,
+  currentBom,
   brands,
   skuTypes,
   categories,
@@ -79,29 +81,17 @@ export default function SkusClient({
   currentSkuType: string
   currentCategory: string
   currentSubcategory: string
+  currentBom: string
   brands: string[]
   skuTypes: string[]
   categories: string[]
   subcategories: string[]
 }) {
-  const router       = useRouter()
-  const pathname     = usePathname()
-  const searchParams = useSearchParams()
-
-  /** Merge URL-param overrides and reset to page 1. */
-  function navigate(updates: Record<string, string>) {
-    const params = new URLSearchParams(searchParams.toString())
-    for (const [k, v] of Object.entries(updates)) {
-      if (v) params.set(k, v)
-      else   params.delete(k)
-    }
-    params.set("page", "1")
-    router.push(`${pathname}?${params.toString()}`)
-  }
+  const { navigate, router } = useUrlFilters()
   const refresh = () => router.refresh()
 
   // Filter panel open/close.
-  const [showFilters, setShowFilters] = useState(false)
+  const filterPanel = useFilterPanel()
 
   // Draft filter state — controls only update these locally; the actual
   // server refetch fires only when "Apply" is clicked.
@@ -110,6 +100,7 @@ export default function SkusClient({
   const [draftSkuType, setDraftSkuType]         = useState(currentSkuType)
   const [draftCategory, setDraftCategory]       = useState(currentCategory)
   const [draftSubcategory, setDraftSubcategory] = useState(currentSubcategory)
+  const [draftBom, setDraftBom]                 = useState(currentBom)
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft status when the URL-driven status filter changes
   useEffect(() => setDraftStatus(currentStatus), [currentStatus])
@@ -121,8 +112,10 @@ export default function SkusClient({
   useEffect(() => setDraftCategory(currentCategory), [currentCategory])
   // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft subcategory when the URL-driven subcategory filter changes
   useEffect(() => setDraftSubcategory(currentSubcategory), [currentSubcategory])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft Recipe filter when the URL-driven Recipe filter changes
+  useEffect(() => setDraftBom(currentBom), [currentBom])
 
-  const activeFilterCount = [currentStatus, currentBrand, currentSkuType, currentCategory, currentSubcategory].filter(Boolean).length
+  const activeFilterCount = [currentStatus, currentBrand, currentSkuType, currentCategory, currentSubcategory, currentBom].filter(Boolean).length
   const hasFilters = !!currentSearch || activeFilterCount > 0
 
   function applyFilters() {
@@ -132,8 +125,9 @@ export default function SkusClient({
       sku_type: draftSkuType,
       category: draftCategory,
       subcategory: draftSubcategory,
+      bom: draftBom,
     })
-    setShowFilters(false)
+    filterPanel.close()
   }
 
   function clearAllFilters() {
@@ -142,16 +136,15 @@ export default function SkusClient({
     setDraftSkuType("")
     setDraftCategory("")
     setDraftSubcategory("")
-    navigate({ search: "", status: "", brand: "", sku_type: "", category: "", subcategory: "" })
-    setShowFilters(false)
+    setDraftBom("")
+    navigate({ search: "", status: "", brand: "", sku_type: "", category: "", subcategory: "", bom: "" })
+    filterPanel.close()
   }
 
   // Row-level dialog state — one shared dialog per kind, driven by selection.
   const [editSku, setEditSku] = useState<Sku | null>(null)
   const [historySkuId, setHistorySkuId] = useState<number | null>(null)
   const [variantsTarget, setVariantsTarget] = useState<{ brand: string; base_sku_sno: number; sku_code: string } | null>(null)
-
-  const selectCls = "h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 
   return (
     <>
@@ -162,19 +155,7 @@ export default function SkusClient({
           placeholder="Search by code, name, brand…"
         />
 
-        <ToggleButton
-          size="lg"
-          pressed={activeFilterCount > 0}
-          onClick={() => setShowFilters((v) => !v)}
-        >
-          <Filter className="h-3.5 w-3.5" />
-          Filters
-          {activeFilterCount > 0 && (
-            <span className="ml-0.5 rounded-full bg-blue-600 px-1.5 py-0 text-[10px] text-white">
-              {activeFilterCount}
-            </span>
-          )}
-        </ToggleButton>
+        <FilterToggleButton open={filterPanel.open} onToggle={filterPanel.toggle} activeCount={activeFilterCount} />
 
         <MasterToolbarActions>
           <DownloadButton
@@ -185,93 +166,83 @@ export default function SkusClient({
       </MasterToolbar>
 
       {/* ── Filter panel ── */}
-      {showFilters && (
-        <Card className="border-blue-200 dark:border-blue-900 mb-5">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-medium">Filters</span>
-              <button onClick={() => setShowFilters(false)} className="text-muted-foreground hover:text-foreground">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div className="grid gap-1.5">
-                <Label className="text-xs">Status</Label>
-                <select
-                  value={draftStatus || "all"}
-                  onChange={(e) => setDraftStatus(e.target.value === "all" ? "" : e.target.value)}
-                  className={selectCls}
-                >
-                  <option value="all">All Status</option>
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                  <option value="discontinued">Discontinued</option>
-                </select>
-              </div>
+      <FilterPanel open={filterPanel.open} onClose={filterPanel.close} onApply={applyFilters} onClear={clearAllFilters}>
+        <FilterField label="Status">
+          <Select
+            className="w-full"
+            value={draftStatus || "all"}
+            onChange={(e) => setDraftStatus(e.target.value === "all" ? "" : e.target.value)}
+          >
+            <option value="all">All Status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+            <option value="discontinued">Discontinued</option>
+          </Select>
+        </FilterField>
 
-              <div className="grid gap-1.5">
-                <Label className="text-xs">Brand</Label>
-                <select
-                  value={draftBrand || "all"}
-                  onChange={(e) => setDraftBrand(e.target.value === "all" ? "" : e.target.value)}
-                  className={selectCls}
-                >
-                  <option value="all">All Brands</option>
-                  {brands.map((b) => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                </select>
-              </div>
+        <FilterField label="Brand">
+          <Select
+            className="w-full"
+            value={draftBrand || "all"}
+            onChange={(e) => setDraftBrand(e.target.value === "all" ? "" : e.target.value)}
+          >
+            <option value="all">All Brands</option>
+            {brands.map((b) => (
+              <option key={b} value={b}>{b}</option>
+            ))}
+          </Select>
+        </FilterField>
 
-              <div className="grid gap-1.5">
-                <Label className="text-xs">SKU Type</Label>
-                <select
-                  value={draftSkuType || "all"}
-                  onChange={(e) => setDraftSkuType(e.target.value === "all" ? "" : e.target.value)}
-                  className={selectCls}
-                >
-                  <option value="all">All Types</option>
-                  {skuTypes.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </div>
+        <FilterField label="SKU Type">
+          <Select
+            className="w-full"
+            value={draftSkuType || "all"}
+            onChange={(e) => setDraftSkuType(e.target.value === "all" ? "" : e.target.value)}
+          >
+            <option value="all">All Types</option>
+            {skuTypes.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </Select>
+        </FilterField>
 
-              <div className="grid gap-1.5">
-                <Label className="text-xs">Category</Label>
-                <select
-                  value={draftCategory || "all"}
-                  onChange={(e) => setDraftCategory(e.target.value === "all" ? "" : e.target.value)}
-                  className={selectCls}
-                >
-                  <option value="all">All Categories</option>
-                  {categories.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
+        <FilterField label="Category">
+          <Select
+            className="w-full"
+            value={draftCategory || "all"}
+            onChange={(e) => setDraftCategory(e.target.value === "all" ? "" : e.target.value)}
+          >
+            <option value="all">All Categories</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </Select>
+        </FilterField>
 
-              <div className="grid gap-1.5">
-                <Label className="text-xs">Sub-Category</Label>
-                <select
-                  value={draftSubcategory || "all"}
-                  onChange={(e) => setDraftSubcategory(e.target.value === "all" ? "" : e.target.value)}
-                  className={selectCls}
-                >
-                  <option value="all">All Sub-Categories</option>
-                  {subcategories.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <Button variant="outline" size="sm" onClick={clearAllFilters}>Clear</Button>
-              <Button size="sm" onClick={applyFilters}>Apply</Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+        <FilterField label="Sub-Category">
+          <Select
+            className="w-full"
+            value={draftSubcategory || "all"}
+            onChange={(e) => setDraftSubcategory(e.target.value === "all" ? "" : e.target.value)}
+          >
+            <option value="all">All Sub-Categories</option>
+            {subcategories.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </Select>
+        </FilterField>
+
+        <FilterField label="BOM">
+          <Select
+            className="w-full"
+            value={draftBom || "all"}
+            onChange={(e) => setDraftBom(e.target.value === "all" ? "" : e.target.value)}
+          >
+            <option value="all">All SKUs</option>
+            <option value="missing">Missing Recipe</option>
+          </Select>
+        </FilterField>
+      </FilterPanel>
 
       {/* ── Table card ── */}
       <Card>
@@ -280,11 +251,7 @@ export default function SkusClient({
           <Table>
             <TableHeader>
               <TableRow>
-                {/* Frozen: the SKU code stays pinned while the other 11 columns
-                    scroll under it. A sticky cell paints above its siblings, so
-                    it needs an opaque background — TableHead already has one,
-                    body cells take the row's via bg-inherit. */}
-                <TableHead className="sticky left-0 z-10 shadow-[1px_0_0_var(--color-border)]">SKU Code</TableHead>
+                <TableHead>SKU Code</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Brand</TableHead>
                 <TableHead>SKU Type</TableHead>
@@ -301,8 +268,8 @@ export default function SkusClient({
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={12} className="text-center text-muted-foreground py-10">
-                    {hasFilters ? "No SKUs match your filters." : "No records found."}
+                  <TableCell colSpan={12} className="text-center py-10">
+                    <EmptyState hasFilters={hasFilters} filteredMessage="No SKUs match your filters." />
                   </TableCell>
                 </TableRow>
               ) : (
@@ -310,11 +277,8 @@ export default function SkusClient({
                   const missing = missingFieldsFor(row)
                   const hasVariants = (row.variant_count ?? 0) > 1 && row.brand && row.base_sku_sno != null
                   return (
-                    // Opaque in every state — the frozen cell inherits this
-                    // background, and a translucent one shows the scrolling
-                    // columns' text through it.
-                    <TableRow key={row.id} className="bg-background hover:bg-muted">
-                      <TableCell className="sticky left-0 z-10 bg-inherit shadow-[1px_0_0_var(--color-border)] font-mono text-xs font-medium">
+                    <TableRow key={row.id}>
+                      <TableCell className="font-mono text-xs font-medium">
                         <div className="flex items-center gap-1.5">
                           {row.sku_code}
                           {missing.length > 0 && (

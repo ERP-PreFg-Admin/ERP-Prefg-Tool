@@ -244,6 +244,7 @@ export const approvalsSql = {
       a.id,
       a.module,
       a.entity_id,
+      a.approval_type,
       a.raised_on,
       a.status,
       a.remarks,
@@ -258,11 +259,11 @@ export const approvalsSql = {
   `,
 
   /**
-   * Same shape as listHistoryForEntity, but for every BOM version belonging
+   * Same shape as listHistoryForEntity, but for every Recipe version belonging
    * to one SKU at once — RM/PM now version independently, so a SKU can
    * accumulate many master_recipe rows (one per version) over time, each with
-   * its own approval. The row-level "History" dialog for BOM resolves the
-   * clicked BOM's sku_id first (see app/api/v1/approvals/entity-history/route.ts),
+   * its own approval. The row-level "History" dialog for Recipe resolves the
+   * clicked Recipe's sku_id first (see app/api/v1/approvals/entity-history/route.ts),
    * then passes ALL of that SKU's bom_ids here so the full recipe lineage
    * shows as one linked trail instead of being siloed per version.
    * Params: [bom_ids[]] — used via query() (pool.query), which expands an
@@ -273,6 +274,7 @@ export const approvalsSql = {
       a.id,
       a.module,
       a.entity_id,
+      a.approval_type,
       a.raised_on,
       a.status,
       a.remarks,

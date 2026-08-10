@@ -14,6 +14,7 @@
 import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Select } from "@/components/ui/select"
 import { RecipeLineEditorTable } from "./RecipeLineEditorTable"
 import { ChangeTypeCheckboxes } from "./ChangeTypeCheckboxes"
 import { RecipeArtifactsAddButton, RecipeArtifactsList } from "./RecipeArtifactsEditor"
@@ -131,7 +132,7 @@ export function RecipeEditDialog({
 
             <div className="flex items-center gap-2">
               <label className="text-xs font-medium text-muted-foreground shrink-0">Status</label>
-              <select
+              <Select
                 className="w-36 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 value={status}
                 onChange={(e) => onChangeStatus(e.target.value)}
@@ -140,7 +141,7 @@ export function RecipeEditDialog({
                 {RECIPE_STATUS_VALUES.map((v) => (
                   <option key={v} value={v}>{STATUS_LABELS[v] ?? v}</option>
                 ))}
-              </select>
+              </Select>
               <Button variant="outline" size="sm" onClick={onSaveStatus} disabled={statusSaving}>
                 {statusSaving ? "Updating…" : "Update Status"}
               </Button>

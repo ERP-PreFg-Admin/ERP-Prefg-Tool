@@ -3,8 +3,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { Textarea } from "@/components/ui/textarea"
-import { Label } from "@/components/ui/label"
+import { RemarksField, REJECTION_REASON_PRESETS } from "@/components/masters/RemarksField"
 
 export default function RejectDialog({
   open, loading, onClose, onConfirm,
@@ -36,16 +35,15 @@ export default function RejectDialog({
           <p className="text-sm text-muted-foreground">
             The record will be marked <strong>Rejected</strong> so the requester can modify and resubmit.
           </p>
-          <div className="grid gap-1.5">
-            <Label htmlFor="remarks">Remarks <span className="text-destructive">*</span></Label>
-            <Textarea
+          <div>
+            <RemarksField
               id="remarks"
               placeholder="Explain why this edit is being rejected…"
               value={remarks}
-              onChange={(e) => { setRemarks(e.target.value); setError("") }}
-              rows={3}
+              onChange={(v) => { setRemarks(v); setError("") }}
+              presets={REJECTION_REASON_PRESETS}
             />
-            {error && <p className="text-xs text-destructive">{error}</p>}
+            {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
           </div>
         </div>
         <DialogFooter>

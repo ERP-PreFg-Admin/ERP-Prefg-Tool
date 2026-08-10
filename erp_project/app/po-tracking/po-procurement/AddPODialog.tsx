@@ -8,26 +8,26 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+import { Select } from "@/components/ui/select"
 import { useToast } from "@/components/ui/toast"
-import type { MfgOption, WarehouseOption } from "./po-types"
+import { RemarksField, PO_REASON_PRESETS } from "@/components/masters/RemarksField"
+import type { RecipeChoice, MfgOption, MfgSkuOption, WarehouseOption } from "./po-types"
 import { useQuotedRate } from "./useQuotedRate"
 import { todayIST } from "@/lib/date"
 
 type PoType = "normal" | "impromptu"
 
-type MfgSkuOption = { sku_code: string; sku_name: string }
-
 type PoLineRowState = {
   sku_code: string
   sku_name: string
+  /** The recipes this manufacturer produces the SKU under, active first. */
+  boms: RecipeChoice[]
+  /** Selected recipe, as a string because it comes back off a <Select>. */
+  recipe_id: string
   qty: string
   expected_on: string
   destination: string
 }
-
-const selectCls =
-  "flex h-9 w-full rounded-md border border-input bg-background px-2 py-1 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
 
 // One SKU row — the quoted rate is fetched independently per row (display
 // only; submission re-fetches it fresh right before creating each PO, so a
@@ -51,6 +51,28 @@ function PoLineRow({
         <div className="font-mono text-xs font-medium">{row.sku_code}</div>
         <div className="text-[11px] text-muted-foreground max-w-40 truncate">{row.sku_name}</div>
       </td>
+      {/* Recipe — one recipe is the norm, so it reads as text; only a SKU this
+          manufacturer builds two ways makes the user choose. */}
+      <td className="px-2 py-1.5 align-top">
+        {row.boms.length === 0 ? (
+          <span className="text-[11px] text-destructive">No Recipe on this line</span>
+        ) : row.boms.length === 1 ? (
+          <span className="font-mono text-[11px] text-muted-foreground">{row.boms[0].bom_code}</span>
+        ) : (
+          <Select
+            value={row.recipe_id}
+            onChange={(e) => onChange("recipe_id", e.target.value)}
+            className="h-8 w-40 text-xs"
+          >
+            {row.boms.map((b) => (
+              <option key={b.recipe_id} value={String(b.recipe_id)}>
+                {b.bom_code}{b.status !== "active" ? ` (${b.status})` : ""}
+              </option>
+            ))}
+          </Select>
+        )}
+      </td>
+
       <td className="px-2 py-1.5 align-top">
         <Input
           type="number" min={0} placeholder="0" value={row.qty}
@@ -69,10 +91,10 @@ function PoLineRow({
         />
       </td>
       <td className="px-2 py-1.5 align-top">
-        <select
+        <Select
           value={row.destination}
           onChange={(e) => onChange("destination", e.target.value)}
-          className={selectCls}
+          className="w-full text-xs"
         >
           <option value="">— Select —</option>
           {warehouseOptions.map((w) => (
@@ -80,7 +102,7 @@ function PoLineRow({
               {w.name}{w.zone ? ` — ${w.zone}` : ""} ({w.type})
             </option>
           ))}
-        </select>
+        </Select>
       </td>
       <td className="px-2 py-1.5 align-top">
         {error && <p className="text-[11px] text-destructive max-w-32">{error}</p>}
@@ -139,6 +161,7 @@ export default function AddPODialog({
   }, [open])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears rows when the dialog closes or the manufacturer selection is cleared
     if (!open || !mfgId) { setRows([]); return }
     setLoadingSkus(true)
     setSkusError("")
@@ -150,6 +173,10 @@ export default function AddPODialog({
           (data.skus ?? []).map((s) => ({
             sku_code: s.sku_code,
             sku_name: s.sku_name,
+            boms: s.boms ?? [],
+            // The API sorts active recipes first, so the default is the live
+            // one whenever there is a choice to make.
+            recipe_id: s.boms?.[0] ? String(s.boms[0].recipe_id) : "",
             qty: "",
             expected_on: "",
             destination: defaultDest,
@@ -181,7 +208,8 @@ export default function AddPODialog({
 
     const errs: Record<string, string> = {}
     for (const r of filled) {
-      if (!r.expected_on) errs[r.sku_code] = "Expected dispatch date is required."
+      if (!r.recipe_id) errs[r.sku_code] = "No Recipe on this manufacturer's line for this SKU — it can't be ordered."
+      else if (!r.expected_on) errs[r.sku_code] = "Expected dispatch date is required."
       else if (r.expected_on < today) errs[r.sku_code] = "Backdating is not allowed."
     }
     if (Object.keys(errs).length > 0) { setRowErrors(errs); return }
@@ -209,6 +237,7 @@ export default function AddPODialog({
             po_type:      poType,
             mfg_id:       Number(mfgId),
             sku_code:     r.sku_code,
+            recipe_id:       Number(r.recipe_id),
             qty:          Number(r.qty),
             unit_price:   unitPrice,
             total_amount: totalAmt,
@@ -250,9 +279,11 @@ export default function AddPODialog({
     const errMap: Record<string, string> = {}
     for (const f of failed) errMap[f.sku_code] = f.message
     setRowErrors(errMap)
-    setApiError(
-      `${succeeded.length} PO${succeeded.length !== 1 ? "s" : ""} created, ${failed.length} failed — see errors below.`
-    )
+    const summary = succeeded.length > 0
+      ? `${succeeded.length} PO${succeeded.length !== 1 ? "s" : ""} created, ${failed.length} failed — see errors below.`
+      : `All ${failed.length} PO${failed.length !== 1 ? "s" : ""} failed — see errors below.`
+    setApiError(summary)
+    toast({ title: succeeded.length > 0 ? "Some POs failed" : "Couldn't create POs", description: summary, variant: "error" })
     if (succeeded.length > 0) onCreated()
   }
 
@@ -272,7 +303,7 @@ export default function AddPODialog({
           {/* Manufacturer — selected first; SKUs load once picked */}
           <div className="grid gap-1.5">
             <Label htmlFor="apo-mfg">Manufacturer <span className="text-destructive">*</span></Label>
-            <select
+            <Select
               id="apo-mfg" value={mfgId}
               onChange={(e) => setMfgId(e.target.value)}
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
@@ -281,7 +312,7 @@ export default function AddPODialog({
               {mfgOptions.map((m) => (
                 <option key={m.id} value={m.id}>{m.code} — {m.name}</option>
               ))}
-            </select>
+            </Select>
           </div>
 
           {/* SKU rows — one line per SKU: qty, rate, dispatch, destination */}
@@ -303,6 +334,7 @@ export default function AddPODialog({
                 <thead className="bg-muted/50">
                   <tr>
                     <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">SKU</th>
+                    <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">Recipe</th>
                     <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">PO Qty</th>
                     <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">Rate / Unit</th>
                     <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">Expected Dispatch</th>
@@ -331,14 +363,15 @@ export default function AddPODialog({
 
           {/* Reason — mandatory only for Impromptu, applies to the whole batch */}
           <div className="grid gap-1.5">
-            <Label htmlFor="apo-reason">
-              Reason / Notes
-              {poType === "impromptu" && <span className="text-destructive"> *</span>}
-            </Label>
-            <Textarea
-              id="apo-reason" rows={2}
+            <RemarksField
+              id="apo-reason"
+              label="Reason / Notes"
+              required={poType === "impromptu"}
+              helperText={poType === "impromptu" ? "Required for Impromptu POs — briefly explain why these are being raised." : ""}
               placeholder="Why are these POs being raised? Any special instructions…"
-              value={reason} onChange={(e) => setReason(e.target.value)}
+              value={reason}
+              onChange={setReason}
+              presets={PO_REASON_PRESETS}
             />
           </div>
 

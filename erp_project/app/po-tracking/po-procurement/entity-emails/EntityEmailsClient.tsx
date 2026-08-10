@@ -7,13 +7,14 @@
  */
 
 import { useState } from "react"
-import { useRouter, usePathname, useSearchParams } from "next/navigation"
+import { useUrlFilters } from "@/lib/useUrlFilters"
 import { ArrowLeft, Plus } from "lucide-react"
 import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import { MasterToolbar, MasterToolbarActions } from "@/components/masters/MasterToolbar"
 import { Button } from "@/components/ui/button"
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import { Card, CardContent } from "@/components/ui/card"
+import { Select } from "@/components/ui/select"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
@@ -29,9 +30,6 @@ type EntityEmailRow = {
   purpose: string | null
   created_at: string | null
 }
-
-const selectCls =
-  "h-9 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 
 export default function EntityEmailsClient({
   rows,
@@ -56,20 +54,8 @@ export default function EntityEmailsClient({
   warehouseOptions: EntityOption[]
   canEdit: boolean
 }) {
-  const router       = useRouter()
-  const pathname      = usePathname()
-  const searchParams  = useSearchParams()
+  const { navigate, router } = useUrlFilters()
   const [showAdd, setShowAdd] = useState(false)
-
-  function navigate(updates: Record<string, string>) {
-    const params = new URLSearchParams(searchParams.toString())
-    for (const [k, v] of Object.entries(updates)) {
-      if (v) params.set(k, v)
-      else   params.delete(k)
-    }
-    params.set("page", "1")
-    router.push(`${pathname}?${params.toString()}`)
-  }
 
   return (
     <>
@@ -79,16 +65,15 @@ export default function EntityEmailsClient({
           initialValue={currentSearch}
           placeholder="Search by code, email, or purpose…"
         />
-        <select
+        <Select
           value={currentType}
           onChange={(e) => navigate({ type: e.target.value })}
-          className={selectCls}
         >
           <option value="">All Types</option>
           <option value="vendor">Vendor</option>
           <option value="mfg">Manufacturer</option>
           <option value="warehouse">Warehouse</option>
-        </select>
+        </Select>
         <MasterToolbarActions>
           <Button
             variant="outline"

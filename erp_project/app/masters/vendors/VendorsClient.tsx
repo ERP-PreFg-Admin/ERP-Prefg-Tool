@@ -19,10 +19,13 @@
  * the SAME URL params so the user stays on their current page and filters.
  */
 
-import { useRouter, usePathname, useSearchParams } from "next/navigation"
+import { useUrlFilters } from "@/lib/useUrlFilters"
 import { Badge } from "@/components/ui/badge"
 import { StatusBadge } from "@/components/masters/StatusBadge"
 import { Card, CardContent } from "@/components/ui/card"
+import { EmptyState } from "@/components/ui/empty-state"
+import { Select } from "@/components/ui/select"
+import { useFilterPanel, FilterToggleButton, FilterPanel, FilterField } from "@/components/masters/FilterPanel"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import {
   Table,
@@ -100,12 +103,13 @@ export default function VendorsClient({
   currentZone: string
   zones: string[]
 }) {
-  const router       = useRouter()
-  const pathname     = usePathname()
-  const searchParams = useSearchParams()
+  const { navigate, router } = useUrlFilters()
   const [editVendor, setEditVendor] = useState<Vendor | null>(null)
   const [docsVendor, setDocsVendor] = useState<Vendor | null>(null)
   const [historyVendorId, setHistoryVendorId] = useState<number | null>(null)
+
+  // Filter panel open/close.
+  const filterPanel = useFilterPanel()
 
   // Draft filter state — selects only update these locally; the actual
   // server refetch fires only when "Apply" is clicked.
@@ -115,25 +119,23 @@ export default function VendorsClient({
   useEffect(() => setDraftType(currentType), [currentType])
   // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft zone when the URL-driven zone filter changes
   useEffect(() => setDraftZone(currentZone), [currentZone])
-  const draftDirty = draftType !== currentType || draftZone !== currentZone
 
-  /**
-   * Merge one or more key/value overrides into the current URL params,
-   * reset page to 1, then navigate. Empty-string values delete the param.
-   */
-  function navigate(updates: Record<string, string>) {
-    const params = new URLSearchParams(searchParams.toString())
-    for (const [k, v] of Object.entries(updates)) {
-      if (v) params.set(k, v)
-      else   params.delete(k)
-    }
-    params.set("page", "1")
-    router.push(`${pathname}?${params.toString()}`)
-  }
-
+  const activeFilterCount = [currentType, currentZone].filter(Boolean).length
   const hasFilters = currentSearch || currentType || currentZone
   // router.refresh() re-runs the server page with the SAME URL, keeping page + filters.
   const refresh    = () => router.refresh()
+
+  function applyFilters() {
+    navigate({ type: draftType, zone: draftZone })
+    filterPanel.close()
+  }
+
+  function clearAllFilters() {
+    setDraftType("")
+    setDraftZone("")
+    navigate({ search: "", type: "", zone: "" })
+    filterPanel.close()
+  }
 
   return (
     <>
@@ -144,35 +146,7 @@ export default function VendorsClient({
           placeholder="Search by code or name…"
         />
 
-        <select
-          value={draftType || "all"}
-          onChange={(e) =>
-            setDraftType(e.target.value === "all" ? "" : e.target.value)
-          }
-          className="h-9 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <option value="all">All Types</option>
-          <option value="rm">RM</option>
-          <option value="pm">PM</option>
-          <option value="both">BOTH</option>
-        </select>
-
-        <select
-          value={draftZone || "all"}
-          onChange={(e) =>
-            setDraftZone(e.target.value === "all" ? "" : e.target.value)
-          }
-          className="h-9 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <option value="all">All Zones</option>
-          {zones.map((z) => (
-            <option key={z} value={z}>{z}</option>
-          ))}
-        </select>
-
-        <Button variant="outline" size="lg" onClick={() => navigate({ type: draftType, zone: draftZone })} disabled={!draftDirty}>
-          Apply
-        </Button>
+        <FilterToggleButton open={filterPanel.open} onToggle={filterPanel.toggle} activeCount={activeFilterCount} />
 
         <MasterToolbarActions>
           <DownloadButton
@@ -192,15 +166,40 @@ export default function VendorsClient({
         </MasterToolbarActions>
       </MasterToolbar>
 
+      {/* ── Filter panel ── */}
+      <FilterPanel open={filterPanel.open} onClose={filterPanel.close} onApply={applyFilters} onClear={clearAllFilters}>
+        <FilterField label="Type">
+          <Select
+            className="w-full"
+            value={draftType || "all"}
+            onChange={(e) => setDraftType(e.target.value === "all" ? "" : e.target.value)}
+          >
+            <option value="all">All Types</option>
+            <option value="rm">RM</option>
+            <option value="pm">PM</option>
+            <option value="both">BOTH</option>
+          </Select>
+        </FilterField>
+
+        <FilterField label="Zone">
+          <Select
+            className="w-full"
+            value={draftZone || "all"}
+            onChange={(e) => setDraftZone(e.target.value === "all" ? "" : e.target.value)}
+          >
+            <option value="all">All Zones</option>
+            {zones.map((z) => (
+              <option key={z} value={z}>{z}</option>
+            ))}
+          </Select>
+        </FilterField>
+      </FilterPanel>
+
       {/* ── Table card ── */}
       <Card>
         <RecordCountHeader
           total={total}
-          onClearFilters={hasFilters ? () => {
-            setDraftType("")
-            setDraftZone("")
-            navigate({ search: "", type: "", zone: "" })
-          } : undefined}
+          onClearFilters={hasFilters ? clearAllFilters : undefined}
         />
         <CardContent className="p-0">
           <Table>
@@ -221,8 +220,8 @@ export default function VendorsClient({
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-muted-foreground py-10">
-                    {hasFilters ? "No vendors match your filters." : "No records found."}
+                  <TableCell colSpan={10} className="text-center py-10">
+                    <EmptyState hasFilters={!!hasFilters} filteredMessage="No vendors match your filters." />
                   </TableCell>
                 </TableRow>
               ) : (

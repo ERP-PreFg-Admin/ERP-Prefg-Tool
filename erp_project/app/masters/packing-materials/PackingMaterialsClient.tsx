@@ -4,6 +4,8 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { EmptyState } from "@/components/ui/empty-state"
+import { Select } from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -83,7 +85,7 @@ export default function PackingMaterialsClient({
           placeholder="Search by code, name, type…"
         />
 
-        <select
+        <Select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           className="h-9 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -91,7 +93,7 @@ export default function PackingMaterialsClient({
           <option value="all">All Status</option>
           <option value="active">Active</option>
           <option value="discontinued">Discontinued</option>
-        </select>
+        </Select>
 
         <MasterToolbarActions>
           <CsvImportDialog
@@ -144,11 +146,9 @@ export default function PackingMaterialsClient({
                 <TableRow>
                   <TableCell
                     colSpan={5}
-                    className="text-center text-muted-foreground py-10"
+                    className="text-center py-10"
                   >
-                    {hasFilters
-                      ? "No packing materials match your filters."
-                      : "No records found."}
+                    <EmptyState hasFilters={!!hasFilters} filteredMessage="No packing materials match your filters." />
                   </TableCell>
                 </TableRow>
               ) : (

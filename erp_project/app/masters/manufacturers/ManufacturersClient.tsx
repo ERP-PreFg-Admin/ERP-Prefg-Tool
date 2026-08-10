@@ -7,8 +7,11 @@
  * Owns search (UrlSearchInput), Add/CSV dialogs, and the PaginationBar footer.
  */
 
-import { useRouter, usePathname, useSearchParams } from "next/navigation"
+import { useUrlFilters } from "@/lib/useUrlFilters"
 import { Card, CardContent } from "@/components/ui/card"
+import { EmptyState } from "@/components/ui/empty-state"
+import { Select } from "@/components/ui/select"
+import { useFilterPanel, FilterToggleButton, FilterPanel, FilterField } from "@/components/masters/FilterPanel"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import {
   Table,
@@ -32,7 +35,7 @@ import type { MasterField } from "@/components/masters/field-config"
 import { ZONE_OPTIONS, normalizeZone } from "@/components/masters/field-config"
 import { GST_REGEX, IFSC_REGEX, ACCOUNT_NUMBER_REGEX, EMAIL_REGEX } from "@/lib/validation/shared"
 import type { Mfg } from "@/types/masters"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Pencil, FileText, History as HistoryIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { EditMfgDialog } from "./EditMfgDialog"
@@ -81,19 +84,41 @@ export default function ManufacturersClient({
   page,
   pageSize,
   currentSearch,
+  currentStatus,
 }: {
   rows: Mfg[]
   total: number
   page: number
   pageSize: number
   currentSearch: string
+  currentStatus: string
 }) {
-  const router = useRouter()
+  const { navigate, router } = useUrlFilters()
   // router.refresh() re-runs the server page with current URL — keeps page + filters.
   const refresh = () => router.refresh()
   const [editMfg, setEditMfg] = useState<Mfg | null>(null)
   const [docsMfg, setDocsMfg] = useState<Mfg | null>(null)
   const [historyMfgId, setHistoryMfgId] = useState<number | null>(null)
+
+  const filterPanel = useFilterPanel()
+  const [draftStatus, setDraftStatus] = useState(currentStatus)
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven status filter changes
+  useEffect(() => setDraftStatus(currentStatus), [currentStatus])
+
+  const activeFilterCount = currentStatus ? 1 : 0
+  const hasFilters = !!currentSearch || activeFilterCount > 0
+
+  function applyFilters() {
+    navigate({ status: draftStatus })
+    filterPanel.close()
+  }
+
+  function clearAllFilters() {
+    setDraftStatus("")
+    navigate({ search: "", status: "" })
+    filterPanel.close()
+  }
+
   return (
     <>
       {/* ── Toolbar ── */}
@@ -102,6 +127,7 @@ export default function ManufacturersClient({
           initialValue={currentSearch}
           placeholder="Search by code or name…"
         />
+        <FilterToggleButton open={filterPanel.open} onToggle={filterPanel.toggle} activeCount={activeFilterCount} />
         <MasterToolbarActions>
           <DownloadButton
             endpoint="/api/v1/masters/manufacturers/export"
@@ -120,9 +146,24 @@ export default function ManufacturersClient({
         </MasterToolbarActions>
       </MasterToolbar>
 
+      {/* ── Filter panel ── */}
+      <FilterPanel open={filterPanel.open} onClose={filterPanel.close} onApply={applyFilters} onClear={clearAllFilters}>
+        <FilterField label="Status">
+          <Select
+            className="w-full"
+            value={draftStatus || "all"}
+            onChange={(e) => setDraftStatus(e.target.value === "all" ? "" : e.target.value)}
+          >
+            <option value="all">All Status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </Select>
+        </FilterField>
+      </FilterPanel>
+
       {/* ── Table card ── */}
       <Card>
-        <RecordCountHeader total={total} matching={currentSearch} />
+        <RecordCountHeader total={total} onClearFilters={hasFilters ? clearAllFilters : undefined} />
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -141,10 +182,8 @@ export default function ManufacturersClient({
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground py-10">
-                    {currentSearch
-                      ? "No manufacturers match your search."
-                      : "No records found."}
+                  <TableCell colSpan={9} className="text-center py-10">
+                    <EmptyState hasFilters={hasFilters} filteredMessage="No manufacturers match your filters." />
                   </TableCell>
                 </TableRow>
               ) : (

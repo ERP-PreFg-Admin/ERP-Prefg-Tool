@@ -32,13 +32,22 @@ const STATUS_OPTIONS = STATUS_KEYS.map((k) => ({ value: k, label: STATUS_CONFIG[
  * see buildRows in components/masters/field-config.ts.
  *
  * Row semantics (see poBulkHandler.applyAndArchive):
- *   po_no blank/unrecognized → CREATE a new PO (mfg_code, sku_code, qty required)
+ *   po_no blank/unrecognized → CREATE a new PO (mfg_code, sku_code, bom_code, qty required)
  *   po_no matches an existing PO → UPDATE that PO's status/expected_on/destination only
+ *     (bom_code is still required, but only as a cross-check against the PO —
+ *      it is written only when the PO doesn't have one yet)
  */
 export const PO_BULK_CSV_FIELDS: MasterField[] = [
   { key: "po_no", label: "PO No.", aliases: ["po no."], placeholder: "Blank = create new PO", sample: "" },
   { key: "mfg_code", label: "Mfg Code", aliases: ["mfg code"], required: true, placeholder: "e.g. MFG-001-ABC", sample: "MFG-001-ABC" },
   { key: "sku_code", label: "SKU", aliases: ["sku"], required: true, placeholder: "e.g. SKU-001", sample: "SKU-001" },
+  {
+    // Which recipe the PO is against. Required on every row, including updates:
+    // the importer uses it to confirm the row is talking about the same PO the
+    // po_no points at, and backfills it on POs raised before this column existed.
+    key: "bom_code", label: "Recipe Code", aliases: ["bom code"], required: true,
+    placeholder: "e.g. Recipe-SKU-001-R1-P1", sample: "Recipe-SKU-001-R1-P1",
+  },
   {
     key: "qty", label: "PO Qty", aliases: ["po qty"], type: "number", required: true, placeholder: "e.g. 5000", sample: "5000",
     validate: (raw) =>

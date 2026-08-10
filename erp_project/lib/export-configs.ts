@@ -41,16 +41,29 @@ export const PM_BASE_EXPORT_COLUMNS: ExportColumn[] = [
 
 // ── SKUs ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Mirrors the on-screen column set of /masters/skus (SkusClient's table head),
+ * in the same order. `filling` is split into value + UOM because the UI renders
+ * them concatenated ("30ml"), which is not sortable/filterable in a spreadsheet.
+ *
+ * Keys must match `skus.selectAllFiltered` (lib/queries/skus.ts) — note it is
+ * `subcategory`, not the DWH source's `sub_category`. `bom_code` is not a
+ * column on master_skus; the export route resolves it from `active_bom_id`
+ * exactly as app/masters/skus/page.tsx does.
+ */
 export const SKU_EXPORT_COLUMNS: ExportColumn[] = [
-  { key: "sku_code",     label: "SKU Code",     type: "text"   },
-  { key: "name",         label: "Name",         type: "text"   },
-  { key: "brand",        label: "Brand",        type: "text"   },
-  { key: "category",     label: "Category",     type: "text"   },
-  { key: "sub_category", label: "Sub-Category", type: "text"   },
-  { key: "mrp",          label: "MRP",          type: "number" },
-  { key: "status",       label: "Status",       type: "text"   },
-  { key: "hsn",          label: "HSN",          type: "text"   },
-  { key: "launch_date",  label: "Launch Date",  type: "text"   },
+  { key: "sku_code",    label: "SKU Code",    type: "text"   },
+  { key: "name",        label: "Name",        type: "text"   },
+  { key: "brand",       label: "Brand",       type: "text"   },
+  { key: "sku_type",    label: "SKU Type",    type: "text"   },
+  { key: "category",    label: "Category",    type: "text"   },
+  { key: "subcategory", label: "Sub-Category", type: "text"  },
+  { key: "filling",     label: "Filling",     type: "number" },
+  { key: "filling_uom", label: "Filling UOM", type: "text"   },
+  { key: "mrp",         label: "MRP",         type: "number" },
+  { key: "gst",         label: "GST %",       type: "number" },
+  { key: "bom_code",    label: "BOM",         type: "text"   },
+  { key: "status",      label: "Status",      type: "text"   },
 ]
 
 // ── Raw Materials — Vendor view ───────────────────────────────────────────────
@@ -127,6 +140,9 @@ export const PO_PROCUREMENT_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "sku_code",      label: "SKU",                 type: "text"   },
   { key: "sku_name",      label: "SKU Name",            type: "text"   },
   { key: "sku_status",    label: "SKU Status",          type: "text"   },
+  // Exported because the bulk importer requires it — a downloaded file has to
+  // be re-uploadable without hand-adding the column.
+  { key: "bom_code",      label: "Recipe Code",            type: "text"   },
   { key: "qty",           label: "PO Qty",              type: "number" },
   { key: "received_qty",  label: "Received Qty",        type: "number" },
   { key: "unit_price",    label: "Rate",                type: "number" },

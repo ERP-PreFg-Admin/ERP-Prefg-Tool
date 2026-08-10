@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
+import { Select } from "@/components/ui/select"
+import { useToast } from "@/components/ui/toast"
 import type { MfgLineOption, MiscCostLine, MiscCostType } from "@/types/masters"
-import { todayIST } from "@/lib/date"
 
 const TYPE_LABEL: Record<MiscCostType, string> = {
   jw: "Job Work",
@@ -34,13 +35,10 @@ const EMPTY_FORM: FormState = {
   type: "jw",
   recipe_id: "",
   cost: "",
-  effective_from: todayIST(),
+  effective_from: new Date().toISOString().slice(0, 10),
   effective_till: "",
   status: "active",
 }
-
-const selectCls =
-  "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
 
 export default function MiscCostDialog({
   open, onClose, onSaved, mfgId, options, editData,
@@ -54,13 +52,14 @@ export default function MiscCostDialog({
 }) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [submitting, setSubmitting] = useState(false)
-  const [apiError, setApiError] = useState("")
+  const { toast } = useToast()
   const effectiveType = editData ? editData.type : form.type
   const isPercent = isPercentType(effectiveType)
 
   useEffect(() => {
     if (!open) return
     if (editData) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets form state each time the dialog is opened
       setForm({
         type: editData.type,
         recipe_id: String(editData.recipe_id),
@@ -72,18 +71,16 @@ export default function MiscCostDialog({
     } else {
       setForm(EMPTY_FORM)
     }
-    setApiError("")
   }, [open, editData])
 
   function set<K extends keyof FormState>(field: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [field]: value }))
-    setApiError("")
   }
 
   async function handleSubmit() {
-    if (!editData && !form.recipe_id) { setApiError("Select a SKU / Recipe."); return }
-    if (!form.cost) { setApiError(isPercent ? "Enter a wastage %." : "Enter a cost."); return }
-    if (isPercent && (Number(form.cost) < 0 || Number(form.cost) > 100)) { setApiError("Wastage % must be between 0 and 100."); return }
+    if (!editData && !form.recipe_id) { toast({ title: "Select a SKU / Recipe.", variant: "error" }); return }
+    if (!form.cost) { toast({ title: isPercent ? "Enter a wastage %." : "Enter a cost.", variant: "error" }); return }
+    if (isPercent && (Number(form.cost) < 0 || Number(form.cost) > 100)) { toast({ title: "Wastage % must be between 0 and 100.", variant: "error" }); return }
 
     setSubmitting(true)
     try {
@@ -113,10 +110,11 @@ export default function MiscCostDialog({
         body: JSON.stringify(payload),
       })
       const data = await res.json()
-      if (!res.ok) { setApiError(data.error ?? "Failed to save."); return }
+      if (!res.ok) { toast({ title: "Couldn't save misc. cost", description: data.error, variant: "error" }); return }
+      toast({ title: editData ? "Cost updated" : "Cost added", variant: "success" })
       onSaved()
     } catch {
-      setApiError("Network error. Please try again.")
+      toast({ title: "Couldn't save misc. cost", description: "Network error. Please try again.", variant: "error" })
     } finally {
       setSubmitting(false)
     }
@@ -135,17 +133,17 @@ export default function MiscCostDialog({
           {!editData && (
             <div className="grid gap-1.5">
               <Label htmlFor="mc-type">Type <span className="text-destructive">*</span></Label>
-              <select
+              <Select
                 id="mc-type" value={form.type}
                 onChange={(e) => set("type", e.target.value as MiscCostType)}
-                className={selectCls}
+                className="w-full"
               >
                 <option value="jw">Job Work</option>
                 <option value="shrink">Shrink Wrap</option>
                 <option value="shipper">Shipper</option>
                 <option value="rm_loss">RM Wastage %</option>
                 <option value="pm_loss">PM Wastage %</option>
-              </select>
+              </Select>
             </div>
           )}
 
@@ -192,18 +190,16 @@ export default function MiscCostDialog({
 
           <div className="grid gap-1.5">
             <Label htmlFor="mc-status">Status</Label>
-            <select
+            <Select
               id="mc-status" value={form.status}
               onChange={(e) => set("status", e.target.value as FormState["status"])}
-              className={selectCls}
+              className="w-full"
             >
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
               <option value="discontinued">Discontinued</option>
-            </select>
+            </Select>
           </div>
-
-          {apiError && <p className="text-sm text-destructive">{apiError}</p>}
         </div>
 
         <DialogFooter>

@@ -119,6 +119,7 @@ export function useBomDetailPanel() {
   // deep-linked ?bomId= — the server enforces access, not the URL.
   useEffect(() => {
     if (selectedBomId == null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale detail when the selection is cleared
       setDetail(null)
       setDetailError(null)
       return
@@ -155,6 +156,7 @@ export function useBomDetailPanel() {
       amount: l.amount != null ? String(l.amount) : "",
       uom: l.uom ?? "",
     })
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds the editable rows once, the first time detail loads in edit mode
     setEditRmRows(detail.lines.filter((l) => l.mtrl_type === "rm").map(toRow))
     setEditPmRows(detail.lines.filter((l) => l.mtrl_type === "pm").map(toRow))
     setEditStatus(detail.status ?? "")

@@ -65,9 +65,13 @@ export type OpenPoOption = {
   live_bom_count: number
   qty:          string | number
   received_qty: string | number
+  /** For a master, what it hasn't handed to a split — quantity on a child
+   *  belongs to that child and is received against it, not against this row. */
   remaining:    string | number
   expected_on:  string | null
   status:       string
+  /** Set when this PO is itself a split: the po_no it was split off. */
+  reference_po: string | null
 }
 
 /** A row in the Invoice History list. Numerics arrive as strings from DECIMAL. */

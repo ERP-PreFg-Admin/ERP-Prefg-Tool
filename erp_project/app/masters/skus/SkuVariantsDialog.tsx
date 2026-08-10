@@ -35,6 +35,7 @@ export function SkuVariantsDialog({
 
   useEffect(() => {
     if (!brand) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale results before the new brand's fetch resolves
     setLoading(true)
     setError(null)
     fetch("/api/v1/masters/skus", {

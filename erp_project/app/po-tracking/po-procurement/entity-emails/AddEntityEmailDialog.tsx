@@ -8,6 +8,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select } from "@/components/ui/select"
 
 type EntityType = "vendor" | "mfg" | "warehouse"
 type EntityOption = { id: number; code: string; name: string }
@@ -20,9 +21,6 @@ const TYPE_LABEL: Record<EntityType, string> = {
   warehouse: "Warehouse",
 }
 type EmailRow = { email: string; purpose: string }
-
-const selectCls =
-  "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
 
 const emptyRow = (): EmailRow => ({ email: "", purpose: "" })
 
@@ -104,23 +102,23 @@ export default function AddEntityEmailDialog({
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-1.5">
               <Label htmlFor="ee-type">Entity Type</Label>
-              <select
-                id="ee-type" value={entityType} className={selectCls}
+              <Select
+                id="ee-type" value={entityType} className="w-full"
                 onChange={(e) => { setEntityType(e.target.value as EntityType); setEntityCode("") }}
               >
                 <option value="mfg">Manufacturer</option>
                 <option value="vendor">Vendor</option>
                 <option value="warehouse">Warehouse</option>
-              </select>
+              </Select>
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="ee-code">{TYPE_LABEL[entityType]}</Label>
-              <select id="ee-code" value={entityCode} className={selectCls} onChange={(e) => setEntityCode(e.target.value)}>
+              <Select id="ee-code" value={entityCode} className="w-full" onChange={(e) => setEntityCode(e.target.value)}>
                 <option value="">— Select —</option>
                 {codeOptions.map((o) => (
                   <option key={o.id} value={o.code}>{o.code} — {o.name}</option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
 

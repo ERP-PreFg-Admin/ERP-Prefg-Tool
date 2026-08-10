@@ -5,8 +5,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+import { useToast } from "@/components/ui/toast"
 import { InReviewBanner, RejectionBanner, type RejectionInfo } from "@/components/masters/ApprovalBanners"
+import { RemarksField, EDIT_REMARK_PRESETS } from "@/components/masters/RemarksField"
+import { Select } from "@/components/ui/select"
 import type { Sku } from "@/types/masters"
 
 /**
@@ -23,6 +25,7 @@ export function EditSkuDialog({
   onSuccess: () => void
   onClose: () => void
 }) {
+  const { toast } = useToast()
   const [form, setForm] = useState({
     sku_type: sku?.sku_type ?? "",
     category: sku?.category ?? "",
@@ -90,11 +93,18 @@ export function EditSkuDialog({
         body: JSON.stringify({ action: "update", id: sku!.id, ...form }),
       })
       const data = await res.json()
-      if (!res.ok) { setError(data.error ?? "Failed to save"); return }
+      if (!res.ok) {
+        const message = data.error ?? "Failed to save"
+        setError(message)
+        toast({ title: "Submission failed", description: message, variant: "error" })
+        return
+      }
       setSubmitted(true)
+      toast({ title: "Submitted for approval", description: `SKU ${sku!.sku_code} edit is now awaiting approval.`, variant: "success" })
       setTimeout(() => { onSuccess(); onClose() }, 1500)
     } catch {
       setError("Network error")
+      toast({ title: "Submission failed", description: "Network error — please try again.", variant: "error" })
     } finally {
       setSaving(false)
     }
@@ -119,7 +129,7 @@ export function EditSkuDialog({
             </div>
             <div className="grid gap-1">
               <Label>Status</Label>
-              <select
+              <Select
                 value={form.status}
                 onChange={(e) => set("status", e.target.value)}
                 disabled={isInReview || !canEdit}
@@ -130,7 +140,7 @@ export function EditSkuDialog({
                 <option value="discontinued">Discontinued</option>
                 <option value="new launch">New Launch</option>
                 <option value="draft">Draft</option>
-              </select>
+              </Select>
             </div>
           </div>
 
@@ -155,16 +165,13 @@ export function EditSkuDialog({
           </div>
 
           {/* Row 4: Remarks (mandatory — reason for this edit, archived to history_masters_edits) */}
-          <div className="grid gap-1">
-            <Label>Remarks <span className="text-destructive">*</span></Label>
-            <p className="text-xs text-muted-foreground">Remarks are required for every edit — briefly explain the reason for this change.</p>
-            <Textarea
-              value={form.remarks}
-              onChange={(e) => set("remarks", e.target.value)}
-              disabled={isInReview || !canEdit}
-              placeholder="Reason for this change…"
-            />
-          </div>
+          <RemarksField
+            id="sku-remarks"
+            value={form.remarks}
+            onChange={(v) => set("remarks", v)}
+            disabled={isInReview || !canEdit}
+            presets={EDIT_REMARK_PRESETS}
+          />
 
           {submitted && <p className="text-sm text-emerald-600 font-medium">Edit submitted for approval.</p>}
           {error && <p className="text-sm text-destructive">{error}</p>}

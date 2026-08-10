@@ -5,13 +5,11 @@ import { useRouter } from "next/navigation"
 import { Plus, Pencil, AlertTriangle } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
-import { TableEmpty } from "@/components/ui/empty-state"
 import { DownloadButton } from "@/components/masters/DownloadButton"
-import { SearchInput } from "@/components/masters/SearchInput"
+import { useToast } from "@/components/ui/toast"
 import type { MfgLine, MfgLineStatus } from "@/types/masters"
 import { fmtDate } from "../mfg-utils"
 import LineDialog, { type RecipeOption } from "./LineDialog"
@@ -49,6 +47,7 @@ export default function ManufacturingLinesClient({
   liveBomsBySkuCode?: Map<string, LiveBomInfo>
 }) {
   const router = useRouter()
+  const { toast } = useToast()
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [dialogTarget, setDialogTarget] = useState<MfgLine | null | "new">(null)
@@ -77,7 +76,15 @@ export default function ManufacturingLinesClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "update-status", recipe_id: bomId, status: "inactive" }),
       })
-      if (res.ok) router.refresh()
+      if (res.ok) {
+        toast({ title: "Line paused", variant: "success" })
+        router.refresh()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        toast({ title: "Couldn't pause line", description: data.error, variant: "error" })
+      }
+    } catch {
+      toast({ title: "Couldn't pause line", description: "Network error. Please try again.", variant: "error" })
     } finally {
       setPausingBomId(null)
     }
@@ -87,11 +94,11 @@ export default function ManufacturingLinesClient({
     <div className="space-y-4 text-xs">
       {/* ── Toolbar ── */}
       <div className="flex flex-col sm:flex-row gap-3">
-        <SearchInput
+        <input
           value={search}
-          onChange={setSearch}
+          onChange={(e) => setSearch(e.target.value)}
           placeholder="Search SKU, Recipe…"
-          className="sm:max-w-xs"
+          className="flex h-9 w-full sm:max-w-xs rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
         />
         <div className="flex items-center gap-1.5">
           {(["all", "active", "discontinued", "inactive"] as StatusFilter[]).map((f) => (
@@ -141,28 +148,11 @@ export default function ManufacturingLinesClient({
               </TableHeader>
               <TableBody>
                 {filteredRows.length === 0 ? (
-                  <TableEmpty
-                    colSpan={8}
-                    action={
-                      rows.length === 0 ? (
-                        <Button variant="outline" size="sm" onClick={() => setDialogTarget("new")}>
-                          <Plus /> Add SKUs
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => { setSearch(""); setStatusFilter("all") }}
-                        >
-                          Clear filters
-                        </Button>
-                      )
-                    }
-                  >
-                    {rows.length === 0
-                      ? "No SKUs are assigned to this manufacturer yet."
-                      : "No manufacturing lines match this view."}
-                  </TableEmpty>
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center text-muted-foreground py-10">
+                      No manufacturing lines match this view.
+                    </TableCell>
+                  </TableRow>
                 ) : (
                   filteredRows.map((r) => {
                     const liveBoms = r.sku_code ? liveBomsBySkuCode?.get(r.sku_code) : undefined

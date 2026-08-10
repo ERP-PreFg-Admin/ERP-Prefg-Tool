@@ -23,6 +23,9 @@ const po = (
 ): OpenPoOption => ({
   id, po_no: `PO-${id}`, date, sku_code: sku, sku_name: sku,
   bom_code: `BOM-${sku}`, live_bom_count: liveBoms,
+  // Null = a master, not a split child. The picker now carries this so it can
+  // say which order a child came off; FIFO itself doesn't branch on it.
+  reference_po: null,
   qty: remaining, received_qty: 0, remaining, expected_on: null, status: "raised",
 })
 

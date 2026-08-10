@@ -68,12 +68,22 @@ export async function receivePo(
 
   const originalQty = Number(po.qty)
   const receivedQty = Number(po.received_qty ?? 0)
-  const remaining   = originalQty - receivedQty
+
+  // Quantity handed to split children isn't the parent's to receive — those
+  // goods arrive against the child, which is its own row with its own receipt.
+  // Without this a fully-split PO would still accept its whole quantity here
+  // and the units would be counted on both rows.
+  const [childRows] = await conn.execute(purchaseOrdersSql.childSplitSummary, [po.po_no, po.po_no])
+  const allocated = Number((childRows as { allocated_qty: string }[])[0]?.allocated_qty ?? 0)
+
+  const remaining = originalQty - receivedQty - allocated
   if (qty > remaining) {
     throw new ApiError(
       400,
       "over_limit",
-      `Received qty (${qty}) exceeds the ${remaining} still outstanding on PO ${po.po_no}.`
+      allocated > 0
+        ? `Received qty (${qty}) exceeds the ${remaining} still outstanding on PO ${po.po_no} — ${allocated} is on its split POs, receive that against them.`
+        : `Received qty (${qty}) exceeds the ${remaining} still outstanding on PO ${po.po_no}.`
     )
   }
 
@@ -85,8 +95,11 @@ export async function receivePo(
   // Only 'received' is ever written. 'partially_received' is derived from
   // received_qty by EFFECTIVE_STATUS_EXPR at read time, never stored — storing
   // it would leave a stale value behind once the PO is fully received.
+  // A split PO is never closed by its own receipts: the children still owe
+  // their share. It reaches 'received' through EFFECTIVE_STATUS_EXPR once the
+  // rolled-up total covers the order, so nothing needs storing here.
   let newStatus = po.status
-  if (newRemaining <= poTolerance(originalQty)) {
+  if (allocated === 0 && newRemaining <= poTolerance(originalQty)) {
     newStatus = "received"
     await conn.execute(purchaseOrdersSql.setStatus, ["received", poId])
   }

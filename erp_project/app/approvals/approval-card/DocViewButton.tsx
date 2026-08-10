@@ -4,21 +4,22 @@ import { useState } from "react"
 import { cva } from "class-variance-authority"
 import { ExternalLink, Loader2 as SpinIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { DIFF_OLD_CELL_CLASS, DIFF_NEW_CELL_CLASS } from "./diff-colors"
 
 /** Doc key fields — rendered as view buttons instead of raw S3 keys. */
 export const DOC_FIELDS = new Set([
   "gst_certificate_key", "cancelled_cheque_key", "pan_card_key", "misc_document_key",
 ])
 
-/** Same red/emerald tokens as `Badge`'s destructive/success variants, applied
- *  to a clickable chip instead of a static label. */
+/** Same red/emerald tokens as every other diff renderer (see diff-colors.ts),
+ *  applied to a clickable chip instead of a static label. */
 const docViewButtonVariants = cva(
   "flex-1 min-w-0 flex items-center gap-1.5 rounded border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-60",
   {
     variants: {
       variant: {
-        old: "bg-red-50 border-red-200 text-red-800 hover:bg-red-100 dark:bg-red-950/30 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/60",
-        new: "bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:border-emerald-900 dark:text-emerald-300 dark:hover:bg-emerald-950/60",
+        old: cn(DIFF_OLD_CELL_CLASS, "border-red-100 hover:bg-red-100 dark:border-red-900/40 dark:hover:bg-red-950/50"),
+        new: cn(DIFF_NEW_CELL_CLASS, "border-emerald-100 hover:bg-emerald-100 dark:border-emerald-900/40 dark:hover:bg-emerald-950/50"),
       },
     },
   }

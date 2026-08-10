@@ -9,7 +9,6 @@
 import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
-import { IST } from "@/lib/date"
 
 type RateHistoryEntry = {
   id: number
@@ -24,16 +23,16 @@ type RateHistoryEntry = {
 
 function formatDate(val: string | null) {
   if (!val) return "—"
-  return new Date(val).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: IST })
+  return new Date(val).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
 }
 
 function formatDateTime(val: string | null) {
   if (!val) return "—"
-  return new Date(val).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST })
+  return new Date(val).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
 }
 
 /** history_cost_mfg.status is a plain boolean/tinyint; history_cost_ven.status is a status enum string — normalize both. */
-function StatusBadge({ status }: { status: RateHistoryEntry["status"] }) {
+function RateStatusBadge({ status }: { status: RateHistoryEntry["status"] }) {
   if (typeof status === "boolean" || typeof status === "number") {
     return status
       ? <Badge variant="success">Active</Badge>
@@ -64,6 +63,7 @@ export function RateHistoryDialog({
     if (!row) return
     const entityId = kind === "mfg" ? row.mfg_id : row.vendor_id
     if (!entityId) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale results before the new row's fetch resolves
     setLoading(true)
     setError(null)
     const basePath = materialType === "rm" ? "raw-materials" : "packing-materials"
@@ -102,7 +102,7 @@ export function RateHistoryDialog({
                 <span className="text-sm font-medium">
                   ₹{entry.rate != null ? Number(entry.rate).toFixed(2) : "—"}
                 </span>
-                <StatusBadge status={entry.status} />
+                <RateStatusBadge status={entry.status} />
               </div>
 
               <p className="text-xs text-muted-foreground">

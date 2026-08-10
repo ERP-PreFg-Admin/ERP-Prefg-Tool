@@ -59,11 +59,11 @@ export const skus = {
 
   /**
    * Paginated SKU list with optional search + status + brand + sku_type +
-   * category + subcategory filters. Also joins a `variant_count` column
-   * (SKUs sharing this row's brand + base_sku_sno) so the client can decide,
-   * per row, whether the "see variants" row action should be shown
+   * category + subcategory + missing-Recipe filters. Also joins a `variant_count`
+   * column (SKUs sharing this row's brand + base_sku_sno) so the client can
+   * decide, per row, whether the "see variants" row action should be shown
    * (variant_count > 1).
-   * Params: [like, like, like, like, status, status, brand, brand, sku_type, sku_type, category, category, subcategory, subcategory, LIMIT, OFFSET]
+   * Params: [like, like, like, like, status, status, brand, brand, sku_type, sku_type, category, category, subcategory, subcategory, missingBom, LIMIT, OFFSET]
    */
   selectPaginated: `
     SELECT ${SKU_COLUMNS}, master_skus.base_sku_sno, COALESCE(vg.variant_count, 1) AS variant_count
@@ -80,6 +80,7 @@ export const skus = {
       AND (? IS NULL OR master_skus.sku_type = ?)
       AND (? IS NULL OR master_skus.category = ?)
       AND (? IS NULL OR master_skus.subcategory = ?)
+      AND (? IS NULL OR master_skus.active_bom_id IS NULL)
     ORDER BY master_skus.sku_code ASC
     LIMIT ? OFFSET ?
   `,
@@ -88,7 +89,7 @@ export const skus = {
    * Fetch ALL matching SKUs for export (no LIMIT/OFFSET).
    * Same WHERE clause as selectPaginated; call countAll first to enforce the
    * row cap before running this.
-   * Params: [like, like, like, like, status, status, brand, brand, sku_type, sku_type, category, category, subcategory, subcategory]
+   * Params: [like, like, like, like, status, status, brand, brand, sku_type, sku_type, category, category, subcategory, subcategory, missingBom]
    */
   selectAllFiltered: `
     SELECT ${SKU_COLUMNS}, master_skus.base_sku_sno, COALESCE(vg.variant_count, 1) AS variant_count
@@ -105,6 +106,7 @@ export const skus = {
       AND (? IS NULL OR master_skus.sku_type = ?)
       AND (? IS NULL OR master_skus.category = ?)
       AND (? IS NULL OR master_skus.subcategory = ?)
+      AND (? IS NULL OR master_skus.active_bom_id IS NULL)
     ORDER BY master_skus.sku_code ASC
   `,
 
@@ -183,6 +185,7 @@ export const skus = {
       AND (? IS NULL OR sku_type = ?)
       AND (? IS NULL OR category = ?)
       AND (? IS NULL OR subcategory = ?)
+      AND (? IS NULL OR active_bom_id IS NULL)
   `,
 
   // ============ UPDATE QUERIES ============

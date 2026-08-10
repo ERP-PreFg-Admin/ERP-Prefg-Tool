@@ -33,6 +33,7 @@ export default function PoHistoryDialog({
 
   useEffect(() => {
     if (!poId) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale results before the new PO's fetch resolves
     setLoading(true)
     setError(null)
     fetch(`/api/v1/purchase-orders/history?po_id=${poId}`)

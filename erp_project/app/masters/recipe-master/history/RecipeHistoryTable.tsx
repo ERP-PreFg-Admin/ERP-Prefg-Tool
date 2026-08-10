@@ -12,6 +12,7 @@
 import { Fragment, useMemo, useState } from "react"
 import { ChevronDown, ChevronRight, FlaskConical } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
+import { EmptyState } from "@/components/ui/empty-state"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import {
   Table,
@@ -117,8 +118,8 @@ export function RecipeHistoryTable({
           <TableBody>
             {groups.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={COLUMN_COUNT} className="text-center text-muted-foreground py-10">
-                  {hasFilters ? "No Recipe records match your filters." : "No records found."}
+                <TableCell colSpan={COLUMN_COUNT} className="text-center py-10">
+                  <EmptyState hasFilters={hasFilters} filteredMessage="No Recipe records match your filters." />
                 </TableCell>
               </TableRow>
             ) : (

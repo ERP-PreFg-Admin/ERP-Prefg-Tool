@@ -6,6 +6,7 @@ import { timedQuery } from "@/lib/query-timing"
 import { purchaseOrdersSql, buildFilterParams, buildStatusCountParams } from "@/lib/queries/purchase-orders"
 import { getPoDropdownOptions } from "@/lib/cached-reference-data"
 import { getUserScope, filterByScope } from "@/lib/scope"
+import { fetchChildrenByParent } from "@/lib/po-children"
 import type { PoRow } from "./po-types"
 import PoProcurementClient from "./PoProcurementClient"
 
@@ -42,7 +43,7 @@ export default async function PoProcurementPage({
   // they distort every tab count and summary card on this page. PO Inwarding is
   // where they live.
   const scope = await getUserScope(userId)
-  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, true, scope)
+  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poType  || null, skuFilter || null, dateFrom || null, dateTo|| null, destFilter || null, true, scope)
   const statusCountParams = buildStatusCountParams(search || null, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, true, scope)
 
   const pageStart = performance.now()
@@ -64,6 +65,10 @@ export default async function PoProcurementPage({
   const total = Number(countRows[0]?.total ?? 0)
   console.log(`[AUDIT] PO Procurement complete: ${(performance.now() - pageStart).toFixed(2)}ms | ${rows.length}/${total} rows`)
 
+  // The list is masters only; their split children come back in one extra
+  // round trip, keyed by parent po_no for the expandable section under each row.
+  const childrenByParent = await fetchChildrenByParent(rows)
+
   const statusCounts: Record<string, number> = {}
   for (const r of statusCountRows) statusCounts[r.status] = Number(r.cnt)
   statusCounts.all = Object.values(statusCounts).reduce((sum, n) => sum + n, 0)
@@ -73,11 +78,13 @@ export default async function PoProcurementPage({
 
   const s = summaryRows[0] ?? {}
   const summary = {
-    total:             Number(s.total            ?? 0),
-    raised:            Number(s.raised           ?? 0),
-    punched:           Number(s.punched          ?? 0),
-    partiallyReceived: Number(s.partially_received ?? 0),
-    openValue:         Number(s.open_value        ?? 0),
+    total:        Number(s.total         ?? 0),
+    openQty:      Number(s.open_qty      ?? 0),
+    committedQty: Number(s.committed_qty ?? 0),
+    receivedQty:  Number(s.received_qty  ?? 0),
+    overdueQty:   Number(s.overdue_qty   ?? 0),
+    overduePos:   Number(s.overdue_pos   ?? 0),
+    draftPos:     Number(s.draft_pos     ?? 0),
   }
 
   return (
@@ -90,6 +97,7 @@ export default async function PoProcurementPage({
       </div>
       <PoProcurementClient
         rows={rows}
+        childrenByParent={childrenByParent}
         total={total}
         page={page}
         pageSize={size}

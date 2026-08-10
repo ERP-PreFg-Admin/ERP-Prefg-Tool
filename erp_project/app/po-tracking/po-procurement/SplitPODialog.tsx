@@ -7,6 +7,8 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { useToast } from "@/components/ui/toast"
+import { Select } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import type { PoRow, SplitRow, WarehouseOption } from "./po-types"
 import { fmtInt, num } from "./po-utils"
@@ -25,9 +27,11 @@ export default function SplitPODialog({
   ])
   const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError]     = useState("")
+  const { toast } = useToast()
 
   useEffect(() => {
     if (open && po) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the split form each time the dialog is opened
       setRows([
         { destination: "", qty: "" },
       ])
@@ -39,7 +43,11 @@ export default function SplitPODialog({
 
   const total      = num(po.qty)
   const received   = num(po.received_qty)
-  const remaining  = total - received
+  // Splitting doesn't touch po.qty — that's the quantity on the document and it
+  // stays — so anything earlier splits already took has to come off here, or the
+  // same units could be handed out twice.
+  const allocated  = num(po.split_qty)
+  const remaining  = total - received - allocated
   const splitTotal = rows.reduce((s, r) => s + num(r.qty), 0)
   const overLimit  = splitTotal > remaining
   const leftover   = Math.max(0, remaining - splitTotal)
@@ -77,19 +85,22 @@ export default function SplitPODialog({
         }),
       })
       const data = await res.json()
-      if (!res.ok) { setApiError(data.error ?? "Failed to split PO."); return }
-      console.log(`[split dialog] success — splits_created=${data.splits_created}`)
+      if (!res.ok) {
+        const message = data.error ?? "Failed to split PO."
+        setApiError(message)
+        toast({ title: "Couldn't split PO", description: message, variant: "error" })
+        return
+      }
+      toast({ title: "PO split", description: `${data.splits_created} new PO${data.splits_created === 1 ? "" : "s"} created.`, variant: "success" })
       onSplit()
       onClose()
     } catch {
       setApiError("Network error. Please try again.")
+      toast({ title: "Couldn't split PO", description: "Network error. Please try again.", variant: "error" })
     } finally {
       setSubmitting(false)
     }
   }
-
-  const selectCls =
-    "flex-1 h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o && !submitting) onClose() }}>
@@ -117,9 +128,17 @@ export default function SplitPODialog({
               <span className="font-heading text-lg font-semibold leading-tight mt-0.5">{po.po_no}</span>
               <span className="text-[11px] text-muted-foreground truncate" title={po.mfg_name}>{po.mfg_name}</span>
 
+              {/* Total is the ordered quantity and stays that way — the split
+                  is recorded on the new POs, not by editing this one. */}
               <div className="mt-3 space-y-1 text-[11px] font-mono text-muted-foreground">
-                <div className="flex justify-between"><span>Total</span><span className="text-foreground">{fmtInt(total)}</span></div>
+                <div className="flex justify-between"><span>Ordered</span><span className="text-foreground">{fmtInt(total)}</span></div>
                 <div className="flex justify-between"><span>Received</span><span className="text-foreground">{fmtInt(received)}</span></div>
+                {allocated > 0 && (
+                  <div className="flex justify-between">
+                    <span>On splits</span>
+                    <span className="text-violet-600 dark:text-violet-400">{fmtInt(allocated)}</span>
+                  </div>
+                )}
               </div>
 
               <div className="mt-4 pt-3 border-t border-dashed border-border sm:border-t-0 sm:pt-0 sm:mt-auto">
@@ -156,10 +175,10 @@ export default function SplitPODialog({
                       <div className="font-mono text-xs font-semibold">{String(i + 1).padStart(2, "0")}</div>
                       <div className="font-mono text-[9px] text-muted-foreground">S{String(i + 1).padStart(3, "0")}</div>
                     </div>
-                    <select
+                    <Select
                       value={row.destination}
                       onChange={(e) => setRow(i, "destination", e.target.value)}
-                      className={selectCls}
+                      className="flex-1"
                     >
                       <option value="">— Destination —</option>
                       {warehouseOptions.map((w) => (
@@ -167,7 +186,7 @@ export default function SplitPODialog({
                           {w.name}{w.zone ? ` — ${w.zone}` : ""} ({w.type})
                         </option>
                       ))}
-                    </select>
+                    </Select>
                     <Input
                       type="number" min={1} placeholder="Qty"
                       value={row.qty} onChange={(e) => setRow(i, "qty", e.target.value)}

@@ -3,12 +3,11 @@
 import { useState } from "react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import type { InvoiceForm } from "./invoice-form"
 import type { MfgOption, WarehouseOption } from "../po-procurement/po-types"
 
-const selectCls =
-  "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
 const textareaCls =
   "w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
 
@@ -52,24 +51,10 @@ export function SectionHead({ children }: { children: string }) {
   )
 }
 
-/** What the extractor read for a field the user is now overriding via a picker.
- *
- *  `matched` turns it into a verdict rather than a bare quote: a picker that
- *  silently landed on the right row looks identical to one nobody has checked,
- *  so the successful case has to say so out loud. */
-function ParsedHint({ value, matched }: { value: string; matched?: boolean }) {
+/** What the extractor read for a field the user is now overriding via a picker. */
+function ParsedHint({ value }: { value: string }) {
   if (!value) return null
-  if (matched === undefined) {
-    return <p className="text-[11px] text-muted-foreground">Invoice says: <strong>{value}</strong></p>
-  }
-  return (
-    <p className={cn(
-      "text-[11px]",
-      matched ? "text-emerald-700 dark:text-emerald-500" : "text-amber-700 dark:text-amber-500"
-    )}>
-      {matched ? "✓ Matched" : "⚠ No match"} from invoice: <strong>{value}</strong>
-    </p>
-  )
+  return <p className="text-[11px] text-muted-foreground">Invoice says: <strong>{value}</strong></p>
 }
 
 export function InvoiceFields({
@@ -116,21 +101,21 @@ export function InvoiceFields({
         <div className="col-span-full"><SectionHead>Where it came from, where it&apos;s going</SectionHead></div>
         <div className="grid gap-1.5">
           <Label className="text-xs">Manufacturer <span className="text-destructive">*</span></Label>
-          <select value={form.mfgId} onChange={(e) => onChangeMfg(e.target.value)} className={selectCls}>
+          <Select value={form.mfgId} onChange={(e) => onChangeMfg(e.target.value)} className="w-full">
             <option value="">— Select MFG —</option>
             {mfgOptions.map((m) => (
               <option key={m.id} value={m.id}>{m.code} — {m.name}</option>
             ))}
-          </select>
-          <ParsedHint value={form.parsedFrom} matched={Boolean(form.mfgId)} />
+          </Select>
+          <ParsedHint value={form.parsedFrom} />
         </div>
 
         <div className="grid gap-1.5">
           <Label className="text-xs">Destination <span className="text-destructive">*</span></Label>
-          <select
+          <Select
             value={form.destination}
             onChange={(e) => setField("destination", e.target.value)}
-            className={selectCls}
+            className="w-full"
           >
             <option value="">— Select Warehouse —</option>
             {warehouseOptions.map((w) => (
@@ -138,7 +123,7 @@ export function InvoiceFields({
                 {w.name}{w.zone ? ` — ${w.zone}` : ""} ({w.type})
               </option>
             ))}
-          </select>
+          </Select>
           <ParsedHint value={form.parsedDest} />
         </div>
 

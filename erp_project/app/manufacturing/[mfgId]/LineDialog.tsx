@@ -5,12 +5,10 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
+import { useToast } from "@/components/ui/toast"
 import type { MfgLine, MfgLineStatus } from "@/types/masters"
-import { todayIST } from "@/lib/date"
 
 export type RecipeOption = { id: number; bom_code: string; sku_code: string | null; sku_name: string | null }
 
@@ -28,16 +26,13 @@ type FormState = {
 const EMPTY_FORM: FormState = {
   recipe_id: "",
   status: "active",
-  effective_from: todayIST(),
+  effective_from: new Date().toISOString().slice(0, 10),
   effective_to: "",
   monthly_capacity: "",
   this_month_plan: "",
   last_batch_date: "",
   remarks: "",
 }
-
-const selectCls =
-  "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
 
 export default function LineDialog({
   open, onClose, onSaved, mfgId, bomOptions, editData,
@@ -51,11 +46,12 @@ export default function LineDialog({
 }) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [submitting, setSubmitting] = useState(false)
-  const [apiError, setApiError] = useState("")
+  const { toast } = useToast()
 
   useEffect(() => {
     if (!open) return
     if (editData) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets form state each time the dialog is opened
       setForm({
         recipe_id: String(editData.recipe_id),
         status: editData.status,
@@ -69,16 +65,14 @@ export default function LineDialog({
     } else {
       setForm(EMPTY_FORM)
     }
-    setApiError("")
   }, [open, editData])
 
   function set<K extends keyof FormState>(field: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [field]: value }))
-    setApiError("")
   }
 
   async function handleSubmit() {
-    if (!editData && !form.recipe_id) { setApiError("Select a SKU / Recipe."); return }
+    if (!editData && !form.recipe_id) { toast({ title: "Select a SKU / Recipe.", variant: "error" }); return }
 
     setSubmitting(true)
     try {
@@ -112,10 +106,11 @@ export default function LineDialog({
         body: JSON.stringify(payload),
       })
       const data = await res.json()
-      if (!res.ok) { setApiError(data.error ?? "Failed to save."); return }
+      if (!res.ok) { toast({ title: "Couldn't save manufacturing line", description: data.error, variant: "error" }); return }
+      toast({ title: editData ? "Line updated" : "Line added", variant: "success" })
       onSaved()
     } catch {
-      setApiError("Network error. Please try again.")
+      toast({ title: "Couldn't save manufacturing line", description: "Network error. Please try again.", variant: "error" })
     } finally {
       setSubmitting(false)
     }

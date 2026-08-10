@@ -41,23 +41,27 @@ export const GET = withGateway({
           entityLabelSql[a.module]
             ? query<EntityLabelRow>(entityLabelSql[a.module], [a.entity_id])
             : Promise.resolve([]),
-          // Only VENDOR/MFG/SKU submissions write a history_masters_edits row
-          // (see lib/master-routes/history-utils.ts) — everyone else just
-          // gets zero rows back here, which is fine.
-          query<{ remarks: string | null }>(historySql.selectPendingRemarks, [a.module, a.entity_id]),
+          // Only MFG/VENDOR/RM_MAT/PM_MAT/SKU submissions write a
+          // history_masters_edits row (see lib/master-routes/history-utils.ts).
+          // Recipe never does — its reason travels as a __reason__ sentinel
+          // approval_item instead (see RecipeLineDiffTable.tsx) — so skip the
+          // query entirely there instead of running one that always returns
+          // empty. Reliable 1:1 lookup for the rest: hasPending guarantees at
+          // most one pending approval per (module, entity_id), so at most one
+          // pending history row matches.
+          a.module === "BOM"
+            ? Promise.resolve([])
+            : query<{ remarks: string | null }>(historySql.selectPendingRemarks, [a.module, a.entity_id]),
         ])
         const label = labelRows[0] ?? {}
-        const remarks = remarksRows[0]?.remarks
-        const allItems = remarks
-          ? [...items, { field_name: "remarks", old_value: "", new_value: remarks }]
-          : items
         return {
           ...a,
-          items: allItems,
+          items,
           entity_code: label.code ?? null,
           entity_name: label.name ?? null,
           entity_secondary_code: label.secondary_code ?? null,
           entity_secondary_name: label.secondary_name ?? null,
+          reason: remarksRows[0]?.remarks ?? null,
         }
       })
     )

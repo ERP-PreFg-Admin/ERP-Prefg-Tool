@@ -47,6 +47,7 @@ export default async function SkusPage({
   const skuTypeFilter   = String(sp.sku_type ?? "")
   const categoryFilter  = String(sp.category ?? "")
   const subcategoryFilter = String(sp.subcategory ?? "")
+  const bomFilter       = String(sp.bom ?? "")
 
   const like        = search          ? `%${search}%`     : null
   const status      = statusFilter    ? statusFilter       : null
@@ -54,9 +55,12 @@ export default async function SkusPage({
   const skuType     = skuTypeFilter   ? skuTypeFilter      : null
   const category    = categoryFilter  ? categoryFilter     : null
   const subcategory = subcategoryFilter ? subcategoryFilter : null
+  // Any non-null value activates the "AND ... IS NULL" branch — the value
+  // itself is never compared, so 1 is just a truthy placeholder.
+  const missingBom  = bomFilter === "missing" ? 1 : null
 
   // ── DB query (paginated) ───────────────────────────────────────────────────
-  // Param order: [like×4, status×2, brand×2, sku_type×2, category×2, subcategory×2, LIMIT, OFFSET] (data) / same minus LIMIT/OFFSET (count)
+  // Param order: [like×4, status×2, brand×2, sku_type×2, category×2, subcategory×2, missingBom, LIMIT, OFFSET] (data) / same minus LIMIT/OFFSET (count)
   const pageStart = performance.now()
   console.log(`[AUDIT] SKUs load - page=${page}, size=${size}, search=${search || "none"}, status=${status || "all"}, brand=${brand || "all"}`)
 
@@ -75,7 +79,7 @@ export default async function SkusPage({
     // relevance against the search term, then slice the requested page in memory.
     const allMatching = await timedQuery<Sku>(
       skuSql.selectAllFiltered,
-      [null, null, null, null, status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory],
+      [null, null, null, null, status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory, missingBom],
       { label: "selectAllFiltered" }
     )
     const ranked = fuzzyRank(allMatching, search, ["sku_code", "name", "brand"])
@@ -85,12 +89,12 @@ export default async function SkusPage({
     const [dbRows, countRows] = await Promise.all([
       timedQuery<Sku>(
         skuSql.selectPaginated,
-        [like, like, like, like, status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory, size, offset],
+        [like, like, like, like, status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory, missingBom, size, offset],
         { label: "selectPaginated" }
       ),
       timedQuery<{ total: number }>(
         skuSql.countAll,
-        [like, like, like, like, status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory],
+        [like, like, like, like, status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory, missingBom],
         { label: "countAll" }
       ),
     ])
@@ -125,6 +129,7 @@ export default async function SkusPage({
         currentSkuType={skuTypeFilter}
         currentCategory={categoryFilter}
         currentSubcategory={subcategoryFilter}
+        currentBom={bomFilter}
         brands={brands.map((b) => b.brand)}
         skuTypes={skuTypes.map((t) => t.sku_type)}
         categories={categories.map((c) => c.category)}

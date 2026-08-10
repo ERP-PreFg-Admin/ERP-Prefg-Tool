@@ -5,9 +5,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/toast"
 import { ZONE_OPTIONS } from "@/components/masters/field-config"
+import { RemarksField, EDIT_REMARK_PRESETS } from "@/components/masters/RemarksField"
+import { Select } from "@/components/ui/select"
 import { InReviewBanner, RejectionBanner, type RejectionInfo } from "@/components/masters/ApprovalBanners"
 import type { Mfg } from "@/types/masters"
 
@@ -43,6 +44,7 @@ export function EditMfgDialog({
 
   useEffect(() => {
     if (mfg) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets form state to the newly-opened manufacturer's fields
       setForm({
         name: mfg.name ?? "",
         registered_name: mfg.registered_name ?? "",
@@ -145,7 +147,7 @@ export function EditMfgDialog({
             </div>
             <div className="grid gap-1">
               <Label>Zone</Label>
-              <select
+              <Select
                 value={form.zone}
                 onChange={(e) => set("zone", e.target.value)}
                 disabled={isInReview || !canEdit}
@@ -155,7 +157,7 @@ export function EditMfgDialog({
                 {ZONE_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div className="grid gap-1">
               <Label>GST Number</Label>
@@ -187,7 +189,7 @@ export function EditMfgDialog({
             </div>
             <div className="grid gap-1">
               <Label>Status</Label>
-              <select
+              <Select
                 value={form.status}
                 onChange={(e) => set("status", e.target.value)}
                 disabled={isInReview || !canEdit}
@@ -195,21 +197,18 @@ export function EditMfgDialog({
               >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
-              </select>
+              </Select>
             </div>
           </div>
 
           {/* Row 5: Remarks (mandatory — reason for this edit, archived to history_masters_edits) */}
-          <div className="grid gap-1">
-            <Label>Remarks <span className="text-destructive">*</span></Label>
-            <p className="text-xs text-muted-foreground">Remarks are required for every edit — briefly explain the reason for this change.</p>
-            <Textarea
-              value={form.remarks}
-              onChange={(e) => set("remarks", e.target.value)}
-              disabled={isInReview || !canEdit}
-              placeholder="Reason for this change…"
-            />
-          </div>
+          <RemarksField
+            id="mfg-remarks"
+            value={form.remarks}
+            onChange={(v) => set("remarks", v)}
+            disabled={isInReview || !canEdit}
+            presets={EDIT_REMARK_PRESETS}
+          />
 
           {submitted && <p className="text-sm text-emerald-600 font-medium">Edit submitted for approval.</p>}
           {error && <p className="text-sm text-destructive">{error}</p>}

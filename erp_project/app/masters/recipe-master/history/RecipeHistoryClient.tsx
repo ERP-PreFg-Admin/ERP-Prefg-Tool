@@ -7,7 +7,7 @@
  * wizard / edit dialog at all, since archived revisions can't be edited.
  */
 
-import { useRouter, usePathname, useSearchParams } from "next/navigation"
+import { useUrlFilters } from "@/lib/useUrlFilters"
 import { ArrowLeft } from "lucide-react"
 import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import { MasterToolbar, MasterToolbarActions } from "@/components/masters/MasterToolbar"
@@ -31,19 +31,7 @@ export default function RecipeHistoryClient({
   pageSize: number
   currentSearch: string
 }) {
-  const router       = useRouter()
-  const pathname     = usePathname()
-  const searchParams = useSearchParams()
-
-  function navigate(updates: Record<string, string>) {
-    const params = new URLSearchParams(searchParams.toString())
-    for (const [k, v] of Object.entries(updates)) {
-      if (v) params.set(k, v)
-      else   params.delete(k)
-    }
-    params.set("page", "1")
-    router.push(`${pathname}?${params.toString()}`)
-  }
+  const { navigate, router } = useUrlFilters()
 
   const hasFilters = Boolean(currentSearch)
   const panel = useBomHistoryPanel()

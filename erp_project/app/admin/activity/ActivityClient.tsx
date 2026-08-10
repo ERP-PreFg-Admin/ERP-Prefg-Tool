@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { PaginationBar } from "@/components/ui/pagination-bar"
+import { Select } from "@/components/ui/select"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import { MasterToolbar } from "@/components/masters/MasterToolbar"
 import type { ActivityRow } from "./page"
@@ -33,7 +34,7 @@ function formatWhen(value: Date | string) {
 
 /** "/api/v1/masters/vendors" → "masters/vendors" — the prefix is noise here.
  *  The version segment is optional so un-versioned routes (auth, health) and a
- *  future /api/v2 both read the same way. */
+ *  future /api/v1/v2 both read the same way. */
 function readablePath(detail: string) {
   return detail.replace(/^\/api\/(v\d+\/)?/, "")
 }
@@ -76,7 +77,7 @@ export default function ActivityClient({
   return (
     <>
       <MasterToolbar className="flex-wrap items-center">
-        <select
+        <Select
           value={filters.user}
           onChange={(e) => setFilter("user", e.target.value)}
           className={INPUT_CLASS}
@@ -85,9 +86,9 @@ export default function ActivityClient({
           {actors.map((a) => (
             <option key={a.id} value={a.id}>{a.name}</option>
           ))}
-        </select>
+        </Select>
 
-        <select
+        <Select
           value={filters.method}
           onChange={(e) => setFilter("method", e.target.value)}
           className={INPUT_CLASS}
@@ -96,7 +97,7 @@ export default function ActivityClient({
           {METHODS.map((m) => (
             <option key={m} value={m}>{m}</option>
           ))}
-        </select>
+        </Select>
 
         <Input
           type="date"

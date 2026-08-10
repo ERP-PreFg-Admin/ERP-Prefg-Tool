@@ -1,11 +1,13 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter, usePathname, useSearchParams } from "next/navigation"
+import { useUrlFilters } from "@/lib/useUrlFilters"
 import { ArrowLeft, History as HistoryIcon } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { PaginationBar } from "@/components/ui/pagination-bar"
+import { Select } from "@/components/ui/select"
+import { useFilterPanel, FilterToggleButton, FilterPanel, FilterField } from "@/components/masters/FilterPanel"
 import type { Approval } from "../approvals-types"
 import { MODULE_LABEL } from "../approvals-types"
 import ApprovalCard, { type MaterialMap } from "../ApprovalCard"
@@ -28,22 +30,10 @@ export default function ApprovalHistoryClient({
   currentStatus: string
   materialMap:   MaterialMap
 }) {
-  const router       = useRouter()
-  const pathname     = usePathname()
-  const searchParams = useSearchParams()
+  const { navigate, router } = useUrlFilters()
 
   const [expanded,       setExpanded]       = useState<number | null>(null)
   const [csvPreview,     setCsvPreview]     = useState<{ s3Key: string; filename: string } | null>(null)
-
-  function navigate(updates: Record<string, string>) {
-    const params = new URLSearchParams(searchParams.toString())
-    for (const [k, v] of Object.entries(updates)) {
-      if (v) params.set(k, v)
-      else   params.delete(k)
-    }
-    params.set("page", "1")
-    router.push(`${pathname}?${params.toString()}`)
-  }
 
   function openCsvFile(_approvalId: number, s3Key: string, filename: string) {
     setCsvPreview({ s3Key, filename })
@@ -51,13 +41,28 @@ export default function ApprovalHistoryClient({
 
   // Draft filter state — selects only update these locally; the actual
   // server refetch fires only when "Apply" is clicked.
+  const filterPanel = useFilterPanel()
   const [draftModule, setDraftModule] = useState(currentModule)
   const [draftStatus, setDraftStatus] = useState(currentStatus)
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven module filter changes
   useEffect(() => setDraftModule(currentModule), [currentModule])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven status filter changes
   useEffect(() => setDraftStatus(currentStatus), [currentStatus])
-  const draftDirty = draftModule !== currentModule || draftStatus !== currentStatus
 
+  const activeFilterCount = (currentModule ? 1 : 0) + (currentStatus ? 1 : 0)
   const hasFilters = Boolean(currentModule || currentStatus)
+
+  function applyFilters() {
+    navigate({ module: draftModule, status: draftStatus })
+    filterPanel.close()
+  }
+
+  function clearAllFilters() {
+    setDraftModule("")
+    setDraftStatus("")
+    navigate({ module: "", status: "" })
+    filterPanel.close()
+  }
 
   return (
     <>
@@ -80,47 +85,36 @@ export default function ApprovalHistoryClient({
 
       {/* Filters */}
       <div className="flex items-center gap-2 px-6 mb-4">
-        <select
-          value={draftModule || "all"}
-          onChange={(e) => setDraftModule(e.target.value === "all" ? "" : e.target.value)}
-          className="h-9 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <option value="all">All Modules</option>
-          {Object.entries(MODULE_LABEL).map(([code, label]) => (
-            <option key={code} value={code}>{label}</option>
-          ))}
-        </select>
+        <FilterToggleButton open={filterPanel.open} onToggle={filterPanel.toggle} activeCount={activeFilterCount} />
+      </div>
 
-        <select
-          value={draftStatus || "all"}
-          onChange={(e) => setDraftStatus(e.target.value === "all" ? "" : e.target.value)}
-          className="h-9 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <option value="all">Approved + Rejected</option>
-          <option value="approved">Approved</option>
-          <option value="rejected">Rejected</option>
-        </select>
+      <div className="px-6">
+        <FilterPanel open={filterPanel.open} onClose={filterPanel.close} onApply={applyFilters} onClear={clearAllFilters}>
+          <FilterField label="Module">
+            <Select
+              className="w-full"
+              value={draftModule || "all"}
+              onChange={(e) => setDraftModule(e.target.value === "all" ? "" : e.target.value)}
+            >
+              <option value="all">All Modules</option>
+              {Object.entries(MODULE_LABEL).map(([code, label]) => (
+                <option key={code} value={code}>{label}</option>
+              ))}
+            </Select>
+          </FilterField>
 
-        <button
-          onClick={() => navigate({ module: draftModule, status: draftStatus })}
-          disabled={!draftDirty}
-          className="h-9 rounded-lg border border-input bg-background px-3 text-sm font-medium hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Apply
-        </button>
-
-        {hasFilters && (
-          <button
-            onClick={() => {
-              setDraftModule("")
-              setDraftStatus("")
-              navigate({ module: "", status: "" })
-            }}
-            className="text-xs text-primary hover:underline"
-          >
-            Clear filters
-          </button>
-        )}
+          <FilterField label="Status">
+            <Select
+              className="w-full"
+              value={draftStatus || "all"}
+              onChange={(e) => setDraftStatus(e.target.value === "all" ? "" : e.target.value)}
+            >
+              <option value="all">Approved + Rejected</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </Select>
+          </FilterField>
+        </FilterPanel>
       </div>
 
       {/* Empty state */}

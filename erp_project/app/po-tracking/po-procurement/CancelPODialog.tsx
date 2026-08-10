@@ -32,7 +32,12 @@ export default function CancelPODialog({
         onDone()
         onClose()
         setReason("")
+      } else {
+        const data = await res.json().catch(() => ({}))
+        toast({ title: "Couldn't cancel PO", description: data.error, variant: "error" })
       }
+    } catch {
+      toast({ title: "Couldn't cancel PO", description: "Network error. Please try again.", variant: "error" })
     } finally {
       setLoading(false)
     }

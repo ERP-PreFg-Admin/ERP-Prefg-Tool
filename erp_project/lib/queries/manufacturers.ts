@@ -40,8 +40,8 @@ export const manufacturers = {
   // ============ PAGINATED SELECT QUERIES ============
 
   /**
-   * Paginated manufacturer list with optional search.
-   * Params: [like, like, like, LIMIT, OFFSET]
+   * Paginated manufacturer list with optional search + status filter.
+   * Params: [like, like, like, status, status, LIMIT, OFFSET]
    *   like — '%search%' or null
    */
   selectPaginated: `
@@ -55,6 +55,7 @@ export const manufacturers = {
     INNER JOIN details_mfg AS mfgd ON mfgd.mfg_id = mfg.id
     WHERE (? IS NULL OR mfg.code LIKE ? OR mfg.name LIKE ?)
       AND (? IS NULL OR mfg.id IN (?))
+      AND (? IS NULL OR mfgd.status = ?)
     ORDER BY mfg.code ASC
     LIMIT ? OFFSET ?
   `,
@@ -62,7 +63,7 @@ export const manufacturers = {
   /**
    * Fetch ALL matching manufacturers for export (no LIMIT/OFFSET).
    * Same WHERE clause as selectPaginated.
-   * Params: [like, like, like]
+   * Params: [like, like, like, status, status]
    */
   selectAllFiltered: `
     SELECT
@@ -74,12 +75,13 @@ export const manufacturers = {
     INNER JOIN details_mfg AS mfgd ON mfgd.mfg_id = mfg.id
     WHERE (? IS NULL OR mfg.code LIKE ? OR mfg.name LIKE ?)
       AND (? IS NULL OR mfg.id IN (?))
+      AND (? IS NULL OR mfgd.status = ?)
     ORDER BY mfg.code ASC
   `,
 
   /**
    * Matching COUNT for selectPaginated.
-   * Params: [like, like, like]
+   * Params: [like, like, like, status, status]
    */
   countAll: `
     SELECT COUNT(*) AS total
@@ -87,6 +89,7 @@ export const manufacturers = {
     INNER JOIN details_mfg AS mfgd ON mfgd.mfg_id = mfg.id
     WHERE (? IS NULL OR mfg.code LIKE ? OR mfg.name LIKE ?)
       AND (? IS NULL OR mfg.id IN (?))
+      AND (? IS NULL OR mfgd.status = ?)
   `,
 
   // ============ INSERT QUERIES ============
@@ -271,11 +274,11 @@ export const manufacturers = {
    * UNRESTRICTED explicitly where that's genuinely intended.
    *
    * Usage:
-   *   const fp = manufacturers.filterParams(search, scope)
+   *   const fp = manufacturers.filterParams(search, scope, status)
    *   paginate(manufacturers.selectPaginated, [...fp, limit, offset], manufacturers.countAll, fp, ...)
    */
-  filterParams(search: string | null, scope: UserScope): unknown[] {
+  filterParams(search: string | null, scope: UserScope, status: string | null = null): unknown[] {
     const like = search ? `%${search}%` : null
-    return [like, like, like, ...scopeParams(scope.mfgIds)]
+    return [like, like, like, ...scopeParams(scope.mfgIds), status, status]
   },
 }

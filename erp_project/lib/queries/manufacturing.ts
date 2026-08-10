@@ -235,6 +235,17 @@ export const manufacturingSql = {
     ORDER BY sk.sku_code ASC
   `,
 
+  /** SKU + orderable recipes for one manufacturer — feeds the Add PO dialog's
+   *  SKU/Recipe picker. Params: [mfg_id] */
+  selectOrderableBomsForMfg: `
+    SELECT sk.sku_code, sk.name AS sku_name, b.id AS recipe_id, b.bom_code, b.status AS bom_status
+    FROM master_recipe_mfg mbm
+    INNER JOIN master_recipe b  ON b.id  = mbm.recipe_id
+    INNER JOIN master_skus   sk ON sk.id = b.sku_id
+    WHERE mbm.mfg_id = ? AND mbm.status IN ('active', 'discontinued') AND sk.status = 'active'
+    ORDER BY sk.sku_code ASC, (b.status = 'active') DESC, b.bom_code ASC
+  `,
+
   /** Resolve one SKU code to the recipe_id this manufacturer produces it under — for the bulk misc-cost CSV importer. Params: [mfg_id, sku_code] */
   selectMfgLineBySkuCode: `
     SELECT DISTINCT mbm.recipe_id AS id

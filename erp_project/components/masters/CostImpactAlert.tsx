@@ -35,6 +35,7 @@ export function CostImpactAlert({
 
   useEffect(() => {
     let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale results before the new material/mfg's fetch resolves
     setSkus(null)
     fetch(endpoint, {
       method: "POST",

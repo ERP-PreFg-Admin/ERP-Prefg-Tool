@@ -1,6 +1,8 @@
 "use client"
 
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
+import { DIFF_OLD_CELL_CLASS, DIFF_NEW_CELL_CLASS } from "./FieldDiff"
 import type { DiffRow } from "./types"
 
 /** Shared red/green "Old Value → New Value" comparison table used by every
@@ -33,11 +35,11 @@ export function DiffTable({ rows, newOnly }: { rows: DiffRow[]; newOnly?: boolea
               ) : (
                 <>
                   {!newOnly && (
-                    <TableCell className="py-1.5 bg-red-50 dark:bg-red-950/30 text-xs text-red-700 dark:text-red-400 font-medium align-top">
+                    <TableCell className={cn("py-1.5 text-xs font-medium align-top", DIFF_OLD_CELL_CLASS)}>
                       {r.old}
                     </TableCell>
                   )}
-                  <TableCell className="py-1.5 bg-emerald-50 dark:bg-emerald-950/30 text-xs text-emerald-700 dark:text-emerald-400 font-medium align-top">
+                  <TableCell className={cn("py-1.5 text-xs font-medium align-top", DIFF_NEW_CELL_CLASS)}>
                     {r.new}
                   </TableCell>
                 </>

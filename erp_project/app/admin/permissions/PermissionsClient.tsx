@@ -43,6 +43,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { useToast } from "@/components/ui/toast"
+import { Select } from "@/components/ui/select"
 import { PAGES, PAGE_SECTIONS } from "@/lib/pages"
 import { ROLES, roleLabel, designationsOf, DESIGNATION_LABELS, type Role } from "@/lib/roles"
 import { cn } from "@/lib/utils"
@@ -75,7 +76,7 @@ function AccessSelect({
   onChange: (next: CellValue) => void
 }) {
   return (
-    <select
+    <Select
       value={value}
       disabled={disabled}
       onChange={(e) => onChange(e.target.value as CellValue)}
@@ -89,7 +90,7 @@ function AccessSelect({
       {CELL_OPTIONS.map((o) => (
         <option key={o.value} value={o.value}>{o.label}</option>
       ))}
-    </select>
+    </Select>
   )
 }
 
