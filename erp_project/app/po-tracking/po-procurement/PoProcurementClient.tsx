@@ -264,7 +264,7 @@ export default function PoProcurementClient({
             <CsvImportDialog
               entityLabel="PO"
               entityLabelPlural="POs"
-              endpoint="/api/purchase-orders"
+              endpoint="/api/v1/purchase-orders"
               templateFilename="po_bulk_template.csv"
               fields={PO_BULK_CSV_FIELDS}
               onSuccess={afterAction}
@@ -281,7 +281,7 @@ export default function PoProcurementClient({
 
       {/* ── Filter panel ── */}
       {showFilters && (
-        <Card className="border-blue-200">
+        <Card className="border-blue-200 dark:border-blue-900">
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-medium">Filters</span>
@@ -396,7 +396,7 @@ export default function PoProcurementClient({
       </Tabs>
 
       {/* ── Table + inwarding panel — split-pane, same shape as Recipe Master's
-             BOMMasterComponent: the table narrows to make room and the panel
+             RecipeMasterComponent: the table narrows to make room and the panel
              sticks to its top edge, capped to the viewport so a long invoice
              list scrolls internally. ── */}
       <div className="flex gap-4 items-start">
@@ -406,6 +406,9 @@ export default function PoProcurementClient({
             inwarding.selectedPoId != null ? "w-[58%] shrink-0" : "w-full"
           )}
         >
+          {/* Every tab here lists purchase orders, the Inward tab included —
+              one inward PO per row. The invoice-shaped view of the same data
+              lives on /po-tracking/invoices. */}
           <PoTable
             rows={rows}
             sessionUserId={sessionUserId}

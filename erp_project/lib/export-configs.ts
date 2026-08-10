@@ -116,7 +116,7 @@ export const PM_MFG_EXPORT_COLUMNS: ExportColumn[] = [
 
 // ── PO Procurement ────────────────────────────────────────────────────────────
 // Row shape comes from purchaseOrdersSql.buildSelectFiltered (see
-// app/api/purchase-orders/export/route.ts) — same columns PoTable.tsx shows.
+// app/api/v1/purchase-orders/export/route.ts) — same columns PoTable.tsx shows.
 
 export const PO_PROCUREMENT_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "po_no",         label: "PO No.",              type: "text"   },
@@ -169,16 +169,16 @@ export const MFG_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "status",          label: "Status",         type: "text" },
 ]
 
-// ── BOM Master ────────────────────────────────────────────────────────────────
+// ── Recipe Master ────────────────────────────────────────────────────────────────
 
-export const BOM_EXPORT_COLUMNS: ExportColumn[] = [
-  { key: "bom_code",        label: "BOM Code",        type: "text"   },
+export const RECIPE_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: "bom_code",        label: "Recipe Code",        type: "text"   },
   { key: "mtrl_type",       label: "Material Type",   type: "text"   },
   { key: "mtrl_id",         label: "Material ID",     type: "number" },
   { key: "amount",          label: "Amount",          type: "number" },
   { key: "uom",             label: "UOM",             type: "text"   },
   { key: "material_status", label: "Material Status", type: "text"   },
-  { key: "bom_status",      label: "BOM Status",      type: "text"   },
+  { key: "bom_status",      label: "Recipe Status",      type: "text"   },
   { key: "effective_from",  label: "Effective From",  type: "date"   },
 ]
 
@@ -186,7 +186,7 @@ export const BOM_EXPORT_COLUMNS: ExportColumn[] = [
 
 export const MFG_LINES_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "sku_code",        label: "SKU",             type: "text" },
-  { key: "bom_code",        label: "BOM Code",        type: "text" },
+  { key: "bom_code",        label: "Recipe Code",        type: "text" },
   { key: "sku_name",        label: "SKU Name",        type: "text" },
   { key: "status",          label: "Status",          type: "text", format: (v) => (v === "discontinued" ? "Discontinued" : v === "inactive" ? "Inactive" : "Active") },
   { key: "effective_from",  label: "Effective From",  type: "date" },
@@ -285,7 +285,7 @@ export const MISC_COST_CURRENT_RATES_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "type",           label: "Type",           format: (v) => MISC_COST_TYPE_LABEL[String(v)] ?? String(v) },
   { key: "sku_code",       label: "SKU Code",       type: "text"   },
   { key: "sku_name",       label: "SKU Name",       type: "text"   },
-  { key: "bom_code",       label: "BOM Code",       type: "text"   },
+  { key: "bom_code",       label: "Recipe Code",       type: "text"   },
   {
     // Mixed unit column (currency amount for jw/shrink/shipper, percentage for
     // rm_loss/pm_loss) — left as "text" so both render as the format() string below
@@ -349,4 +349,53 @@ export const FINAL_COSTING_DETAILED_LINE_COLUMNS: ExportColumn[] = [
   { key: "max_cost",          label: "Max Cost",           type: "number" },
   { key: "max_delta",         label: "Δ vs MRM (₹)",       type: "number" },
   { key: "max_delta_pct",     label: "Δ vs MRM (%)",       type: "number" },
+]
+
+// ── Invoices (/po-tracking/invoices) ────────────────────────────────────────
+// Two sheets, same split the Agreed Final Costing export uses: a header row per
+// invoice, and every line flattened with its invoice. CSV gets the summary
+// only, since CSV has no sheets.
+
+export const INVOICE_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: "invoice_no",      label: "Invoice No",     type: "text"   },
+  { key: "invoice_date",    label: "Invoice Date",   type: "date"   },
+  { key: "mfg_code",        label: "MFG Code",       type: "text"   },
+  { key: "mfg_name",        label: "Manufacturer",   type: "text"   },
+  { key: "destination",     label: "Destination",    type: "text"   },
+  { key: "invoice_total",   label: "Invoice Total",  type: "number" },
+  { key: "item_count",      label: "Lines",          type: "number" },
+  { key: "received_count",  label: "Lines Received", type: "number" },
+  { key: "eway_bill_no",    label: "E-way Bill No",  type: "text"   },
+  { key: "vehicle_no",      label: "Vehicle No",     type: "text"   },
+  { key: "created_by_name", label: "Entered By",     type: "text"   },
+  { key: "created_at",      label: "Entered On",     type: "date"   },
+]
+
+export const INVOICE_LINE_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: "invoice_no",             label: "Invoice No",       type: "text"   },
+  { key: "invoice_date",           label: "Invoice Date",     type: "date"   },
+  { key: "mfg_code",               label: "MFG Code",         type: "text"   },
+  { key: "mfg_name",               label: "Manufacturer",     type: "text"   },
+  { key: "destination",            label: "Destination",      type: "text"   },
+  { key: "line_no",                label: "Line",             type: "number" },
+  { key: "sku_code",               label: "SKU",              type: "text"   },
+  // Kept beside the mapped code: when they differ, the invoice printed
+  // something our master doesn't know, and that is what needs correcting.
+  { key: "parsed_sku_code",        label: "SKU As Printed",   type: "text"   },
+  { key: "sku_name",               label: "Product",          type: "text"   },
+  { key: "batch",                  label: "Batch",            type: "text"   },
+  { key: "mfg_date",               label: "Mfg Date",         type: "text"   },
+  { key: "expiry",                 label: "Expiry",           type: "text"   },
+  { key: "hsn",                    label: "HSN",              type: "text"   },
+  { key: "qty",                    label: "Qty",              type: "number" },
+  { key: "rate",                   label: "Rate",             type: "number" },
+  { key: "gst_percent",            label: "GST %",            type: "number" },
+  { key: "amount",                 label: "Amount",           type: "number" },
+  { key: "total_amount",           label: "Line Total",       type: "number" },
+  { key: "inward_po_no",           label: "Inward PO",        type: "text"   },
+  { key: "received_against_po_no", label: "Received Against", type: "text"   },
+  {
+    key: "link_type", label: "Line Type", type: "text",
+    format: (v) => (v === "received" ? "Received against PO" : "Raised new PO"),
+  },
 ]

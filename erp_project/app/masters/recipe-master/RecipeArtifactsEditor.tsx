@@ -1,33 +1,33 @@
 "use client"
 
 /**
- * Staging UI for BOM artifacts (reference files — spec sheets, lab reports,
- * etc.) — shared by BomEditDialog and the Create BOM wizard's Step 4.
+ * Staging UI for Recipe artifacts (reference files — spec sheets, lab reports,
+ * etc.) — shared by RecipeEditDialog and the Create Recipe wizard's Step 4.
  *
  * Artifacts are NOT immediate: add/remove here only stages local state
- * (`pendingFiles` / `pendingRemoveIds`). The actual bom_artifacts rows are
+ * (`pendingFiles` / `pendingRemoveIds`). The actual artifacts_recipe rows are
  * only ever written/deleted at approval time, bundled with the RM/PM line
  * diff into the same create-full submission (see useBomDetailPanel.saveEdit
  * / useBomWizard.handleSubmit for the upload-then-submit step, and
  * lib/approvals/module-handlers.ts bomHandler.applyAndArchive for the apply
- * step). This component never calls /api/upload itself — it only collects
+ * step). This component never calls /api/v1/upload itself — it only collects
  * File objects for the caller to upload right before submitting.
  */
 
 import { useRef } from "react"
 import { Paperclip, X, ExternalLink, Undo2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import type { BomArtifact } from "@/types/masters"
+import type { RecipeArtifact } from "@/types/masters"
 
-// Matches /api/upload's ALLOWED_SET (app/api/upload/route.ts) — no point
+// Matches /api/v1/upload's ALLOWED_SET (app/api/v1/upload/route.ts) — no point
 // letting the user pick a file the server will reject.
 const ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.csv"
 const MAX_BYTES = 10 * 1024 * 1024
 
 /** Just the "Add Artifact" button + hidden file input — split out so a caller
- *  (BomEditDialog) can place it inline next to unrelated controls (e.g. the
- *  Status row) while BomArtifactsList renders the actual file list below. */
-export function BomArtifactsAddButton({
+ *  (RecipeEditDialog) can place it inline next to unrelated controls (e.g. the
+ *  Status row) while RecipeArtifactsList renders the actual file list below. */
+export function RecipeArtifactsAddButton({
   pendingFiles,
   onChangePendingFiles,
   disabled,
@@ -75,7 +75,7 @@ export function BomArtifactsAddButton({
 
 /** The file list (already-attached + staged) — no header/add-button, so it
  *  can sit under a header row the caller composes itself. */
-export function BomArtifactsList({
+export function RecipeArtifactsList({
   existing,
   pendingFiles,
   onChangePendingFiles,
@@ -83,7 +83,7 @@ export function BomArtifactsList({
   onChangePendingRemoveIds,
   disabled,
 }: {
-  existing?: BomArtifact[]
+  existing?: RecipeArtifact[]
   pendingFiles: File[]
   onChangePendingFiles: (files: File[]) => void
   pendingRemoveIds: number[]
@@ -104,7 +104,7 @@ export function BomArtifactsList({
 
   async function viewArtifact(s3Key: string) {
     try {
-      const res = await fetch(`/api/files/presign?key=${encodeURIComponent(s3Key)}&view=1`)
+      const res = await fetch(`/api/v1/files/presign?key=${encodeURIComponent(s3Key)}&view=1`)
       const data = await res.json()
       if (data.url) window.open(data.url, "_blank", "noopener,noreferrer")
     } catch {
@@ -136,7 +136,7 @@ export function BomArtifactsList({
             </span>
             {staged ? (
               <>
-                <span className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 shrink-0">
+                <span className="text-xs font-medium text-amber-700 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400 rounded px-1.5 py-0.5 shrink-0">
                   Pending removal
                 </span>
                 <Button
@@ -183,7 +183,7 @@ export function BomArtifactsList({
       {pendingFiles.map((f, i) => (
         <div key={`${f.name}-${i}`} className="flex items-center gap-2 rounded-lg border px-3 py-2">
           <span className="text-xs flex-1 truncate text-foreground">{f.name}</span>
-          <span className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 shrink-0">
+          <span className="text-xs font-medium text-amber-700 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400 rounded px-1.5 py-0.5 shrink-0">
             Pending
           </span>
           <Button
@@ -203,11 +203,11 @@ export function BomArtifactsList({
   )
 }
 
-/** Combined label + Add button + list — used as-is by the Create BOM wizard
+/** Combined label + Add button + list — used as-is by the Create Recipe wizard
  *  (Step4LineEntry), which has no neighboring control to share a line with.
- *  BomEditDialog instead composes BomArtifactsAddButton/BomArtifactsList
+ *  RecipeEditDialog instead composes RecipeArtifactsAddButton/RecipeArtifactsList
  *  directly so it can put the Add button on the same line as Status. */
-export function BomArtifactsEditor({
+export function RecipeArtifactsEditor({
   existing,
   pendingFiles,
   onChangePendingFiles,
@@ -215,7 +215,7 @@ export function BomArtifactsEditor({
   onChangePendingRemoveIds,
   disabled,
 }: {
-  existing?: BomArtifact[]
+  existing?: RecipeArtifact[]
   pendingFiles: File[]
   onChangePendingFiles: (files: File[]) => void
   pendingRemoveIds: number[]
@@ -226,13 +226,13 @@ export function BomArtifactsEditor({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <label className="block text-xs font-medium text-muted-foreground">Artifacts</label>
-        <BomArtifactsAddButton
+        <RecipeArtifactsAddButton
           pendingFiles={pendingFiles}
           onChangePendingFiles={onChangePendingFiles}
           disabled={disabled}
         />
       </div>
-      <BomArtifactsList
+      <RecipeArtifactsList
         existing={existing}
         pendingFiles={pendingFiles}
         onChangePendingFiles={onChangePendingFiles}

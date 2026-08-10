@@ -12,7 +12,7 @@
  * from its options. That reuses the app's existing searchable select rather
  * than introducing a multi-select widget.
  *
- * Each row saves on its own — PUT /api/admin/entity-scope replaces one
+ * Each row saves on its own — PUT /api/v1/admin/entity-scope replaces one
  * (user, entity_type) set. "All" is the absence of rows, not a row that says
  * "all", so switching a row to All sends `entity_ids: null` and deletes its
  * rows. Saving "Only selected" with nothing picked is refused here: it would
@@ -97,7 +97,7 @@ function ScopeRow({
     }
     setSaving(true)
     try {
-      const res = await fetch("/api/admin/entity-scope", {
+      const res = await fetch("/api/v1/admin/entity-scope", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

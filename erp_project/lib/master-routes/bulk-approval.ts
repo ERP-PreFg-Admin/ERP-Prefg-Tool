@@ -14,7 +14,7 @@ import { uploadFile } from "@/lib/s3"
 /**
  * Minimal CSV serializer for internal round-tripping through
  * lib/import-s3.ts's parseCsvBuffer — NOT for human/Excel export (see
- * lib/export.ts's buildCsv for that, which prepends a BOM that
+ * lib/export.ts's buildCsv for that, which prepends a Recipe that
  * parseCsvBuffer doesn't strip, corrupting the first header on re-parse).
  */
 export function rowsToCsv(rows: Record<string, string>[]): string {

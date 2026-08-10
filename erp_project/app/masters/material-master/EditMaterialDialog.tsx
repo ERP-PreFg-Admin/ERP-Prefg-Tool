@@ -71,7 +71,7 @@ export default function EditMaterialDialog({
     if (row.status === "rejected" && row.id) {
       const mod = material === "rm" ? "RM_MAT" : "PM_MAT"
       setLoadingInfo(true)
-      fetch(`/api/approvals/entity?module=${mod}&entity_id=${row.id}`)
+      fetch(`/api/v1/approvals/entity?module=${mod}&entity_id=${row.id}`)
         .then((r) => r.json())
         .then((data) => {
           setRejection(data.rejection ?? null)
@@ -83,12 +83,12 @@ export default function EditMaterialDialog({
 
     // Fetch managed dropdown options for RM.
     if (material === "rm") {
-      fetch("/api/masters/raw-materials", {
+      fetch("/api/v1/masters/raw-materials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "get-makes" }),
       }).then((r) => r.json()).then((d) => setMakeOptions(d.makes ?? [])).catch(() => {})
-      fetch("/api/masters/raw-materials", {
+      fetch("/api/v1/masters/raw-materials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "get-inci-names" }),
@@ -116,7 +116,7 @@ export default function EditMaterialDialog({
           ? { material: "rm", id: row!.id, name: name.trim(), make: make.trim(), inci_name: inci.trim(), type: type.trim() || null, uom: uom.trim() || null, hsn_code: hsn.trim() || null, status, remarks: remarks.trim() }
           : { material: "pm", id: row!.id, name: name.trim(), type: type.trim(), uom: uom.trim() || null, hsn_code: hsn.trim() || null, pantone_color: pantoneColor.trim() || null, status, remarks: remarks.trim() }
 
-      const res = await fetch("/api/masters/material-master", {
+      const res = await fetch("/api/v1/masters/material-master", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

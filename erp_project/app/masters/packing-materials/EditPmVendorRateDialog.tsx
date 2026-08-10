@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { CostImpactAlert } from "@/components/masters/CostImpactAlert"
 import { RejectionBanner, type RejectionInfo } from "@/components/masters/ApprovalBanners"
 import type { PMVendor } from "@/types/masters"
+import { todayIST } from "@/lib/date"
 
 export function EditPmVendorRateDialog({
   row,
@@ -50,7 +51,7 @@ export function EditPmVendorRateDialog({
 
       if (row.status === "rejected" && row.vrm_id) {
         setLoadingInfo(true)
-        fetch(`/api/approvals/entity?module=PM_VRM&entity_id=${row.vrm_id}`)
+        fetch(`/api/v1/approvals/entity?module=PM_VRM&entity_id=${row.vrm_id}`)
           .then((r) => r.json())
           .then((data) => {
             setRejection(data.rejection ?? null)
@@ -64,7 +65,7 @@ export function EditPmVendorRateDialog({
 
   if (!row) return null
 
-  const today    = new Date().toISOString().slice(0, 10)
+  const today    = todayIST()
   const isDraft  = row.status === "rejected"
   const canEdit  = !isDraft || currentUserId === null || rejection === null || currentUserId === rejection.raised_by
 
@@ -88,7 +89,7 @@ export function EditPmVendorRateDialog({
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch("/api/masters/packing-materials", {
+      const res = await fetch("/api/v1/masters/packing-materials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -128,7 +129,7 @@ export function EditPmVendorRateDialog({
           <div className="text-xs text-muted-foreground">Vendor: {row.vendor_code}</div>
 
           <CostImpactAlert
-            endpoint="/api/masters/packing-materials"
+            endpoint="/api/v1/masters/packing-materials"
             materialIdField="pm_id"
             materialId={row.pm_id}
             scope="vendor"

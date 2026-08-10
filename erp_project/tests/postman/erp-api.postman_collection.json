@@ -1,0 +1,446 @@
+{
+  "info": {
+    "name": "ERP — Files & S3 key authorization",
+    "description": "Exercises the object-level guard added to /api/files/presign and /api/upload (docs/qa-audit-2026-08.md #5), plus the two findings still open.\n\nEvery request authenticates with a real NextAuth session cookie you paste into the `sessionToken` collection variable — see tests/postman/README.md for how to get it. `proxy.ts` does not match /api/*, so the cookie is the only thing standing between Postman and these routes.\n\nRun the folders in order: 'Setup' harvests a real PO attachment key, 'Upload' harvests a key you own, and the presign folder uses both.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "7f3a9c21-4e5b-4d18-9a62-1c0b7e4d55aa"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "description": "No trailing slash."
+    },
+    {
+      "key": "cookieName",
+      "value": "authjs.session-token",
+      "description": "next-auth v5 over http. Behind HTTPS it is __Secure-authjs.session-token."
+    },
+    {
+      "key": "sessionToken",
+      "value": "",
+      "description": "Paste the cookie VALUE here (not name=value). See README."
+    },
+    {
+      "key": "probeFolder",
+      "value": "postman/qa"
+    },
+    {
+      "key": "uploadedKey",
+      "value": ""
+    },
+    {
+      "key": "uploadedKeyTwice",
+      "value": ""
+    },
+    {
+      "key": "forgedKey",
+      "value": ""
+    },
+    {
+      "key": "poAttachmentKey",
+      "value": ""
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Attach the session cookie to every request, except the one whose whole",
+          "// point is to arrive without it.",
+          "if (pm.info.requestName.indexOf('no session') === -1) {",
+          "  // The replace() is not decoration: a token copied out of a wrapped terminal",
+          "  // line carries newlines, and a header value containing one is rejected with",
+          "  // 'Invalid character in header content'.",
+          "  const token = (pm.collectionVariables.get('sessionToken') || '').replace(/s+/g, '');",
+          "  if (!token) {",
+          "    console.warn('sessionToken is empty — every request will 401. See tests/postman/README.md');",
+          "  } else {",
+          "    pm.request.headers.upsert({",
+          "      key: 'Cookie',",
+          "      value: pm.collectionVariables.get('cookieName') + '=' + token",
+          "    });",
+          "  }",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Setup",
+      "item": [
+        {
+          "name": "Health — no session required",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/health",
+            "description": "Confirms the app is up and that you have the right baseUrl, before any auth question muddies the water.",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "pm.test('status: ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PO list — proves the session cookie works, harvests a real attachment key",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/purchase-orders",
+            "description": "A 401 here means the sessionToken variable is stale or wrong — fix that before reading anything into the presign results.\n\nSaves the first attachment_key it finds into `poAttachmentKey`: a key that belongs to a row YOU can see, which is the positive case for the guard.",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('authenticated (401 here = stale sessionToken)', () => pm.response.to.have.status(200));",
+                  "const rows = pm.response.json();",
+                  "pm.test('returns a list', () => pm.expect(rows).to.be.an('array'));",
+                  "const withKey = rows.filter(r => r.attachment_key);",
+                  "if (withKey.length) {",
+                  "  pm.collectionVariables.set('poAttachmentKey', withKey[0].attachment_key);",
+                  "  console.log('harvested attachment_key from PO', withKey[0].po_no);",
+                  "} else {",
+                  "  console.warn('No PO in scope has an attachment — the in-scope presign test will be skipped.');",
+                  "  pm.collectionVariables.set('poAttachmentKey', '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Upload — keys are unguessable and stamped",
+      "item": [
+        {
+          "name": "Upload a probe file",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/upload",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Pick any PDF/PNG/CSV under 10 MB — Postman cannot pre-fill this."
+                },
+                {
+                  "key": "folder",
+                  "value": "{{probeFolder}}",
+                  "type": "text"
+                },
+                {
+                  "key": "field",
+                  "value": "probe",
+                  "type": "text"
+                }
+              ]
+            },
+            "description": "You must click 'Select Files' on the `file` row once — Postman will not interpolate a path there.\n\nAsserts the returned key carries the -u<userId>-<12 hex> marker buildUploadKey adds. That marker is what lets you presign a file you just uploaded but haven't saved to any row yet (the Add Vendor / Add Manufacturer preview flow).\n\nNote: this writes a real object to S3 under postman/qa/.",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const key = pm.response.json().key;",
+                  "pm.collectionVariables.set('uploadedKey', key);",
+                  "pm.test('key is stamped with the uploader marker', () => {",
+                  "  pm.expect(key).to.match(/-u\\d+-[0-9a-f]{12}\\.[A-Za-z0-9]+$/);",
+                  "});",
+                  "pm.test('key keeps its folder and extension', () => {",
+                  "  pm.expect(key.indexOf(pm.collectionVariables.get('probeFolder') + '/probe-u')).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upload the same folder+field again — must not reuse the key",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/upload",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Same file is fine."
+                },
+                {
+                  "key": "folder",
+                  "value": "{{probeFolder}}",
+                  "type": "text"
+                },
+                {
+                  "key": "field",
+                  "value": "probe",
+                  "type": "text"
+                }
+              ]
+            },
+            "description": "The overwrite half of audit #5. uploadFile is a plain PutObject, so the old predictable `${folder}/${field}.${ext}` key meant a second upload replaced the first object's bytes — an invoice PDF or vendor document could be swapped out underneath whatever referenced it. Identical inputs must now produce a different key.",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const second = pm.response.json().key;",
+                  "pm.collectionVariables.set('uploadedKeyTwice', second);",
+                  "pm.test('a repeat upload cannot overwrite the first object', () => {",
+                  "  pm.expect(second).to.not.eql(pm.collectionVariables.get('uploadedKey'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Presign — the object guard",
+      "item": [
+        {
+          "name": "My own just-uploaded key — allowed",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/files/presign?key={{uploadedKey}}",
+            "description": "Rule 2 of assertKeyReadable: the marker in the key says you uploaded it, so it is readable even though no row references it yet. If this 403s, document previews in the Add Vendor / Add Manufacturer dialogs are broken.",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "pm.test('returns a signed url', () => pm.expect(pm.response.json().url).to.include('X-Amz-Signature'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "My own key, inline view — allowed",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/files/presign?key={{uploadedKey}}&view=1&expiresIn=3600",
+            "description": "Same guard, the view=1 branch, and confirms expiresIn is still clamped to 3600.",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "pm.test('expiry honoured and clamped', () => pm.expect(pm.response.json().expiresIn).to.eql(3600));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "A key owned by nothing — 403",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/files/presign?key=postman/qa/no-such-object-9f3a1c.pdf",
+            "description": "THE enumeration test. Before the fix this returned a working presigned URL for any key at all — so any signed-in user could walk the bucket using the attachment_key and csv_source_key values that ordinary list responses hand out. A key that resolves to no owning row must now be refused outright.",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403, not a signed url', () => pm.response.to.have.status(403));",
+                  "pm.test('no url leaked in the body', () => pm.expect(pm.response.text()).to.not.include('X-Amz-Signature'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Someone else's marker on my key — 403",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/files/presign?key={{forgedKey}}",
+            "description": "Takes your real uploaded key and rewrites the marker to user 999999. The marker no longer matches you, nothing owns the key, so it is refused — i.e. the marker grants access to your own uploads only, it is not a general bypass.",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const k = pm.collectionVariables.get('uploadedKey') || '';",
+                  "pm.collectionVariables.set(",
+                  "  'forgedKey',",
+                  "  k.replace(/-u\\d+-([0-9a-f]{12})(\\.[A-Za-z0-9]+)$/, '-u999999-$1$2')",
+                  ");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the rewritten key really is different', () => {",
+                  "  pm.expect(pm.collectionVariables.get('forgedKey')).to.not.eql(pm.collectionVariables.get('uploadedKey'));",
+                  "});",
+                  "pm.test('403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "A real PO attachment I can see — allowed",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/files/presign?key={{poAttachmentKey}}",
+            "description": "Rule 1: the key resolves to a purchase_orders row whose mfg_id and destination are in your scope. Skipped when no PO in your scope has an attachment.\n\nThis is the regression that matters most — if the owner lookup misses a table, real documents stop opening for everyone.",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('poAttachmentKey')) {",
+                  "  pm.test.skip('no PO with an attachment in scope', () => {});",
+                  "} else {",
+                  "  pm.test('a document on a PO I can see still opens', () => pm.response.to.have.status(200));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Missing key — 400",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/files/presign",
+            "description": "Unchanged behaviour — the guard runs after the required-param check, so a missing key is still a plain 400 and not a confusing 403.",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Presign with no session — 401",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/files/presign?key={{uploadedKey}}",
+            "description": "The collection pre-request script skips the cookie for any request with 'no session' in its name. withGateway must reject before the guard is ever reached.\n\nIf Postman's own cookie jar has captured a cookie for this host, clear it (Cookies link under Send) or this will pass a session anyway.",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Still open — these SHOULD fail today",
+      "description": "Red tests on purpose. They encode the desired behaviour for findings not yet fixed, so they flip green when the fix lands instead of needing to be remembered.",
+      "item": [
+        {
+          "name": "EXPECTED FAIL — preview of an unowned key (audit #5)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/files/preview?key=postman/qa/no-such-object-9f3a1c.csv",
+            "description": "/api/files/preview has the same hole presign had: it takes the key from the caller, parses whatever CSV/XLSX is at it, and returns the contents as JSON. Two lines away from fixed — assertKeyReadable, and delete the '..' check.\n\nThis asserts 403, so it fails until that lands. A 500 here means the object simply wasn't there, which is not authorization.",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('preview refuses a key owned by nothing', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "INFO — supplier invoice by id (audit #6)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/purchase-orders/invoice/1",
+            "description": "supplier_invoices.mfg_id makes every invoice manufacturer-owned, but this route has no scope assertion — so ids can be walked. Informational here because proving it needs a user scoped to a DIFFERENT manufacturer than invoice 1's: signed in as an unrestricted user, a 200 is correct behaviour.\n\nTo turn this into a real test: create a user scoped to one manufacturer under /admin > Data Access, sign in as them, and re-run — a 200 on another manufacturer's invoice is the defect.",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('never a 500', () => pm.expect(pm.response.code).to.be.oneOf([200, 403, 404]));",
+                  "if (pm.response.code === 200) {",
+                  "  console.log('invoice mfg_id =', pm.response.json().invoice.mfg_id, '— compare against your own entity scope');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

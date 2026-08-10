@@ -2,10 +2,12 @@ import { Card, CardContent } from "@/components/ui/card"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
+import { TableEmpty } from "@/components/ui/empty-state"
 import type { MfgMonthlyPoRow } from "@/types/masters"
 import { fmtInt } from "../mfg-utils"
+import { IST } from "@/lib/date"
 
-const MONTH_LABEL = new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })
+const MONTH_LABEL = new Date().toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: IST })
 
 export default function MfgMonthlyPoSummary({ rows }: { rows: MfgMonthlyPoRow[] }) {
   return (
@@ -25,11 +27,10 @@ export default function MfgMonthlyPoSummary({ rows }: { rows: MfgMonthlyPoRow[] 
             </TableHeader>
             <TableBody>
               {rows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={3} className="text-center text-muted-foreground py-4 text-xs">
-                    No POs raised this month.
-                  </TableCell>
-                </TableRow>
+                // Read-only summary tile — nothing to invite here, and it's too small for a button.
+                <TableEmpty colSpan={3} className="py-4 text-xs">
+                  No POs raised this month.
+                </TableEmpty>
               ) : (
                 rows.map((r, i) => (
                   <TableRow key={i}>

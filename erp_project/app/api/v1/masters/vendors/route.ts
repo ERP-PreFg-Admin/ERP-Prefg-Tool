@@ -1,7 +1,7 @@
 // API route for Vendors → table `vendors`.
 //
 // Called by VendorsClient's AddRecordDialog / CsvImportDialog
-// (endpoint="/api/masters/vendors"). On success the client refreshes the page.
+// (endpoint="/api/v1/masters/vendors"). On success the client refreshes the page.
 //
 // A vendor lives across TWO tables, linked only by id (no DB foreign key):
 //   vendors(id, code, name, type)
@@ -10,7 +10,7 @@
 // then INSERT the matching details_vendor row — both inside one transaction so
 // we never leave a vendor without its details (or vice-versa).
 //
-// POST /api/masters/vendors
+// POST /api/v1/masters/vendors
 //   Request  { action: "create", name, type, location?, zone?, registered_name? }
 //     Process → auto-generate code (VEN-<RM/PM/BT>-<first 3 letters of name>) + INSERT vendors → INSERT details_vendor(vendor_id = new id).
 //     Response 200 { ok, approval_id } · 400 (validation, via withGateway) · 500 { error }
@@ -32,7 +32,7 @@
 //
 //   Request  { action: "bulk_from_s3", key }
 //     Process → same split staging behaviour as "bulk", but the file is
-//       already in S3 (client uploaded it via /api/upload) — just parsed,
+//       already in S3 (client uploaded it via /api/v1/upload) — just parsed,
 //       no second upload for the create rows.
 //     Response 200 { ok, approval_id, staged, skipped, total } · 500 { error }
 //
@@ -53,6 +53,7 @@ import { vendorActionSchema } from "@/lib/validation/vendors"
 import { assertNoDuplicateBankingFields, insertVendorWithGeneratedCode } from "@/lib/master-routes/material-utils"
 import { type EditCandidate, findBestEditMatch, fetchEditMatchCandidates } from "@/lib/master-routes/edit-match"
 import { stageVendorBulkRows } from "@/lib/approvals/handlers/vendors"
+import { monthIST } from "@/lib/date"
 
 export const POST = withGateway({
   schema: vendorActionSchema,
@@ -153,7 +154,7 @@ export const POST = withGateway({
       let skipped = 0
       try {
         await conn.beginTransaction()
-        const s3Folder = `imports/vendors/${new Date().toISOString().slice(0, 7)}`
+        const s3Folder = `imports/vendors/${monthIST()}`
         const result = await stageVendorBulkRows(conn, rows, userId, s3Folder)
         staged = result.staged
         skipped = result.skipped
@@ -336,7 +337,7 @@ export const POST = withGateway({
 
     // ── bulk_from_s3 ─────────────────────────────────────────────────────────────
     // Same staging-only behaviour as "bulk" above — the file is already in S3
-    // (client uploaded it via /api/upload), so we just parse it for a preview
+    // (client uploaded it via /api/v1/upload), so we just parse it for a preview
     // count and stage ONE approval referencing that key.
     if(body.action === "bulk_from_s3") {
       const { key } = body
@@ -368,7 +369,7 @@ export const POST = withGateway({
         // staged file must only ever contain new records (see the "bulk"
         // action above), so stageVendorBulkRows can't reuse `key` as-is (the
         // originally-uploaded file has every row, edits included).
-        const s3Folder = `imports/vendors/${new Date().toISOString().slice(0, 7)}`
+        const s3Folder = `imports/vendors/${monthIST()}`
         const result = await stageVendorBulkRows(conn, rawRows, userId, s3Folder)
         staged = result.staged
         skipped = result.skipped

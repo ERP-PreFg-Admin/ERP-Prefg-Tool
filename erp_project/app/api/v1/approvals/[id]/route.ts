@@ -1,4 +1,4 @@
-// POST /api/approvals/[id]
+// POST /api/v1/approvals/[id]
 // Body: { action: "approve" | "reject", remarks?: string }
 //
 // Approve: delegates to the module's handler (applyAndArchive), then marks
@@ -102,7 +102,7 @@ export const POST = withGateway({
     await resolvePendingHistoryEntry(conn, approval.module, approval.entity_id, approverId, action === "approve" ? "approved" : "rejected")
     await conn.commit()
 
-    // Manufacturer-scoped rm_mrm_fixed/pm_mrm_fixed rate reads are cached
+    // Manufacturer-scoped cost_master_rm_mfg/cost_master_pm_mfg rate reads are cached
     // (see lib/cached-reference-data.ts) since they rarely change — bust
     // that cache immediately on approve/reject instead of waiting out the
     // timer, so the Manufacturing module's RM Vendor / Agreed Rates tabs

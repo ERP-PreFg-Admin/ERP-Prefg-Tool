@@ -53,8 +53,16 @@ export type ParsedInvoice = {
 export type OpenPoOption = {
   id:           number
   po_no:        string
+  /** PO raise date — what the FIFO allocation orders on. */
+  date:         string | null
   sku_code:     string | null
   sku_name:     string | null
+  /** The SKU's live Recipe(s) — comma-joined when more than one is producible. */
+  bom_code:     string | null
+  /** How many Recipes are live for this SKU. >1 means an active Recipe and the
+   *  discontinued one it superseded are both still producible, nothing records
+   *  which a PO was raised against, and the desk has to pick the PO by hand. */
+  live_bom_count: number
   qty:          string | number
   received_qty: string | number
   remaining:    string | number

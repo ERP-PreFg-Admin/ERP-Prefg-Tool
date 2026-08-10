@@ -19,7 +19,7 @@
 // review pane in InvoiceFields.tsx / InvoiceLineItems.tsx.
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, FileUp, History, Loader2, RotateCw } from "lucide-react"
+import { AlertTriangle, Check, FileUp, History, Loader2, RotateCw } from "lucide-react"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog"
@@ -29,9 +29,9 @@ import { cn } from "@/lib/utils"
 import type { OpenPoOption } from "@/types/invoice"
 import type { MfgOption, SkuOption, WarehouseOption } from "../po-procurement/po-types"
 import {
-  EMPTY_FORM, MAX_BYTES, collectProblems, emptyRow, formFromParsed,
-  rowsFromParsed, sumLineItems, toInwardPayload,
-  type InvoiceForm, type Row,
+  EMPTY_FORM, MAX_BYTES, allocateFifo, collectProblems, emptyRow, formFromParsed,
+  matchSummary, rowsFromParsed, sumLineItems, toInwardPayload,
+  type InvoiceForm, type Row, type Shortage,
 } from "./invoice-form"
 import { commitInvoice, fetchOpenPos, parseInvoiceFile, type InwardStep } from "./invoice-api"
 import { clearDraft, loadDraft, saveDraft, savedAgo, type InvoiceDraft } from "./invoice-draft"
@@ -83,12 +83,17 @@ export default function AddInvoiceDialog({
   const [rows, setRows]   = useState<Row[]>([])
   const [extra, setExtra] = useState<Record<string, string>>({})
   const [openPos, setOpenPos] = useState<OpenPoOption[]>([])
+  /** SKUs the open POs couldn't cover, from the last FIFO match. */
+  const [shortages, setShortages] = useState<Shortage[]>([])
 
   /** A checkpointed review found on open, offered for resume. */
   const [draft, setDraft] = useState<InvoiceDraft | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const xhrRef       = useRef<XMLHttpRequest | null>(null)
+  /** Latest rows, readable from applyFifo without putting `rows` in the
+   *  open-PO effect's deps — which would re-fetch on every allocation. */
+  const rowsRef      = useRef<Row[]>([])
   /** Set once the invoice is filed, so closing doesn't resurrect its draft. */
   const committedRef = useRef(false)
   const split        = useSplitPane(50)
@@ -107,7 +112,7 @@ export default function AddInvoiceDialog({
     // every reviewed invoice leaks its full size for the life of the tab.
     setPdfUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return "" })
     setFile(null)
-    setForm(EMPTY_FORM); setRows([]); setExtra({}); setOpenPos([])
+    setForm(EMPTY_FORM); setRows([]); setExtra({}); setOpenPos([]); setShortages([])
     committedRef.current = false
     split.reset()
   }
@@ -179,14 +184,38 @@ export default function AddInvoiceDialog({
     return () => clearTimeout(t)
   }, [phase, file, form, rows, extra, submitting])
 
+  // rows, mirrored for applyFifo. An effect rather than assigning during render,
+  // so a concurrent re-render can't publish a value the commit then discards.
+  useEffect(() => { rowsRef.current = rows }, [rows])
+
+  /** Allocate every line against `pos`, oldest PO raise date first. Splits a
+   *  line across POs when one can't cover it, and re-running is idempotent —
+   *  allocateFifo merges previous splits back before it starts. */
+  function applyFifo(pos: OpenPoOption[]) {
+    const result = allocateFifo(rowsRef.current, pos)
+    rowsRef.current = result.rows
+    setRows(result.rows)
+    setShortages(result.shortages)
+  }
+
   // Reference-PO options follow the manufacturer. Refetched rather than filtered
   // client-side because the full open-PO set across all manufacturers is large.
   // Only the fetch lives here — clearing happens in changeMfg, at the event, so
   // this never calls setState synchronously on the way in.
+  //
+  // The FIFO match runs off the back of it: arriving POs are the moment there is
+  // something to match against, and it's the same moment changeMfg has just
+  // invalidated every reference. Not re-run on every row edit — that would
+  // re-split rows out from under someone typing a quantity; the "Re-match POs"
+  // button and the blocking problems below cover the edit case instead.
   useEffect(() => {
     if (phase !== "review" || !form.mfgId) return
     let cancelled = false
-    void fetchOpenPos(form.mfgId).then((pos) => { if (!cancelled) setOpenPos(pos) })
+    void fetchOpenPos(form.mfgId).then((pos) => {
+      if (cancelled) return
+      setOpenPos(pos)
+      applyFifo(pos)
+    })
     return () => { cancelled = true }
   }, [form.mfgId, phase])
 
@@ -195,6 +224,7 @@ export default function AddInvoiceDialog({
   function changeMfg(value: string) {
     setField("mfgId", value)
     setOpenPos([])
+    setShortages([])
     setRows((prev) => (prev.some((r) => r.reference_po_id)
       ? prev.map((r) => ({ ...r, reference_po_id: "" }))
       : prev))
@@ -221,9 +251,16 @@ export default function AddInvoiceDialog({
     setError("")
     setElapsed(0)
     try {
-      const parsed = await parseInvoiceFile(target)
+      const { parsed, detected } = await parseInvoiceFile(target)
       // Every value here is a suggestion; the review step exists to override it.
-      setForm(formFromParsed(parsed, mfgOptions, warehouseOptions))
+      const next = formFromParsed(parsed, mfgOptions, warehouseOptions)
+      // An exact GSTIN match beats fuzzy-matching the printed seller name, so
+      // it wins when detection found one. formFromParsed's matchMfg result
+      // stands otherwise — a scanned PDF yields no GSTIN at all.
+      if (detected && mfgOptions.some((m) => m.id === detected.mfgId)) {
+        next.mfgId = String(detected.mfgId)
+      }
+      setForm(next)
       setRows(rowsFromParsed(parsed, skuOptions))
       setExtra(parsed.extra ?? {})
       setPhase("review")
@@ -234,8 +271,12 @@ export default function AddInvoiceDialog({
 
   // ── Phase 3: validate + create ────────────────────────────────────────────
   const poById   = useMemo(() => new Map(openPos.map((p) => [String(p.id), p])), [openPos])
-  const problems = useMemo(() => collectProblems(form, rows, poById), [form, rows, poById])
+  const problems = useMemo(
+    () => collectProblems(form, rows, poById, shortages),
+    [form, rows, poById, shortages]
+  )
   const lineSum  = useMemo(() => sumLineItems(rows), [rows])
+  const matched  = useMemo(() => matchSummary(form, rows, shortages), [form, rows, shortages])
   const receiveCount = useMemo(() => rows.filter((r) => r.reference_po_id).length, [rows])
 
   async function handleSubmit() {
@@ -461,6 +502,7 @@ export default function AddInvoiceDialog({
                     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)))}
                   addRow={() => setRows((prev) => [...prev, emptyRow()])}
                   removeRow={(i) => setRows((prev) => prev.filter((_, idx) => idx !== i))}
+                  rematch={() => applyFifo(openPos)}
                   skuOptions={skuOptions}
                   openPos={openPos}
                   mfgId={form.mfgId}
@@ -470,6 +512,29 @@ export default function AddInvoiceDialog({
 
             {/* Commit bar — one blocking list, then what pressing the button does. */}
             <div className="mt-3 shrink-0 border-t border-border pt-3">
+              {/* What worked, beside what didn't. The dialog used to report only
+                  problems, which left "nothing is wrong" and "nothing has been
+                  checked" looking exactly alike — and the FIFO match in
+                  particular does real work the user never asked for and can't
+                  otherwise see. */}
+              {(matched.skuTotal > 0 || matched.mfgMatched) && (
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                  {matched.mfgMatched && matched.parsedFrom && (
+                    <MatchChip title={`Invoice says "${matched.parsedFrom}"`}>Manufacturer matched</MatchChip>
+                  )}
+                  {matched.skuTotal > 0 && matched.skusMatched === matched.skuTotal && (
+                    <MatchChip>All {matched.skuTotal} SKUs matched</MatchChip>
+                  )}
+                  {matched.skuTotal > 0 && matched.skusMatched > 0 && matched.skusMatched < matched.skuTotal && (
+                    <MatchChip>{matched.skusMatched} of {matched.skuTotal} SKUs matched</MatchChip>
+                  )}
+                  {matched.allocated > 0 && (
+                    <MatchChip title="Oldest PO raise date first">
+                      {matched.allocated} PO{matched.allocated === 1 ? "" : "s"} matched by FIFO
+                    </MatchChip>
+                  )}
+                </div>
+              )}
               {problems.length > 0 && (
                 <div className="mb-2 flex flex-wrap items-center gap-1.5">
                   <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-500">
@@ -520,6 +585,20 @@ export default function AddInvoiceDialog({
         )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** A confirmation, shaped like the problem chips beside it so the two read as
+ *  one ledger rather than two unrelated widgets. */
+function MatchChip({ children, title }: { children: React.ReactNode; title?: string }) {
+  return (
+    <span
+      title={title}
+      className="flex items-center gap-1 rounded border border-emerald-500/50 bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+    >
+      <Check className="h-3 w-3 shrink-0" />
+      {children}
+    </span>
   )
 }
 

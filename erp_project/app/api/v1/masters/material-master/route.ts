@@ -178,7 +178,7 @@ export const POST = withGateway({
 //
 // Instead of writing directly to the DB, this creates an approval record with
 // a field-level diff and locks the row to "in_review". The approver then
-// applies or rejects the change via POST /api/approvals/[id].
+// applies or rejects the change via POST /api/v1/approvals/[id].
 
 export const PUT = withGateway({
   schema: materialMasterUpdateSchema,

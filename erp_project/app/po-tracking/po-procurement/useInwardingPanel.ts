@@ -5,7 +5,7 @@
  * the detail fetch, with an in-memory cache so re-opening a PO seen this session
  * is instant.
  *
- * The fetch half of app/masters/bom-master/useBomDetailPanel.ts. No edit mode —
+ * The fetch half of app/masters/recipe-master/useBomDetailPanel.ts. No edit mode —
  * this panel is read-only, so there is no save path, no staged files, and no
  * seeding.
  */
@@ -51,7 +51,7 @@ export function useInwardingPanel() {
     if (pending) return pending
 
     const p = (async () => {
-      const res = await fetch(`/api/purchase-orders/${poId}/inwarding`)
+      const res = await fetch(`/api/v1/purchase-orders/${poId}/inwarding`)
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error ?? "Failed to load inwarding")
       cache.current.set(poId, data)

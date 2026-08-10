@@ -15,27 +15,24 @@
  * only within the current page.
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useState } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { History as HistoryIcon } from "lucide-react"
-import { SortableTableHead, StaticTableHead } from "@/components/ui/sortable-table-head"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+  DataTable,
+  useTableSort,
+  type AnyRow,
+  type ColumnDef,
+} from "@/components/masters/DataTable"
 import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import {
   MasterToolbar,
   MasterToolbarActions,
 } from "@/components/masters/MasterToolbar"
-import { cn } from "@/lib/utils"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { StatusBadge } from "@/components/masters/StatusBadge"
@@ -65,18 +62,6 @@ const PM_CSV_FIELDS: MasterField[] = [
   { key: "pantone_color", label: "Pantone Color", placeholder: "e.g. PMS 185 C", sample: "PMS 185 C" },
   { key: "remarks",       label: "Remarks",      colSpan: 2, placeholder: "Optional for new records — remarks are required when submitting an edit", sample: "New material onboarding" },
 ]
-
-type AnyRow = Record<string, unknown>
-type ColumnDef = {
-  key: string
-  label: string
-  sortAs: "text" | "num"
-  /** Fixed pixel width for narrow/fixed-format columns. Columns without a
-   *  width share the remaining space equally (table-layout: fixed). */
-  width?: string
-  className?: string
-  render?: (row: AnyRow) => ReactNode
-}
 
 const statusBadge = (row: AnyRow) => <StatusBadge status={row.status as string | null} />
 
@@ -146,20 +131,10 @@ export default function MaterialMasterClient({
   const draftDirty =
     draftStatus !== currentStatus || draftMake !== currentMake || draftType !== currentType
 
-  // Client-side sort state (sorts within the current DB page only).
-  const [sortKey, setSortKey] = useState<string | null>(null)
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
-
   const columns = material === "rm" ? RM_COLUMNS : PM_COLUMNS
 
-  const toggleSort = (key: string) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
-    } else {
-      setSortKey(key)
-      setSortDir("asc")
-    }
-  }
+  // Client-side sort (within the current DB page only).
+  const { sorted, sortKey, sortDir, toggleSort } = useTableSort(rows, columns)
 
   /**
    * Merge URL-param overrides, reset to page 1, then navigate.
@@ -174,27 +149,6 @@ export default function MaterialMasterClient({
     params.set("page", "1")
     router.push(`${pathname}?${params.toString()}`)
   }
-
-  // Sort within current page — rows are already DB-filtered and sliced.
-  const sorted = useMemo(() => {
-    if (!sortKey) return rows
-    const col = columns.find((c) => c.key === sortKey)
-    const dir = sortDir === "asc" ? 1 : -1
-    return [...rows].sort((a, b) => {
-      const av = a[sortKey]
-      const bv = b[sortKey]
-      const aEmpty = av === null || av === undefined || av === ""
-      const bEmpty = bv === null || bv === undefined || bv === ""
-      if (aEmpty && bEmpty) return 0
-      if (aEmpty) return 1
-      if (bEmpty) return -1
-      const cmp =
-        col?.sortAs === "num"
-          ? Number(av) - Number(bv)
-          : String(av).localeCompare(String(bv), undefined, { numeric: true })
-      return cmp * dir
-    })
-  }, [rows, columns, sortKey, sortDir])
 
   const hasFilters = currentSearch || currentStatus || currentMake || currentType
   // router.refresh() re-runs the server page with current URL — keeps page + filters.
@@ -264,14 +218,14 @@ export default function MaterialMasterClient({
 
         <MasterToolbarActions>
           <DownloadButton
-            endpoint="/api/masters/material-master/export"
+            endpoint="/api/v1/masters/material-master/export"
             label="Materials"
           />
           {material === "rm" ? (
             <CsvImportDialog
               entityLabel="Raw Material"
               entityLabelPlural="Raw Materials"
-              endpoint="/api/masters/raw-materials"
+              endpoint="/api/v1/masters/raw-materials"
               templateFilename="raw_material_template.csv"
               fields={RM_CSV_FIELDS}
               enableDuplicateCheck
@@ -281,7 +235,7 @@ export default function MaterialMasterClient({
             <CsvImportDialog
               entityLabel="Packing Material"
               entityLabelPlural="Packing Materials"
-              endpoint="/api/masters/packing-materials"
+              endpoint="/api/v1/masters/packing-materials"
               templateFilename="packing_material_template.csv"
               fields={PM_CSV_FIELDS}
               enableDuplicateCheck
@@ -304,68 +258,34 @@ export default function MaterialMasterClient({
           } : undefined}
         />
         <CardContent className="p-0">
-          <Table className="[&_th]:whitespace-nowrap table-fixed">
-            <TableHeader>
-              <TableRow>
-                {columns.map((col) => (
-                  <SortableTableHead
-                    key={col.key}
-                    sortKey={col.key}
-                    activeKey={sortKey}
-                    sortDir={sortDir}
-                    onSort={toggleSort}
-                    width={col.width}
-                  >
-                    {col.label}
-                  </SortableTableHead>
-                ))}
-                <StaticTableHead width="80px">Action</StaticTableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sorted.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={columns.length + 1}
-                    className="text-center text-muted-foreground py-10"
-                  >
-                    {hasFilters
-                      ? "No materials match your filters."
-                      : "No records found."}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                sorted.map((row, index) => (
-                  <TableRow key={index}>
-                    {columns.map((col) => (
-                      <TableCell
-                        key={col.key}
-                        className={cn("overflow-hidden text-ellipsis", col.className ?? "text-muted-foreground")}
-                      >
-                        {col.render
-                          ? col.render(row)
-                          : ((row[col.key] as ReactNode) ?? "—")}
-                      </TableCell>
-                    ))}
-                    <TableCell className="flex items-center gap-1">
-                      <EditButton
-                        onClick={() => setEditRow(row)}
-                        disabled={row.status === "in_review"}
-                        title={row.status === "in_review" ? "Pending approval — cannot edit" : undefined}
-                      />
-                      <button
-                        onClick={() => setHistoryRow(row)}
-                        className="p-1.5 rounded-md transition-colors hover:bg-accent text-muted-foreground hover:text-foreground"
-                        title="View edit history"
-                      >
-                        <HistoryIcon className="h-4 w-4" />
-                      </button>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+          <DataTable
+            rows={sorted}
+            columns={columns}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            onSort={toggleSort}
+            actionColumn={(row) => (
+              <div className="flex items-center gap-1">
+                <EditButton
+                  onClick={() => setEditRow(row)}
+                  disabled={row.status === "in_review"}
+                  title={row.status === "in_review" ? "Pending approval — cannot edit" : undefined}
+                />
+                <button
+                  onClick={() => setHistoryRow(row)}
+                  className="p-1.5 rounded-md transition-colors hover:bg-accent text-muted-foreground hover:text-foreground"
+                  title="View edit history"
+                >
+                  <HistoryIcon className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+            emptyMessage={
+              hasFilters
+                ? "No materials match your filters."
+                : "No records found."
+            }
+          />
 
           <PaginationBar total={total} page={page} pageSize={pageSize} />
         </CardContent>

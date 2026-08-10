@@ -1,4 +1,4 @@
-// GET /api/purchase-orders/history?po_id=123
+// GET /api/v1/purchase-orders/history?po_id=123
 //
 // Returns the history_pos audit trail for one PO — every create/update the
 // PO bulk CSV flow recorded against it (see poBulkHandler.applyAndArchive),

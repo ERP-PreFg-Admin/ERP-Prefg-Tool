@@ -1,18 +1,18 @@
 import { z } from "zod"
-import { BOM_STATUS_IN_REVIEW } from "@/lib/queries/bom"
+import { RECIPE_STATUS_IN_REVIEW } from "@/lib/queries/recipe"
 
 // Every value of the master_bom_status DB enum — note "in review" has a space
-// (see BOM_STATUS_IN_REVIEW's doc comment in lib/queries/bom.ts), unlike
+// (see RECIPE_STATUS_IN_REVIEW's doc comment in lib/queries/bom.ts), unlike
 // STATUS.IN_REVIEW ("in_review") used by every other module.
-export const BOM_STATUS_VALUES = ["draft", "active", "inactive", BOM_STATUS_IN_REVIEW, "discontinued", "rejected"] as const
-export type BomStatusValue = typeof BOM_STATUS_VALUES[number]
+export const RECIPE_STATUS_VALUES = ["draft", "active", "inactive", RECIPE_STATUS_IN_REVIEW, "discontinued", "rejected"] as const
+export type RecipeStatusValue = typeof RECIPE_STATUS_VALUES[number]
 
-// Route param for /api/masters/bom-master/[id]
+// Route param for /api/v1/masters/recipe-master/[id]
 export const bomIdParamSchema = z.object({
-  id: z.coerce.number().int().positive("Invalid BOM id"),
+  id: z.coerce.number().int().positive("Invalid Recipe id"),
 })
 
-export type BomIdParam = z.infer<typeof bomIdParamSchema>
+export type RecipeIdParam = z.infer<typeof bomIdParamSchema>
 
 // RM percentages must total within this tolerance of 100%. Exported so the
 // wizard's client-side running-total banner uses the exact same bounds as the
@@ -41,7 +41,7 @@ export const bomCheckExistingSchema = z.object({
 })
 
 // A file already uploaded to S3 (client-side, before this submit), staged to
-// attach to the BOM once this submission is approved.
+// attach to the Recipe once this submission is approved.
 export const bomArtifactAddSchema = z.object({
   s3_key: z.string().trim().min(1),
   file_name: z.string().trim().min(1).max(255),
@@ -54,7 +54,7 @@ export const bomCreateFullSchema = z
     action: z.literal("create-full"),
     mode: z.enum(["new-version", "update-existing"]),
     sku_id: z.coerce.number().int().positive(),
-    bom_id: z.coerce.number().int().positive().optional(), // required when mode === "update-existing"
+    recipe_id: z.coerce.number().int().positive().optional(), // required when mode === "update-existing"
     // For mode === "new-version" the server always computes its own
     // <sku_code>-RM<n>-PM<n> code (see route.ts) — any client-sent value here is ignored.
     bom_code: z.string().trim().min(1).max(50).optional(),
@@ -66,21 +66,21 @@ export const bomCreateFullSchema = z
     pm_lines: z.array(bomLineSchema),
     // Artifacts are bundled into this same approval — see
     // lib/approvals/module-handlers.ts bomHandler.applyAndArchive, which is
-    // the only place bom_artifacts rows are actually written/deleted.
+    // the only place artifacts_recipe rows are actually written/deleted.
     artifact_adds: z.array(bomArtifactAddSchema).optional(),
     artifact_removes: z.array(z.coerce.number().int().positive()).optional(),
     // Reason + type of change — required by route.ts whenever this submission
-    // is actually editing an existing BOM (mode === "update-existing", or
-    // mode === "new-version" against a SKU that already has a prior BOM).
-    // Not required for the very first BOM ever created for a SKU, so kept
+    // is actually editing an existing Recipe (mode === "update-existing", or
+    // mode === "new-version" against a SKU that already has a prior Recipe).
+    // Not required for the very first Recipe ever created for a SKU, so kept
     // optional at the schema level; route.ts enforces the real gate once it
-    // knows whether a prior BOM exists.
+    // knows whether a prior Recipe exists.
     reason: z.string().trim().max(500).optional(),
     change_type: z.array(bomChangeTypeSchema).optional(),
   })
   .superRefine((data, ctx) => {
-    if (data.mode === "update-existing" && !data.bom_id) {
-      ctx.addIssue({ code: "custom", path: ["bom_id"], message: "bom_id is required for update-existing" })
+    if (data.mode === "update-existing" && !data.recipe_id) {
+      ctx.addIssue({ code: "custom", path: ["recipe_id"], message: "recipe_id is required for update-existing" })
     }
     if (data.mode === "new-version" && !data.effective_from?.trim()) {
       ctx.addIssue({ code: "custom", path: ["effective_from"], message: "effective_from is required for new-version" })
@@ -126,8 +126,8 @@ export const bomCheckDuplicatesSchema = z.object({
 // create-full's line edits, which still go through the approval flow.
 export const bomUpdateStatusSchema = z.object({
   action: z.literal("update-status"),
-  bom_id: z.coerce.number().int().positive(),
-  status: z.enum(BOM_STATUS_VALUES),
+  recipe_id: z.coerce.number().int().positive(),
+  status: z.enum(RECIPE_STATUS_VALUES),
 })
 
 export const bomActionSchema = z.discriminatedUnion("action", [
@@ -138,8 +138,8 @@ export const bomActionSchema = z.discriminatedUnion("action", [
   bomCheckDuplicatesSchema,
 ])
 
-export type BomLine = z.infer<typeof bomLineSchema>
-export type BomCreateFull = z.infer<typeof bomCreateFullSchema>
-export type BomUpdateStatus = z.infer<typeof bomUpdateStatusSchema>
-export type BomAction = z.infer<typeof bomActionSchema>
-export type BomBulk = z.infer<typeof bomBulkSchema>
+export type RecipeLine = z.infer<typeof bomLineSchema>
+export type RecipeCreateFull = z.infer<typeof bomCreateFullSchema>
+export type RecipeUpdateStatus = z.infer<typeof bomUpdateStatusSchema>
+export type RecipeAction = z.infer<typeof bomActionSchema>
+export type RecipeBulk = z.infer<typeof bomBulkSchema>

@@ -1,4 +1,4 @@
-// GET /api/approvals/entity?module=RM_VRM&entity_id=123
+// GET /api/v1/approvals/entity?module=RM_VRM&entity_id=123
 //
 // Returns the most recent rejection record for the given entity, plus the
 // current user's ID so the client can decide whether the Save button should
@@ -17,7 +17,7 @@ export const GET = withGateway({
   const moduleName = searchParams.get("module")
   const entityId = searchParams.get("entity_id")
 
-  const logCtx = { ...ctx, route: "/api/approvals/entity", module: "GET_APPROVAL_ENTITY" }
+  const logCtx = { ...ctx, route: "/api/v1/approvals/entity", module: "GET_APPROVAL_ENTITY" }
   logger.info({ ...logCtx, queryModule: moduleName, entityId, message: "Approval entity search started" })
   if (!moduleName || !entityId || isNaN(Number(entityId))) {
     logger.warn({ ...logCtx, queryModule: moduleName, entityId, message: "Validation failed. module and entity_id are required" })

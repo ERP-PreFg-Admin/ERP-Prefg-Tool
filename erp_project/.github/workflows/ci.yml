@@ -1,0 +1,69 @@
+name: CI
+
+# Nothing here needs a database, AWS keys, Nanonets or Uniware. That is not an
+# assumption — the Dockerfile builds this app with .dockerignore excluding .env*
+# and no DB reachable, so `next build` provably runs without secrets. Every page
+# is server-rendered on demand (no static prerender), so the build never opens a
+# connection.
+#
+# The DB tests (`npm run test:db`) are deliberately NOT run here: they need the
+# test schema, which is not reachable from a GitHub runner.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same PR makes the previous run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # The real gate: catches type errors, broken imports and bad JSX across all
+      # 27 pages and 68 routes.
+      - run: npm run build
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # Pure logic only — money math, scope helpers, access resolution, Zod schemas.
+      - run: npm test
+      # The credential-free half of the older _check-* scripts.
+      - run: npm run test:checks
+
+  lint:
+    name: Lint (changed files only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # tests/lint-changed.mjs needs history to find the merge base.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # A ratchet, not a clean-up: ~238 pre-existing errors are left alone, but a
+      # changed file must be clean. See tests/lint-changed.mjs.
+      - run: npm run lint:changed
+        env:
+          LINT_BASE: origin/${{ github.event.pull_request.base.ref || 'main' }}

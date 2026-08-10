@@ -52,10 +52,24 @@ export function SectionHead({ children }: { children: string }) {
   )
 }
 
-/** What the extractor read for a field the user is now overriding via a picker. */
-function ParsedHint({ value }: { value: string }) {
+/** What the extractor read for a field the user is now overriding via a picker.
+ *
+ *  `matched` turns it into a verdict rather than a bare quote: a picker that
+ *  silently landed on the right row looks identical to one nobody has checked,
+ *  so the successful case has to say so out loud. */
+function ParsedHint({ value, matched }: { value: string; matched?: boolean }) {
   if (!value) return null
-  return <p className="text-[11px] text-muted-foreground">Invoice says: <strong>{value}</strong></p>
+  if (matched === undefined) {
+    return <p className="text-[11px] text-muted-foreground">Invoice says: <strong>{value}</strong></p>
+  }
+  return (
+    <p className={cn(
+      "text-[11px]",
+      matched ? "text-emerald-700 dark:text-emerald-500" : "text-amber-700 dark:text-amber-500"
+    )}>
+      {matched ? "✓ Matched" : "⚠ No match"} from invoice: <strong>{value}</strong>
+    </p>
+  )
 }
 
 export function InvoiceFields({
@@ -108,7 +122,7 @@ export function InvoiceFields({
               <option key={m.id} value={m.id}>{m.code} — {m.name}</option>
             ))}
           </select>
-          <ParsedHint value={form.parsedFrom} />
+          <ParsedHint value={form.parsedFrom} matched={Boolean(form.mfgId)} />
         </div>
 
         <div className="grid gap-1.5">

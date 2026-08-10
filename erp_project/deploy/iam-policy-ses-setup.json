@@ -1,0 +1,91 @@
+{
+  "_comment": [
+    "TEMPORARY setup policy. Attach to the operator identity that runs the SES",
+    "Phase 0 commands (see ~/.claude/plans/ses-migration.md), then DETACH once the",
+    "identity is verified and the configuration set exists. This is not a runtime",
+    "policy - the app only needs iam-policy-erp-app-runtime-ses.json.",
+    "",
+    "Account 157320387454, region ap-south-1. The identity is the ROOT domain",
+    "mcaffeine.com, because mail is sent from erp.prefg@mcaffeine.com. A domain",
+    "identity (not an email identity) is required so DKIM signing works - DKIM is",
+    "what produces DMARC alignment here, since SES's default envelope sender is a",
+    "subdomain of amazonses.com and therefore does NOT align with mcaffeine.com on",
+    "SPF alone.",
+    "",
+    "SESv2 API actions use the 'ses:' prefix, not 'sesv2:'."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SesAccountLevelReadAndProductionRequest",
+      "Effect": "Allow",
+      "Action": [
+        "ses:GetAccount",
+        "ses:ListEmailIdentities",
+        "ses:ListConfigurationSets",
+        "ses:PutAccountDetails"
+      ],
+      "Resource": "*",
+      "_comment": "These have no resource to scope to. PutAccountDetails is the production-access request."
+    },
+    {
+      "Sid": "SesManageSendingIdentity",
+      "Effect": "Allow",
+      "Action": [
+        "ses:CreateEmailIdentity",
+        "ses:GetEmailIdentity",
+        "ses:DeleteEmailIdentity",
+        "ses:PutEmailIdentityDkimAttributes",
+        "ses:PutEmailIdentityDkimSigningAttributes",
+        "ses:PutEmailIdentityMailFromAttributes",
+        "ses:PutEmailIdentityConfigurationSetAttributes"
+      ],
+      "Resource": "arn:aws:ses:ap-south-1:157320387454:identity/mcaffeine.com"
+    },
+    {
+      "Sid": "SesManageConfigurationSet",
+      "Effect": "Allow",
+      "Action": [
+        "ses:CreateConfigurationSet",
+        "ses:GetConfigurationSet",
+        "ses:DeleteConfigurationSet",
+        "ses:CreateConfigurationSetEventDestination",
+        "ses:GetConfigurationSetEventDestinations",
+        "ses:UpdateConfigurationSetEventDestination",
+        "ses:DeleteConfigurationSetEventDestination"
+      ],
+      "Resource": "arn:aws:ses:ap-south-1:157320387454:configuration-set/erp-app"
+    },
+    {
+      "Sid": "SesSendForVerification",
+      "Effect": "Allow",
+      "Action": ["ses:SendEmail"],
+      "Resource": [
+        "arn:aws:ses:ap-south-1:157320387454:identity/mcaffeine.com",
+        "arn:aws:ses:ap-south-1:157320387454:identity/erp.prefg@mcaffeine.com",
+        "arn:aws:ses:ap-south-1:157320387454:configuration-set/erp-app"
+      ],
+      "_comment": "Needed to exercise the simulator addresses (bounce@/complaint@/ooto@simulator.amazonses.com) during Phase 2 verification. Both identity ARNs listed - SES was observed authorising against the address-level ARN, see iam-policy-erp-app-runtime-ses.json."
+    },
+    {
+      "Sid": "SnsManageEventTopic",
+      "Effect": "Allow",
+      "Action": [
+        "sns:CreateTopic",
+        "sns:DeleteTopic",
+        "sns:GetTopicAttributes",
+        "sns:SetTopicAttributes",
+        "sns:Subscribe",
+        "sns:ConfirmSubscription",
+        "sns:ListSubscriptionsByTopic"
+      ],
+      "Resource": "arn:aws:sns:ap-south-1:157320387454:erp-app-ses-events"
+    },
+    {
+      "Sid": "SnsListTopicsToResolveArn",
+      "Effect": "Allow",
+      "Action": ["sns:ListTopics"],
+      "Resource": "*"
+    }
+  ]
+}

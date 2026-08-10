@@ -3,7 +3,7 @@
 /**
  * Cost-change impact alert for RM/PM rate-edit dialogs.
  *
- * Fetches the SKUs whose active BOM references this material as soon as it
+ * Fetches the SKUs whose active Recipe references this material as soon as it
  * mounts, and renders a small "this will impact N SKUs" banner with a hover
  * tooltip listing them. Renders nothing while loading or if the impact is
  * zero — this is informational context, not a warning that always needs to
@@ -25,7 +25,7 @@ export function CostImpactAlert({
   scope,
   mfgId,
 }: {
-  endpoint: "/api/masters/raw-materials" | "/api/masters/packing-materials"
+  endpoint: "/api/v1/masters/raw-materials" | "/api/v1/masters/packing-materials"
   materialIdField: "rm_id" | "pm_id"
   materialId: number
   scope: "vendor" | "mfg"

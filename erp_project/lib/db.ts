@@ -27,14 +27,32 @@ if (NODE_ENV !== "production") {
   globalForPool.dbPool = pool;
 }
 
-// Retry once on fatal connection errors (ECONNRESET, PROTOCOL_CONNECTION_LOST).
-// The first call hits a dead pooled connection; the pool removes it and the
-// retry gets a fresh one.
+// Retry once on transient connection errors. The first call typically hits a dead
+// pooled connection; the pool removes it and the retry gets a fresh one.
+//
+// ETIMEDOUT is included because it genuinely happens against RDS — an observed
+// connect timeout between two successful queries used to surface as a hard 500 on
+// whatever page the user was loading. Unlike the others it is a timeout rather
+// than a closed socket, so an immediate retry is likely to time out too; hence
+// the short delay before retrying.
+const RETRYABLE = new Set([
+  "ECONNRESET",
+  "PROTOCOL_CONNECTION_LOST",
+  "ETIMEDOUT",
+  "EPIPE",
+  "ER_LOCK_WAIT_TIMEOUT",
+]);
+
+const RETRY_DELAY_MS = 250;
+
 export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (err: any) {
-    if (err.fatal || err.code === "ECONNRESET" || err.code === "PROTOCOL_CONNECTION_LOST") {
+    if (err.fatal || RETRYABLE.has(err.code)) {
+      if (err.code === "ETIMEDOUT" || err.code === "ER_LOCK_WAIT_TIMEOUT") {
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      }
       return fn();
     }
     throw err;

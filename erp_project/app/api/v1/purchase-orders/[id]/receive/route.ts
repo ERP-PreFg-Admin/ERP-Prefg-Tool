@@ -1,4 +1,4 @@
-// POST /api/purchase-orders/[id]/receive
+// POST /api/v1/purchase-orders/[id]/receive
 // Record a manual goods receipt against a PO. Credits the qty to received_qty
 // and auto-marks the PO 'received' once the remainder falls within tolerance
 // (min(100, 10% of qty)) — same math as the Split flow's parent-closing rule.

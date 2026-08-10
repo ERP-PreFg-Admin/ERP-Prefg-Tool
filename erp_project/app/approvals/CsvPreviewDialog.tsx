@@ -9,7 +9,7 @@ type PreviewData = { headers: string[]; rows: Record<string, string>[] }
 /** Renders a bulk-upload CSV/Excel file as a proper table instead of the raw
  *  file — opening the presigned S3 link directly showed unformatted text,
  *  which isn't legible for non-technical approvers. Parsing happens
- *  server-side (app/api/files/preview) via the same parser the bulk-approval
+ *  server-side (app/api/v1/files/preview) via the same parser the bulk-approval
  *  import uses, so this reads exactly like what gets imported. */
 export default function CsvPreviewDialog({
   open, s3Key, filename, onClose,
@@ -27,7 +27,7 @@ export default function CsvPreviewDialog({
     if (!open || !s3Key) return
     // eslint-disable-next-line react-hooks/set-state-in-effect -- resets preview state when a new file is opened
     setLoading(true); setError(null); setData(null)
-    fetch(`/api/files/preview?key=${encodeURIComponent(s3Key)}`)
+    fetch(`/api/v1/files/preview?key=${encodeURIComponent(s3Key)}`)
       .then((r) => r.json())
       .then((d) => { if (d.error) setError(d.error); else setData(d) })
       .catch(() => setError("Failed to load file"))

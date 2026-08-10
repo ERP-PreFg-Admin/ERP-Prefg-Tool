@@ -23,10 +23,10 @@ import {
 } from "@/components/ui/table"
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import { cn } from "@/lib/utils"
-import { formatDateTime } from "../bom-format"
+import { formatDateTime } from "../recipe-format"
 import { ChangeTypeBadges } from "../ChangeTypeBadges"
 import { StatusBadge } from "@/components/masters/StatusBadge"
-import type { BomHistoryListItem } from "@/types/masters"
+import type { RecipeHistoryListItem } from "@/types/masters"
 
 const COLUMN_COUNT = 7
 
@@ -34,12 +34,12 @@ type SkuGroup = {
   skuId: number | null
   skuCode: string | null
   skuName: string | null
-  rows: BomHistoryListItem[]
+  rows: RecipeHistoryListItem[]
 }
 
 /** Adjacent rows sharing a sku_id are already grouped by the query's
  *  ORDER BY, so a single pass is enough — no need to re-sort client-side. */
-function groupBySku(rows: BomHistoryListItem[]): SkuGroup[] {
+function groupBySku(rows: RecipeHistoryListItem[]): SkuGroup[] {
   const groups: SkuGroup[] = []
   for (const row of rows) {
     const last = groups[groups.length - 1]
@@ -62,7 +62,7 @@ function AuditCell({ when, who }: { when: string | Date | null; who: string | nu
   )
 }
 
-export function BomHistoryTable({
+export function RecipeHistoryTable({
   rows,
   total,
   page,
@@ -73,7 +73,7 @@ export function BomHistoryTable({
   onRowClick,
   onPrefetch,
 }: {
-  rows: BomHistoryListItem[]
+  rows: RecipeHistoryListItem[]
   total: number
   page: number
   pageSize: number
@@ -105,7 +105,7 @@ export function BomHistoryTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>BOM Code</TableHead>
+              <TableHead>Recipe Code</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Created</TableHead>
               <TableHead>Updated</TableHead>
@@ -118,7 +118,7 @@ export function BomHistoryTable({
             {groups.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={COLUMN_COUNT} className="text-center text-muted-foreground py-10">
-                  {hasFilters ? "No BOM records match your filters." : "No records found."}
+                  {hasFilters ? "No Recipe records match your filters." : "No records found."}
                 </TableCell>
               </TableRow>
             ) : (
@@ -158,13 +158,13 @@ export function BomHistoryTable({
                     {isOpen &&
                       group.rows.map((row) => (
                         <TableRow
-                          key={row.bom_id}
-                          onClick={() => row.bom_id != null && onRowClick(row.bom_id)}
-                          onMouseEnter={() => onPrefetch(row.bom_id)}
+                          key={row.recipe_id}
+                          onClick={() => row.recipe_id != null && onRowClick(row.recipe_id)}
+                          onMouseEnter={() => onPrefetch(row.recipe_id)}
                           onMouseLeave={() => onPrefetch(null)}
                           className={cn(
                             "cursor-pointer transition-colors",
-                            selectedBomId === row.bom_id
+                            selectedBomId === row.recipe_id
                               ? "bg-primary/5 hover:bg-primary/10"
                               : "hover:bg-muted/50"
                           )}

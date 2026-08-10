@@ -17,6 +17,7 @@ import { PaginationBar } from "@/components/ui/pagination-bar"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import { MasterToolbar } from "@/components/masters/MasterToolbar"
 import type { ActivityRow } from "./page"
+import { IST } from "@/lib/date"
 
 const METHODS = ["POST", "PATCH", "PUT", "DELETE"]
 
@@ -27,12 +28,14 @@ function formatWhen(value: Date | string) {
   const d = new Date(value)
   return Number.isNaN(d.getTime())
     ? "—"
-    : d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "medium" })
+    : d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "medium", timeZone: IST })
 }
 
-/** "/api/masters/vendors" → "masters/vendors" — the /api/ prefix is noise here. */
+/** "/api/v1/masters/vendors" → "masters/vendors" — the prefix is noise here.
+ *  The version segment is optional so un-versioned routes (auth, health) and a
+ *  future /api/v2 both read the same way. */
 function readablePath(detail: string) {
-  return detail.replace(/^\/api\//, "")
+  return detail.replace(/^\/api\/(v\d+\/)?/, "")
 }
 
 function statusVariant(status: number) {

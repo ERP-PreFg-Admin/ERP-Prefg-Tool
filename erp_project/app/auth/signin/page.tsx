@@ -10,7 +10,7 @@ export default async function SignInPage({
   return (
     <main className="min-h-screen flex items-center justify-center bg-zinc-950">
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-10 w-full max-w-sm">
-        <h1 className="text-2xl font-bold text-zinc-100 mb-1">ERP System</h1>
+        <h1 className="text-2xl font-bold text-zinc-100 mb-1">PEP ERP</h1>
         <p className="text-zinc-400 text-sm mb-8">
           Sign in with your company Google account.
         </p>

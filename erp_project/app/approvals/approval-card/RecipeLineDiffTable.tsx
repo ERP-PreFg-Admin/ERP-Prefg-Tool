@@ -1,9 +1,9 @@
 "use client"
 
-/** Readable rendering of a BOM's line:<type>:<id>:<field> flat approval_items
+/** Readable rendering of a Recipe's line:<type>:<id>:<field> flat approval_items
  *  (see lib/approvals/module-handlers.ts bomHandler for the write side).
  *  Renders ONE consolidated DiffTable (one row per material line) instead of
- *  a separate boxed table per line, so a BOM approval reads as compactly as
+ *  a separate boxed table per line, so a Recipe approval reads as compactly as
  *  every other module's FieldDiffTable. */
 
 import { Badge } from "@/components/ui/badge"
@@ -12,7 +12,7 @@ import type { Approval } from "../approvals-types"
 import { DiffTable } from "./DiffTable"
 import type { DiffRow, MaterialMap } from "./types"
 
-type BomLineRowDiff = {
+type RecipeLineRowDiff = {
   mtrlType: "rm" | "pm"
   mtrlId: string
   removed: boolean
@@ -29,7 +29,7 @@ function parseBomApprovalItems(items: Approval["items"]) {
   const changeTypeItem = items.find((i) => i.field_name === "__change_type__")?.new_value
   const changeTypes = changeTypeItem ? changeTypeItem.split(",").map((t) => CHANGE_TYPE_LABEL[t] ?? t) : []
 
-  const lineMap = new Map<string, BomLineRowDiff>()
+  const lineMap = new Map<string, RecipeLineRowDiff>()
   for (const it of items) {
     const m = it.field_name.match(/^line:(rm|pm):(\d+):(.+)$/)
     if (!m) continue
@@ -55,7 +55,7 @@ function materialLabel(mtrlType: "rm" | "pm", mtrlId: string, materialMap?: Mate
 
 /** Combines a line's amount + uom fields into one "40.0000 pct"-style value
  *  per side — one row per material line instead of one row per field. */
-function lineToDiffRow(line: BomLineRowDiff, materialMap?: MaterialMap): DiffRow {
+function lineToDiffRow(line: RecipeLineRowDiff, materialMap?: MaterialMap): DiffRow {
   const label = materialLabel(line.mtrlType, line.mtrlId, materialMap)
   const key = `${line.mtrlType}:${line.mtrlId}`
 
@@ -80,29 +80,29 @@ function lineToDiffRow(line: BomLineRowDiff, materialMap?: MaterialMap): DiffRow
   }
 }
 
-/** "New Version" is technically accurate for every submission (BomEditDialog
- *  always creates a new master_bom row), but reads oddly once approvals for
+/** "New Version" is technically accurate for every submission (RecipeEditDialog
+ *  always creates a new master_recipe row), but reads oddly once approvals for
  *  the same SKU are shown together as one lineage — every entry claiming to
  *  be brand new is confusing when it's really just the next step in the same
  *  recipe's history. reason/changeTypes are only ever collected when a prior
- *  BOM existed (see route.ts), so their presence is what distinguishes "this
+ *  Recipe existed (see route.ts), so their presence is what distinguishes "this
  *  SKU's very first recipe" from "a later revision of it". */
 function modeLabel(mode: "new-version" | "update-existing", isRevision: boolean) {
   if (mode === "update-existing") return "In-Place Edit"
   return isRevision ? "Recipe Change" : "Initial Recipe"
 }
 
-export function BomLineDiffTable({ items, materialMap }: { items: Approval["items"]; materialMap?: MaterialMap }) {
+export function RecipeLineDiffTable({ items, materialMap }: { items: Approval["items"]; materialMap?: MaterialMap }) {
   const { mode, reason, changeTypes, lines } = parseBomApprovalItems(items)
   // A line with no field diffs is just the "__present__" bookkeeping marker
   // (update-existing carries one for every unchanged line so applyAndArchive
   // knows to keep it) — not an actual change, so it's excluded from display.
   const changedLines = lines.filter((l) => l.removed || l.fields.amount || l.fields.uom)
-  // Every field's old_value is "" for a brand-new BOM (no prior state) — same
+  // Every field's old_value is "" for a brand-new Recipe (no prior state) — same
   // "hide the Old Value column" treatment FieldDiffTable gives a new record.
   const newOnly = mode === "new-version"
 
-  // RM/PM side by side in their own labeled columns — same split the BOM
+  // RM/PM side by side in their own labeled columns — same split the Recipe
   // wizard's review step and line editors already use (Step5Review's
   // "Raw Materials (RM)" / "Packing Materials (PM)" sections), instead of
   // one merged list with a tag repeated on every row.

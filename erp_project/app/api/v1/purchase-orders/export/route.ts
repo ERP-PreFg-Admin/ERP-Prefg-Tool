@@ -1,5 +1,5 @@
 /**
- * GET /api/purchase-orders/export
+ * GET /api/v1/purchase-orders/export
  *
  * Exports every PO matching the PO Procurement page's current filters/search/
  * sort as CSV or Excel — same WHERE clause and columns as PoTable.tsx, just

@@ -37,28 +37,28 @@ export const entityLabelSql: Record<string, string> = {
   `,
   RM_RATE: `
     SELECT r.rm_code AS code, r.name, m.code AS secondary_code, m.name AS secondary_name
-    FROM rm_mrm_fixed rmm
+    FROM cost_master_rm_mfg rmm
     JOIN master_rm r ON r.id = rmm.rm_id
     JOIN master_mfgs m ON m.id = rmm.mfg_id
     WHERE rmm.id = ? LIMIT 1
   `,
   PM_RATE: `
     SELECT p.pm_code AS code, p.name, m.code AS secondary_code, m.name AS secondary_name
-    FROM pm_mrm_fixed pmm
+    FROM cost_master_pm_mfg pmm
     JOIN master_pm p ON p.id = pmm.pm_id
     JOIN master_mfgs m ON m.id = pmm.mfg_id
     WHERE pmm.id = ? LIMIT 1
   `,
   RM_VRM: `
     SELECT r.rm_code AS code, r.name, v.code AS secondary_code, v.name AS secondary_name
-    FROM rm_vrm_dynamic rmv
+    FROM cost_master_rm_ven rmv
     JOIN master_rm r ON r.id = rmv.rm_id
     JOIN master_vendors v ON v.id = rmv.vendor_id
     WHERE rmv.id = ? LIMIT 1
   `,
   PM_VRM: `
     SELECT p.pm_code AS code, p.name, v.code AS secondary_code, v.name AS secondary_name
-    FROM pm_vrm_dynamic pmv
+    FROM cost_master_pm_ven pmv
     JOIN master_pm p ON p.id = pmv.pm_id
     JOIN master_vendors v ON v.id = pmv.vendor_id
     WHERE pmv.id = ? LIMIT 1
@@ -91,7 +91,7 @@ export const entityLabelSql: Record<string, string> = {
   `,
   BOM: `
     SELECT b.bom_code AS code, s.sku_code AS name, NULL AS secondary_code, s.name AS secondary_name
-    FROM master_bom b
+    FROM master_recipe b
     LEFT JOIN master_skus s ON s.id = b.sku_id
     WHERE b.id = ? LIMIT 1
   `,
@@ -260,9 +260,9 @@ export const approvalsSql = {
   /**
    * Same shape as listHistoryForEntity, but for every BOM version belonging
    * to one SKU at once — RM/PM now version independently, so a SKU can
-   * accumulate many master_bom rows (one per version) over time, each with
+   * accumulate many master_recipe rows (one per version) over time, each with
    * its own approval. The row-level "History" dialog for BOM resolves the
-   * clicked BOM's sku_id first (see app/api/approvals/entity-history/route.ts),
+   * clicked BOM's sku_id first (see app/api/v1/approvals/entity-history/route.ts),
    * then passes ALL of that SKU's bom_ids here so the full recipe lineage
    * shows as one linked trail instead of being siloed per version.
    * Params: [bom_ids[]] — used via query() (pool.query), which expands an

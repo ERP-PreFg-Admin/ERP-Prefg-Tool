@@ -17,6 +17,13 @@ export type PoRow = {
   invoice_no: string | null
   /** Unicommerce's PO code for this row — inward POs only, null everywhere else. */
   uniware_po_code: string | null
+  /**
+   * The PO number this row derives from. Two sources, one meaning:
+   * a split child names its parent, an inward receipt names the order it
+   * settled (see insertInwardReceived). A po_no string, not an FK — display
+   * it, don't join on it.
+   */
+  reference_po: string | null
   destination: string | null
   status: PoStatus | null
   po_type: "normal" | "impromptu" | "inward" | null
@@ -31,7 +38,9 @@ export type PoRow = {
 }
 
 export type SkuOption       = { id: number; sku_code: string; name: string; status: string }
-export type MfgOption       = { id: number; code: string; name: string }
+/** `registered_name` is the legal entity from details_mfg — the name a supplier
+ *  invoice header prints. matchMfg matches on it ahead of `name`. */
+export type MfgOption       = { id: number; code: string; name: string; registered_name: string | null }
 export type WarehouseOption = { id: number; name: string; location: string | null; zone: string | null; type: "CWH" | "MWH" }
 
 export type BadgeVariant = "default" | "secondary" | "success" | "warning" | "info" | "destructive" | "outline"

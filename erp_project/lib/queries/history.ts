@@ -19,22 +19,28 @@ export const historySql = {
 
   /**
    * Insert one audit-trail row for a create/edit/delete submission.
-   * created_on is stored as IST — the DB session runs in UTC.
+   *
+   * created_on is a UTC instant — plain NOW(), matching the DB session. It was
+   * previously shifted to IST wall-clock on the way in, which mysql2 then read
+   * back as UTC and the UI shifted to IST a second time. Storage is UTC;
+   * display converts once, in IST, via lib/date.ts.
+   *
    * Parameters: [module, entity_id, action_type, remarks, created_by, version_no]
    */
   insert: `
     INSERT INTO history_masters_edits
       (module, entity_id, action_type, remarks, created_by, created_on, version_no)
-    VALUES (?, ?, ?, ?, ?, CONVERT_TZ(NOW(), '+00:00', '+05:30'), ?)
+    VALUES (?, ?, ?, ?, ?, NOW(), ?)
   `,
 
   /**
    * Resolve the most recent pending row for this entity to approved/rejected.
-   * approved_on is stored as IST. Parameters: [status, approved_by, module, entity_id]
+   * approved_on is a UTC instant, like created_on above.
+   * Parameters: [status, approved_by, module, entity_id]
    */
   resolvePending: `
     UPDATE history_masters_edits
-    SET status = ?, approved_by = ?, approved_on = CONVERT_TZ(NOW(), '+00:00', '+05:30')
+    SET status = ?, approved_by = ?, approved_on = NOW()
     WHERE module = ? AND entity_id = ? AND status = 'pending'
     ORDER BY created_on DESC, id DESC
     LIMIT 1

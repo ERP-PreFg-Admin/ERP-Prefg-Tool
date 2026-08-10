@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * Main BOM listing table for /masters/bom-master. Pure presentation over the
+ * Main Recipe listing table for /masters/recipe-master. Pure presentation over the
  * paginated row slice — all selection/edit state lives in useBomDetailPanel
  * and is passed in.
  */
@@ -22,12 +22,12 @@ import {
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { formatDate, LOCKED_STATUSES } from "./bom-format"
+import { formatDate, LOCKED_STATUSES } from "./recipe-format"
 import { ChangeTypeBadges } from "./ChangeTypeBadges"
 import { StatusBadge } from "@/components/masters/StatusBadge"
-import type { BomListItem } from "@/types/masters"
+import type { RecipeListItem } from "@/types/masters"
 
-export function BomTable({
+export function RecipeTable({
   rows,
   total,
   page,
@@ -41,7 +41,7 @@ export function BomTable({
   onEdit,
   onHistory,
 }: {
-  rows: BomListItem[]
+  rows: RecipeListItem[]
   total: number
   page: number
   pageSize: number
@@ -61,7 +61,7 @@ export function BomTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>BOM Code</TableHead>
+              <TableHead>Recipe Code</TableHead>
               <TableHead>SKU Code</TableHead>
               <TableHead>SKU Name</TableHead>
               <TableHead>Created On</TableHead>
@@ -78,19 +78,19 @@ export function BomTable({
             {rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={11} className="text-center text-muted-foreground py-10">
-                  {hasFilters ? "No BOM records match your filters." : "No records found."}
+                  {hasFilters ? "No Recipe records match your filters." : "No records found."}
                 </TableCell>
               </TableRow>
             ) : (
               rows.map((row) => (
                 <TableRow
-                  key={row.bom_id}
-                  onClick={() => row.bom_id != null && onRowClick(row.bom_id)}
-                  onMouseEnter={() => onPrefetch(row.bom_id)}
+                  key={row.recipe_id}
+                  onClick={() => row.recipe_id != null && onRowClick(row.recipe_id)}
+                  onMouseEnter={() => onPrefetch(row.recipe_id)}
                   onMouseLeave={() => onPrefetch(null)}
                   className={cn(
                     "cursor-pointer transition-colors",
-                    selectedBomId === row.bom_id
+                    selectedBomId === row.recipe_id
                       ? "bg-primary/5 hover:bg-primary/10"
                       : "hover:bg-muted/50"
                   )}
@@ -145,12 +145,12 @@ export function BomTable({
                           disabled={LOCKED_STATUSES.has(row.status ?? "")}
                           title={
                             LOCKED_STATUSES.has(row.status ?? "")
-                              ? "This BOM has a pending approval"
+                              ? "This Recipe has a pending approval"
                               : "Edit"
                           }
                           onClick={(e) => {
                             e.stopPropagation()
-                            if (row.bom_id != null) onEdit(row.bom_id)
+                            if (row.recipe_id != null) onEdit(row.recipe_id)
                           }}
                         >
                           <Pencil className="h-3.5 w-3.5" />
@@ -163,7 +163,7 @@ export function BomTable({
                         title="History"
                         onClick={(e) => {
                           e.stopPropagation()
-                          if (row.bom_id != null) onHistory(row.bom_id)
+                          if (row.recipe_id != null) onHistory(row.recipe_id)
                         }}
                       >
                         <HistoryIcon className="h-3.5 w-3.5" />

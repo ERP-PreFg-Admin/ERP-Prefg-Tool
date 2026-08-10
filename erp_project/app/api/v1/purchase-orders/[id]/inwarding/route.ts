@@ -1,4 +1,4 @@
-// GET /api/purchase-orders/[id]/inwarding
+// GET /api/v1/purchase-orders/[id]/inwarding
 //
 // Everything inwarded against one PO, for the FG PO Tracking detail panel.
 //
@@ -31,7 +31,7 @@ export const GET = withGateway({
   access: { pageSlug: "/po-tracking", level: "viewer" },
   handler: async ({ params, session, ctx }) => {
     const poId = params.id
-    const logCtx = { ...ctx, route: `/api/purchase-orders/${poId}/inwarding` }
+    const logCtx = { ...ctx, route: `/api/v1/purchase-orders/${poId}/inwarding` }
 
     // PO ids are sequential integers, so the scope-filtered list is not a
     // boundary — without this a user scoped to one manufacturer could read

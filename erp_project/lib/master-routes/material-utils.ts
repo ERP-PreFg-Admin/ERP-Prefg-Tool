@@ -242,7 +242,7 @@ type VendorRateInput = {
   /** Mandatory reason for this edit (enforced client-side by the Cost Master
    *  edit dialogs) — stored as an approval_item, not a diffed field, and read
    *  back by rmVrmHandler/pmVrmHandler.applyAndArchive to archive into
-   *  history_vrm.remarks alongside the superseded rate. */
+   *  history_cost_ven.remarks alongside the superseded rate. */
   remarks?: string
 }
 
@@ -250,7 +250,7 @@ type MfgRateInput = {
   curr_rate?: unknown
   rate_uom?: unknown
   effective_from?: string | null
-  /** See VendorRateInput.remarks — archived into history_mrm.remarks. */
+  /** See VendorRateInput.remarks — archived into history_cost_mfg.remarks. */
   remarks?: string
 }
 
@@ -281,8 +281,8 @@ export async function applyVendorRateApproval(
     ["moq", existing.moq, v.moq],
     ["uom", existing.uom, v.rate_uom],
     ["effective_from", existing.effective_from, v.effective_from ?? today],
-    // mfg_id only exists on rm_vrm_dynamic (informational vendor→manufacturer
-    // tag) — pm_vrm_dynamic has no such column, so skip it for PM_VRM.
+    // mfg_id only exists on cost_master_rm_ven (informational vendor→manufacturer
+    // tag) — cost_master_pm_ven has no such column, so skip it for PM_VRM.
     ...(moduleVrm === "RM_VRM" ? [["mfg_id", existing.mfg_id, v.mfg_id] as [string, unknown, unknown]] : []),
   ] as [string, unknown, unknown][]).filter(([, o, n]) => String(o ?? "") !== String(n ?? ""))
   if (diff.length === 0) return null

@@ -2,7 +2,7 @@
  * Per-user entity scoping — `user_entity_scope`.
  *
  * Read by lib/scope.ts (once per request), written by
- * /api/admin/entity-scope. See prisma/add_user_entity_scope.sql for why the
+ * /api/v1/admin/entity-scope. See prisma/add_user_entity_scope.sql for why the
  * absence of rows means "unrestricted".
  */
 

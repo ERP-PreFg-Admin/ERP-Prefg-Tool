@@ -32,14 +32,16 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "ERP System",
+  title: "PEP ERP",
   description: "Enterprise Resource Planning System",
+  // ?v=2 busts the browser favicon cache — the filenames are unchanged but the
+  // artwork behind them is now the PEP wordmark. Bump again if the mark changes.
   icons: {
     icon: [
-      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
-      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/favicon-32x32.png?v=4", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-16x16.png?v=4", sizes: "16x16", type: "image/png" },
     ],
-    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+    apple: [{ url: "/apple-touch-icon.png?v=4", sizes: "180x180" }],
   },
   manifest: "/site.webmanifest",
 };
@@ -84,7 +86,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       )}
     >
       <head>
-        {/* <script dangerouslySetInnerHTML={{ __html: themeScript }} /> */}
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className="h-full">
         <ThemeProvider>

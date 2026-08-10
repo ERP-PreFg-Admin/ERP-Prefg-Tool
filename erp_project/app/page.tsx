@@ -12,7 +12,7 @@ import { redirect } from "next/navigation"
 //   { name: "Finance & Accounting", slug: "/finance",       description: "GL, AP/AR, financial reporting", built: false },
 //   { name: "Masters",              slug: "/masters",       description: "Master data: SKUs, vendors, manufacturers, materials", built: true },
 //   { name: "Reports & Analytics",  slug: "/reports",       description: "Dashboards, KPIs, data exports", built: false },
-//   { name: "Manufacturing",        slug: "/manufacturing", description: "Production planning, BOMs, work orders", built: true },
+//   { name: "Manufacturing",        slug: "/manufacturing", description: "Production planning, Recipes, work orders", built: true },
 // ]
 
 export default async function Home() {
@@ -39,12 +39,12 @@ export default async function Home() {
         <section className="space-y-3">
           <h3 className="font-semibold text-sm">Masters — what each table holds</h3>
           <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1.5 ml-1">
-            <li><span className="font-medium text-foreground">SKUs</span> — sku_code, name, brand, category/subcategory, sku type, filling &amp; UOM, MRP, GST, and the BOM currently linked to it.</li>
+            <li><span className="font-medium text-foreground">SKUs</span> — sku_code, name, brand, category/subcategory, sku type, filling &amp; UOM, MRP, GST, and the Recipe currently linked to it.</li>
             <li><span className="font-medium text-foreground">Raw Materials (RM)</span> — rm_code, name, make/type, UOM, HSN code, INCI name, plus its rate &amp; MOQ against each manufacturer/vendor.</li>
             <li><span className="font-medium text-foreground">Packing Materials (PM)</span> — pm_code, name, type, HSN code, UOM, plus its rate &amp; MOQ against each manufacturer/vendor.</li>
             <li><span className="font-medium text-foreground">Vendors</span> — code, name, type (RM/PM/both), location, zone, GST number, registered name, bank details.</li>
             <li><span className="font-medium text-foreground">Manufacturers</span> — code, name, location, zone, GST number, registered name, bank details, email.</li>
-            <li><span className="font-medium text-foreground">BOM (Recipe)</span> — sku_code, each material&apos;s type (RM/PM) and code, quantity, UOM, effective dates, and the resulting material cost.</li>
+            <li><span className="font-medium text-foreground">Recipe (Recipe)</span> — sku_code, each material&apos;s type (RM/PM) and code, quantity, UOM, effective dates, and the resulting material cost.</li>
           </ul>
           <p className="text-sm text-muted-foreground">
             Open <Link href="/masters" className="text-primary hover:underline">Masters</Link> and pick a tab to browse, search, or export any of these as CSV/Excel.
@@ -52,15 +52,15 @@ export default async function Home() {
         </section>
 
         <section className="space-y-3">
-          <h3 className="font-semibold text-sm">Bulk CSV upload — BOM / Recipe</h3>
+          <h3 className="font-semibold text-sm">Bulk CSV upload — Recipe / Recipe</h3>
           <p className="text-sm text-muted-foreground">
             A recipe is just a list of materials mapped to their exact RM/PM code, so the code has to already exist in
             the material master before you upload — <span className="font-medium text-foreground">export the Raw Material and Packing Material masters first</span> to
             copy the correct codes, then build your CSV against them:
           </p>
           <ol className="list-decimal list-inside text-sm text-muted-foreground space-y-1.5 ml-1">
-            <li><span className="font-medium text-foreground">Single BOM</span> (creation wizard, step 4 &quot;Upload CSV&quot;) — columns: <code className="font-mono text-xs bg-muted px-1 rounded">mtrl_type, mtrl_code, amount, uom</code>. Download the sample template from that step to get the exact format.</li>
-            <li><span className="font-medium text-foreground">Bulk import</span> (multiple SKUs/BOMs at once) — columns: <code className="font-mono text-xs bg-muted px-1 rounded">sku_code, bom_code (optional, auto-generated if blank), effective_from, mtrl_type, mtrl_code, amount, uom</code>.</li>
+            <li><span className="font-medium text-foreground">Single Recipe</span> (creation wizard, step 4 &quot;Upload CSV&quot;) — columns: <code className="font-mono text-xs bg-muted px-1 rounded">mtrl_type, mtrl_code, amount, uom</code>. Download the sample template from that step to get the exact format.</li>
+            <li><span className="font-medium text-foreground">Bulk import</span> (multiple SKUs/Recipes at once) — columns: <code className="font-mono text-xs bg-muted px-1 rounded">sku_code, bom_code (optional, auto-generated if blank), effective_from, mtrl_type, mtrl_code, amount, uom</code>.</li>
           </ol>
           <p className="text-sm text-muted-foreground">
             <span className="font-medium text-foreground">mtrl_code must exactly match an existing rm_code or pm_code</span> — a typo or an unmapped code will fail the row instead of silently linking to the wrong ingredient.
@@ -80,7 +80,7 @@ export default async function Home() {
             <li><span className="font-medium text-foreground">PM × Vendor</span> — <code className="font-mono text-xs bg-muted px-1 rounded">pm_code, vendor_code, curr_rate, moq, uom, effective_from, effective_to, remarks</code></li>
           </ul>
           <p className="text-sm text-muted-foreground">
-            Same rule as BOM: pull the RM/PM master export first so the code you paste into the CSV matches the ingredient you actually mean to re-rate.
+            Same rule as Recipe: pull the RM/PM master export first so the code you paste into the CSV matches the ingredient you actually mean to re-rate.
           </p>
         </section>
 
@@ -120,7 +120,7 @@ export default async function Home() {
           </p>
           <ol className="list-decimal list-inside text-sm text-muted-foreground space-y-1.5 ml-1">
             <li>Open <Link href="/manufacturing" className="text-primary hover:underline">Manufacturing</Link> to see the list of manufacturers.</li>
-            <li>Click into a manufacturer to see its overview — production status, BOMs in use, and related work.</li>
+            <li>Click into a manufacturer to see its overview — production status, Recipes in use, and related work.</li>
             <li>Any master-data edits triggered from here (e.g. rates) follow the same approval flow below.</li>
           </ol>
         </section>
@@ -142,7 +142,7 @@ export default async function Home() {
           </ol>
           <p className="text-sm text-muted-foreground">
             While a record shows <span className="font-mono text-xs bg-muted px-1 rounded">in_review</span>, its edit form is disabled with a banner explaining it&apos;s pending review.
-            BOM edits are the one exception — they save immediately and don&apos;t require approval.
+            Recipe edits are the one exception — they save immediately and don&apos;t require approval.
           </p>
         </section>
       </div>

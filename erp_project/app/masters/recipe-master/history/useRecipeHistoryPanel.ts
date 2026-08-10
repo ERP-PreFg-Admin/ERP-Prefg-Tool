@@ -3,14 +3,14 @@
 /**
  * Read-only counterpart to ../useBomDetailPanel.ts — owns just the URL-synced
  * ?bomId= selection and the detail fetch (with cache + hover-prefetch). No
- * edit-mode state at all, since /masters/bom-master/history never allows
+ * edit-mode state at all, since /masters/recipe-master/history never allows
  * editing.
  */
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
-import { isRmTotalValid } from "@/lib/validation/bom"
-import type { BomDetailResponse } from "@/types/masters"
+import { isRmTotalValid } from "@/lib/validation/recipe"
+import type { RecipeDetailResponse } from "@/types/masters"
 
 export function useBomHistoryPanel() {
   const router       = useRouter()
@@ -21,13 +21,13 @@ export function useBomHistoryPanel() {
     const raw = searchParams.get("bomId")
     return raw && /^\d+$/.test(raw) ? Number(raw) : null
   })
-  const [detail, setDetail]                 = useState<BomDetailResponse | null>(null)
+  const [detail, setDetail]                 = useState<RecipeDetailResponse | null>(null)
   const [detailLoading, setDetailLoading]   = useState(false)
   const [detailError, setDetailError]       = useState<string | null>(null)
   const [activeMtrlType, setActiveMtrlType] = useState<"rm" | "pm">("rm")
 
-  const detailCache = useRef<Map<number, BomDetailResponse>>(new Map())
-  const inFlight     = useRef<Map<number, Promise<BomDetailResponse>>>(new Map())
+  const detailCache = useRef<Map<number, RecipeDetailResponse>>(new Map())
+  const inFlight     = useRef<Map<number, Promise<RecipeDetailResponse>>>(new Map())
   const hoverTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -41,13 +41,13 @@ export function useBomHistoryPanel() {
     const pending = inFlight.current.get(bomId)
     if (pending) return pending
 
-    const req = fetch(`/api/masters/bom-master/history/${bomId}`)
+    const req = fetch(`/api/v1/masters/recipe-master/history/${bomId}`)
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.json().catch(() => ({}))
-          throw new Error(body.error || "Failed to load BOM history")
+          throw new Error(body.error || "Failed to load Recipe history")
         }
-        return res.json() as Promise<BomDetailResponse>
+        return res.json() as Promise<RecipeDetailResponse>
       })
       .then((data) => {
         detailCache.current.set(bomId, data)

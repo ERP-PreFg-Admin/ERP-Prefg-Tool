@@ -22,6 +22,15 @@ This index is the single entry point for understanding the ERP codebase. Read do
 | [PO Inwarding](./po-inwarding.md) | Supplier-invoice PDF → Nanonets extraction → review → inward POs / goods receipts → Uniware mirror → warehouse notification |
 | [S3 Integration](./s3-integration.md) | Bucket layout, key conventions, presigned URLs, event writes |
 
+## QA / QC
+
+| Document | What it covers |
+|----------|----------------|
+| [QA Audit — Aug 2026](./qa-audit-2026-08.md) | **Open defects**, each with a failing-if-changed test: two PO-split quantity bugs, an S3 access gap, a rate-history gap. Read before a release. |
+| [Manual QA / UAT Checklist](./qa-uat-checklist.md) | Per-module click-through for release sign-off — auth, scoping, approvals, PO lifecycle, invoice inwarding |
+
+Automated: `npm test` (pure, in CI) · `npm run test:db` (rollback-wrapped, local only) · `npm run test:checks` · `npm run lint:changed`. See the Testing section of `CLAUDE.md` for the conventions.
+
 ## Developer Guides
 
 | Document | Purpose |
@@ -37,6 +46,7 @@ These docs capture ongoing architectural decisions. Do not edit them without con
 |----------|--------|-------|
 | [Architecture Evolution Plan](./architecture-evolution.md) | Proposed | In-app API gateway layer + event-driven backbone |
 | [Event-Driven Options](./event-driven-options.md) | For review | Comparison of event backbone options (in-process, EventBridge, MSK, Redis) |
+| [Per-Manufacturer Extraction Profiles](./superpowers/specs/2026-08-07-per-manufacturer-extraction-profiles.md) | Approved, not built | Per-supplier invoice extraction rules, chosen by GSTIN detected from the PDF — module structure + API routes |
 
 ## Module Status
 

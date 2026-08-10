@@ -3,7 +3,7 @@
 /**
  * Shows the sibling SKUs sharing one SKU's brand + base_sku_sno (i.e. the
  * same base product's size/variant family) — fetched on demand via
- * POST /api/masters/skus { action: "variants" } rather than baked into the
+ * POST /api/v1/masters/skus { action: "variants" } rather than baked into the
  * paginated list response, since most rows have no siblings.
  */
 
@@ -37,7 +37,7 @@ export function SkuVariantsDialog({
     if (!brand) return
     setLoading(true)
     setError(null)
-    fetch("/api/masters/skus", {
+    fetch("/api/v1/masters/skus", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "variants", brand: brand.brand, base_sku_sno: brand.base_sku_sno }),

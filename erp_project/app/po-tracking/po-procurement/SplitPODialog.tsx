@@ -69,7 +69,7 @@ export default function SplitPODialog({
     }
     setSubmitting(true)
     try {
-      const res = await fetch(`/api/purchase-orders/${po.id}/split`, {
+      const res = await fetch(`/api/v1/purchase-orders/${po.id}/split`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

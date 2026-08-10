@@ -14,7 +14,7 @@
 //   po_no matches an existing PO → UPDATE only status/expected_on/destination
 //     (qty/rate/etc. are out of reach here — see po-bulk-fields.ts).
 // Every create/update writes a history_pos row so the change is visible from
-// PoTable's Actions menu (see app/api/purchase-orders/history/route.ts).
+// PoTable's Actions menu (see app/api/v1/purchase-orders/history/route.ts).
 
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { skus as skusSql } from "@/lib/queries/skus"
@@ -32,7 +32,7 @@ export const poHandler: ModuleHandler = {
 }
 
 // Same brand-code mapping used by the single-PO "normal" create path
-// (app/api/purchase-orders/route.ts) — kept in sync so bulk-created and
+// (app/api/v1/purchase-orders/route.ts) — kept in sync so bulk-created and
 // directly-created PO numbers share one scheme.
 const BRAND_CODES: Record<string, string> = {
   mcaffeine: "MCAFF",
@@ -122,6 +122,7 @@ export const poBulkHandler: ModuleHandler = {
 
           const [poResult] = await conn.execute(purchaseOrdersSql.insertBulkPo, [
             newPoNo, mfg.id, skuCode, qty, expectedOn, destination, s3Key,
+            mfg.id, skuCode,
           ])
           const poId = (poResult as any).insertId
           await conn.execute(purchaseOrdersSql.insertPoHistory, [poId, newPoNo, "create", null, null, null, s3Key, approverId])

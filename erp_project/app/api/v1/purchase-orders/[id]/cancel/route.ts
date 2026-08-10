@@ -1,9 +1,9 @@
-// POST /api/purchase-orders/[id]/cancel
+// POST /api/v1/purchase-orders/[id]/cancel
 // Fully cancel a raised PO. Distinct from Short Close: cancellation voids
 // the whole PO rather than accepting partial fulfillment as final.
 // Notifying the manufacturer is a separate, explicit step — see the PO
 // Procurement table's checkbox selection + "Review & Send Mail" flow
-// (POST /api/purchase-orders/send-mail) — cancelling no longer sends an
+// (POST /api/v1/purchase-orders/send-mail) — cancelling no longer sends an
 // email on its own.
 
 import { NextResponse } from "next/server"

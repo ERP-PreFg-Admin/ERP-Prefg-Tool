@@ -14,7 +14,7 @@ import { roundToWholeNumber, roundToTwoDecimals } from "@/lib/numeric"
 import { toPmParams } from "@/lib/master-routes/material-utils"
 import { insertHistoryEntry } from "@/lib/master-routes/history-utils"
 import { findEditMatchForRow } from "@/lib/master-routes/edit-match"
-import { type ModuleHandler, buildFieldMap, s3KeyOf } from "./types"
+import { type ModuleHandler, buildFieldMap, s3KeyOf, supersededOn } from "./types"
 
 export const pmRateHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
@@ -31,7 +31,9 @@ export const pmRateHandler: ModuleHandler = {
 
     await conn.execute(pmSql.archiveToHistoryMrm, [
       cur.mfg_id, cur.pm_id, vendorId,
-      cur.curr_rate, cur.effective_from, null,
+      // See supersededOn in ./types — cost_master_pm_mfg has no effective_to column, so
+      // the archived row's end date is derived from the incoming rate's start.
+      cur.curr_rate, cur.effective_from, supersededOn(fieldMap.effective_from),
       cur.status === STATUS.ACTIVE ? 1 : 0,
       fieldMap.remarks || null, raisedBy ?? null,
     ])
@@ -275,8 +277,8 @@ export async function stagePmBulkRows(
   }
 }
 
-// Bulk PM × Vendor rate upload — one CSV row = one pm_vrm_dynamic row.
-// pm_vrm_dynamic has no mfg_id column (unlike rm_vrm_dynamic), so there's no
+// Bulk PM × Vendor rate upload — one CSV row = one cost_master_pm_ven row.
+// cost_master_pm_ven has no mfg_id column (unlike cost_master_rm_ven), so there's no
 // manufacturer tag here.
 export const pmVrmBulkHandler: ModuleHandler = {
   async setStatus() {
@@ -324,8 +326,8 @@ export const pmVrmBulkHandler: ModuleHandler = {
   },
 }
 
-// Bulk PM × Manufacturer rate upload — one CSV row = one pm_mrm_fixed row.
-// pm_mrm_fixed has no approved-vendor column (unlike rm_mrm_fixed).
+// Bulk PM × Manufacturer rate upload — one CSV row = one cost_master_pm_mfg row.
+// cost_master_pm_mfg has no approved-vendor column (unlike cost_master_rm_mfg).
 export const pmRateBulkHandler: ModuleHandler = {
   async setStatus() {
     // No entity exists before approval — nothing to roll back on reject.

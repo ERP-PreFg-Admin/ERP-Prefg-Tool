@@ -1,4 +1,4 @@
-// GET /api/manufacturing/[mfgId]/final-costing/detailed-export
+// GET /api/v1/manufacturing/[mfgId]/final-costing/detailed-export
 //
 // "Detailed Breakup (Negotiation)" export for the Agreed Final Costing tab —
 // a two-sheet workbook analysts use to see exactly where the agreed MRM rate
@@ -28,10 +28,10 @@ import { computeRmCost, computePmCost, computeWastage, computeTotalCosting } fro
 import type { MfgLine, MiscCostType } from "@/types/masters"
 import logger from "@/lib/logger"
 
-type MaterialCostRow = { bom_id: number; rm_cost: string; pm_cost: string }
-type MiscCostRow = { bom_id: number; type: MiscCostType; cost: string }
-type BomLineDetailRow = {
-  bom_id: number
+type MaterialCostRow = { recipe_id: number; rm_cost: string; pm_cost: string }
+type MiscCostRow = { recipe_id: number; type: MiscCostType; cost: string }
+type RecipeLineDetailRow = {
+  recipe_id: number
   sku_code: string | null
   sku_name: string | null
   mtrl_type: "rm" | "pm"
@@ -78,26 +78,26 @@ export const GET = withGateway({
         query<MfgLine>(manufacturingSql.selectLiveLinesByMfg, [mfgId]),
         query<MaterialCostRow>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId]),
         query<MiscCostRow>(manufacturingSql.selectMiscCostsByMfg, [mfgId]),
-        query<BomLineDetailRow>(manufacturingSql.selectBomLineDetailByMfg, [mfgId, mfgId, mfgId]),
+        query<RecipeLineDetailRow>(manufacturingSql.selectBomLineDetailByMfg, [mfgId, mfgId, mfgId]),
         query<MinMaxRateRow>(rawMaterials.selectMinMaxVrmRateByRm, vendorScope),
         query<MinMaxRateRow>(packingMaterials.selectMinMaxVrmRateByPm, vendorScope),
       ])
 
-      const materialByBom = new Map(materialCostRows.map((r) => [r.bom_id, { rm: Number(r.rm_cost), pm: Number(r.pm_cost) }]))
+      const materialByBom = new Map(materialCostRows.map((r) => [r.recipe_id, { rm: Number(r.rm_cost), pm: Number(r.pm_cost) }]))
       const miscByBom = new Map<number, Partial<Record<MiscCostType, number>>>()
       for (const r of miscCostRows) {
-        const entry = miscByBom.get(r.bom_id) ?? {}
+        const entry = miscByBom.get(r.recipe_id) ?? {}
         entry[r.type] = Number(r.cost)
-        miscByBom.set(r.bom_id, entry)
+        miscByBom.set(r.recipe_id, entry)
       }
       const rmRateMap = new Map(minMaxRmRows.map((r) => [r.rm_id as number, { min: Number(r.min_rate ?? 0), max: Number(r.max_rate ?? 0), minVendor: r.min_vendor_name, maxVendor: r.max_vendor_name }]))
       const pmRateMap = new Map(minMaxPmRows.map((r) => [r.pm_id as number, { min: Number(r.min_rate ?? 0), max: Number(r.max_rate ?? 0), minVendor: r.min_vendor_name, maxVendor: r.max_vendor_name }]))
 
-      const linesByBom = new Map<number, BomLineDetailRow[]>()
+      const linesByBom = new Map<number, RecipeLineDetailRow[]>()
       for (const l of lineDetailRows) {
-        const arr = linesByBom.get(l.bom_id) ?? []
+        const arr = linesByBom.get(l.recipe_id) ?? []
         arr.push(l)
-        linesByBom.set(l.bom_id, arr)
+        linesByBom.set(l.recipe_id, arr)
       }
 
       function scenarioTotal(bomId: number, scenario: "min" | "max"): { rm: number; pm: number; total: number } {
@@ -122,12 +122,12 @@ export const GET = withGateway({
       }
 
       const summaryRows = lineRows.map((l) => {
-        const material = materialByBom.get(l.bom_id) ?? { rm: 0, pm: 0 }
-        const misc = miscByBom.get(l.bom_id) ?? {}
+        const material = materialByBom.get(l.recipe_id) ?? { rm: 0, pm: 0 }
+        const misc = miscByBom.get(l.recipe_id) ?? {}
         const { total: mrmWastage } = computeWastage(material.rm, material.pm, misc.rm_loss ?? 0, misc.pm_loss ?? 0)
         const mrmTotal = computeTotalCosting({ rmCost: material.rm, pmCost: material.pm, wastageTotal: mrmWastage, jw: misc.jw ?? 0, shrink: misc.shrink ?? 0, shipper: misc.shipper ?? 0 })
-        const cheapest = scenarioTotal(l.bom_id, "min")
-        const max = scenarioTotal(l.bom_id, "max")
+        const cheapest = scenarioTotal(l.recipe_id, "min")
+        const max = scenarioTotal(l.recipe_id, "max")
         const cheapestDelta = cheapest.total - mrmTotal
         const maxDelta = max.total - mrmTotal
         return {

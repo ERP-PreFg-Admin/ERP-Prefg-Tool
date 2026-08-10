@@ -1,6 +1,6 @@
 import type { MasterField } from "@/components/masters/field-config"
 
-/** Pure format check — no DB round-trip. See app/api/masters/raw-materials/
+/** Pure format check — no DB round-trip. See app/api/v1/masters/raw-materials/
  *  vrm-bulk/route.ts's check_duplicates action for the code-existence checks. */
 function validateDateStr(raw: string): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return `must be YYYY-MM-DD (got "${raw}")`

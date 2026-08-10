@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import type { PoHistoryRow } from "./po-types"
+import { IST } from "@/lib/date"
 
 const FIELD_LABEL: Record<string, string> = {
   status: "Status",
@@ -16,7 +17,7 @@ const FIELD_LABEL: Record<string, string> = {
 
 function fmtDateTime(d: string | null) {
   if (!d) return "—"
-  return new Date(d).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+  return new Date(d).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST })
 }
 
 export default function PoHistoryDialog({
@@ -34,7 +35,7 @@ export default function PoHistoryDialog({
     if (!poId) return
     setLoading(true)
     setError(null)
-    fetch(`/api/purchase-orders/history?po_id=${poId}`)
+    fetch(`/api/v1/purchase-orders/history?po_id=${poId}`)
       .then((r) => r.json())
       .then((data) => setEntries(data.history ?? []))
       .catch(() => setError("Failed to load history"))

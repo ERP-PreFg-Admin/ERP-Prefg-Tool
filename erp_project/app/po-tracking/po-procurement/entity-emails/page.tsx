@@ -2,7 +2,7 @@
  * SERVER component for /po-tracking/po-procurement/entity-emails.
  *
  * Standalone page (not a dialog) for the vendor/manufacturer contact-email
- * list — same pattern as the BOM/Approval history pages: reads ?page/?size/
+ * list — same pattern as the Recipe/Approval history pages: reads ?page/?size/
  * ?search/?type from the URL, runs a DB-level LIMIT/OFFSET query, and hands
  * the slice to a client component.
  */

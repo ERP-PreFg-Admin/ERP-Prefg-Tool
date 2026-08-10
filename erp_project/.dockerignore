@@ -10,3 +10,5 @@ tsconfig.tsbuildinfo
 architecture-discussion-framework.md
 README.md
 docs
+scripts
+tests

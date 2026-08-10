@@ -1,9 +1,9 @@
 "use client"
 
 /**
- * Table-form RM/PM line editor used by BomEditDialog.tsx. A denser
- * alternative to BomLineEditorGrid's stacked cards — one row per line, all
- * fields editable inline — so editing a BOM with many lines doesn't turn into
+ * Table-form RM/PM line editor used by RecipeEditDialog.tsx. A denser
+ * alternative to RecipeLineEditorGrid's stacked cards — one row per line, all
+ * fields editable inline — so editing a Recipe with many lines doesn't turn into
  * a long scroll of repeated card chrome.
  */
 
@@ -18,9 +18,9 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Callout } from "@/components/ui/callout"
-import { isRmTotalValid } from "@/lib/validation/bom"
+import { isRmTotalValid } from "@/lib/validation/recipe"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
-import { emptyBomLine, rmTotal, type BomLineRow, type BomMaterialOption } from "./BomLineEditorGrid"
+import { emptyBomLine, rmTotal, type RecipeLineRow, type RecipeMaterialOption } from "./RecipeLineEditorGrid"
 
 const cellInputCls =
   "w-full rounded border border-input bg-background px-2 py-1 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -32,14 +32,14 @@ function LineTable({
   onChange,
 }: {
   mtrlType: "rm" | "pm"
-  rows: BomLineRow[]
-  materials: BomMaterialOption[]
-  onChange: (rows: BomLineRow[]) => void
+  rows: RecipeLineRow[]
+  materials: RecipeMaterialOption[]
+  onChange: (rows: RecipeLineRow[]) => void
 }) {
   const total = mtrlType === "rm" ? rmTotal(rows) : null
   const balanced = total != null && rows.length > 0 && isRmTotalValid(total)
 
-  function updateRow(i: number, patch: Partial<BomLineRow>) {
+  function updateRow(i: number, patch: Partial<RecipeLineRow>) {
     onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
   }
   function removeRow(i: number) {
@@ -154,7 +154,7 @@ function LineTable({
   )
 }
 
-export function BomLineEditorTable({
+export function RecipeLineEditorTable({
   rmRows,
   pmRows,
   onChangeRm,
@@ -162,12 +162,12 @@ export function BomLineEditorTable({
   rmMaterials,
   pmMaterials,
 }: {
-  rmRows: BomLineRow[]
-  pmRows: BomLineRow[]
-  onChangeRm: (rows: BomLineRow[]) => void
-  onChangePm: (rows: BomLineRow[]) => void
-  rmMaterials: BomMaterialOption[]
-  pmMaterials: BomMaterialOption[]
+  rmRows: RecipeLineRow[]
+  pmRows: RecipeLineRow[]
+  onChangeRm: (rows: RecipeLineRow[]) => void
+  onChangePm: (rows: RecipeLineRow[]) => void
+  rmMaterials: RecipeMaterialOption[]
+  pmMaterials: RecipeMaterialOption[]
 }) {
   return (
     <div className="space-y-6">

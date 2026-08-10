@@ -4,10 +4,11 @@ import { rawMaterials } from "@/lib/queries/raw-materials"
 import { parseS3Import } from "@/lib/import-s3"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
-import { insertApprovalWithItems, applyVendorRateApproval, applyMfgRateApproval, toRmParams, findFuzzyMakeMatch } from "../../../../lib/master-routes/material-utils"
+import { insertApprovalWithItems, applyVendorRateApproval, applyMfgRateApproval, toRmParams, findFuzzyMakeMatch } from "@/lib/master-routes/material-utils"
 import { stageRmBulkRows } from "@/lib/approvals/handlers/raw-materials"
 import { fetchEditMatchCandidates, findBestEditMatch, type EditCandidate } from "@/lib/master-routes/edit-match"
 import { roundToWholeNumber, roundToTwoDecimals } from "@/lib/numeric"
+import { todayIST, monthIST } from "@/lib/date"
 
 function toRmVendorRateParams(rmId: number, r: any, today: string): any[] {
   return [
@@ -36,7 +37,7 @@ function toRmMfgRateParams(rmId: number, m: any, today: string): any[] {
 export async function rmCreate(body: any, userId: number, ctx: object): Promise<NextResponse> {
   if (!body.name?.trim()) return NextResponse.json({ error: "name is required" }, { status: 400 })
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayIST()
   const logCtx = { ...ctx, eventId: makeEventId("RM_MAT", "create"), module: "RM_Create" }
   logger.info({ ...logCtx, name: body.name.trim(), message: "RM Create Started" })
   recordRawEvent("RM_MAT", logCtx.eventId, { name: body.name.trim() })
@@ -197,7 +198,7 @@ export async function rmCreateFull(body: any, userId: number, ctx: object): Prom
   const mfgList = Array.isArray(body.manufacturers) ? body.manufacturers : []
   if (!rm?.name?.trim()) return NextResponse.json({ error: "name is required" }, { status: 400 })
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayIST()
   const logCtx = { ...ctx, eventId: makeEventId("RM_FULL", "create-full"), module: "RM_CreateFull" }
   logger.info({ ...logCtx, name: rm.name.trim(), vendors: vendorList.length, mfgs: mfgList.length, message: "RM Create-Full Started" })
   recordRawEvent("RM_FULL", logCtx.eventId, { name: rm.name.trim(), vendorCount: vendorList.length, mfgCount: mfgList.length })
@@ -289,7 +290,7 @@ export async function rmAddRates(body: any, userId: number, ctx: object): Promis
       if (rms.length === 0) return NextResponse.json({ error: "Material not found" }, { status: 404 })
       rmId = rms[0].id
     }
-    const today = new Date().toISOString().slice(0, 10)
+    const today = todayIST()
 
     const conn = await pool.getConnection()
     await conn.beginTransaction()
@@ -365,7 +366,7 @@ export async function rmBulk(body: any, userId: number, ctx: object): Promise<Ne
   let staged = 0
   let skipped = 0
   try {
-    const yyyymm = new Date().toISOString().slice(0, 7)
+    const yyyymm = monthIST()
     await conn.beginTransaction()
     const result = await stageRmBulkRows(conn, rows, userId, `imports/raw-materials/${yyyymm}`)
     staged = result.staged
@@ -417,7 +418,7 @@ export async function rmS3Bulk(body: any, userId: number, ctx: object): Promise<
   let staged = 0
   let skipped = 0
   try {
-    const yyyymm = new Date().toISOString().slice(0, 7)
+    const yyyymm = monthIST()
     await conn.beginTransaction()
     const result = await stageRmBulkRows(conn, rawRows, userId, `imports/raw-materials/${yyyymm}`)
     staged = result.staged

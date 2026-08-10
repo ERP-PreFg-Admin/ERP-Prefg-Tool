@@ -2,7 +2,7 @@
 //
 // Called by app/admin/data-access/DataAccessClient.tsx.
 //
-// PUT /api/admin/entity-scope
+// PUT /api/v1/admin/entity-scope
 //   Request  { user_id, entity_type: "mfg"|"vendor"|"warehouse", entity_ids: number[] | null }
 //     Process → replaces that ONE (user, entity_type) set in a transaction.
 //       `null` (or []) deletes every row for the pair, which means UNRESTRICTED —

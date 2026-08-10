@@ -41,7 +41,7 @@ async function countRows(table: string) {
 
 async function main() {
   console.log("── Table sizes ──────────────────────────────")
-  for (const t of ["master_rm", "master_pm", "rm_vrm_dynamic", "rm_mrm_fixed", "pm_vrm_dynamic", "pm_mrm_fixed"]) {
+  for (const t of ["master_rm", "master_pm", "cost_master_rm_ven", "cost_master_rm_mfg", "cost_master_pm_ven", "cost_master_pm_mfg"]) {
     await countRows(t)
   }
 
@@ -61,22 +61,22 @@ async function main() {
   // ── Rate tables, status filter only, via the exact same helper the app uses ─
   console.log("\n── EXPLAIN: rate tables, status='active' only ──")
   await explain(
-    "rm_vrm_dynamic.selectVendorPaginated (status='active')",
+    "cost_master_rm_ven.selectVendorPaginated (status='active')",
     rawMaterials.selectVendorPaginated,
     [...rawMaterials.vendorFilterParams(null, "active", null, null, null, null, null, null, UNRESTRICTED), 50, 0]
   )
   await explain(
-    "rm_mrm_fixed.selectMfgPaginated (status='active')",
+    "cost_master_rm_mfg.selectMfgPaginated (status='active')",
     rawMaterials.selectMfgPaginated,
     [...rawMaterials.mfgFilterParams(null, "active", null, null, null, null, null, UNRESTRICTED), 50, 0]
   )
   await explain(
-    "pm_vrm_dynamic.selectVendorPaginated (status='active')",
+    "cost_master_pm_ven.selectVendorPaginated (status='active')",
     packingMaterials.selectVendorPaginated,
     [...packingMaterials.vendorFilterParams(null, "active", null, null, null, null, null, UNRESTRICTED), 50, 0]
   )
   await explain(
-    "pm_mrm_fixed.selectMfgPaginated (status='active')",
+    "cost_master_pm_mfg.selectMfgPaginated (status='active')",
     packingMaterials.selectMfgPaginated,
     [...packingMaterials.mfgFilterParams(null, "active", null, null, null, null, null, UNRESTRICTED), 50, 0]
   )
@@ -84,12 +84,12 @@ async function main() {
   // ── Rate tables, status + curr_rate range (the other new composite index) ──
   console.log("\n── EXPLAIN: rate tables, status='active' + curr_rate range ──")
   await explain(
-    "rm_vrm_dynamic.selectVendorPaginated (status + rate 10-500)",
+    "cost_master_rm_ven.selectVendorPaginated (status + rate 10-500)",
     rawMaterials.selectVendorPaginated,
     [...rawMaterials.vendorFilterParams(null, "active", null, null, null, "10", "500", null, UNRESTRICTED), 50, 0]
   )
   await explain(
-    "pm_mrm_fixed.selectMfgPaginated (status + rate 10-500)",
+    "cost_master_pm_mfg.selectMfgPaginated (status + rate 10-500)",
     packingMaterials.selectMfgPaginated,
     [...packingMaterials.mfgFilterParams(null, "active", null, null, "10", "500", null, UNRESTRICTED), 50, 0]
   )

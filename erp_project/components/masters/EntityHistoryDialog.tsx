@@ -34,7 +34,7 @@ export function EntityHistoryDialog({
 }) {
   const [approvals, setApprovals] = useState<Approval[]>([])
   // Only ever populated for module="BOM" (see the API route) — resolves
-  // RM/PM ids in BomLineDiffTable to material name/code instead of "#123".
+  // RM/PM ids in RecipeLineDiffTable to material name/code instead of "#123".
   const [materialMap, setMaterialMap] = useState<MaterialMap | undefined>(undefined)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -45,7 +45,7 @@ export function EntityHistoryDialog({
     setExpanded(null)
     setLoading(true)
     setError(null)
-    fetch(`/api/approvals/entity-history?module=${module}&entity_id=${entityId}`)
+    fetch(`/api/v1/approvals/entity-history?module=${module}&entity_id=${entityId}`)
       .then((r) => r.json())
       .then((data) => {
         setApprovals(data.approvals ?? [])

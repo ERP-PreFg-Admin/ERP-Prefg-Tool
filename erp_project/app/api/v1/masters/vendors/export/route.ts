@@ -1,5 +1,5 @@
 /**
- * GET /api/masters/vendors/export
+ * GET /api/v1/masters/vendors/export
  *
  * Exports all vendor records matching the current active filters as CSV or Excel.
  *
@@ -57,7 +57,7 @@ export const GET = withGateway({
 
     const filename = buildExportFilename("VEN", format, { type: type || null, zone: zone || null, search: search || null })
     logger.info({message:"Vendors export served." , userId: session.user.id , format, view: "VEN", rowCount: rows.length})
-    console.log(`[/api/masters/vendors/export] served ${rows.length} rows as ${format}`)
+    console.log(`[/api/v1/masters/vendors/export] served ${rows.length} rows as ${format}`)
 
     if (format === "xlsx") {
       const buffer = await buildXlsx("VEN", VENDOR_EXPORT_COLUMNS, rows)
@@ -80,7 +80,7 @@ export const GET = withGateway({
     })
   } catch (err) {
     logger.error({message:"Filtered Vendorsexport failed" , userId: session.user.id , format , view:"VEN", error : err});
-    console.error("[/api/masters/vendors/export]", err)
+    console.error("[/api/v1/masters/vendors/export]", err)
     return NextResponse.json({ error: "Export failed" }, { status: 500 })
   }
   },

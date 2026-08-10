@@ -55,7 +55,7 @@ export function EditSkuDialog({
 
       if (sku.status === "rejected") {
         setLoadingInfo(true)
-        fetch(`/api/approvals/entity?module=SKU&entity_id=${sku.id}`)
+        fetch(`/api/v1/approvals/entity?module=SKU&entity_id=${sku.id}`)
           .then((r) => r.json())
           .then((data) => {
             setRejection(data.rejection ?? null)
@@ -84,7 +84,7 @@ export function EditSkuDialog({
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch("/api/masters/skus", {
+      const res = await fetch("/api/v1/masters/skus", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "update", id: sku!.id, ...form }),

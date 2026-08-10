@@ -1,4 +1,4 @@
-// GET /api/manufacturing/[mfgId]/final-costing/export
+// GET /api/v1/manufacturing/[mfgId]/final-costing/export
 //
 // Exports the "Agreed Final Costing" tab for one manufacturer. Replicates the
 // same computation as FinalCostingTabContent (app/manufacturing/[mfgId]/page.tsx)
@@ -41,21 +41,21 @@ export const GET = withGateway({
     try {
       const [lineRows, materialCostRows, miscCostRows] = await Promise.all([
         query<MfgLine>(manufacturingSql.selectLiveLinesByMfg, [mfgId]),
-        query<{ bom_id: number; rm_cost: string; pm_cost: string }>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId]),
-        query<{ bom_id: number; type: MiscCostType; cost: string }>(manufacturingSql.selectMiscCostsByMfg, [mfgId]),
+        query<{ recipe_id: number; rm_cost: string; pm_cost: string }>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId]),
+        query<{ recipe_id: number; type: MiscCostType; cost: string }>(manufacturingSql.selectMiscCostsByMfg, [mfgId]),
       ])
 
-      const materialByBom = new Map(materialCostRows.map((r) => [r.bom_id, { rm: Number(r.rm_cost), pm: Number(r.pm_cost) }]))
+      const materialByBom = new Map(materialCostRows.map((r) => [r.recipe_id, { rm: Number(r.rm_cost), pm: Number(r.pm_cost) }]))
       const miscByBom = new Map<number, Partial<Record<MiscCostType, number>>>()
       for (const r of miscCostRows) {
-        const entry = miscByBom.get(r.bom_id) ?? {}
+        const entry = miscByBom.get(r.recipe_id) ?? {}
         entry[r.type] = Number(r.cost)
-        miscByBom.set(r.bom_id, entry)
+        miscByBom.set(r.recipe_id, entry)
       }
 
       const rows: FinalCostingRow[] = lineRows.map((l) => {
-        const material = materialByBom.get(l.bom_id)
-        const misc = miscByBom.get(l.bom_id) ?? {}
+        const material = materialByBom.get(l.recipe_id)
+        const misc = miscByBom.get(l.recipe_id) ?? {}
         const rmCost = material?.rm ?? 0
         const pmCost = material?.pm ?? 0
         const { rmWastage, pmWastage, total: wastage } = computeWastage(rmCost, pmCost, misc.rm_loss ?? 0, misc.pm_loss ?? 0)
@@ -68,7 +68,7 @@ export const GET = withGateway({
           misc.jw === undefined || misc.shrink === undefined || misc.shipper === undefined ||
           misc.rm_loss === undefined || misc.pm_loss === undefined
         return {
-          bom_id: l.bom_id,
+          recipe_id: l.recipe_id,
           sku_code: l.sku_code,
           sku_name: l.sku_name,
           rm_cost: rmCost,

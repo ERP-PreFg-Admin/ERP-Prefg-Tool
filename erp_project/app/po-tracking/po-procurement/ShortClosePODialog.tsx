@@ -21,7 +21,7 @@ export default function ShortClosePODialog({
   async function handleConfirm() {
     setLoading(true)
     try {
-      const res = await fetch(`/api/purchase-orders/${poId}/close`, { method: "POST" })
+      const res = await fetch(`/api/v1/purchase-orders/${poId}/close`, { method: "POST" })
       if (res.ok) {
         toast({ title: "PO short closed", variant: "success" })
         onDone()

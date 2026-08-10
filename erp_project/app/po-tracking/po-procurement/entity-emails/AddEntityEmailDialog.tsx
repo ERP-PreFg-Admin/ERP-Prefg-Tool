@@ -74,7 +74,7 @@ export default function AddEntityEmailDialog({
 
     setSubmitting(true)
     try {
-      const res = await fetch("/api/entity-emails", {
+      const res = await fetch("/api/v1/entity-emails", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

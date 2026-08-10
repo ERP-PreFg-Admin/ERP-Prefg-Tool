@@ -1,4 +1,4 @@
-// POST /api/purchase-orders/invoice/parse
+// POST /api/v1/purchase-orders/invoice/parse
 // Parse an invoice PDF with Nanonets and hand back the fields for review.
 //
 // The PDF is posted straight from the browser as multipart and never touches
@@ -18,7 +18,7 @@ import { ApiError } from "@/lib/gateway/errors"
 import { makeEventId, recordRawEvent, recordProcessedEvent, recordFailedEvent } from "@/lib/events"
 import logger from "@/lib/logger"
 
-const MAX_BYTES = 10 * 1024 * 1024 // matches /api/upload's cap and the dialog's
+const MAX_BYTES = 10 * 1024 * 1024 // matches /api/v1/upload's cap and the dialog's
 
 export const POST = withGateway({
   // No `schema` — this endpoint takes multipart/form-data, and withGateway's

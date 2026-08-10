@@ -5,7 +5,7 @@
  * module code. Adding a new module means adding one object in the relevant
  * lib/approvals/handlers/*.ts file (grouped by domain, mirroring
  * lib/queries/'s layout) and registering it below; the route handler
- * (app/api/approvals/[id]/route.ts) never changes.
+ * (app/api/v1/approvals/[id]/route.ts) never changes.
  *
  * Interface:
  *   setStatus       — called on reject: marks entity as "rejected"
@@ -21,7 +21,7 @@ import { pmRateHandler, pmVrmHandler, pmMatHandler, pmBulkHandler, pmVrmBulkHand
 import { vendorHandler, vendorBulkHandler } from "./handlers/vendors"
 import { mfgHandler, mfgBulkHandler } from "./handlers/manufacturers"
 import { poHandler, poBulkHandler } from "./handlers/purchase-orders"
-import { bomHandler, bomBulkHandler } from "./handlers/bom"
+import { bomHandler, bomBulkHandler } from "./handlers/recipe"
 
 import type { DiffItem, ModuleHandler } from "./handlers/types"
 export type { DiffItem, ModuleHandler }

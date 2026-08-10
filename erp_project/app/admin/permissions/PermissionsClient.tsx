@@ -4,8 +4,8 @@
  * CLIENT component for /admin/permissions.
  *
  * Two panels, both "pick one thing, edit its pages down a list":
- *   1. Role permissions   -> /api/admin/permissions       (page_permissions)
- *   2. Per-user overrides -> /api/admin/user-permissions   (user_page_permissions)
+ *   1. Role permissions   -> /api/v1/admin/permissions       (page_permissions)
+ *   2. Per-user overrides -> /api/v1/admin/user-permissions   (user_page_permissions)
  *
  * The role panel used to be a role x page matrix. With 14 declared roles
  * (lib/roles.ts) that meant 15 columns x 23 pages of dropdowns and horizontal
@@ -24,15 +24,23 @@
  * the question this page exists for: "Inherit" is not an outcome, and an admin
  * reading a column of them has no idea who can reach what.
  *
- * Each change is its own request; the row updates optimistically and rolls back
- * if the API rejects it.
+ * Edits are STAGED, not saved on change. Every dropdown writes to `pending` in
+ * this component; the resolved-effect column re-resolves against that, so the
+ * page previews the outcome before anything is written. A summary of what will
+ * change, and the Apply button that writes it, live in a sticky bar at the
+ * bottom. Nothing reaches the API until Apply.
+ *
+ * `pending` is held HERE rather than in the two panels because switching role
+ * or user remounts them — staged edits for a role you've navigated away from
+ * still have to be in the batch when you apply.
  */
 
-import { Fragment, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { useToast } from "@/components/ui/toast"
 import { PAGES, PAGE_SECTIONS } from "@/lib/pages"
@@ -100,13 +108,26 @@ function EffectCell({ resolution, slug }: { resolution: Resolution; slug: string
   )
 }
 
-type SaveFn = (
-  endpoint: string,
-  body: Record<string, unknown>,
-  next: CellValue,
-  apply: (v: CellValue) => void,
-  previous: CellValue
-) => Promise<void>
+/** One staged edit, carrying enough to render the summary and post the write. */
+type Pending = {
+  kind: "role" | "user"
+  /** Role key, or the user id as a string. */
+  scopeId: string
+  /** "RM Head" / "Ajay Singh" — what the summary groups by. */
+  scopeLabel: string
+  slug: string
+  pageLabel: string
+  from: CellValue
+  to: CellValue
+}
+
+const pendingKey = (kind: Pending["kind"], scopeId: string, slug: string) =>
+  `${kind}:${scopeId}:${slug}`
+
+type StageFn = (change: Pending) => void
+
+const CELL_LABEL: Record<CellValue, string> =
+  Object.fromEntries(CELL_OPTIONS.map((o) => [o.value, o.label])) as Record<CellValue, string>
 
 /** Page label + slug, carrying the authority rail on its left edge. */
 function PageCell({
@@ -146,26 +167,21 @@ function RailLegend() {
 function RolePages({
   role,
   permissions,
+  pending,
   disabled,
-  save,
+  stage,
 }: {
   role: Role
   permissions: RolePermission[]
+  pending: Record<string, Pending>
   disabled: boolean
-  save: SaveFn
+  stage: StageFn
 }) {
-  const [values, setValues] = useState<Record<string, CellValue>>(() =>
-    Object.fromEntries(
-      permissions
-        .filter((p) => p.role === role.key)
-        .map((p) => [p.page_slug, p.access_level as CellValue])
-    )
-  )
-
-  // Resolution reads the live local values, so an edit re-resolves every row
-  // that inherits from the one just changed — the whole point of showing it.
   const stored = useMemo(() => roleLookup(permissions, role.key), [permissions, role.key])
-  const roleAt = (s: string) => values[s] ?? stored(s)
+
+  // Resolution reads the STAGED value, so an edit re-resolves every row that
+  // inherits from the one just changed — the preview is the whole point.
+  const roleAt = (s: string) => pending[pendingKey("role", role.key, s)]?.to ?? stored(s)
   const noOverride = () => "" as CellValue
 
   return (
@@ -189,7 +205,7 @@ function RolePages({
               </TableCell>
             </TableRow>
             {PAGES.filter((p) => p.section === section).map((page) => {
-              const value = values[page.slug] ?? ""
+              const value = roleAt(page.slug)
               const resolution = resolveForDisplay(page.slug, noOverride, roleAt)
               // /approvals has no parent slug to inherit from, so a Head left on
               // Inherit silently cannot approve — worth saying on the row.
@@ -206,13 +222,18 @@ function RolePages({
                       value={value}
                       disabled={disabled}
                       onChange={(next) =>
-                        save(
-                          "/api/admin/permissions",
-                          { role: role.key, page_slug: page.slug },
-                          next,
-                          (v) => setValues((s) => ({ ...s, [page.slug]: v })),
-                          value
-                        )
+                        stage({
+                          kind: "role",
+                          scopeId: role.key,
+                          scopeLabel: role.label,
+                          slug: page.slug,
+                          pageLabel: page.label,
+                          // `from` is the STORED value, not the currently shown
+                          // one — restaging the same row twice must still diff
+                          // against what's in the database.
+                          from: stored(page.slug),
+                          to: next,
+                        })
                       }
                     />
                   </TableCell>
@@ -230,24 +251,24 @@ function OverridesTable({
   user,
   overrides,
   rolePermissions,
+  pending,
   disabled,
-  save,
+  stage,
 }: {
   user: { id: number; name: string; roles: string[] }
   overrides: UserOverride[]
   rolePermissions: RolePermission[]
+  pending: Record<string, Pending>
   disabled: boolean
-  save: SaveFn
+  stage: StageFn
 }) {
-  const [values, setValues] = useState<Record<string, CellValue>>(() =>
-    Object.fromEntries(overrides.map((o) => [o.page_slug, o.access_level as CellValue]))
-  )
-
   const stored = useMemo(
     () => Object.fromEntries(overrides.map((o) => [o.page_slug, o.access_level as CellValue])),
     [overrides]
   )
-  const overrideAt = (s: string) => values[s] ?? stored[s] ?? ""
+  const storedAt = (s: string): CellValue => stored[s] ?? ""
+  const overrideAt = (s: string) =>
+    pending[pendingKey("user", String(user.id), s)]?.to ?? storedAt(s)
   const roleAt = useMemo(() => rolesLookup(rolePermissions, user.roles), [rolePermissions, user.roles])
 
   return (
@@ -261,7 +282,7 @@ function OverridesTable({
       </TableHeader>
       <TableBody>
         {PAGES.map((page) => {
-          const value = values[page.slug] ?? ""
+          const value = overrideAt(page.slug)
           const resolution = resolveForDisplay(page.slug, overrideAt, roleAt)
           return (
             <TableRow key={page.slug}>
@@ -272,13 +293,15 @@ function OverridesTable({
                   value={value}
                   disabled={disabled}
                   onChange={(next) =>
-                    save(
-                      "/api/admin/user-permissions",
-                      { user_id: user.id, page_slug: page.slug },
-                      next,
-                      (v) => setValues((s) => ({ ...s, [page.slug]: v })),
-                      value
-                    )
+                    stage({
+                      kind: "user",
+                      scopeId: String(user.id),
+                      scopeLabel: user.name,
+                      slug: page.slug,
+                      pageLabel: page.label,
+                      from: storedAt(page.slug),
+                      to: next,
+                    })
                   }
                 />
               </TableCell>
@@ -311,35 +334,83 @@ export default function PermissionsClient({
 
   const [roleKey, setRoleKey] = useState<string>("")
   const [busy, setBusy] = useState(false)
+  const [pending, setPending] = useState<Record<string, Pending>>({})
 
   const selectedRole = ROLES.find((r) => r.key === roleKey) ?? null
   const selectedUser = users.find((u) => u.id === selectedUserId) ?? null
 
-  /** POST to upsert, DELETE to clear. Rolls the local value back on failure. */
-  const save: SaveFn = async (endpoint, body, next, apply, previous) => {
-    apply(next)
+  const changes = Object.values(pending)
+
+  /** Records an edit. Setting a row back to its stored value un-stages it, so
+   *  the summary never lists a change that isn't one. */
+  const stage: StageFn = (change) => {
+    const key = pendingKey(change.kind, change.scopeId, change.slug)
+    setPending((prev) => {
+      const next = { ...prev }
+      if (change.to === change.from) delete next[key]
+      else next[key] = change
+      return next
+    })
+  }
+
+  /** Writes every staged change. Sequential rather than parallel: each one is
+   *  its own activity_log row, and a partial failure has to name the rows that
+   *  didn't land rather than leaving the batch ambiguous. */
+  async function applyChanges() {
     setBusy(true)
-    try {
-      const res = await fetch(endpoint, {
-        method: next === "" ? "DELETE" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(next === "" ? body : { ...body, access_level: next }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.error ?? "Request failed")
-      // The sidebar and every page guard read these rows server-side.
-      router.refresh()
-    } catch (err) {
-      apply(previous)
+    const failed: Record<string, Pending> = {}
+    let applied = 0
+
+    for (const c of changes) {
+      const endpoint = c.kind === "role" ? "/api/v1/admin/permissions" : "/api/v1/admin/user-permissions"
+      const body =
+        c.kind === "role"
+          ? { role: c.scopeId, page_slug: c.slug }
+          : { user_id: Number(c.scopeId), page_slug: c.slug }
+      try {
+        const res = await fetch(endpoint, {
+          // Inherit means "no row at all", so clearing is a DELETE — an explicit
+          // access_level='none' row is a different, stronger statement.
+          method: c.to === "" ? "DELETE" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(c.to === "" ? body : { ...body, access_level: c.to }),
+        })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data.error ?? "Request failed")
+        }
+        applied++
+      } catch {
+        failed[pendingKey(c.kind, c.scopeId, c.slug)] = c
+      }
+    }
+
+    // Whatever failed stays staged so it can be retried or discarded.
+    setPending(failed)
+    setBusy(false)
+    // The sidebar and every page guard read these rows server-side.
+    router.refresh()
+
+    const failedCount = Object.keys(failed).length
+    if (failedCount === 0) {
+      toast({ title: `Applied ${applied} change${applied === 1 ? "" : "s"}` })
+    } else {
       toast({
-        title: "Not saved",
-        description: err instanceof Error ? err.message : "Request failed",
+        title: `${failedCount} of ${changes.length} not applied`,
+        description: "The ones that failed are still listed below. Try again or discard them.",
         variant: "error",
       })
-    } finally {
-      setBusy(false)
     }
   }
+
+  // Staged changes live only in this component — a refresh or a closed tab
+  // loses them silently otherwise.
+  useEffect(() => {
+    if (changes.length === 0) return
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault()
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [changes.length])
 
   function selectUser(id: string) {
     const params = new URLSearchParams(searchParams.toString())
@@ -440,13 +511,11 @@ export default function PermissionsClient({
               </div>
               <div className="overflow-x-auto">
                 <RolePages
-                  // Keyed by role so switching remounts with that role's rows —
-                  // the initial state below is read once per mount.
-                  key={selectedRole.key}
                   role={selectedRole}
                   permissions={rolePermissions}
+                  pending={pending}
                   disabled={!canEdit || busy}
-                  save={save}
+                  stage={stage}
                 />
               </div>
             </>
@@ -507,18 +576,86 @@ export default function PermissionsClient({
               </div>
               <div className="overflow-x-auto">
                 <OverridesTable
-                  key={selectedUser.id}
                   user={selectedUser}
                   overrides={overrides}
                   rolePermissions={rolePermissions}
+                  pending={pending}
                   disabled={!canEdit || busy}
-                  save={save}
+                  stage={stage}
                 />
               </div>
             </>
           )}
         </CardContent>
       </Card>
+
+      {/* ── Staged changes ───────────────────────────────────────────────────
+          Sticky, because the panels that feed it are far apart on a long page:
+          you can be editing overrides at the bottom and still see what a role
+          edit up top is about to do. Only rendered when there's something to
+          apply, so it costs nothing the rest of the time. */}
+      {changes.length > 0 && (
+        <div className="sticky bottom-0 z-20 rounded-t-lg border border-b-0 border-border bg-background/95 shadow-[0_-4px_16px_-8px_rgb(0_0_0/0.25)] backdrop-blur">
+          <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+            <div className="min-w-0 space-y-2">
+              <p className="font-heading text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                {changes.length} change{changes.length === 1 ? "" : "s"} not yet applied
+              </p>
+
+              {/* Grouped by who it affects — an admin reads "what am I doing to
+                  this role", not a flat list of slugs. */}
+              <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+                {Object.entries(
+                  changes.reduce<Record<string, Pending[]>>((acc, c) => {
+                    const k = `${c.kind === "role" ? "Role" : "User"} · ${c.scopeLabel}`
+                    ;(acc[k] ??= []).push(c)
+                    return acc
+                  }, {})
+                ).map(([group, items]) => (
+                  <div key={group}>
+                    <p className="text-[11px] font-medium text-foreground/70">{group}</p>
+                    <ul className="mt-0.5 space-y-0.5">
+                      {items.map((c) => (
+                        <li
+                          key={c.slug}
+                          className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground"
+                        >
+                          <span className="font-medium text-foreground">{c.pageLabel}</span>
+                          <span className="font-mono text-[11px]">{c.slug}</span>
+                          <span>
+                            {CELL_LABEL[c.from]} <span aria-hidden>→</span>{" "}
+                            <span
+                              className={cn(
+                                "font-medium",
+                                c.to === "editor" && "text-emerald-700 dark:text-emerald-400",
+                                c.to === "none" && "text-destructive",
+                                c.to === "" && "text-muted-foreground"
+                              )}
+                            >
+                              {CELL_LABEL[c.to]}
+                            </span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => setPending({})}>
+                Discard
+              </Button>
+              <Button size="sm" disabled={busy} onClick={applyChanges}>
+                {busy
+                  ? "Applying…"
+                  : `Apply ${changes.length} change${changes.length === 1 ? "" : "s"}`}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -43,8 +43,11 @@ export const MODULE_LABEL: Record<string, string> = {
   MFG_BULK: "Bulk Manufacturer Upload",
   RM_BULK: "Bulk RM Upload",
   PM_BULK: "Bulk PM Upload",
-  BOM: "BOM",
-  BOM_BULK: "Bulk BOM Upload",
+  // Keys are the module codes stored in `approvals.module` — 14 existing rows
+  // use them, so they stay "BOM" until those are migrated. Only the labels,
+  // which are what users read, become Recipe.
+  BOM: "Recipe",
+  BOM_BULK: "Bulk Recipe Upload",
 }
 
 /** Modules whose approval_items store {s3_key, filename, row_count} for a

@@ -1,5 +1,5 @@
 /**
- * GET /api/purchase-orders/mfg-skus?mfg_id=123
+ * GET /api/v1/purchase-orders/mfg-skus?mfg_id=123
  *
  * Active SKUs one manufacturer currently produces — populates the "Add PO"
  * dialog's SKU rows once a manufacturer is picked (see AddPODialog.tsx).

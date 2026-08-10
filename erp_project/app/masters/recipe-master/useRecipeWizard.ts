@@ -1,25 +1,25 @@
 "use client"
 
 /**
- * Owns all step/form state and submit handlers for BomCreationWizard:
- * SKU select -> existing-active-BOM check -> entry method (manual/CSV) ->
+ * Owns all step/form state and submit handlers for RecipeCreationWizard:
+ * SKU select -> existing-active-Recipe check -> entry method (manual/CSV) ->
  * RM+PM line entry -> review & submit.
  *
- * "Update Existing BOM" (step 2, shown when the picked SKU already has an
- * active BOM) never submits from here — it closes the wizard and hands off
+ * "Update Existing Recipe" (step 2, shown when the picked SKU already has an
+ * active Recipe) never submits from here — it closes the wizard and hands off
  * to the listing's edit-mode detail panel (onEditExisting), since editing in
  * place is a different surface (useBomDetailPanel.ts). This wizard otherwise
- * only ever submits mode:"new-version". Editing an existing BOM directly
- * (without going through "Create BOM" first) is also available via the
+ * only ever submits mode:"new-version". Editing an existing Recipe directly
+ * (without going through "Create Recipe" first) is also available via the
  * table's per-row Edit button, wired to the same onEditExisting.
  */
 
 import { useState } from "react"
 import { useToast } from "@/components/ui/toast"
-import { isRmTotalValid } from "@/lib/validation/bom"
-import { rmTotal, type BomLineRow, type BomMaterialOption } from "./BomLineEditorGrid"
-import { parseBomCsv } from "./bom-csv"
-import { uploadPendingArtifacts } from "./bom-artifact-upload"
+import { isRmTotalValid } from "@/lib/validation/recipe"
+import { rmTotal, type RecipeLineRow, type RecipeMaterialOption } from "./RecipeLineEditorGrid"
+import { parseBomCsv } from "./recipe-csv"
+import { uploadPendingArtifacts } from "./recipe-artifact-upload"
 
 export type WizardStep = 1 | 2 | 3 | 4 | 5
 export type EntryMethod = "manual" | "csv"
@@ -30,8 +30,8 @@ export function useBomWizard({
   onSuccess,
   onEditExisting,
 }: {
-  rmMaterials: BomMaterialOption[]
-  pmMaterials: BomMaterialOption[]
+  rmMaterials: RecipeMaterialOption[]
+  pmMaterials: RecipeMaterialOption[]
   onSuccess: () => void
   onEditExisting: (bomId: number) => void
 }) {
@@ -49,12 +49,12 @@ export function useBomWizard({
   const [entryMethod, setEntryMethod] = useState<EntryMethod | null>(null)
   const [csvParsed, setCsvParsed] = useState(false)
   const [csvErrors, setCsvErrors] = useState<string[]>([])
-  const [rmRows, setRmRows] = useState<BomLineRow[]>([])
-  const [pmRows, setPmRows] = useState<BomLineRow[]>([])
+  const [rmRows, setRmRows] = useState<RecipeLineRow[]>([])
+  const [pmRows, setPmRows] = useState<RecipeLineRow[]>([])
   const [pendingArtifactFiles, setPendingArtifactFiles] = useState<File[]>([])
   // Only required when existingBomId != null — i.e. Step 2 found this SKU
-  // already has an active BOM, so "Create New BOM Version" here is really an
-  // edit to an established recipe. Not required for a SKU's very first BOM.
+  // already has an active Recipe, so "Create New Recipe Version" here is really an
+  // edit to an established recipe. Not required for a SKU's very first Recipe.
   const [reason, setReason] = useState("")
   const [changeType, setChangeType] = useState<("rm" | "pm")[]>([])
 
@@ -94,16 +94,16 @@ export function useBomWizard({
     setSkuId(id)
     setLoading(true)
     try {
-      const res = await fetch("/api/masters/bom-master", {
+      const res = await fetch("/api/v1/masters/recipe-master", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "check-existing", sku_id: id }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Failed to check existing BOMs")
+      if (!res.ok) throw new Error(data.error || "Failed to check existing Recipes")
 
       if (data.hasActive) {
-        setExistingBomId(data.bom_id)
+        setExistingBomId(data.recipe_id)
         setExistingBomCode(data.bom_code)
         setStep(2)
       } else {
@@ -149,7 +149,7 @@ export function useBomWizard({
   function goBack() {
     setError(null)
     // Step 3's "back" skips Step 2 if it was never shown (SKU had no existing
-    // active BOM, so existingBomId is still null) — otherwise every other
+    // active Recipe, so existingBomId is still null) — otherwise every other
     // step just steps back by 1. Step 1 is the first step, so it has no back target.
     if (step === 3) setStep(existingBomId != null ? 2 : 1)
     else setStep((s) => (s - 1) as WizardStep)
@@ -180,7 +180,7 @@ export function useBomWizard({
       }
     }
     if (existingBomId != null && (!reason.trim() || changeType.length === 0)) {
-      setError("A reason and at least one type of change (RM/PM) are required when revising an existing BOM.")
+      setError("A reason and at least one type of change (RM/PM) are required when revising an existing Recipe.")
       return
     }
 
@@ -191,13 +191,13 @@ export function useBomWizard({
         `boms/tmp/${crypto.randomUUID()}`
       )
 
-      const toLine = (r: BomLineRow) => ({
+      const toLine = (r: RecipeLineRow) => ({
         mtrl_type: r.mtrl_type,
         mtrl_id: r.mtrl_id,
         amount: Number(r.amount),
         uom: r.uom || null,
       })
-      const res = await fetch("/api/masters/bom-master", {
+      const res = await fetch("/api/v1/masters/recipe-master", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -214,9 +214,9 @@ export function useBomWizard({
         }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Failed to submit BOM")
+      if (!res.ok) throw new Error(data.error || "Failed to submit Recipe")
       closeWizard()
-      toast({ title: "BOM submitted for approval", description: data.bom_code ?? undefined, variant: "success" })
+      toast({ title: "Recipe submitted for approval", description: data.bom_code ?? undefined, variant: "success" })
       onSuccess()
     } catch (e: any) {
       setError(e.message || "An error occurred")

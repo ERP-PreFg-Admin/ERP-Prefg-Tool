@@ -8,7 +8,7 @@ import { assertPoInScope } from "@/lib/po-guard"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 
-// POST /api/purchase-orders/send-mail
+// POST /api/v1/purchase-orders/send-mail
 // Body: { po_ids: number[] }
 //
 // User-driven notification send: the selected POs (any mix of status —

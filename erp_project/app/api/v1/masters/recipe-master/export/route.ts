@@ -1,7 +1,7 @@
 /**
- * GET /api/masters/bom-master/export
+ * GET /api/v1/masters/recipe-master/export
  *
- * Exports all BOM detail rows matching the current active filters as CSV or Excel.
+ * Exports all Recipe detail rows matching the current active filters as CSV or Excel.
  *
  * Query params (all optional):
  *   format — "csv" (default) | "xlsx"
@@ -18,16 +18,16 @@
 
 import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { bom as bomSql } from "@/lib/queries/bom"
+import { bom as recipeSql } from "@/lib/queries/recipe"
 import { buildCsv, buildXlsx, buildExportFilename } from "@/lib/export"
-import { BOM_EXPORT_COLUMNS } from "@/lib/export-configs"
+import { RECIPE_EXPORT_COLUMNS } from "@/lib/export-configs"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import logger from "@/lib/logger"
 
 const ROW_LIMIT = 50_000
 
 export const GET = withGateway({
-  access: { pageSlug: "/masters/bom-master", level: "viewer" },
+  access: { pageSlug: "/masters/recipe-master", level: "viewer" },
   handler: async ({ req, session }) => {
   const sp     = req.nextUrl.searchParams
   const format = sp.get("format") === "xlsx" ? "xlsx" : "csv"
@@ -44,7 +44,7 @@ export const GET = withGateway({
 
   try {
     const [{ total }] = await query<{ total: number }>(
-      bomSql.countAll,
+      recipeSql.countAll,
       filterParams
     )
     if (total > ROW_LIMIT) {
@@ -55,15 +55,15 @@ export const GET = withGateway({
     }
 
     const rows = await query<Record<string, unknown>>(
-      bomSql.selectAllFiltered,
+      recipeSql.selectAllFiltered,
       filterParams
     )
 
-    const filename = buildExportFilename("BOM", format, { type: type || null, status: status || null, search: search || null })
-    console.log(`[/api/masters/bom-master/export] served ${rows.length} rows as ${format}`)
+    const filename = buildExportFilename("Recipe", format, { type: type || null, status: status || null, search: search || null })
+    console.log(`[/api/v1/masters/recipe-master/export] served ${rows.length} rows as ${format}`)
 
     if (format === "xlsx") {
-      const buffer = await buildXlsx("BOM", BOM_EXPORT_COLUMNS, rows)
+      const buffer = await buildXlsx("Recipe", RECIPE_EXPORT_COLUMNS, rows)
       return new NextResponse(buffer, {
         status: 200,
         headers: {
@@ -73,7 +73,7 @@ export const GET = withGateway({
       })
     }
 
-    const csv = buildCsv(BOM_EXPORT_COLUMNS, rows)
+    const csv = buildCsv(RECIPE_EXPORT_COLUMNS, rows)
     return new NextResponse(csv, {
       status: 200,
       headers: {
@@ -82,8 +82,8 @@ export const GET = withGateway({
       },
     })
   } catch (err) {
-    logger.error({message:"BOM export failed" ,userId: session.user.id, format , type , status, err});
-    console.error("[/api/masters/bom-master/export]", err)
+    logger.error({message:"Recipe export failed" ,userId: session.user.id, format , type , status, err});
+    console.error("[/api/v1/masters/recipe-master/export]", err)
     return NextResponse.json({ error: "Export failed" }, { status: 500 })
   }
   },

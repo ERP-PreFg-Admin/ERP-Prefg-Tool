@@ -10,6 +10,7 @@
  */
 
 import ExcelJS from "exceljs"
+import { todayIST } from "@/lib/date"
 
 // ── Column descriptor ────────────────────────────────────────────────────────
 
@@ -97,7 +98,7 @@ export function buildExportFilename(
   format: string,
   filters: Record<string, string | null | undefined>
 ): string {
-  const date   = new Date().toISOString().split("T")[0]
+  const date   = todayIST()
   const suffix = Object.entries(filters)
     .filter(([, v]) => v)
     .map(([, v]) =>
@@ -113,7 +114,7 @@ export function buildExportFilename(
  * Generate an RFC 4180-compliant CSV string.
  *
  * Conventions applied:
- *   - Prefixed with a UTF-8 BOM (﻿) so Excel on Windows auto-detects encoding.
+ *   - Prefixed with a UTF-8 Recipe (﻿) so Excel on Windows auto-detects encoding.
  *   - Every cell is wrapped in double-quotes.
  *   - Internal double-quotes are escaped as "" (RFC 4180 §2).
  *   - Lines are separated by CRLF (\r\n) as required by the spec.

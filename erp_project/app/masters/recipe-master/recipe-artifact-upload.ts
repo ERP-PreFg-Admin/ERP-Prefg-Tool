@@ -1,5 +1,5 @@
 /**
- * Uploads staged BOM artifact files to S3 right before a create-full submit —
+ * Uploads staged Recipe artifact files to S3 right before a create-full submit —
  * shared by useBomWizard.handleSubmit (mode: "new-version") and
  * useBomDetailPanel.saveEdit (mode: "update-existing"). Mirrors the
  * pick-now-upload-on-submit pattern AddMfgDialog.tsx already uses for
@@ -7,7 +7,7 @@
  * fixed slots.
  *
  * Returns the {s3_key, file_name} pairs to send as create-full's
- * `artifact_adds` — the actual bom_artifacts rows are only written once the
+ * `artifact_adds` — the actual artifacts_recipe rows are only written once the
  * submission is approved (see lib/approvals/module-handlers.ts).
  */
 export async function uploadPendingArtifacts(
@@ -21,7 +21,7 @@ export async function uploadPendingArtifacts(
     form.append("file", file)
     form.append("folder", folder)
     form.append("field", field)
-    const res = await fetch("/api/upload", { method: "POST", body: form })
+    const res = await fetch("/api/v1/upload", { method: "POST", body: form })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || `Failed to upload "${file.name}"`)
     uploaded.push({ s3_key: data.key, file_name: file.name })

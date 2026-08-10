@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server"
 import logger from "@/lib/logger"
 import { query } from "@/lib/db"
-import { bom as bomSql } from "@/lib/queries/bom"
+import { bom as bomSql } from "@/lib/queries/recipe"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { pmActionSchema } from "@/lib/validation/packing-materials"
 import {
   pmCreate, pmCheckDuplicate, pmCheckVendor,
   pmCreateFull, pmAddRates, pmBulk, pmS3Bulk, pmGetMaterials, pmCheckDuplicatesBulk,
-} from "@/app/api/masters/packing-materials/pm-handler"
+} from "@/app/api/v1/masters/packing-materials/pm-handler"
 
 export const POST = withGateway({
   schema: pmActionSchema,

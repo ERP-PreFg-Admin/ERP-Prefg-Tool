@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-// Route param shared by /api/purchase-orders/[id]/* endpoints.
+// Route param shared by /api/v1/purchase-orders/[id]/* endpoints.
 export const poIdParamSchema = z.object({
   id: z.coerce.number().int().positive("Invalid PO id"),
 })

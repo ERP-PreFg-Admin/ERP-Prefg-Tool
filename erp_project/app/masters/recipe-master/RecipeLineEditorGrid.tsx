@@ -1,32 +1,32 @@
 "use client"
 
 /**
- * Shared RM/PM line-editor grid used by both BomCreationWizard.tsx (manual
- * entry step) and BOMMasterComponent.tsx's edit-mode detail panel — one
+ * Shared RM/PM line-editor grid used by both RecipeCreationWizard.tsx (manual
+ * entry step) and RecipeMasterComponent.tsx's edit-mode detail panel — one
  * implementation of the repeatable-row-list + running-total UI so the two
  * surfaces can't drift apart.
  *
  * RM section shows a live running-percentage-total banner (green/amber) using
  * the same +/-0.1% tolerance as the server (lib/validation/bom.ts), and blocks
  * nothing itself — callers gate their own "Next"/"Save" button on isRmTotalValid.
- * PM section has no percentage concept, per the BOM's RM(%) vs PM split.
+ * PM section has no percentage concept, per the Recipe's RM(%) vs PM split.
  */
 
 import { Plus, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Callout } from "@/components/ui/callout"
-import { isRmTotalValid } from "@/lib/validation/bom"
+import { isRmTotalValid } from "@/lib/validation/recipe"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { cn } from "@/lib/utils"
 
-export type BomLineRow = {
+export type RecipeLineRow = {
   mtrl_type: "rm" | "pm"
   mtrl_id: number | null
   amount: string
   uom: string
 }
 
-export type BomMaterialOption = {
+export type RecipeMaterialOption = {
   id: number
   code: string | null
   name: string
@@ -35,7 +35,7 @@ export type BomMaterialOption = {
 
 /** RM lines default to "%" (they express a formulation percentage), PM lines
  *  default to "pcs" (a per-unit packing quantity) — both editable per row. */
-export function emptyBomLine(mtrlType: "rm" | "pm"): BomLineRow {
+export function emptyBomLine(mtrlType: "rm" | "pm"): RecipeLineRow {
   return {
     mtrl_type: mtrlType,
     mtrl_id: null,
@@ -44,7 +44,7 @@ export function emptyBomLine(mtrlType: "rm" | "pm"): BomLineRow {
   }
 }
 
-export function rmTotal(rows: BomLineRow[]): number {
+export function rmTotal(rows: RecipeLineRow[]): number {
   return rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
 }
 
@@ -57,10 +57,10 @@ function LineRowCard({
   onChange,
   onRemove,
 }: {
-  row: BomLineRow
+  row: RecipeLineRow
   index: number
-  materials: BomMaterialOption[]
-  onChange: (row: BomLineRow) => void
+  materials: RecipeMaterialOption[]
+  onChange: (row: RecipeLineRow) => void
   onRemove: () => void
 }) {
   function selectMaterial(id: number) {
@@ -114,14 +114,14 @@ function LineSection({
   onChange,
 }: {
   mtrlType: "rm" | "pm"
-  rows: BomLineRow[]
-  materials: BomMaterialOption[]
-  onChange: (rows: BomLineRow[]) => void
+  rows: RecipeLineRow[]
+  materials: RecipeMaterialOption[]
+  onChange: (rows: RecipeLineRow[]) => void
 }) {
   const total = mtrlType === "rm" ? rmTotal(rows) : null
   const balanced = total != null && rows.length > 0 && isRmTotalValid(total)
 
-  function updateRow(i: number, next: BomLineRow) {
+  function updateRow(i: number, next: RecipeLineRow) {
     onChange(rows.map((r, idx) => (idx === i ? next : r)))
   }
   function removeRow(i: number) {
@@ -185,7 +185,7 @@ function LineSection({
   )
 }
 
-export function BomLineEditorGrid({
+export function RecipeLineEditorGrid({
   rmRows,
   pmRows,
   onChangeRm,
@@ -193,12 +193,12 @@ export function BomLineEditorGrid({
   rmMaterials,
   pmMaterials,
 }: {
-  rmRows: BomLineRow[]
-  pmRows: BomLineRow[]
-  onChangeRm: (rows: BomLineRow[]) => void
-  onChangePm: (rows: BomLineRow[]) => void
-  rmMaterials: BomMaterialOption[]
-  pmMaterials: BomMaterialOption[]
+  rmRows: RecipeLineRow[]
+  pmRows: RecipeLineRow[]
+  onChangeRm: (rows: RecipeLineRow[]) => void
+  onChangePm: (rows: RecipeLineRow[]) => void
+  rmMaterials: RecipeMaterialOption[]
+  pmMaterials: RecipeMaterialOption[]
 }) {
   return (
     <div className="space-y-6">

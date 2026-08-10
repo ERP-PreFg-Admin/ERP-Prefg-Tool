@@ -2,11 +2,12 @@
 
 import { ChevronDown, ChevronRight, Clock, FileText } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Callout } from "@/components/ui/callout"
 import type { Approval } from "../approvals-types"
 import { MODULE_LABEL, MODULE_COLOR, BULK_MODULES, HISTORY_STATUS_COLOR, getInitials, fmtDate } from "../approvals-types"
 import { EntityInfo } from "./EntityInfo"
 import { CsvFileCard } from "./CsvDiff"
-import { BomLineDiffTable } from "./BomLineDiffTable"
+import { RecipeLineDiffTable } from "./RecipeLineDiffTable"
 import { FieldDiffTable } from "./FieldDiffTable"
 import { ApprovalActions } from "./ApprovalActions"
 import type { MaterialMap } from "./types"
@@ -24,7 +25,7 @@ export default function ApprovalCard({
   onApprove:     () => void
   onReject:      () => void
   onOpenCsvFile: (approvalId: number, s3Key: string, filename: string) => void
-  /** RM/PM id → { code, name }, used to resolve BOM line materials by id. */
+  /** RM/PM id → { code, name }, used to resolve Recipe line materials by id. */
   materialMap?:  MaterialMap
   /** Skips the click-to-reveal-diff step: the field changes render inline
    *  right away since there's already a click needed to open the module
@@ -108,9 +109,9 @@ export default function ApprovalCard({
               <span className="font-medium text-foreground">{approval.approved_by_name ?? "—"}</span>
               {approval.approved_on && <> on {fmtDate(approval.approved_on)}</>}
               {approval.status === "rejected" && approval.remarks && (
-                <p className="mt-1.5 rounded-md border border-red-100 bg-red-50 px-2.5 py-1.5 text-red-700">
+                <Callout variant="destructive" className="mt-1.5 px-2.5 py-1.5">
                   {approval.remarks}
-                </p>
+                </Callout>
               )}
             </div>
           )}
@@ -124,7 +125,7 @@ export default function ApprovalCard({
               onOpen={onOpenCsvFile}
             />
           ) : isBom ? (
-            <BomLineDiffTable items={approval.items} materialMap={materialMap} />
+            <RecipeLineDiffTable items={approval.items} materialMap={materialMap} />
           ) : (
             <FieldDiffTable items={approval.items} />
           )}

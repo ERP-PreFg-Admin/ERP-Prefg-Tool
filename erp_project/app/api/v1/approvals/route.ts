@@ -1,4 +1,4 @@
-// GET /api/approvals
+// GET /api/v1/approvals
 // Returns all pending approvals with field-level diff items.
 // Requires "viewer" access on /approvals; only "editor" can action (see [id]/route.ts).
 
@@ -24,7 +24,7 @@ export const GET = withGateway({
   handler: async ({ ctx }) => {
   const logCtx = {
     ...ctx,
-    route: "/api/approvals",
+    route: "/api/v1/approvals",
     module: "GET_APPROVALS",
   }
 

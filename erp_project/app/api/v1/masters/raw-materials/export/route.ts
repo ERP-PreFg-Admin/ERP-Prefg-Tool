@@ -1,5 +1,5 @@
 /**
- * GET /api/masters/raw-materials/export
+ * GET /api/v1/masters/raw-materials/export
  *
  * Exports raw material records for either the vendor or manufacturer rate view.
  * The `view` param mirrors the toggle on the /masters/raw-materials page so the
@@ -97,7 +97,7 @@ export const GET = withGateway({
     }
 
     const rows = await query<Record<string, unknown>>(dataSql, filterParams)
-    console.log(`[/api/masters/raw-materials/export] served ${rows.length} rows as ${format} (view=${viewLabel})`)
+    console.log(`[/api/v1/masters/raw-materials/export] served ${rows.length} rows as ${format} (view=${viewLabel})`)
     logger.info({ message: "Raw materials export", userId: session.user.id, format, view: viewLabel, rowCount: rows.length }) 
     if (format === "xlsx") {
       const buffer = await buildXlsx(sheetName, columns, rows)
@@ -120,7 +120,7 @@ export const GET = withGateway({
     })
   } catch (err) {
     logger.error({ message: "Raw materials export failed", userId: session.user.id, format, view: viewLabel, err })
-    console.error("[/api/masters/raw-materials/export]", err)
+    console.error("[/api/v1/masters/raw-materials/export]", err)
     return NextResponse.json({ error: "Export failed" }, { status: 500 })
   }
   },

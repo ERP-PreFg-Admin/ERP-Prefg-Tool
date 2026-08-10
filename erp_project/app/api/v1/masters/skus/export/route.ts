@@ -1,5 +1,5 @@
 /**
- * GET /api/masters/skus/export
+ * GET /api/v1/masters/skus/export
  *
  * Streams a CSV or Excel file containing all SKU records that match the
  * current active filters. Pagination is intentionally bypassed — the full
@@ -69,7 +69,7 @@ export const GET = withGateway({
     // ── Build and return file ─────────────────────────────────────────────────
     const filename = buildExportFilename("skus", format, { search: search || null, status: status || null, brand: brand || null })
 
-    console.log(`[/api/masters/skus/export] served ${rows.length} rows as ${format}`)
+    console.log(`[/api/v1/masters/skus/export] served ${rows.length} rows as ${format}`)
 
     if (format === "xlsx") {
       const buffer = await buildXlsx("SKUs", SKU_EXPORT_COLUMNS, rows)
@@ -91,7 +91,7 @@ export const GET = withGateway({
       },
     })
   } catch (err) {
-    console.error("[/api/masters/skus/export]", err)
+    console.error("[/api/v1/masters/skus/export]", err)
     return NextResponse.json({ error: "Export failed" }, { status: 500 })
   }
   },

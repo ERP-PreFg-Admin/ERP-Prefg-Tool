@@ -32,7 +32,7 @@ export const skus = {
     ORDER BY sku_code ASC
   `,
 
-  /** Active SKUs only — used to populate the BOM wizard's SKU picker. */
+  /** Active SKUs only — used to populate the Recipe wizard's SKU picker. */
   selectActive: `
     SELECT ${SKU_COLUMNS}
     FROM master_skus
@@ -215,24 +215,24 @@ export const skus = {
   setStatus: `UPDATE master_skus SET status = ? WHERE id = ?`,
 
   /**
-   * Point a SKU at its currently-active BOM — called whenever a BOM
+   * Point a SKU at its currently-active Recipe — called whenever a Recipe
    * transitions TO 'active' (bomHandler.applyAndArchive on approval,
    * bomBulkHandler.applyAndArchive, and the update-status action), so
    * master_skus.active_bom_id never goes stale. This is what the SKU
    * master list's bom_code column resolves (see skus.selectPaginated's
    * active_bom_id -> app/masters/skus/page.tsx's selectBomCodesByIds join).
-   * Parameters: [bom_id, sku_id]
+   * Parameters: [recipe_id, sku_id]
    */
   setActiveBomId: `UPDATE master_skus SET active_bom_id = ? WHERE id = ?`,
 
   /**
-   * Clear a SKU's active_bom_id, but ONLY if it still points at the BOM
-   * being deactivated — guards against clobbering a newer BOM that already
-   * took over active_bom_id in the same transaction. Used when a BOM's
+   * Clear a SKU's active_bom_id, but ONLY if it still points at the Recipe
+   * being deactivated — guards against clobbering a newer Recipe that already
+   * took over active_bom_id in the same transaction. Used when a Recipe's
    * status is changed away from 'active' directly (the update-status
    * action) — without this, master_skus.active_bom_id would keep pointing
-   * at a no-longer-active BOM.
-   * Parameters: [sku_id, bom_id]
+   * at a no-longer-active Recipe.
+   * Parameters: [sku_id, recipe_id]
    */
   clearActiveBomIdIfMatches: `UPDATE master_skus SET active_bom_id = NULL WHERE id = ? AND active_bom_id = ?`,
 

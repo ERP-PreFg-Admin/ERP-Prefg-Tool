@@ -8,9 +8,9 @@ const CHANGE_TYPE_STYLE: Record<string, string> = {
 }
 const CHANGE_TYPE_LABEL: Record<string, string> = { rm: "RM", pm: "PM" }
 
-/** Renders a BOM's comma-joined "rm"/"pm" change_type value (see
+/** Renders a Recipe's comma-joined "rm"/"pm" change_type value (see
  *  approvals.approval_items' "__change_type__" sentinel item) as small
- *  colored tags instead of plain text — used by BomTable/BomHistoryTable. */
+ *  colored tags instead of plain text — used by RecipeTable/RecipeHistoryTable. */
 export function ChangeTypeBadges({ value }: { value: string | null }) {
   if (!value) return <span className="text-muted-foreground/50">—</span>
   return (

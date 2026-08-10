@@ -1,17 +1,12 @@
 import * as React from "react"
 import { CheckCircle2 } from "lucide-react"
+import { badgeVariants } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
 export interface StepperStep {
   label: string
   tag?: string
   tagVariant?: "info" | "success" | "warning"
-}
-
-const TAG_VARIANT_CLASSES: Record<NonNullable<StepperStep["tagVariant"]>, string> = {
-  info: "bg-blue-100 text-blue-700",
-  success: "bg-teal-100 text-teal-700",
-  warning: "bg-amber-100 text-amber-700",
 }
 
 function Stepper({
@@ -36,7 +31,7 @@ function Stepper({
               <div
                 className={cn(
                   "w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold shrink-0",
-                  done && "bg-teal-600 text-white",
+                  done && "bg-teal-600 text-white dark:bg-teal-500 dark:text-teal-950",
                   active && "bg-foreground text-background",
                   !done && !active && "border border-muted-foreground text-muted-foreground"
                 )}
@@ -49,8 +44,8 @@ function Stepper({
               {step.tag && (
                 <span
                   className={cn(
-                    "text-xs font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap",
-                    step.tagVariant ? TAG_VARIANT_CLASSES[step.tagVariant] : undefined
+                    step.tagVariant && badgeVariants({ variant: step.tagVariant }),
+                    "text-xs font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap"
                   )}
                 >
                   {step.tag}

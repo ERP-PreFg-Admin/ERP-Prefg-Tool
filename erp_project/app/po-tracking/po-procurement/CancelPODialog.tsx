@@ -22,7 +22,7 @@ export default function CancelPODialog({
   async function handleConfirm() {
     setLoading(true)
     try {
-      const res = await fetch(`/api/purchase-orders/${poId}/cancel`, {
+      const res = await fetch(`/api/v1/purchase-orders/${poId}/cancel`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: reason.trim() || undefined }),

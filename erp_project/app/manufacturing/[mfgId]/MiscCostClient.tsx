@@ -5,10 +5,13 @@ import { useRouter } from "next/navigation"
 import { Plus, Pencil } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
+import { TableEmpty } from "@/components/ui/empty-state"
 import { DownloadButton } from "@/components/masters/DownloadButton"
+import { SearchInput } from "@/components/masters/SearchInput"
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import type { MfgLineOption, MiscCostLine, MiscCostType } from "@/types/masters"
 import { fmtDate, fmtMoney } from "../mfg-utils"
@@ -60,24 +63,24 @@ export default function MiscCostClient({
           <CsvImportDialog
             entityLabel="Cost Line"
             title="Bulk Upload Job Work / Shrink Wrap / Shipper / Wastage"
-            endpoint={`/api/manufacturing/misc-costs?mfg_id=${mfgId}`}
+            endpoint={`/api/v1/manufacturing/misc-costs?mfg_id=${mfgId}`}
             templateFilename="misc_cost_bulk_template.csv"
             fields={MISC_COST_BULK_CSV_FIELDS}
             onSuccess={() => router.refresh()}
           />
           <DownloadButton
-            endpoint={`/api/manufacturing/${mfgId}/misc-costs/export`}
+            endpoint={`/api/v1/manufacturing/${mfgId}/misc-costs/export`}
             label="Current Misc. Cost Rates"
           />
         </div>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3">
-        <input
+        <SearchInput
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search SKU, BOM…"
-          className="flex h-9 w-full sm:max-w-xs rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+          onChange={setSearch}
+          placeholder="Search SKU, Recipe…"
+          className="sm:max-w-xs"
         />
         <button
           onClick={() => setDialogTarget("new")}
@@ -93,7 +96,7 @@ export default function MiscCostClient({
               <TableHeader>
                 <TableRow>
                   <TableHead>SKU</TableHead>
-                  <TableHead>BOM Code</TableHead>
+                  <TableHead>Recipe Code</TableHead>
                   <TableHead>SKU Name</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead className="text-right">Cost / %</TableHead>
@@ -105,11 +108,24 @@ export default function MiscCostClient({
               </TableHeader>
               <TableBody>
                 {filteredRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-center text-muted-foreground py-10">
-                      No cost lines yet.
-                    </TableCell>
-                  </TableRow>
+                  <TableEmpty
+                    colSpan={9}
+                    action={
+                      rows.length === 0 ? (
+                        <Button variant="outline" size="sm" onClick={() => setDialogTarget("new")}>
+                          <Plus /> Add Cost / Wastage %
+                        </Button>
+                      ) : (
+                        <Button variant="outline" size="sm" onClick={() => setSearch("")}>
+                          Clear search
+                        </Button>
+                      )
+                    }
+                  >
+                    {rows.length === 0
+                      ? "No Job Work, Shrink Wrap, Shipper or Wastage % recorded yet."
+                      : "No cost lines match this search."}
+                  </TableEmpty>
                 ) : (
                   filteredRows.map((r) => (
                     <TableRow key={r.id}>

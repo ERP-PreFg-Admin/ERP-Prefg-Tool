@@ -86,7 +86,7 @@ export function AddPackingMaterialWizard({
 
   useEffect(() => {
     if (!open) return
-    fetch("/api/masters/packing-materials", {
+    fetch("/api/v1/masters/packing-materials", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "get-materials" }),
@@ -210,7 +210,7 @@ export function AddPackingMaterialWizard({
         manufacturers: mfgPayload,
       }
 
-      const res = await fetch("/api/masters/packing-materials", {
+      const res = await fetch("/api/v1/masters/packing-materials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -237,7 +237,7 @@ export function AddPackingMaterialWizard({
     setExistingRates((prev) => ({ ...prev, [index]: null }))
     if (!vendorId || !moq.trim() || !material) return
     try {
-      const res = await fetch("/api/masters/packing-materials", {
+      const res = await fetch("/api/v1/masters/packing-materials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -473,9 +473,9 @@ export function AddPackingMaterialWizard({
                             </button>
                           </div>
                           {existingRates[i] && (
-                            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                            <Callout variant="warning" className="rounded px-2 py-1">
                               ⚠ Existing rate: ₹{existingRates[i]!.curr_rate} · MOQ {existingRates[i]!.moq} — old values will be archived and updated.
-                            </p>
+                            </Callout>
                           )}
                         </div>
                       ))}

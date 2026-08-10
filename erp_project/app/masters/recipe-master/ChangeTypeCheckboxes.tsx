@@ -2,10 +2,10 @@
 
 /**
  * Shared "Reason for change" + "RM change"/"PM change" checkboxes, required
- * whenever a submission is actually editing an established BOM (see
+ * whenever a submission is actually editing an established Recipe (see
  * lib/validation/bom.ts's bomCreateFullSchema comment) — used by both
- * BomEditDialog (always an edit) and BomWizardSteps' Step4/Step5 (only when
- * the picked SKU already has an existing BOM).
+ * RecipeEditDialog (always an edit) and RecipeWizardSteps' Step4/Step5 (only when
+ * the picked SKU already has an existing Recipe).
  */
 
 const OPTIONS: { key: "rm" | "pm"; label: string }[] = [

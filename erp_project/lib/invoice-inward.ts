@@ -45,6 +45,7 @@ import { sendInwardInvoiceEmail } from "@/lib/mailer"
 import { ApiError } from "@/lib/gateway/errors"
 import logger from "@/lib/logger"
 import type { InvoiceInward } from "@/lib/validation/purchase-orders"
+import { monthIST, todayIST } from "@/lib/date"
 
 export const INWARD_STEPS = ["s3", "po", "uniware", "email"] as const
 export type InwardStep = (typeof INWARD_STEPS)[number]
@@ -76,8 +77,19 @@ const BRAND_CODES: Record<string, string> = { mcaffeine: "MCAFF", hyphen: "HYP" 
 const numOrNull = (v: unknown) =>
   v == null || v === "" || Number.isNaN(Number(v)) ? null : Number(v)
 
-/** Validate SKUs and resolve each one's brand, before any transaction opens. */
-async function resolveBrands(skuCodes: string[]): Promise<Map<string, string>> {
+/**
+ * Validate SKUs and resolve each one's brand, before any transaction opens.
+ *
+ * `requireActive` is false for a line received against an existing PO: that
+ * order was raised while the SKU was still active and the goods are physically
+ * here, so a SKU deactivated since then must not strand real stock. Existence is
+ * still checked for every line — an unmapped code is the one thing the desk can
+ * actually fix.
+ */
+async function resolveBrands(
+  skuCodes: string[],
+  requireActive: boolean
+): Promise<Map<string, string>> {
   const brandBySku = new Map<string, string>()
   for (const sku of skuCodes) {
     if (brandBySku.has(sku)) continue
@@ -87,7 +99,7 @@ async function resolveBrands(skuCodes: string[]): Promise<Map<string, string>> {
     if (!rows[0]) {
       throw new ApiError(400, "sku_not_found", `SKU '${sku}' was not found. Map it to an existing SKU and try again.`)
     }
-    if (rows[0].status !== "active") {
+    if (requireActive && rows[0].status !== "active") {
       throw new ApiError(
         400, "sku_not_active",
         `SKU '${sku}' is currently '${rows[0].status.replace(/_/g, " ")}' and cannot be used for a new PO.`
@@ -108,11 +120,12 @@ async function writeInvoiceAndPos(
   brandBySku: Map<string, string>
 ) {
   const { invoice_no, invoice_date, mfg_id, destination, line_items } = body
-  const now = new Date()
-  const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`
+  // IST, not the host's local getters or a UTC ISO slice: this month stamps the
+  // inward PO number, and the fallback below becomes a PO's expected date.
+  const yyyymm = monthIST().replace("-", "")
   // Goods on an invoice have already shipped, so the expected date is the
   // invoice's own — backdated on purpose.
-  const expectedOn = invoice_date?.trim() || now.toISOString().slice(0, 10)
+  const expectedOn = invoice_date?.trim() || todayIST()
 
   // Header first: uq_supplier_invoice (mfg_id, invoice_no) rejects a
   // re-submission, and it has to fire before any receipt is credited or the
@@ -167,6 +180,8 @@ async function writeInvoiceAndPos(
       const [res] = await conn.execute(purchaseOrdersSql.insertInwardReceived, [
         po_no, Number(mfg_id), skuCode, qty, unitPrice, totalAmount,
         expectedOn, destination, invoice_no, attachmentKey, qty, r.po_no,
+        // Recipe inherited from the order being settled, not re-resolved.
+        r.recipe_id, Number(mfg_id), skuCode,
       ])
       const poId = (res as { insertId: number }).insertId
       await conn.execute(purchaseOrdersSql.insertPoHistory, [
@@ -179,11 +194,16 @@ async function writeInvoiceAndPos(
       continue
     }
 
+    // Unreachable since 2026-08-07: invoiceInwardSchema makes reference_po_id
+    // mandatory, so every line takes the branch above. Kept because it is the
+    // only description of what a reference-free inward line would mean if that
+    // rule is ever relaxed.
     const skuCode = item.sku_code?.trim() ?? ""
     const po_no = await nextPoNo(brandBySku.get(skuCode)!)
     const [res] = await conn.execute(purchaseOrdersSql.insertInward, [
       po_no, Number(mfg_id), skuCode, qty, unitPrice, totalAmount,
       expectedOn, destination, invoice_no, attachmentKey,
+      Number(mfg_id), skuCode,
     ])
     const poId = (res as { insertId: number }).insertId
     await conn.execute(purchaseOrdersSql.insertPoHistory, [
@@ -230,11 +250,17 @@ export async function runInwardInvoice(
 
   // Validated before anything is written: a rejected batch shouldn't leave an
   // S3 object behind or hold a connection while we round-trip the SKU master.
-  const newSkus = line_items.filter((i) => i.reference_po_id == null).map((i) => i.sku_code?.trim() ?? "")
-  if (newSkus.some((s) => !s)) {
-    throw new ApiError(400, "sku_required", "Every line item needs a mapped SKU or a reference PO.")
+  const lineSkus = line_items.map((i) => i.sku_code?.trim() ?? "")
+  if (lineSkus.some((s) => !s)) {
+    throw new ApiError(400, "sku_required", "Every line item needs a mapped SKU.")
   }
-  const brandBySku = await resolveBrands(newSkus)
+  // Existence for every line; the active-status rule only for lines raising a
+  // PO of their own, which is where a brand is actually needed.
+  await resolveBrands(lineSkus, false)
+  const brandBySku = await resolveBrands(
+    line_items.filter((i) => i.reference_po_id == null).map((i) => i.sku_code!.trim()),
+    true
+  )
 
   const mfgRows = await query<{ code: string; name: string }>(manufacturersSql.selectById, [Number(mfg_id)])
   const mfgCode = mfgRows[0]?.code ?? ""
@@ -243,7 +269,7 @@ export async function runInwardInvoice(
   await emit({ step: "s3", status: "start" })
   let attachmentKey = ""
   try {
-    const yyyymm = new Date().toISOString().slice(0, 7)
+    const yyyymm = monthIST()
     const safe = pdf.filename.replace(/\.pdf$/i, "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 60)
     attachmentKey = `invoices/${yyyymm}/${safe}-${crypto.randomUUID().slice(0, 8)}.pdf`
     await uploadFile(pdf.buffer, attachmentKey, "application/pdf")
@@ -294,6 +320,11 @@ export async function runInwardInvoice(
   // but real: if the create succeeds and the commit below then fails, the
   // rollback leaves an orphan PO in Uniware and a retry mints a second one.
   // Reconcile on uniware_po_code if that ever happens.
+  // Deduped, in line order: several invoice lines can settle against the same
+  // PO once a FIFO match splits them, and the field is a reference list, not a
+  // per-line one.
+  const referenceOrders = [...new Set(written.received.map((r) => r.po_no))].join(",")
+
   let uniwarePoCode: string | null = null
   await emit({ step: "uniware", status: "start" })
   if (!uniwareEnabled()) {
@@ -316,7 +347,16 @@ export async function runInwardInvoice(
           unitPrice: l.unitPrice ?? 0,
           maxRetailPrice: l.mrp,
         })),
-        customFields: { invoiceNo: invoice_no, invoiceDate: written.expectedOn },
+        customFields: {
+          invoiceNo: invoice_no,
+          invoiceDate: written.expectedOn,
+          // One field, comma-separated: the POs on our side the goods were
+          // inwarded against, so a single Uniware PO can be traced back to the
+          // several orders it settles. Sent as a custom field rather than a body
+          // key — buildPurchaseOrder only forwards documented keys, and Uniware
+          // rejects the rest.
+          ...(referenceOrders ? { ReferenceOrder: referenceOrders } : {}),
+        },
       })
       uniwarePoCode = res.purchaseOrderCode
       // Persisted inside the transaction, so an invoice can never commit

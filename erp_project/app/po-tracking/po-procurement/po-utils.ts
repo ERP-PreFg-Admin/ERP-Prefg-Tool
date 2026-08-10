@@ -1,3 +1,5 @@
+import { IST } from "@/lib/date"
+
 export const num = (v: string | number | null | undefined) => Number(v ?? 0) || 0
 
 export const fmtInt = (v: string | number | null | undefined) =>
@@ -12,7 +14,7 @@ export const fmtMoney = (v: string | number | null | undefined) => {
 }
 
 export const fmtDate = (d: string | null | undefined) =>
-  d ? new Date(d).toLocaleDateString("en-CA") : "—"
+  d ? new Date(d).toLocaleDateString("en-CA", { timeZone: IST }) : "—"
 
 export const fmtRate = (v: string | number | null | undefined) => {
   const n = num(v)

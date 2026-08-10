@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { Upload, FileIcon, ExternalLink, X, Loader2 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
@@ -72,7 +73,7 @@ export function FileUpload({
     form.append("field",  field)
 
     const xhr = new XMLHttpRequest()
-    xhr.open("POST", "/api/upload")
+    xhr.open("POST", "/api/v1/upload")
 
     xhr.upload.onprogress = (ev) => {
       if (ev.lengthComputable) setProgress(Math.round((ev.loaded / ev.total) * 100))
@@ -105,7 +106,7 @@ export function FileUpload({
   async function handleView() {
     if (!localKey) return
     try {
-      const res  = await fetch(`/api/files/presign?key=${encodeURIComponent(localKey)}`)
+      const res  = await fetch(`/api/v1/files/presign?key=${encodeURIComponent(localKey)}`)
       const data = await res.json()
       if (data.url) window.open(data.url, "_blank", "noopener,noreferrer")
     } catch {
@@ -169,9 +170,9 @@ export function FileUpload({
             {hasPending ? pendingFile!.name : localKey!.split("/").pop()}
           </span>
           {hasPending && (
-            <span className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 shrink-0">
+            <Badge variant="warning" className="rounded px-1.5 py-0.5 shrink-0">
               Pending
-            </span>
+            </Badge>
           )}
           {!hasPending && (
             <Button

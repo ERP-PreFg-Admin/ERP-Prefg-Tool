@@ -25,6 +25,7 @@ import {
   buildFlaggedCsv,
   normalizeHeader,
 } from "./field-config"
+import { monthIST } from "@/lib/date"
 
 export function CsvImportDialog({
   entityLabel,
@@ -51,7 +52,7 @@ export function CsvImportDialog({
   onSuccess?: () => void
   /** When true, POSTs `{ action: "check_duplicates", rows }` to `endpoint` after
    *  parsing and merges the response into each row's remarks. The endpoint
-   *  must support that action (see app/api/masters/manufacturers/route.ts). */
+   *  must support that action (see app/api/v1/masters/manufacturers/route.ts). */
   enableDuplicateCheck?: boolean
   /** When true, .xlsx files are also parsed client-side (via ExcelJS) into the
    *  same preview/remarks/duplicate-check pipeline as CSV, and only the valid
@@ -128,12 +129,12 @@ export function CsvImportDialog({
       // Excel (legacy path): upload to S3 first, then process server-side.
       setLoading(true)
       const module = endpoint.split('/').pop() ?? "imports"
-      const yyyymm = new Date().toISOString().slice(0, 7)
+      const yyyymm = monthIST()
       const form = new FormData()
       form.append("file",   file)
       form.append("folder", `imports/${module}/${yyyymm}`)
       form.append("field",  `${templateFilename.replace(/\.[^.]+$/, "")}_${Date.now()}`)
-      fetch("/api/upload", { method: "POST", body: form })
+      fetch("/api/v1/upload", { method: "POST", body: form })
         .then((r) => r.json())
         .then((data) => {
           if (data.key) { setS3Key(data.key) }

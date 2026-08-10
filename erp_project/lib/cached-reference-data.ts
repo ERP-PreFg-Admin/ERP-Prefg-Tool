@@ -62,8 +62,8 @@ export const getPmDistinctTypes = unstable_cache(
   { revalidate: REVALIDATE_SECONDS, tags: ["ref:pm"] }
 )
 
-// ── BOM master dropdowns ──────────────────────────────────────────────────
-// SKU/RM/PM "active" lists feeding the BOM creation wizard + line-editor
+// ── Recipe master dropdowns ──────────────────────────────────────────────────
+// SKU/RM/PM "active" lists feeding the Recipe creation wizard + line-editor
 // grid's material pickers. Same rarely-changing-lookup shape as the vendor/
 // mfg lists above, so they share those tags' invalidation story.
 
@@ -137,10 +137,10 @@ export const getPoDropdownOptions = unstable_cache(
 )
 
 // ── Manufacturing module: RM Vendor / Agreed Rates ──────────────────────────
-// Agreed rm_mrm_fixed/pm_mrm_fixed rates rarely change (only on an RM_RATE/
+// Agreed cost_master_rm_mfg/cost_master_pm_mfg rates rarely change (only on an RM_RATE/
 // PM_RATE approval) — cache per-manufacturer and revalidate on a long timer,
 // backstopped by an immediate revalidateTag() right after that approval
-// commits (see app/api/approvals/[id]/route.ts), so a rate change shows up
+// commits (see app/api/v1/approvals/[id]/route.ts), so a rate change shows up
 // on next load instead of waiting out the timer.
 const MFG_RATES_REVALIDATE_SECONDS = 900
 

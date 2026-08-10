@@ -24,7 +24,7 @@ import type { PM } from "@/types/masters"
 
 // CLIENT component for /masters/packing-materials. Receives PM rows from the
 // server page as `initialRows` and owns search + a status filter + the Add /
-// CSV-import dialogs, which POST to /api/masters/packing-materials.
+// CSV-import dialogs, which POST to /api/v1/masters/packing-materials.
 
 const PM_FIELDS: MasterField[] = [
   {
@@ -97,14 +97,14 @@ export default function PackingMaterialsClient({
           <CsvImportDialog
             entityLabel="Packing Material"
             entityLabelPlural="Packing Materials"
-            endpoint="/api/masters/packing-materials"
+            endpoint="/api/v1/masters/packing-materials"
             templateFilename="packing_material_template.csv"
             fields={PM_FIELDS}
             onSuccess={refresh}
           />
           <AddRecordDialog
             entityLabel="Packing Material"
-            endpoint="/api/masters/packing-materials"
+            endpoint="/api/v1/masters/packing-materials"
             fields={PM_FIELDS}
             onSuccess={refresh}
           />

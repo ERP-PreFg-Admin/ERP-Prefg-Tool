@@ -186,6 +186,24 @@ export const manufacturers = {
     WHERE mfg.code IN (?)
   `,
 
+
+  /**
+   * Seller GSTIN → manufacturer, for picking an extraction strategy from a
+   * PDF before the Nanonets call (lib/invoice-detect.ts).
+   *
+   * Batched because an invoice carries several GSTINs — the real REVE sample
+   * has three (seller, buyer, and a consignee). Only the seller is a
+   * manufacturer, so matching against this table resolves it by elimination.
+   *
+   * Parameters: [gst_numbers[]] — needs query(), not execute(), for IN (?).
+   */
+  selectByGstins: `
+    SELECT mfg.id, mfg.code, mfg.name, d.gst_number
+    FROM details_mfg d
+    JOIN master_mfgs mfg ON mfg.id = d.mfg_id
+    WHERE d.gst_number IN (?)
+  `,
+
   // ── Duplicate checks (banking/tax fields must be unique across manufacturers) ─
   // `excludeMfgId` is 0 on create (no self to exclude) or the current mfg_id on
   // update, so the manufacturer being edited never flags itself as a duplicate.

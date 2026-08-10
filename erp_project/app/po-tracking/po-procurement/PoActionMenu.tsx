@@ -15,7 +15,7 @@ export type MenuAction = {
 
 const VARIANT_CLS: Record<string, string> = {
   default:     "text-foreground hover:bg-accent",
-  warning:     "text-amber-700 hover:bg-amber-50",
+  warning:     "text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40",
   destructive: "text-destructive hover:bg-destructive/10",
 }
 

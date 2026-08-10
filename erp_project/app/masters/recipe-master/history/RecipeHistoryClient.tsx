@@ -1,8 +1,8 @@
 "use client"
 
 /**
- * CLIENT component for /masters/bom-master/history — read-only counterpart
- * to BOMMasterComponent.tsx. Same split-panel layout (BomTable + detail
+ * CLIENT component for /masters/recipe-master/history — read-only counterpart
+ * to RecipeMasterComponent.tsx. Same split-panel layout (RecipeTable + detail
  * panel) with `canEdit` hard-wired to false everywhere, and no creation
  * wizard / edit dialog at all, since archived revisions can't be edited.
  */
@@ -13,19 +13,19 @@ import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import { MasterToolbar, MasterToolbarActions } from "@/components/masters/MasterToolbar"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { BomHistoryTable } from "./BomHistoryTable"
-import { BomDetailPanel } from "../BomDetailPanel"
-import { useBomHistoryPanel } from "./useBomHistoryPanel"
-import type { BomHistoryListItem } from "@/types/masters"
+import { RecipeHistoryTable } from "./RecipeHistoryTable"
+import { RecipeDetailPanel } from "../RecipeDetailPanel"
+import { useBomHistoryPanel } from "./useRecipeHistoryPanel"
+import type { RecipeHistoryListItem } from "@/types/masters"
 
-export default function BomHistoryClient({
+export default function RecipeHistoryClient({
   rows,
   total,
   page,
   pageSize,
   currentSearch,
 }: {
-  rows: BomHistoryListItem[]
+  rows: RecipeHistoryListItem[]
   total: number
   page: number
   pageSize: number
@@ -54,14 +54,14 @@ export default function BomHistoryClient({
       <MasterToolbar>
         <UrlSearchInput
           initialValue={currentSearch}
-          placeholder="Search by BOM code or SKU code…"
+          placeholder="Search by Recipe code or SKU code…"
         />
         <MasterToolbarActions>
           <Button
             variant="outline"
             size="sm"
             className="gap-1.5"
-            onClick={() => router.push("/masters/bom-master")}
+            onClick={() => router.push("/masters/recipe-master")}
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             Back to Recipe Master
@@ -78,7 +78,7 @@ export default function BomHistoryClient({
             panel.selectedBomId != null ? "w-[58%] shrink-0" : "w-full"
           )}
         >
-          <BomHistoryTable
+          <RecipeHistoryTable
             rows={rows}
             total={total}
             page={page}
@@ -98,7 +98,7 @@ export default function BomHistoryClient({
           )}
         >
           {panel.selectedBomId != null && (
-            <BomDetailPanel
+            <RecipeDetailPanel
               detail={panel.detail}
               detailLoading={panel.detailLoading}
               detailError={panel.detailError}

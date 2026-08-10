@@ -46,7 +46,7 @@ export function EditPmMfgRateDialog({
 
       if (row.status === "rejected" && row.rate_id) {
         setLoadingInfo(true)
-        fetch(`/api/approvals/entity?module=PM_RATE&entity_id=${row.rate_id}`)
+        fetch(`/api/v1/approvals/entity?module=PM_RATE&entity_id=${row.rate_id}`)
           .then((r) => r.json())
           .then((data) => {
             setRejection(data.rejection ?? null)
@@ -79,7 +79,7 @@ export function EditPmMfgRateDialog({
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch("/api/masters/packing-materials", {
+      const res = await fetch("/api/v1/masters/packing-materials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -117,7 +117,7 @@ export function EditPmMfgRateDialog({
           <div className="text-xs text-muted-foreground">Manufacturer: {row.mfg_code}</div>
 
           <CostImpactAlert
-            endpoint="/api/masters/packing-materials"
+            endpoint="/api/v1/masters/packing-materials"
             materialIdField="pm_id"
             materialId={row.pm_id}
             scope="mfg"

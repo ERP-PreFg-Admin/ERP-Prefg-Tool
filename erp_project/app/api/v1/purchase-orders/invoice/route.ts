@@ -1,5 +1,5 @@
-// GET  /api/purchase-orders/invoice           — invoice history list
-// POST /api/purchase-orders/invoice           — commit a reviewed invoice
+// GET  /api/v1/purchase-orders/invoice           — invoice history list
+// POST /api/v1/purchase-orders/invoice           — commit a reviewed invoice
 //
 // The POST takes multipart/form-data (the PDF plus a JSON `payload` field) and
 // answers with a stream of newline-delimited step events rather than a single
@@ -25,7 +25,8 @@ export const maxDuration = 300
 
 import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { supplierInvoicesSql } from "@/lib/queries/supplier-invoices"
+import { supplierInvoicesSql, buildInvoiceParams } from "@/lib/queries/supplier-invoices"
+import { getUserScope } from "@/lib/scope"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { invoiceInwardSchema } from "@/lib/validation/purchase-orders"
@@ -39,16 +40,22 @@ const MAX_BYTES = 10 * 1024 * 1024
 
 export const GET = withGateway({
   access: { pageSlug: "/po-tracking", level: "viewer" },
-  handler: async ({ req }) => {
+  handler: async ({ req, session }) => {
     const sp = req.nextUrl.searchParams
-    // Clamped rather than rejected: this is a dialog's own pager, not public
-    // API surface worth 400-ing over.
+    // Clamped rather than rejected: this is a pager, not public API surface
+    // worth 400-ing over.
     const limit  = Math.min(Math.max(Number(sp.get("limit")) || 25, 1), 100)
     const offset = Math.max(Number(sp.get("offset")) || 0, 0)
+    const search = sp.get("search")?.trim() || null
+
+    // Scoped like the PO list: an invoice names a manufacturer and a
+    // destination warehouse, so a user restricted to either sees only theirs.
+    const scope  = await getUserScope(Number(session.user.id))
+    const params = buildInvoiceParams(search, scope)
 
     const [invoices, countRows] = await Promise.all([
-      query(supplierInvoicesSql.listInvoices, [limit, offset]),
-      query<{ total: number }>(supplierInvoicesSql.countInvoices, []),
+      query(supplierInvoicesSql.listInvoices, [...params, limit, offset]),
+      query<{ total: number }>(supplierInvoicesSql.countInvoices, params),
     ])
     return NextResponse.json({
       invoices, total: Number(countRows[0]?.total ?? 0), limit, offset,

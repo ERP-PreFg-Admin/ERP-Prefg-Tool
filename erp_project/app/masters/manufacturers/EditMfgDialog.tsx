@@ -62,7 +62,7 @@ export function EditMfgDialog({
 
       if (mfg.status === "rejected") {
         setLoadingInfo(true)
-        fetch(`/api/approvals/entity?module=MFG&entity_id=${mfg.mfg_id}`)
+        fetch(`/api/v1/approvals/entity?module=MFG&entity_id=${mfg.mfg_id}`)
           .then((r) => r.json())
           .then((data) => {
             setRejection(data.rejection ?? null)
@@ -91,7 +91,7 @@ export function EditMfgDialog({
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch("/api/masters/manufacturers", {
+      const res = await fetch("/api/v1/masters/manufacturers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "update", mfg_id: mfg!.mfg_id, ...form }),

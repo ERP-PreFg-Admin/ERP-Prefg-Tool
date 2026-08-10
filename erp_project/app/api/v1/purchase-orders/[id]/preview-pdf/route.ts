@@ -1,4 +1,4 @@
-// GET /api/purchase-orders/[id]/preview-pdf
+// GET /api/v1/purchase-orders/[id]/preview-pdf
 // Generates and streams the PO PDF inline so the browser can display it.
 
 export const runtime = "nodejs"

@@ -14,8 +14,13 @@
 -- and this is the highest-volume table in the app (session_history.session_id
 -- already sets the no-FK precedent).
 --
--- created_on is IST — written as CONVERT_TZ(NOW(), '+00:00', '+05:30') because
+-- created_on WAS IST — written as CONVERT_TZ(NOW(), '+00:00', '+05:30') because
 -- the DB session runs in UTC, matching history_masters_edits.
+--   SUPERSEDED: it is a plain UTC NOW() now, and the rows written before that
+--   change are re-stamped by prisma/backfill_ist_timestamps_to_utc.sql. Storing
+--   IST wall-clock in a column mysql2 reads back as UTC meant the UI converted
+--   to IST twice and showed every row 5h30m in the future. Store UTC, convert
+--   once at display time — see lib/date.ts.
 --
 -- Re-running is a harmless no-op. Run on BOTH schemas (test and prod).
 -- Keep prisma/schema.prisma in sync.

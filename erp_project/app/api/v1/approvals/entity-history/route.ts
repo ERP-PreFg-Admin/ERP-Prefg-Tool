@@ -1,8 +1,8 @@
-// GET /api/approvals/entity-history?module=X&entity_id=Y
+// GET /api/v1/approvals/entity-history?module=X&entity_id=Y
 //
 // Full approval history (pending/approved/rejected — every edit ever raised)
 // for ONE entity, with field-level diff items resolved the same way
-// /api/approvals and /approvals/history do. Backs the shared per-row
+// /api/v1/approvals and /approvals/history do. Backs the shared per-row
 // "History" dialog (components/masters/EntityHistoryDialog.tsx) used across
 // masters — one endpoint instead of a bespoke history table/dialog per module.
 
@@ -10,7 +10,7 @@ import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { approvalsSql, entityLabelSql } from "@/lib/queries/approvals"
 import { historySql } from "@/lib/queries/history"
-import { bom as bomSql } from "@/lib/queries/bom"
+import { bom as recipeSql } from "@/lib/queries/recipe"
 import { getActiveRmMaterialOptions, getActivePmMaterialOptions } from "@/lib/cached-reference-data"
 import { buildMaterialMap } from "@/app/approvals/material-map"
 import { withGateway } from "@/lib/gateway/with-gateway"
@@ -31,21 +31,21 @@ export const GET = withGateway({
       throw new ApiError(400, "invalid_entity_id", "Missing or invalid entity_id.")
     }
 
-    const logCtx = { ...ctx, route: "/api/approvals/entity-history", module: "GET_ENTITY_HISTORY" }
+    const logCtx = { ...ctx, route: "/api/v1/approvals/entity-history", module: "GET_ENTITY_HISTORY" }
 
     try {
       let rows: any[]
       if (module === "BOM") {
         // RM/PM version independently, so a SKU can accumulate many
-        // master_bom rows (one per version) over time. Resolve the clicked
-        // BOM's sku_id, then pull every version's approval for that SKU so
+        // master_recipe rows (one per version) over time. Resolve the clicked
+        // Recipe's sku_id, then pull every version's approval for that SKU so
         // the dialog shows one linked recipe-edit trail, not just the single
         // version that happened to be clicked.
-        const headerRows = await query<{ sku_id: number | null }>(bomSql.selectBomHeaderRawById, [entityId])
+        const headerRows = await query<{ sku_id: number | null }>(recipeSql.selectBomHeaderRawById, [entityId])
         const skuId = headerRows[0]?.sku_id ?? null
         if (skuId != null) {
-          const bomRows = await query<{ bom_id: number }>(bomSql.selectBomsBySkuId, [skuId])
-          const bomIds = bomRows.map((r) => r.bom_id)
+          const bomRows = await query<{ recipe_id: number }>(recipeSql.selectBomsBySkuId, [skuId])
+          const bomIds = bomRows.map((r) => r.recipe_id)
           rows = bomIds.length > 0 ? await query<any>(approvalsSql.listHistoryForBomIds, [bomIds]) : []
         } else {
           rows = await query<any>(approvalsSql.listHistoryForEntity, [module, entityId])
@@ -54,8 +54,8 @@ export const GET = withGateway({
         rows = await query<any>(approvalsSql.listHistoryForEntity, [module, entityId])
       }
 
-      // BOM's approval_items reference RM/PM by bare mtrl_id (see
-      // BomLineDiffTable.tsx) — resolve a materialMap the same way the
+      // Recipe's approval_items reference RM/PM by bare mtrl_id (see
+      // RecipeLineDiffTable.tsx) — resolve a materialMap the same way the
       // pending-approvals and /approvals/history pages do, so this dialog
       // shows material names/codes instead of falling back to "#123".
       const materialMap = module === "BOM"
@@ -65,7 +65,7 @@ export const GET = withGateway({
       const approvals = await Promise.all(
         rows.map(async (a) => {
           // Use each row's OWN entity_id for label/remarks resolution, not
-          // the originally-clicked entityId — for BOM these can now differ
+          // the originally-clicked entityId — for Recipe these can now differ
           // (a linked trail spans multiple bom_ids); for every other module
           // they're always the same value, so this is a no-op there.
           const rowEntityId = a.entity_id

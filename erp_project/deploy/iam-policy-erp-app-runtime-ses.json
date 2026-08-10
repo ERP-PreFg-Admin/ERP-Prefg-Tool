@@ -1,0 +1,69 @@
+{
+  "_comment": [
+    "PERMANENT runtime statement for IAM user mcaffeine-erp-prefg-tool in account",
+    "157320387454 - the identity behind ACCESS_KEY_ID_AWS / SECRET_ACCESS_KEY_AWS",
+    "in SSM /erp-app/*.",
+    "",
+    "That user carries several separate policies: the deploy one in",
+    "deploy/iam-policy-erp-app-deploy.json (ECR, SSM, EC2, CloudWatch), an S3 one",
+    "not currently in this repo, and this. Attaching this as its own policy keeps",
+    "it independently reviewable and detachable.",
+    "",
+    "This is the entire runtime cost of the SES migration: one statement, no new",
+    "secret. That is why SES was chosen over Resend/Postmark.",
+    "",
+    "SECURITY NOTE - the same user's keys serve both the running app and the",
+    "deploy tooling, so those keys already grant ssm:SendCommand with",
+    "AWS-RunShellScript on the two app instances plus read/write on all",
+    "/erp-app/* secrets. That concentration predates this migration and is out of",
+    "its scope, but it is the reason the ses:FromAddress condition below must",
+    "stay: the blast radius of these credentials is already wide."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SesSendAsErpPrefgOnly",
+      "Effect": "Allow",
+      "Action": ["ses:SendEmail"],
+      "Resource": [
+        "arn:aws:ses:ap-south-1:157320387454:identity/mcaffeine.com",
+        "arn:aws:ses:ap-south-1:157320387454:identity/erp.prefg@mcaffeine.com",
+        "arn:aws:ses:ap-south-1:157320387454:configuration-set/erp-app"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "ses:FromAddress": "erp.prefg@mcaffeine.com"
+        }
+      },
+      "_comment_condition": [
+        "DO NOT REMOVE THE CONDITION. The identity is the ROOT domain",
+        "mcaffeine.com, so without it this credential can send as ANY address at",
+        "mcaffeine.com - ceo@, accounts@, anyone. The condition is the only thing",
+        "between a leaked app key and company-wide impersonation. With a subdomain",
+        "identity it would be good practice; with a root-domain identity it is the",
+        "primary control.",
+        "",
+        "BOTH identity ARNs are listed on purpose. Probed 2026-08-05: SES",
+        "authorised SendEmail against the ADDRESS-level ARN",
+        "  identity/erp.prefg@mcaffeine.com",
+        "not the domain-level one. It may switch to the domain ARN once",
+        "mcaffeine.com is verified as a domain identity - the behaviour was not",
+        "determinable before that existed. Listing both covers either case and",
+        "widens nothing, because ses:FromAddress below is what actually restricts",
+        "the sender. Do not 'tidy up' by removing one.",
+        "",
+        "The configuration set ARN is also required, because lib/mailer.ts passes",
+        "ses.ConfigurationSetName on every send. Omit it and every send fails with",
+        "AccessDenied.",
+        "",
+        "ses:SendEmail is the SESv2 action and covers raw MIME (Content.Raw.Data),",
+        "which is what the nodemailer SES transport produces. ses:SendRawEmail is",
+        "the SESv1 action and is NOT needed.",
+        "",
+        "If a second sender is ever added (a different address or another app),",
+        "give it its own statement with its own FromAddress rather than widening",
+        "this one to a list."
+      ]
+    }
+  ]
+}

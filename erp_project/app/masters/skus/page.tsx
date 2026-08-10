@@ -15,7 +15,7 @@ import { parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
 import { query } from "@/lib/db"
 import { skus as skuSql } from "@/lib/queries/skus"
-import { bom as bomSql } from "@/lib/queries/bom"
+import { bom as recipeSql } from "@/lib/queries/recipe"
 import {
   getSkuDistinctBrands,
   getSkuDistinctSkuTypes,
@@ -101,7 +101,7 @@ export default async function SkusPage({
   // ── Resolve active_bom_id -> bom_code for the SKUs on this page ────────────
   const bomIds = [...new Set(rows.map((r) => r.active_bom_id).filter((id): id is number => id != null))]
   if (bomIds.length > 0) {
-    const bomRows = await query<{ id: number; bom_code: string }>(bomSql.selectBomCodesByIds, [bomIds])
+    const bomRows = await query<{ id: number; bom_code: string }>(recipeSql.selectBomCodesByIds, [bomIds])
     const bomCodeById = new Map(bomRows.map((b) => [b.id, b.bom_code]))
     rows = rows.map((r) => ({ ...r, bom_code: r.active_bom_id != null ? bomCodeById.get(r.active_bom_id) ?? null : null }))
   }

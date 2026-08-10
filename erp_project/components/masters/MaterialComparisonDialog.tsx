@@ -17,6 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
+import { IST } from "@/lib/date"
 
 /** Same "—" for null/blank as every rate-comparison dialog needs. */
 export function fmt(v: string | number | null | undefined) {
@@ -25,7 +26,7 @@ export function fmt(v: string | number | null | undefined) {
 
 export function fmtDate(v: string | null | undefined) {
   if (!v) return "—"
-  return new Date(v).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+  return new Date(v).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: IST })
 }
 
 function InfoField({ label, value }: { label: string; value: string }) {
@@ -56,7 +57,7 @@ export function SummaryStatCard({
   return (
     <div className={cn(
       "rounded-lg border p-4",
-      highlight ? "border-emerald-200 bg-emerald-50" : "border-border bg-muted/30",
+      highlight ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30" : "border-border bg-muted/30",
       className
     )}>
       <p className={cn("text-xs font-medium mb-1", highlight ? "text-emerald-700" : "text-muted-foreground")}>

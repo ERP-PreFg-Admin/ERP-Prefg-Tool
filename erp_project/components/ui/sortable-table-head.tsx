@@ -6,8 +6,16 @@ import { cn } from "@/lib/utils"
 export type SortDir = "asc" | "desc"
 
 /** Shared muted-background look for every header cell in a sortable table —
- *  both the clickable columns and the trailing static ones (e.g. "Action"). */
-const HEAD_CLASS = "bg-muted/50 font-medium text-muted-foreground"
+ *  both the clickable columns and the trailing static ones (e.g. "Action").
+ *
+ *  `overflow-hidden` is load-bearing, not cosmetic. Every table using these
+ *  heads sets `table-layout: fixed` with per-column widths (RmRateTable,
+ *  PmRateTable, MaterialMasterClient), so a label wider than its declared
+ *  width overflows instead of widening the column — and `th` does not clip by
+ *  default, so a long header used to paint straight over the next one
+ *  ("INCI Name" across "Make", "Manufacturer" across "Status"). Body cells
+ *  already clip; this is the header's half of the same guard. */
+const HEAD_CLASS = "bg-muted/50 font-medium text-muted-foreground overflow-hidden"
 
 /** Whole cell is a button so clicking anywhere in the header sorts it; a faint
  *  chevron hints inactive columns are sortable, filled arrows show direction. */
@@ -31,15 +39,21 @@ function SortableTableHead({
   const active = activeKey === sortKey
   return (
     <TableHead style={width ? { width } : undefined} className={cn(HEAD_CLASS, className)}>
+      {/* flex + min-w-0 so the label is what gives way when the column is too
+          narrow; the sort chevron never collapses, or the column stops looking
+          sortable at exactly the widths where it's hardest to read. */}
       <button
         onClick={() => onSort(sortKey)}
-        className="inline-flex items-center gap-1 font-medium hover:text-foreground transition-colors"
+        title={typeof children === "string" ? children : undefined}
+        className="flex w-full min-w-0 items-center gap-1 font-medium hover:text-foreground transition-colors"
       >
-        {children}
+        <span className="truncate">{children}</span>
         {active ? (
-          sortDir === "asc" ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />
+          sortDir === "asc"
+            ? <ArrowUp className="h-3.5 w-3.5 shrink-0" />
+            : <ArrowDown className="h-3.5 w-3.5 shrink-0" />
         ) : (
-          <ChevronsUpDown className="h-3.5 w-3.5 opacity-40" />
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-40" />
         )}
       </button>
     </TableHead>

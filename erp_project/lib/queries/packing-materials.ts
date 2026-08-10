@@ -1,9 +1,10 @@
 /**
  * Packing Materials (PM) Queries
- * Centralized queries for the pm table and related rate tables (pm_vrm_dynamic, pm_mrm_fixed)
+ * Centralized queries for the pm table and related rate tables (cost_master_pm_ven, cost_master_pm_mfg)
  */
 
 import { scopeParams, type UserScope } from "@/lib/scope"
+import { SQL_TODAY_IST } from "@/lib/date"
 
 export const packingMaterials = {
   /** Get all packing materials (base data only, no rate joins) */
@@ -12,7 +13,7 @@ export const packingMaterials = {
     FROM master_pm ORDER BY name
   `,
 
-  /** Active packing materials only — used to populate the BOM wizard's PM picker. */
+  /** Active packing materials only — used to populate the Recipe wizard's PM picker. */
   selectActive: `
     SELECT id, pm_code, name, uom, status
     FROM master_pm
@@ -38,7 +39,7 @@ export const packingMaterials = {
       pmv.curr_rate, pmv.moq,
       pmv.uom, pmv.status,
       pmv.effective_from, pmv.effective_to
-    FROM pm_vrm_dynamic AS pmv
+    FROM cost_master_pm_ven AS pmv
     INNER JOIN master_pm AS p ON pmv.pm_id = p.id
   `,
   /**
@@ -56,24 +57,24 @@ export const packingMaterials = {
       maxv.code AS max_vendor_code, maxv.name AS max_vendor_name
     FROM (
       SELECT pm_id, MIN(curr_rate) AS min_rate, MAX(curr_rate) AS max_rate
-      FROM pm_vrm_dynamic
+      FROM cost_master_pm_ven
       WHERE status = 'active'
-        AND effective_from <= CURDATE()
-        AND (effective_to IS NULL OR effective_to >= CURDATE())
+        AND effective_from <= ${SQL_TODAY_IST}
+        AND (effective_to IS NULL OR effective_to >= ${SQL_TODAY_IST})
         AND (? IS NULL OR vendor_id IN (?))
       GROUP BY pm_id
     ) agg
     LEFT JOIN master_vendors minv ON minv.id = (
-      SELECT vendor_id FROM pm_vrm_dynamic
+      SELECT vendor_id FROM cost_master_pm_ven
       WHERE pm_id = agg.pm_id AND curr_rate = agg.min_rate AND status = 'active'
-        AND effective_from <= CURDATE() AND (effective_to IS NULL OR effective_to >= CURDATE())
+        AND effective_from <= ${SQL_TODAY_IST} AND (effective_to IS NULL OR effective_to >= ${SQL_TODAY_IST})
         AND (? IS NULL OR vendor_id IN (?))
       ORDER BY id LIMIT 1
     )
     LEFT JOIN master_vendors maxv ON maxv.id = (
-      SELECT vendor_id FROM pm_vrm_dynamic
+      SELECT vendor_id FROM cost_master_pm_ven
       WHERE pm_id = agg.pm_id AND curr_rate = agg.max_rate AND status = 'active'
-        AND effective_from <= CURDATE() AND (effective_to IS NULL OR effective_to >= CURDATE())
+        AND effective_from <= ${SQL_TODAY_IST} AND (effective_to IS NULL OR effective_to >= ${SQL_TODAY_IST})
         AND (? IS NULL OR vendor_id IN (?))
       ORDER BY id LIMIT 1
     )
@@ -86,7 +87,7 @@ export const packingMaterials = {
       p.hsn_code, p.uom, pmm.pm_id, pmm.id AS rate_id,
       pmm.mfg_id, pmm.mfg_code, pmm.curr_rate,
       pmm.uom, pmm.status, pmm.effective_from
-    FROM pm_mrm_fixed AS pmm
+    FROM cost_master_pm_mfg AS pmm
     INNER JOIN master_pm AS p ON pmm.pm_id = p.id
   `,
 
@@ -160,7 +161,7 @@ export const packingMaterials = {
       pmv.curr_rate, pmv.moq,
       pmv.uom, pmv.status,
       pmv.effective_from, pmv.effective_to
-    FROM pm_vrm_dynamic AS pmv
+    FROM cost_master_pm_ven AS pmv
     INNER JOIN master_pm AS p ON pmv.pm_id = p.id
     WHERE (? IS NULL OR p.pm_code LIKE ? OR p.name LIKE ?)
       AND (? IS NULL OR pmv.status = ?)
@@ -182,7 +183,7 @@ export const packingMaterials = {
       pmv.curr_rate, pmv.moq,
       pmv.uom, pmv.status,
       pmv.effective_from, pmv.effective_to
-    FROM pm_vrm_dynamic AS pmv
+    FROM cost_master_pm_ven AS pmv
     INNER JOIN master_pm AS p ON pmv.pm_id = p.id
     WHERE (? IS NULL OR p.pm_code LIKE ? OR p.name LIKE ?)
       AND (? IS NULL OR pmv.status = ?)
@@ -197,7 +198,7 @@ export const packingMaterials = {
 
   countVendor: `
     SELECT COUNT(*) AS total
-    FROM pm_vrm_dynamic AS pmv
+    FROM cost_master_pm_ven AS pmv
     INNER JOIN master_pm AS p ON pmv.pm_id = p.id
     WHERE (? IS NULL OR p.pm_code LIKE ? OR p.name LIKE ?)
       AND (? IS NULL OR pmv.status = ?)
@@ -260,7 +261,7 @@ export const packingMaterials = {
       p.hsn_code, p.uom, pmm.pm_id, pmm.id AS rate_id,
       pmm.mfg_id, pmm.mfg_code, pmm.curr_rate,
       pmm.uom, pmm.status, pmm.effective_from
-    FROM pm_mrm_fixed AS pmm
+    FROM cost_master_pm_mfg AS pmm
     INNER JOIN master_pm AS p ON pmm.pm_id = p.id
     WHERE (? IS NULL OR p.pm_code LIKE ? OR p.name LIKE ?)
       AND (? IS NULL OR pmm.status = ?)
@@ -280,7 +281,7 @@ export const packingMaterials = {
       p.hsn_code, p.uom, pmm.pm_id, pmm.id AS rate_id,
       pmm.mfg_id, pmm.mfg_code, pmm.curr_rate,
       pmm.uom, pmm.status, pmm.effective_from
-    FROM pm_mrm_fixed AS pmm
+    FROM cost_master_pm_mfg AS pmm
     INNER JOIN master_pm AS p ON pmm.pm_id = p.id
     WHERE (? IS NULL OR p.pm_code LIKE ? OR p.name LIKE ?)
       AND (? IS NULL OR pmm.status = ?)
@@ -295,7 +296,7 @@ export const packingMaterials = {
 
   countMfg: `
     SELECT COUNT(*) AS total
-    FROM pm_mrm_fixed AS pmm
+    FROM cost_master_pm_mfg AS pmm
     INNER JOIN master_pm AS p ON pmm.pm_id = p.id
     WHERE (? IS NULL OR p.pm_code LIKE ? OR p.name LIKE ?)
       AND (? IS NULL OR pmm.status = ?)
@@ -344,13 +345,13 @@ export const packingMaterials = {
 
   /** Parameters: [pm_id, vendor_id, vendor_code, curr_rate, moq, uom, status, effective_from, effective_to] */
   insertVendorRate: `
-    INSERT INTO pm_vrm_dynamic (pm_id, vendor_id, vendor_code, curr_rate, moq, uom, status, effective_from, effective_to)
+    INSERT INTO cost_master_pm_ven (pm_id, vendor_id, vendor_code, curr_rate, moq, uom, status, effective_from, effective_to)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   /** Parameters: [pm_id, mfg_id, mfg_code, curr_rate, uom, status, effective_from] */
   insertMfgRate: `
-    INSERT INTO pm_mrm_fixed (pm_id, mfg_id, mfg_code, curr_rate, uom, status, effective_from)
+    INSERT INTO cost_master_pm_mfg (pm_id, mfg_id, mfg_code, curr_rate, uom, status, effective_from)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `,
 
@@ -370,72 +371,72 @@ export const packingMaterials = {
    */
   checkVendorRate: `
     SELECT id, vendor_id, curr_rate, moq, uom, status, effective_from, effective_to
-    FROM pm_vrm_dynamic WHERE pm_id = ? AND vendor_id = ? AND moq = ? LIMIT 1
+    FROM cost_master_pm_ven WHERE pm_id = ? AND vendor_id = ? AND moq = ? LIMIT 1
   `,
 
   /** Archive an old pm_vrm row to vrm_history. Parameters: [pm_id, vendor_id, curr_rate, moq, uom, effective_from, effective_to, status] */
   archiveVendorRate: `
-    INSERT INTO history_vrm (mtrl_type, mtrl_id, vendor_id, rate, moq, uom, effective_from, effective_to, status)
+    INSERT INTO history_cost_ven (mtrl_type, mtrl_id, vendor_id, rate, moq, uom, effective_from, effective_to, status)
     VALUES ('pm', ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   /** Update an existing pm_vrm row. Parameters: [curr_rate, moq, uom, status, effective_from, id] */
   updateVendorRate: `
-    UPDATE pm_vrm_dynamic SET curr_rate = ?, moq = ?, uom = ?, status = ?, effective_from = ?, effective_to = NULL, updated_on = NOW()
+    UPDATE cost_master_pm_ven SET curr_rate = ?, moq = ?, uom = ?, status = ?, effective_from = ?, effective_to = NULL, updated_on = NOW()
     WHERE id = ?
   `,
 
   /** Check if a manufacturer rate exists for this pm + mfg. Parameters: [pm_id, mfg_id] */
   checkMfgRate: `
-    SELECT id, mfg_id, curr_rate, uom, status, effective_from FROM pm_mrm_fixed WHERE pm_id = ? AND mfg_id = ? LIMIT 1
+    SELECT id, mfg_id, curr_rate, uom, status, effective_from FROM cost_master_pm_mfg WHERE pm_id = ? AND mfg_id = ? LIMIT 1
   `,
 
   /** Update an existing pm_mrm approval row in place. Parameters: [curr_rate, uom, effective_from, id] */
   updateMfgRate: `
-    UPDATE pm_mrm_fixed SET curr_rate = ?, uom = ?, effective_from = ?, updated_on = NOW() WHERE id = ?
+    UPDATE cost_master_pm_mfg SET curr_rate = ?, uom = ?, effective_from = ?, updated_on = NOW() WHERE id = ?
   `,
 
   /** Insert a minimal pm_mrm approval row (curr_rate = 0, rates filled later). Parameters: [pm_id, mfg_id, mfg_code, effective_from] */
   insertMfgApproval: `
-    INSERT INTO pm_mrm_fixed (pm_id, mfg_id, mfg_code, curr_rate, uom, status, effective_from)
+    INSERT INTO cost_master_pm_mfg (pm_id, mfg_id, mfg_code, curr_rate, uom, status, effective_from)
     VALUES (?, ?, ?, 0, NULL, 'active', ?)
   `,
 
-  /** Archive old PM vendor rate to history_vrm before overwriting.
+  /** Archive old PM vendor rate to history_cost_ven before overwriting.
    *  Parameters: [mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by]
    */
   archiveToHistoryVrm: `
-    INSERT INTO history_vrm (mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by)
+    INSERT INTO history_cost_ven (mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by)
     VALUES ('pm', ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
-  /** Archive old PM mfg rate to history_mrm before overwriting.
+  /** Archive old PM mfg rate to history_cost_mfg before overwriting.
    *  Parameters: [mfg_id, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by]
    */
   archiveToHistoryMrm: `
-    INSERT INTO history_mrm (mfg_id, mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by)
+    INSERT INTO history_cost_mfg (mfg_id, mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by)
     VALUES (?, 'pm', ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   /** Find the first vendor_id linked to a PM in the vendor rate master. Parameters: [pm_id] */
   getVendorId: `
-    SELECT vendor_id FROM pm_vrm_dynamic WHERE pm_id = ? AND vendor_id IS NOT NULL LIMIT 1
+    SELECT vendor_id FROM cost_master_pm_ven WHERE pm_id = ? AND vendor_id IS NOT NULL LIMIT 1
   `,
 
   // ── Approval-flow helpers ────────────────────────────────────────────────
 
-  /** Set status on a pm_mrm_fixed rate row (e.g. 'in_review', 'draft', 'active').
+  /** Set status on a cost_master_pm_mfg rate row (e.g. 'in_review', 'draft', 'active').
    *  Parameters: [status, id]
    */
-  setRateStatus: `UPDATE pm_mrm_fixed SET status = ? WHERE id = ?`,
+  setRateStatus: `UPDATE cost_master_pm_mfg SET status = ? WHERE id = ?`,
 
-  /** Fetch a single pm_mrm_fixed rate row by its primary key.
+  /** Fetch a single cost_master_pm_mfg rate row by its primary key.
    *  Used by the approve handler to read current values before archiving.
    *  Parameters: [id]
    */
   selectRateById: `
     SELECT id, mfg_id, pm_id, curr_rate, uom, effective_from, status
-    FROM pm_mrm_fixed WHERE id = ? LIMIT 1
+    FROM cost_master_pm_mfg WHERE id = ? LIMIT 1
   `,
 
   // ── Base-record approval-flow helpers ───────────────────────────────────────
@@ -471,38 +472,38 @@ export const packingMaterials = {
 
   // ── VRM Approval-flow helpers ─────────────────────────────────────────────
 
-  /** Set status on a pm_vrm_dynamic row (e.g. 'in_review', 'draft', 'active').
+  /** Set status on a cost_master_pm_ven row (e.g. 'in_review', 'draft', 'active').
    *  Parameters: [status, id]
    */
-  setVendorRateStatus: `UPDATE pm_vrm_dynamic SET status = ? WHERE id = ?`,
+  setVendorRateStatus: `UPDATE cost_master_pm_ven SET status = ? WHERE id = ?`,
 
-  /** Fetch a single pm_vrm_dynamic row by its primary key.
+  /** Fetch a single cost_master_pm_ven row by its primary key.
    *  Parameters: [id]
    */
   selectVendorRateById: `
     SELECT id, pm_id, vendor_id, curr_rate, moq, uom, effective_from, effective_to, status
-    FROM pm_vrm_dynamic WHERE id = ? LIMIT 1
+    FROM cost_master_pm_ven WHERE id = ? LIMIT 1
   `,
 
-  /** Full archived rate history for one PM×Vendor pair from history_vrm, newest first.
+  /** Full archived rate history for one PM×Vendor pair from history_cost_ven, newest first.
    *  Parameters: [pm_id, vendor_id]
    */
   selectVendorRateHistory: `
     SELECT h.id, h.rate, h.effective_from, h.effective_to, h.updated_on, h.status, h.remarks,
            u.name AS changed_by_name
-    FROM history_vrm h
+    FROM history_cost_ven h
     LEFT JOIN users u ON u.id = h.changed_by
     WHERE h.mtrl_type = 'pm' AND h.mtrl_id = ? AND h.vendor_id = ?
     ORDER BY h.updated_on DESC, h.id DESC
   `,
 
-  /** Full archived rate history for one PM×Manufacturer pair from history_mrm, newest first.
+  /** Full archived rate history for one PM×Manufacturer pair from history_cost_mfg, newest first.
    *  Parameters: [pm_id, mfg_id]
    */
   selectMfgRateHistory: `
     SELECT h.id, h.rate, h.effective_from, h.effective_to, h.updated_on, h.status, h.remarks,
            u.name AS changed_by_name
-    FROM history_mrm h
+    FROM history_cost_mfg h
     LEFT JOIN users u ON u.id = h.changed_by
     WHERE h.mtrl_type = 'pm' AND h.mtrl_id = ? AND h.mfg_id = ?
     ORDER BY h.updated_on DESC, h.id DESC

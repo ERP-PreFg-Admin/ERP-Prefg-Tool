@@ -1,5 +1,5 @@
-// PUT /api/purchase-orders/[id]  — re-edit a draft PO and re-submit for approval
-// PATCH /api/purchase-orders/[id] — update attachment key (S3 file reference)
+// PUT /api/v1/purchase-orders/[id]  — re-edit a draft PO and re-submit for approval
+// PATCH /api/v1/purchase-orders/[id] — update attachment key (S3 file reference)
 
 import { NextResponse } from "next/server"
 import type { PoolConnection } from "mysql2/promise"
@@ -15,6 +15,7 @@ import { assertPoInScope } from "@/lib/po-guard"
 import { poIdParamSchema } from "@/lib/validation/purchase-order-detail"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
+import { todayIST } from "@/lib/date"
 
 export const PUT = withGateway({
   paramsSchema: poIdParamSchema,
@@ -35,7 +36,7 @@ export const PUT = withGateway({
 
   // No backdating on expected dispatch
   if (expected_on) {
-    const today = new Date().toISOString().slice(0, 10)
+    const today = todayIST()
     if (expected_on < today) {
       return NextResponse.json({ error: "Backdating is not allowed for expected dispatch date." }, { status: 400 })
     }
@@ -75,7 +76,7 @@ export const PUT = withGateway({
     return NextResponse.json({ error: "Only the original submitter can re-edit this PO." }, { status: 403 })
   }
 
-  const ctx = { requestId: crypto.randomUUID(), userId, route: `/api/purchase-orders/${poId}` }
+  const ctx = { requestId: crypto.randomUUID(), userId, route: `/api/v1/purchase-orders/${poId}` }
   const eventId = makeEventId("PO", "edit", poId)
   const logCtx = { ...ctx, eventId, module: "PO_EDIT" }
   logger.info({ ...logCtx, poId, mfg_id, sku_code, qty, message: "PO re-edit started" })
@@ -89,7 +90,10 @@ export const PUT = withGateway({
 
     // Update PO fields
     await conn.execute(purchaseOrdersSql.updateDraft, [
-      Number(mfg_id), sku_code, Number(qty), unitPrice, totalAmount, expected_on || null, destination || null, poId,
+      Number(mfg_id), sku_code, Number(qty), unitPrice, totalAmount, expected_on || null, destination || null,
+      // Re-resolved: this edit can change the SKU or the manufacturer, either of
+      // which leaves the stamped Recipe describing an order that no longer exists.
+      Number(mfg_id), sku_code, poId,
     ])
 
     // Fetch MFG details for readable diff
@@ -130,7 +134,7 @@ export const PUT = withGateway({
   },
 })
 
-// PATCH /api/purchase-orders/[id]
+// PATCH /api/v1/purchase-orders/[id]
 // Body: { attachment_key: string | null }
 // Sets or clears the S3 attachment on a PO. Deletes the old S3 object when replacing.
 export const PATCH = withGateway({
@@ -145,7 +149,7 @@ export const PATCH = withGateway({
 
   const { attachment_key } = await req.json()
 
-  const patchCtx = { ...ctx, route: `/api/purchase-orders/${poId}` }
+  const patchCtx = { ...ctx, route: `/api/v1/purchase-orders/${poId}` }
   logger.info({ ...patchCtx, poId, message: "PO attachment update started" })
 
   // Verify current user is the original submitter

@@ -20,6 +20,21 @@ import type { MfgOption, SkuOption, WarehouseOption } from "@/app/po-tracking/po
 const MATCH_THRESHOLD = 0.3
 
 /**
+ * The first option whose value for any of `keys` equals `query`, ignoring case
+ * and surrounding space. Kept separate from the fuzzy pass so a caller ranking
+ * several fields can run every exact comparison before any fuzzy one.
+ */
+export function exactMatch<T>(
+  query: string | null | undefined,
+  options: T[],
+  keys: (keyof T & string)[]
+): T | null {
+  const q = query?.trim().toLowerCase()
+  if (!q || options.length === 0) return null
+  return options.find((o) => keys.some((k) => String(o[k] ?? "").trim().toLowerCase() === q)) ?? null
+}
+
+/**
  * Best match for `query` among `options`, or null when nothing is close enough.
  *
  * Exact case-insensitive hits on any key short-circuit Fuse — a supplier code
@@ -34,8 +49,7 @@ export function bestMatch<T>(
   const q = query?.trim()
   if (!q || options.length === 0) return null
 
-  const lower = q.toLowerCase()
-  const exact = options.find((o) => keys.some((k) => String(o[k] ?? "").trim().toLowerCase() === lower))
+  const exact = exactMatch(q, options, keys)
   if (exact) return exact
 
   const fuse = new Fuse(options, { keys, threshold: MATCH_THRESHOLD, ignoreLocation: true })
@@ -57,9 +71,24 @@ export function matchSku(
     ?? bestMatch(code, options, ["sku_code", "name"])
 }
 
-/** Map the invoice's consignor/seller to a manufacturer. */
+/**
+ * Map the invoice's consignor/seller to a manufacturer.
+ *
+ * `registered_name` is tried before `name`: an invoice header prints the legal
+ * entity ("REVE PHARMACEUTICALS PVT LTD"), while `name` is the short form we
+ * type internally ("Reve"). Matching the short form first meant the fuzzy pass
+ * had to bridge that gap, which it often couldn't.
+ *
+ * Every field gets its exact comparison before any of them get a fuzzy one — a
+ * code or name that already matches character for character must never lose to
+ * a merely-plausible registered-name hit. Only then does the fuzzy pass run, in
+ * the same priority order.
+ */
 export function matchMfg(from: string | null | undefined, options: MfgOption[]): MfgOption | null {
-  return bestMatch(from, options, ["name", "code"])
+  return exactMatch(from, options, ["registered_name", "name", "code"])
+    ?? bestMatch(from, options, ["registered_name"])
+    ?? bestMatch(from, options, ["name"])
+    ?? bestMatch(from, options, ["code"])
 }
 
 /**

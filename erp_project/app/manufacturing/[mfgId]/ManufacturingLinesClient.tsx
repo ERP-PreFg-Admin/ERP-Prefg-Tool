@@ -5,13 +5,16 @@ import { useRouter } from "next/navigation"
 import { Plus, Pencil, AlertTriangle } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
+import { TableEmpty } from "@/components/ui/empty-state"
 import { DownloadButton } from "@/components/masters/DownloadButton"
+import { SearchInput } from "@/components/masters/SearchInput"
 import type { MfgLine, MfgLineStatus } from "@/types/masters"
 import { fmtDate } from "../mfg-utils"
-import LineDialog, { type BomOption } from "./LineDialog"
+import LineDialog, { type RecipeOption } from "./LineDialog"
 
 type LiveBomInfo = { bomCodes: string; bomIds: number[] }
 
@@ -42,7 +45,7 @@ export default function ManufacturingLinesClient({
 }: {
   mfgId: number
   rows: MfgLine[]
-  bomOptions: BomOption[]
+  bomOptions: RecipeOption[]
   liveBomsBySkuCode?: Map<string, LiveBomInfo>
 }) {
   const router = useRouter()
@@ -69,10 +72,10 @@ export default function ManufacturingLinesClient({
   async function handlePauseBom(bomId: number) {
     setPausingBomId(bomId)
     try {
-      const res = await fetch("/api/masters/bom-master", {
+      const res = await fetch("/api/v1/masters/recipe-master", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update-status", bom_id: bomId, status: "inactive" }),
+        body: JSON.stringify({ action: "update-status", recipe_id: bomId, status: "inactive" }),
       })
       if (res.ok) router.refresh()
     } finally {
@@ -84,11 +87,11 @@ export default function ManufacturingLinesClient({
     <div className="space-y-4 text-xs">
       {/* ── Toolbar ── */}
       <div className="flex flex-col sm:flex-row gap-3">
-        <input
+        <SearchInput
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search SKU, BOM…"
-          className="flex h-9 w-full sm:max-w-xs rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+          onChange={setSearch}
+          placeholder="Search SKU, Recipe…"
+          className="sm:max-w-xs"
         />
         <div className="flex items-center gap-1.5">
           {(["all", "active", "discontinued", "inactive"] as StatusFilter[]).map((f) => (
@@ -108,7 +111,7 @@ export default function ManufacturingLinesClient({
         </div>
         <div className="flex items-center gap-2 sm:ml-auto">
           <DownloadButton
-            endpoint={`/api/manufacturing/${mfgId}/lines/export`}
+            endpoint={`/api/v1/manufacturing/${mfgId}/lines/export`}
             label="Manufacturing Lines"
           />
           <button
@@ -127,7 +130,7 @@ export default function ManufacturingLinesClient({
               <TableHeader>
                 <TableRow>
                   <TableHead>SKU</TableHead>
-                  <TableHead>BOM Code</TableHead>
+                  <TableHead>Recipe Code</TableHead>
                   <TableHead>SKU Name</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Effective From</TableHead>
@@ -138,23 +141,40 @@ export default function ManufacturingLinesClient({
               </TableHeader>
               <TableBody>
                 {filteredRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center text-muted-foreground py-10">
-                      No manufacturing lines match this view.
-                    </TableCell>
-                  </TableRow>
+                  <TableEmpty
+                    colSpan={8}
+                    action={
+                      rows.length === 0 ? (
+                        <Button variant="outline" size="sm" onClick={() => setDialogTarget("new")}>
+                          <Plus /> Add SKUs
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => { setSearch(""); setStatusFilter("all") }}
+                        >
+                          Clear filters
+                        </Button>
+                      )
+                    }
+                  >
+                    {rows.length === 0
+                      ? "No SKUs are assigned to this manufacturer yet."
+                      : "No manufacturing lines match this view."}
+                  </TableEmpty>
                 ) : (
                   filteredRows.map((r) => {
                     const liveBoms = r.sku_code ? liveBomsBySkuCode?.get(r.sku_code) : undefined
                     const isOlderLiveBom =
-                      !!liveBoms && liveBoms.bomIds.length > 1 && r.bom_id !== liveBoms.bomIds[liveBoms.bomIds.length - 1]
+                      !!liveBoms && liveBoms.bomIds.length > 1 && r.recipe_id !== liveBoms.bomIds[liveBoms.bomIds.length - 1]
                     return (
                     <TableRow key={r.id}>
                       <TableCell className="font-mono">
                         <div className="flex items-center gap-1.5">
                           {liveBoms && (
                             <span
-                              title={`Multiple BOMs are currently live for this SKU (${liveBoms.bomCodes}) — production can happen on any of them until the older one is paused.`}
+                              title={`Multiple Recipes are currently live for this SKU (${liveBoms.bomCodes}) — production can happen on any of them until the older one is paused.`}
                               className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 cursor-help"
                             >
                               <AlertTriangle className="h-2.5 w-2.5" />
@@ -168,12 +188,12 @@ export default function ManufacturingLinesClient({
                           {r.bom_code ?? "—"}
                           {isOlderLiveBom && (
                             <button
-                              onClick={() => handlePauseBom(r.bom_id)}
-                              disabled={pausingBomId === r.bom_id}
-                              title="Set this older BOM to Inactive so production stops on it"
+                              onClick={() => handlePauseBom(r.recipe_id)}
+                              disabled={pausingBomId === r.recipe_id}
+                              title="Set this older Recipe to Inactive so production stops on it"
                               className="rounded border border-amber-300 px-1 py-0.5 text-[10px] text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/20"
                             >
-                              {pausingBomId === r.bom_id ? "Pausing…" : "Pause"}
+                              {pausingBomId === r.recipe_id ? "Pausing…" : "Pause"}
                             </button>
                           )}
                         </div>

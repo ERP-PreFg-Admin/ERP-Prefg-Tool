@@ -1,6 +1,6 @@
-// GET /api/masters/packing-materials/mrm-history?pm_id=1&mfg_id=2
+// GET /api/v1/masters/packing-materials/mrm-history?pm_id=1&mfg_id=2
 //
-// Full rate-change history for one PM×Manufacturer pair from history_mrm,
+// Full rate-change history for one PM×Manufacturer pair from history_cost_mfg,
 // newest first — backs the "Rate History" dialog on the PM Rate Master
 // (Manufacturer view).
 
@@ -18,7 +18,7 @@ export const GET = withGateway({
     const { searchParams } = new URL(req.url)
     const pmId = searchParams.get("pm_id")
     const mfgId = searchParams.get("mfg_id")
-    const logCtx = { ...ctx, route: "/api/masters/packing-materials/mrm-history" }
+    const logCtx = { ...ctx, route: "/api/v1/masters/packing-materials/mrm-history" }
 
     if (!pmId || isNaN(Number(pmId)) || !mfgId || isNaN(Number(mfgId))) {
       throw new ApiError(400, "validation_error", "pm_id and mfg_id are required")

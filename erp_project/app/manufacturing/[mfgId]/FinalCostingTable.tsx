@@ -1,9 +1,12 @@
 "use client"
 
+import Link from "next/link"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
+import { TableEmpty } from "@/components/ui/empty-state"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import type { FinalCostingRow } from "@/types/masters"
 import { fmtMoney } from "../mfg-utils"
@@ -26,16 +29,13 @@ export default function FinalCostingTable({ mfgId, rows }: { mfgId: number; rows
         <p className="text-[11px] text-muted-foreground">
           Total = RM + PM + (RM × RM Wastage%) + (PM × PM Wastage%) + JW + Shrink Wrap + Shipper. Rates from this manufacturer&apos;s agreed MRM rates.
         </p>
-        <div className="flex items-center gap-2">
-          <DownloadButton
-            endpoint={`/api/manufacturing/${mfgId}/final-costing/export`}
-            label="Final Costing"
-          />
-          <DownloadButton
-            endpoint={`/api/manufacturing/${mfgId}/final-costing/detailed-export`}
-            label="Detailed Breakup (Negotiation)"
-          />
-        </div>
+        {/* Only this table's own export lives here. The detailed breakup covers
+            the two vendor-rate comparisons below, so it sits under them — two
+            CSV/Excel pairs side by side here read as one control duplicated. */}
+        <DownloadButton
+          endpoint={`/api/v1/manufacturing/${mfgId}/final-costing/export`}
+          label="Final Costing"
+        />
       </div>
       <Card>
         <CardContent className="p-0">
@@ -55,14 +55,20 @@ export default function FinalCostingTable({ mfgId, rows }: { mfgId: number; rows
               </TableHeader>
               <TableBody>
                 {rows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-center text-muted-foreground py-10">
-                      No active SKUs to cost yet.
-                    </TableCell>
-                  </TableRow>
+                  <TableEmpty
+                    colSpan={9}
+                    action={
+                      <Button variant="outline" size="sm" asChild>
+                        <Link href={`/manufacturing/${mfgId}?tab=active`}>Add SKUs</Link>
+                      </Button>
+                    }
+                  >
+                    No active SKUs to cost yet — costing starts from the SKUs assigned to this
+                    manufacturer.
+                  </TableEmpty>
                 ) : (
                   rows.map((r) => (
-                    <TableRow key={r.bom_id}>
+                    <TableRow key={r.recipe_id}>
                       <TableCell className="font-mono">
                         <span className="inline-flex items-center gap-1">
                           {r.incomplete && (

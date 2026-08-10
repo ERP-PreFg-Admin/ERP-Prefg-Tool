@@ -1,7 +1,7 @@
-// POST /api/masters/raw-materials/mrm-bulk
+// POST /api/v1/masters/raw-materials/mrm-bulk
 //
-// Bulk CSV upload for RM × Manufacturer rates (rm_mrm_fixed). Separate
-// endpoint from /api/masters/raw-materials — see vrm-bulk/route.ts's header
+// Bulk CSV upload for RM × Manufacturer rates (cost_master_rm_mfg). Separate
+// endpoint from /api/v1/masters/raw-materials — see vrm-bulk/route.ts's header
 // comment for why this can't share that route's "bulk"/"check_duplicates"
 // action names.
 
@@ -18,6 +18,7 @@ import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } 
 import logger from "@/lib/logger"
 import { stageBulkUploadApproval, uploadRowsAsCsv } from "@/lib/master-routes/bulk-approval"
 import { applyMfgRateApproval } from "@/lib/master-routes/material-utils"
+import { todayIST, monthIST } from "@/lib/date"
 
 const looseRow = z.record(z.string(), z.unknown())
 
@@ -131,7 +132,7 @@ export const POST = withGateway({
     let skipped = 0
     try {
       await conn.beginTransaction()
-      const today = new Date().toISOString().slice(0, 10)
+      const today = todayIST()
       const createRows: Record<string, string>[] = []
       let firstApprovalId: number | null = null
 
@@ -167,7 +168,7 @@ export const POST = withGateway({
 
       let batchApprovalId: number | null = null
       if (createRows.length > 0) {
-        const yyyymm = new Date().toISOString().slice(0, 7)
+        const yyyymm = monthIST()
         const { key, filename } = await uploadRowsAsCsv(createRows, `imports/rm-mrm-bulk/${yyyymm}`, "rm_mrm_bulk")
         batchApprovalId = await stageBulkUploadApproval(conn, {
           userId, module: "RM_RATE_BULK", s3Key: key, filename, rowCount: createRows.length,

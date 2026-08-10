@@ -1,10 +1,10 @@
 /**
- * BOM code versioning — `<sku_code>-RM<rm_version>-PM<pm_version>` encodes RM
- * and PM version numbers that bump INDEPENDENTLY: creating a new BOM version
+ * Recipe code versioning — `<sku_code>-RM<rm_version>-PM<pm_version>` encodes RM
+ * and PM version numbers that bump INDEPENDENTLY: creating a new Recipe version
  * only increments the side (RM lines or PM lines) that actually changed vs.
- * the SKU's immediately-prior BOM. Applies uniformly to every new (non-
- * backfilled) BOM regardless of upload path — see the "new-version" branch
- * of app/api/masters/bom-master/route.ts (single-BOM wizard/edit) and
+ * the SKU's immediately-prior Recipe. Applies uniformly to every new (non-
+ * backfilled) Recipe regardless of upload path — see the "new-version" branch
+ * of app/api/v1/masters/recipe-master/route.ts (single-Recipe wizard/edit) and
  * bomBulkHandler.applyAndArchive in lib/approvals/handlers/bom.ts (CSV bulk).
  */
 

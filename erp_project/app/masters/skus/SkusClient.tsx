@@ -178,7 +178,7 @@ export default function SkusClient({
 
         <MasterToolbarActions>
           <DownloadButton
-            endpoint="/api/masters/skus/export"
+            endpoint="/api/v1/masters/skus/export"
             label="SKUs"
           />
         </MasterToolbarActions>
@@ -186,7 +186,7 @@ export default function SkusClient({
 
       {/* ── Filter panel ── */}
       {showFilters && (
-        <Card className="border-blue-200 mb-5">
+        <Card className="border-blue-200 dark:border-blue-900 mb-5">
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-medium">Filters</span>
@@ -280,7 +280,11 @@ export default function SkusClient({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>SKU Code</TableHead>
+                {/* Frozen: the SKU code stays pinned while the other 11 columns
+                    scroll under it. A sticky cell paints above its siblings, so
+                    it needs an opaque background — TableHead already has one,
+                    body cells take the row's via bg-inherit. */}
+                <TableHead className="sticky left-0 z-10 shadow-[1px_0_0_var(--color-border)]">SKU Code</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Brand</TableHead>
                 <TableHead>SKU Type</TableHead>
@@ -289,7 +293,7 @@ export default function SkusClient({
                 <TableHead>Filling</TableHead>
                 <TableHead>MRP</TableHead>
                 <TableHead>GST</TableHead>
-                <TableHead>BOM</TableHead>
+                <TableHead>Recipe</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="w-28">Actions</TableHead>
               </TableRow>
@@ -306,8 +310,11 @@ export default function SkusClient({
                   const missing = missingFieldsFor(row)
                   const hasVariants = (row.variant_count ?? 0) > 1 && row.brand && row.base_sku_sno != null
                   return (
-                    <TableRow key={row.id}>
-                      <TableCell className="font-mono text-xs font-medium">
+                    // Opaque in every state — the frozen cell inherits this
+                    // background, and a translucent one shows the scrolling
+                    // columns' text through it.
+                    <TableRow key={row.id} className="bg-background hover:bg-muted">
+                      <TableCell className="sticky left-0 z-10 bg-inherit shadow-[1px_0_0_var(--color-border)] font-mono text-xs font-medium">
                         <div className="flex items-center gap-1.5">
                           {row.sku_code}
                           {missing.length > 0 && (
@@ -339,7 +346,7 @@ export default function SkusClient({
                           <span className="font-mono text-xs">{row.bom_code ?? "—"}</span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500">
-                            <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> No BOM
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> No Recipe
                           </span>
                         )}
                       </TableCell>

@@ -89,6 +89,7 @@ A supplier writes "REVE PHARMA", "Guwahati" and "Mcaf407"; the masters hold a ma
 - Uses **Fuse.js** (already a dependency via `components/ui/FuzzySelect`), threshold `0.3` — deliberately tighter than FuzzySelect's browsing threshold of `0.4`, because this picks a value on the user's behalf and a confidently wrong guess costs more than a blank field.
 - Exact case-insensitive hits short-circuit Fuse, so a supplier code that already equals a master code can never lose to a fuzzier-but-shorter candidate.
 - `matchSku` tries the code first (more discriminating), and only falls back to the product name when the code finds nothing.
+- `matchMfg` tries **`registered_name` before `name`**: an invoice header prints the legal entity ("REVE PHARMACEUTICALS PVT LTD") where `master_mfgs.name` is the short form we type internally ("Reve"), and the fuzzy pass often couldn't bridge that gap. `registered_name` comes from `details_mfg` via `purchaseOrdersSql.mfgOptions`. Every field gets its **exact** comparison (`exactMatch`) before any field gets a fuzzy one, so a code or short name that already matches character-for-character can't lose to a merely-plausible registered-name hit; the fuzzy pass then runs in the same priority order.
 - Pure and network-free, so `scripts/_check-invoice-mapping.ts` exercises it directly.
 
 **Every result is a suggestion, never a silent commit.**
@@ -113,11 +114,60 @@ A supplier writes "REVE PHARMA", "Guwahati" and "Mcaf407"; the masters hold a ma
 
 **Why IndexedDB, not localStorage:** extraction takes ~60s and the review that follows is real work, so losing it to a stray Escape is expensive. The PDF has to survive too — localStorage holds ~5 MB of *strings* and a 10 MB PDF is ~13 MB once base64'd. IndexedDB stores a `File` directly, no encoding, with a quota measured against free disk. Every draft operation is best-effort: storage can be unavailable (private mode, blocked cookies, quota exhausted) and a draft that fails to save must never take the invoice flow down with it.
 
-### Per-line "Reference PO"
+### Per-line "Reference PO" and the FIFO match
 
-Each line can point at an existing open PO (`raised` or `partially_received`) for that manufacturer, fetched on demand from `GET /api/purchase-orders/open-for-receive?mfg_id=`. That's fetched on demand rather than shipped with the page because the manufacturer isn't known until the invoice has been parsed, and every open PO for every manufacturer would be most of the PO table.
+Every line points at an existing open PO (`raised` or `partially_received`) for that manufacturer, fetched on demand from `GET /api/purchase-orders/open-for-receive?mfg_id=`. That's fetched on demand rather than shipped with the page because the manufacturer isn't known until the invoice has been parsed, and every open PO for every manufacturer would be most of the PO table. **Which** PO is decided by the FIFO match below, not by the user.
 
 When a line references a PO, it **still raises its own inward PO** *and* books a goods receipt against the referenced one — so the line carries two PO links (see `link_type` below).
+
+**A reference PO is mandatory** (since 2026-08-07), in `invoiceInwardSchema` as well as the dialog. There is no longer a path through this endpoint for inwarding goods against no order at all.
+
+The references are chosen by `allocateFifo` (`invoice-form.ts`), not by hand:
+
+- Open POs are bucketed by SKU and consumed **oldest `purchase_orders.date` first** — the raise date, not `expected_on`. `openForReceiveByMfg` sorts the same way so the picker never contradicts the allocator.
+- A line whose quantity no single PO covers is **split into one row per PO consumed**. The payload and `supplier_invoice_items` carry exactly one reference PO per line, so an allocation *is* a line — no nested `allocations[]`, no schema change. `Row.line_key` ties the splits back to the printed line, and `allocateFifo` merges on it before re-allocating, which is what makes re-matching idempotent.
+- `amount` / `total_amount` are pro-rated by quantity share across a split, last chunk taking the rounding remainder so the invoice total doesn't drift. Per-unit fields (`rate`, `mrp`, `discount`, `gst_percent`) are copied, never divided.
+- A PO's remaining quantity is tracked across the **whole invoice**, so two lines for the same SKU can't both claim it.
+- A quantity the open POs can't cover stays as a row with **no** reference PO, plus a shortage message. That one leftover row is what blocks submit — "not enough POs" and "reference PO missing" are deliberately the same mechanism, not two.
+
+It runs when the open-PO list arrives (the same moment `changeMfg` invalidates every existing reference), and from the **Re-match POs (FIFO)** button. Not on every keystroke: that would re-split rows out from under someone typing a quantity. A qty edit that breaks an allocation is caught instead by the outstanding-quantity check, which is aggregated **per PO** — after a split two rows legitimately share one PO, and comparing each row alone would pass while the pair overdraws it.
+
+**The desk does not choose the PO.** The Reference PO cell is read-only — it states the PO the FIFO match assigned and why (`oldest open PO · raised 2026-01-14`). A picker that could undo the allocation invites exactly the inconsistency the match exists to remove.
+
+The **one** exception is a genuine ambiguity the data can't resolve: **a SKU with more than one live BOM**. This is a fast-moving system where `effective_till` is often left unset, so an `active` BOM and the `discontinued` one it superseded stay producible together through a transition (the same rule `bomSql.selectSkusWithMultipleLiveBoms` encodes: `status IN ('active','discontinued') AND effective_from <= CURDATE()`, ignoring the unreliable `effective_till`). FIFO cannot tell those POs apart and the desk can, so those lines — and only those — get a picker, **filtered to that SKU's own POs**, captioned `2 BOM versions live — pick the right PO`.
+
+`purchase_orders.bom_id` is now stamped at creation (see below), but **`live_bom_count` stays the trigger**. Switching it to "these POs carry different `bom_id`s" would read 0 distinct ids across a set of legacy NULLs and quietly stop asking, in exactly the case where the versions are indistinguishable and the question most needs asking.
+
+The **BOM Code** column prefers the PO's own stamped `bom_id` and falls back to the SKU's live BOM(s), comma-joined when there is more than one. `openForReceiveByMfg` carries `bom_code` and `live_bom_count` together, so the client needs no second round trip to decide which cells get a picker.
+
+### `purchase_orders.bom_id` — stamped at creation
+
+The column had existed since the schema was written and no INSERT had ever populated it. Every PO creation path now does (`lib/queries/purchase-orders.ts`, `BOM_ID_FOR_LINE`).
+
+**Why stamp instead of resolving at read time:** `master_skus.active_bom_id` moves when a new version goes live, so reading through it makes every historical PO claim the *current* recipe. Freezing the value at creation is the only thing that lets two open POs for one SKU be told apart after a version change.
+
+**Which BOM:** the manufacturer's own live production line for that SKU — the same `(mfg, sku) → bom_id` mapping `/api/purchase-orders/quote-rate` already prices the PO from, so a row's `bom_id` and its `unit_price` cannot describe different recipes. Live follows `manufacturingSql.selectLiveLinesByMfg` (`active` or `discontinued`, since a discontinued line can still be raised against); `active` sorts first so a new PO takes the current recipe during a transition.
+
+| Path | `bom_id` |
+|---|---|
+| `insert` (impromptu draft), `insertNormal`, `insertBulkPo`, `insertInward` | Resolved from the live line |
+| `insertSplit` | **Inherited from the parent** — a split divides one order, it doesn't raise a new one, so a child must not pick up a version the parent never had |
+| `insertInwardReceived` | **Inherited from the order being settled** (via `receivePo`'s new `bom_id`) — goods made months ago under the previous recipe must not be stamped with today's |
+| `updateDraft` | Re-resolved — this is the one edit that can change the SKU or manufacturer, either of which would leave the stamped BOM describing an order that no longer exists |
+
+Both inherited paths `COALESCE` to the live-line resolver, because parents raised before this existed carry NULL. Anything with no live line resolves to NULL, which is what the column held before — nothing regresses.
+
+`bom_id` is the **last column** on every insert, so its resolver params append to the existing array rather than being threaded into the middle of it, where a miscount would silently shift every following value by one.
+
+### Saying what matched
+
+The dialog used to report only problems, which left "nothing is wrong" and "nothing has been checked" looking identical — and the FIFO match in particular does real work nobody asked for and can't otherwise see. Three confirmations balance that:
+
+- The manufacturer field: `✓ Matched from invoice: REVE PHARMACEUTICALS PVT LTD` in green, `⚠ No match` in amber.
+- Each SKU cell: `✓ matched from "Mcaf407"` under the picker when the fuzzy map landed on something.
+- Green chips beside the problem chips in the commit bar: `Manufacturer matched` · `All 4 SKUs matched` · `5 POs matched by FIFO`. Counted over printed invoice lines (`line_key`), not allocation rows — one line split across three POs is still one SKU that matched.
+
+`collectProblems` names what the invoice printed when a fuzzy match found nothing — `"REVE PHARMA" doesn't match any manufacturer in the system.`, `Row 3: "Mcaf407" doesn't match any SKU in the system.` — because a match that found nothing is a different problem from a field the user simply hasn't filled in.
 
 ---
 
@@ -180,6 +230,8 @@ Two traps this module exists to contain:
 The code is stamped onto every inward PO the invoice created (`buildSetUniwarePoCode`) **after the mirror succeeds but inside the same transaction**, so no row ever commits quoting a Uniware PO that doesn't exist.
 
 We deliberately **do not** send our own `purchaseOrderCode` on create: leaving it out lets the facility's own series number the PO (e.g. `GM/2627/PO/2006`), which is the reference the manufacturer recognises and the one quoted in the notification email. It exists nowhere else, which is why it is stored.
+
+Because one Uniware PO settles several of ours, it carries a **`ReferenceOrder`** custom field: a single comma-separated list of the `purchase_orders.po_no` values the goods were inwarded against (deduped, in line order — a FIFO split means several invoice lines can settle the same PO). It travels in `customFieldValues` rather than as a body key, because `buildPurchaseOrder` only forwards documented keys and Uniware rejects the rest. If the facility hasn't got that custom field configured, moving it into the body payload is a one-line change.
 
 `uniwareEnabled()` is false when the `UNIWARE_*` vars are unset, and the mirror step is then **skipped** rather than failing — the app boots and inwards invoices without Uniware configured.
 

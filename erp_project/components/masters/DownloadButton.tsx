@@ -14,7 +14,7 @@
  *
  * Usage:
  *   <DownloadButton
- *     endpoint="/api/masters/skus/export"
+ *     endpoint="/api/v1/masters/skus/export"
  *     label="SKUs"
  *   />
  *
@@ -29,7 +29,7 @@ import { Download } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 type DownloadButtonProps = {
-  /** Export API route, e.g. "/api/masters/skus/export" */
+  /** Export API route, e.g. "/api/v1/masters/skus/export" */
   endpoint: string
   /** Entity label shown in button titles, e.g. "SKUs" */
   label: string
@@ -70,7 +70,7 @@ export function DownloadButton({ endpoint, label, disabled, extraParams }: Downl
         variant="outline"
         disabled={!!loading || disabled}
         onClick={() => download("csv")}
-        className="h-8 gap-1.5 text-xs bg-blue-100 "
+        className="h-8 gap-1.5 text-xs bg-blue-100 dark:bg-blue-900/40 "
         title={`Download ${label} as CSV`}
       >
         <Download className="h-3.5 w-3.5" />
@@ -81,7 +81,7 @@ export function DownloadButton({ endpoint, label, disabled, extraParams }: Downl
         variant="outline"
         disabled={!!loading || disabled}
         onClick={() => download("xlsx")}
-        className="h-8 gap-1.5 text-xs bg-blue-100 "
+        className="h-8 gap-1.5 text-xs bg-blue-100 dark:bg-blue-900/40 "
         title={`Download ${label} as Excel`}
       >
         <Download className="h-3.5 w-3.5" />

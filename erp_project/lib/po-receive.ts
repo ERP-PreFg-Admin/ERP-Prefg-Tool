@@ -17,6 +17,7 @@ type ReceivePoRow = {
   id: number
   po_no: string
   sku_code: string | null
+  recipe_id: number | null
   qty: number
   received_qty: number | null
   status: string
@@ -27,6 +28,11 @@ export type ReceiveResult = {
   /** The order's SKU — callers raising a matching inward PO reuse it rather
    *  than trusting whatever the invoice printed. */
   sku_code: string | null
+  /** The Recipe version this order was raised under. An inward PO settling it
+   *  inherits this rather than re-resolving, so goods made under the previous
+   *  recipe aren't stamped with the current one. Null on orders predating the
+   *  column being written. */
+  recipe_id: number | null
   previous_qty: number
   received_qty: number
   status: string
@@ -92,6 +98,7 @@ export async function receivePo(
   return {
     po_no: po.po_no,
     sku_code: po.sku_code,
+    recipe_id: po.recipe_id ?? null,
     previous_qty: receivedQty,
     received_qty: newReceivedQty,
     status: newStatus,

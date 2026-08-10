@@ -1,7 +1,7 @@
-// POST /api/masters/raw-materials/vrm-bulk
+// POST /api/v1/masters/raw-materials/vrm-bulk
 //
-// Bulk CSV upload for RM × Vendor rates (rm_vrm_dynamic). Separate endpoint
-// from /api/masters/raw-materials so CsvImportDialog's fixed "bulk" /
+// Bulk CSV upload for RM × Vendor rates (cost_master_rm_ven). Separate endpoint
+// from /api/v1/masters/raw-materials so CsvImportDialog's fixed "bulk" /
 // "check_duplicates" action names don't collide with that route's own
 // (unrelated) RM_BULK base-material bulk upload and fuzzy-make check.
 //
@@ -27,6 +27,7 @@ import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } 
 import logger from "@/lib/logger"
 import { stageBulkUploadApproval, uploadRowsAsCsv } from "@/lib/master-routes/bulk-approval"
 import { applyVendorRateApproval } from "@/lib/master-routes/material-utils"
+import { todayIST, monthIST } from "@/lib/date"
 
 const looseRow = z.record(z.string(), z.unknown())
 
@@ -144,7 +145,7 @@ export const POST = withGateway({
     let skipped = 0
     try {
       await conn.beginTransaction()
-      const today = new Date().toISOString().slice(0, 10)
+      const today = todayIST()
       const createRows: Record<string, string>[] = []
       let firstApprovalId: number | null = null
 
@@ -188,7 +189,7 @@ export const POST = withGateway({
 
       let batchApprovalId: number | null = null
       if (createRows.length > 0) {
-        const yyyymm = new Date().toISOString().slice(0, 7)
+        const yyyymm = monthIST()
         const { key, filename } = await uploadRowsAsCsv(createRows, `imports/rm-vrm-bulk/${yyyymm}`, "rm_vrm_bulk")
         batchApprovalId = await stageBulkUploadApproval(conn, {
           userId, module: "RM_VRM_BULK", s3Key: key, filename, rowCount: createRows.length,

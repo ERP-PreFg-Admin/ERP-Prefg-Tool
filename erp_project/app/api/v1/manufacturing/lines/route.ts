@@ -1,8 +1,8 @@
-// POST /api/manufacturing/lines
+// POST /api/v1/manufacturing/lines
 //
-// Create or update a master_bom_mfg line (a manufacturer's SKU-level
+// Create or update a master_recipe_mfg line (a manufacturer's SKU-level
 // production entry: capacity, this-month plan, status, last batch, remarks).
-// No approval flow — master_bom_mfg isn't a registered approval module, same
+// No approval flow — master_recipe_mfg isn't a registered approval module, same
 // directness as bom-master's direct writes.
 
 import { NextResponse } from "next/server"
@@ -34,14 +34,14 @@ export const POST = withGateway({
     }
 
     if (body.action === "create") {
-      const eventId = makeEventId("MFG_LINE", "create", `${body.mfg_id}-${body.bom_id}`)
+      const eventId = makeEventId("MFG_LINE", "create", `${body.mfg_id}-${body.recipe_id}`)
       const logCtx = { ...ctx, eventId, module: "MFG_LINE_CREATE" }
-      logger.info({ ...logCtx, mfgId: body.mfg_id, bomId: body.bom_id, status: body.status, message: "Manufacturing line create started" })
-      recordRawEvent("MFG_LINE", eventId, { mfgId: body.mfg_id, bomId: body.bom_id, status: body.status })
+      logger.info({ ...logCtx, mfgId: body.mfg_id, bomId: body.recipe_id, status: body.status, message: "Manufacturing line create started" })
+      recordRawEvent("MFG_LINE", eventId, { mfgId: body.mfg_id, bomId: body.recipe_id, status: body.status })
 
       try {
         const result = await execute(manufacturingSql.insertLine, [
-          body.bom_id,
+          body.recipe_id,
           body.mfg_id,
           body.status,
           body.effective_from,
@@ -53,12 +53,12 @@ export const POST = withGateway({
           userId,
         ])
         logger.info({ ...logCtx, id: result.insertId, message: "Manufacturing line created" })
-        recordProcessedEvent("MFG_LINE", eventId, { id: result.insertId, mfgId: body.mfg_id, bomId: body.bom_id })
+        recordProcessedEvent("MFG_LINE", eventId, { id: result.insertId, mfgId: body.mfg_id, bomId: body.recipe_id })
         return NextResponse.json({ ok: true, id: result.insertId })
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)
         const stack = err instanceof Error ? err.stack : undefined
-        recordFailedEvent("MFG_LINE", eventId, { mfgId: body.mfg_id, bomId: body.bom_id }, message)
+        recordFailedEvent("MFG_LINE", eventId, { mfgId: body.mfg_id, bomId: body.recipe_id }, message)
         logger.error({ ...logCtx, err: message, stack, message: "Manufacturing line create failed" })
         throw new ApiError(500, "internal", "Database error")
       }

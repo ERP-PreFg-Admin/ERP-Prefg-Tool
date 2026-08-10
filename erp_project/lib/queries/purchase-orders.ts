@@ -2,13 +2,14 @@
  * Purchase Orders Queries
  *
  * Real table: purchase_orders
- * Columns: id, po_no, mfg_id, date, sku_code, bom_id, qty, unit_price,
+ * Columns: id, po_no, mfg_id, date, sku_code, recipe_id, qty, unit_price,
  *          total_amount, expected_on, received_qty, invoice_no,
  *          uniware_po_code, status, po_type, email_sent_at, attachment_key,
  *          csv_source_key, destination, reference_po
  */
 
 import { scopeParams, type UserScope } from "@/lib/scope"
+import { SQL_TODAY_IST } from "@/lib/date"
 
 // Overrides the stored status with a computed "partially_received" whenever
 // some (but not all) of the ordered qty has come in — terminal/manual states
@@ -20,6 +21,41 @@ const EFFECTIVE_STATUS_EXPR = `
     ELSE po.status
   END
 `
+
+/**
+ * The Recipe a PO is being raised against, as a scalar subquery. Params: [mfg_id, sku_code]
+ *
+ * Stamped at insert time rather than resolved at read time, and that is the
+ * whole point: `master_skus.active_bom_id` moves when a new Recipe version goes
+ * live, so reading through it makes every historical PO claim the *current*
+ * recipe. Freezing it here is what lets two open POs for the same SKU be
+ * distinguished after a version change — see the Recipe-version case in
+ * docs/po-inwarding.md.
+ *
+ * The Recipe is the manufacturer's own live production line for that SKU, the same
+ * (mfg, sku) -> recipe_id mapping /api/v1/purchase-orders/quote-rate already prices
+ * the PO from, so a row's recipe_id and its unit_price can't disagree. "Live"
+ * follows manufacturingSql.selectLiveLinesByMfg: status 'active' or
+ * 'discontinued', because a discontinued line can still be raised against.
+ * `active` sorts first so a new PO takes the current recipe during a transition
+ * where both are still producible.
+ *
+ * Resolves to NULL when the manufacturer has no live line for the SKU — the
+ * same value the column held before this existed, so nothing regresses.
+ */
+const RECIPE_ID_FOR_LINE = `(
+    SELECT l.recipe_id
+    FROM master_recipe_mfg l
+    INNER JOIN master_recipe  b ON b.id = l.recipe_id
+    INNER JOIN master_skus s ON s.id = b.sku_id
+    WHERE l.mfg_id = ?
+      AND s.sku_code = ?
+      AND l.status IN ('active', 'discontinued')
+      AND b.status IN ('active', 'discontinued')
+      AND b.effective_from <= ${SQL_TODAY_IST}
+    ORDER BY b.status = 'active' DESC, b.effective_from DESC, b.id DESC
+    LIMIT 1
+  )`
 
 // The FG PO Tracking page never shows inward POs — those are the invoice desk's
 // records, not procurement's. Expressed as its own nullable flag rather than
@@ -79,7 +115,7 @@ const SELECT_COLS = `
   SELECT
     po.id, po.po_no, po.date, po.sku_code, po.qty, po.unit_price,
     po.total_amount, po.expected_on, po.received_qty, po.invoice_no,
-    po.uniware_po_code,
+    po.uniware_po_code, po.reference_po,
     po.destination, ${EFFECTIVE_STATUS_EXPR} AS status, po.po_type, po.attachment_key,
     po.csv_source_key, po.email_sent_at,
     m.id   AS mfg_id, m.code AS mfg_code, m.name AS mfg_name,
@@ -193,22 +229,27 @@ export const purchaseOrdersSql = {
 
   /**
    * Insert an impromptu PO as draft (pending approval).
-   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, po_type, destination]
+   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, po_type, destination, mfg_id, sku_code]
+   *
+   * recipe_id is deliberately the LAST column on every insert below: its two
+   * resolver params then append to the existing array instead of being threaded
+   * into the middle of it, where a miscount would silently shift every
+   * following value by one.
    */
   insert: `
     INSERT INTO purchase_orders
-      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination)
-    VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, 'draft', ?, ?)
+      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, 'draft', ?, ?, ${RECIPE_ID_FOR_LINE})
   `,
 
   /**
    * Insert a normal PO directly as raised (no approval needed).
-   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination]
+   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, mfg_id, sku_code]
    */
   insertNormal: `
     INSERT INTO purchase_orders
-      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination)
-    VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, 'raised', 'normal', ?)
+      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, 'raised', 'normal', ?, ${RECIPE_ID_FOR_LINE})
   `,
 
   /**
@@ -217,12 +258,12 @@ export const purchaseOrdersSql = {
    * invoice number plus the S3 key of the original PDF so the inwarding desk
    * can pull the source document back up from the row. received_qty is left at
    * its 0 default: creating the PO is not receiving against it.
-   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, invoice_no, attachment_key]
+   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, invoice_no, attachment_key, mfg_id, sku_code]
    */
   insertInward: `
     INSERT INTO purchase_orders
-      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, invoice_no, attachment_key)
-    VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, 'raised', 'inward', ?, ?, ?)
+      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, invoice_no, attachment_key, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, 'raised', 'inward', ?, ?, ?, ${RECIPE_ID_FOR_LINE})
   `,
 
   /**
@@ -230,13 +271,19 @@ export const purchaseOrdersSql = {
    * PO. Booked straight in as fully received — the goods are physically here,
    * which is the whole point of the invoice — and reference_po points back at
    * the order it fulfils so the two rows aren't mistaken for separate demand.
+   * recipe_id is INHERITED from the order being settled, falling back to the live
+   * line only when that order predates this column. The goods physically
+   * belong to the recipe the parent PO was raised under; re-resolving would
+   * stamp today's Recipe onto stock made months ago under the previous version.
+   *
    * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount,
-   *   expected_on, destination, invoice_no, attachment_key, received_qty, reference_po]
+   *   expected_on, destination, invoice_no, attachment_key, received_qty, reference_po,
+   *   parent_bom_id, mfg_id, sku_code]
    */
   insertInwardReceived: `
     INSERT INTO purchase_orders
-      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, invoice_no, attachment_key, received_qty, reference_po)
-    VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, 'received', 'inward', ?, ?, ?, ?, ?)
+      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, invoice_no, attachment_key, received_qty, reference_po, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, 'received', 'inward', ?, ?, ?, ?, ?, COALESCE(?, ${RECIPE_ID_FOR_LINE}))
   `,
 
   /** Set status on a purchase_orders row. Parameters: [status, id] */
@@ -302,9 +349,12 @@ export const purchaseOrdersSql = {
     ORDER BY type DESC, name ASC
   `,
 
-  /** Lightweight MFG list for the Impromptu PO dropdown. */
+  /** Lightweight MFG list for the Impromptu PO dropdown.
+   *  `registered_name` is the legal entity — what a supplier invoice header
+   *  actually prints, where `name` is our internal short form. It's what
+   *  matchMfg tries first (lib/invoice-mapping.ts). */
   mfgOptions: `
-    SELECT m.id, m.code, m.name
+    SELECT m.id, m.code, m.name, d.registered_name
     FROM master_mfgs m
     INNER JOIN details_mfg d ON d.mfg_id = m.id
     WHERE d.status = 'active'
@@ -323,43 +373,64 @@ export const purchaseOrdersSql = {
     ORDER BY id DESC LIMIT 1
   `,
 
-  /** Full PO row for split operations. Parameters: [id] */
+  /** Full PO row for split operations. `total_amount` is needed to scale the
+   *  parent's value when unit_price is NULL. Parameters: [id] */
   selectForSplit: `
-    SELECT id, po_no, mfg_id, sku_code, qty, unit_price, received_qty, expected_on, status
+    SELECT id, po_no, mfg_id, sku_code, recipe_id, qty, unit_price, total_amount, received_qty, expected_on, status
     FROM purchase_orders WHERE id = ? LIMIT 1
+  `,
+
+  /**
+   * Existing child PO numbers of one parent, so a repeat split continues the
+   * sequence instead of restarting at -S001 and colliding with the unique index
+   * on po_no. Params: [parent po_no]
+   */
+  selectChildPoNos: `
+    SELECT po_no FROM purchase_orders WHERE reference_po = ?
   `,
 
   /** Full PO row for a manual receive operation. Parameters: [id] */
   /** Same as selectForReceive but locks the row for the duration of the transaction — prevents two concurrent receives from both reading a stale received_qty. Parameters: [id] */
   selectForReceiveLocked: `
-    SELECT id, po_no, sku_code, qty, received_qty, status
+    SELECT id, po_no, sku_code, recipe_id, qty, received_qty, status
     FROM purchase_orders WHERE id = ? LIMIT 1 FOR UPDATE
   `,
 
-  /** Insert a split child PO with an explicit status. Parameters: [po_no, mfg_id, sku_code, qty, expected_on, status, destination, reference_po] */
+  /**
+   * Insert a split child PO with an explicit status.
+   *
+   * recipe_id is INHERITED from the parent: a split is the same order divided, not
+   * a new one, so a child must not pick up a Recipe version the parent never had.
+   * Falls back to the live line for parents raised before this column existed.
+   *
+   * Parameters: [po_no, mfg_id, sku_code, qty, expected_on, status, destination, reference_po,
+   *   parent_bom_id, mfg_id, sku_code]
+   */
   insertSplit: `
-    INSERT INTO purchase_orders (po_no, mfg_id, date, sku_code, qty, expected_on, status, destination, reference_po, po_type)
-    VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, ?, 'normal')
+    INSERT INTO purchase_orders (po_no, mfg_id, date, sku_code, qty, expected_on, status, destination, reference_po, po_type, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, ?, 'normal', COALESCE(?, ${RECIPE_ID_FOR_LINE}))
   `,
 
   /**
    * Insert a PO directly as 'raised' for the bulk CSV flow.
-   * Parameters: [po_no, mfg_id, sku_code, qty, expected_on, destination, csv_source_key]
+   * Parameters: [po_no, mfg_id, sku_code, qty, expected_on, destination, csv_source_key, mfg_id, sku_code]
    */
   insertBulkPo: `
     INSERT INTO purchase_orders
-      (po_no, mfg_id, date, sku_code, qty, expected_on, status, po_type, destination, csv_source_key)
-    VALUES (?, ?, CURDATE(), ?, ?, ?, 'raised', 'normal', ?, ?)
+      (po_no, mfg_id, date, sku_code, qty, expected_on, status, po_type, destination, csv_source_key, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, 'raised', 'normal', ?, ?, ${RECIPE_ID_FOR_LINE})
   `,
 
   /**
-   * Update editable fields on a draft PO.
-   * Parameters: [mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, id]
+   * Update editable fields on a draft PO. recipe_id is re-resolved because this is
+   * the one edit that can change the SKU or the manufacturer, either of which
+   * would leave the stamped Recipe describing an order that no longer exists.
+   * Parameters: [mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, mfg_id, sku_code, id]
    */
   updateDraft: `
     UPDATE purchase_orders
     SET mfg_id = ?, sku_code = ?, qty = ?, unit_price = ?, total_amount = ?,
-        expected_on = ?, destination = ?
+        expected_on = ?, destination = ?, recipe_id = ${RECIPE_ID_FOR_LINE}
     WHERE id = ?
   `,
 
@@ -416,18 +487,50 @@ export const purchaseOrdersSql = {
    * partially_received qualify: the same set the receive route accepts, minus
    * punched (which has no physical goods behind it yet). `remaining` is
    * returned so the picker can show how much is still outstanding and the
-   * caller doesn't have to re-derive it. Parameters: [mfg_id]
+   * caller doesn't have to re-derive it.
+   *
+   * `date` is the PO's raise date and drives the dialog's FIFO allocation, so
+   * the sort is oldest-first — the picker list then reads in the same order the
+   * allocator consumes, instead of contradicting it.
+   *
+   * `bom_code` prefers the PO's OWN stamped recipe_id and falls back to the SKU's
+   * live Recipe(s). Both, because the fallback is what every PO raised before
+   * RECIPE_ID_FOR_LINE existed has to rely on — those rows carry recipe_id NULL and
+   * always will. "Live" is the same rule recipeSql.selectSkusWithMultipleLiveBoms
+   * uses: status IN ('active','discontinued') AND effective_from <= today,
+   * ignoring the unreliable effective_till.
+   *
+   * `live_bom_count` > 1 is the transition period where an active Recipe and the
+   * discontinued one it superseded are both still producible, and it stays the
+   * trigger for the dialog's manual PO picker even though recipe_id is now written.
+   * Switching the trigger to "these POs carry different bom_ids" would read 0
+   * distinct ids across a set of legacy NULLs and quietly stop asking — in
+   * exactly the case where we can't tell the versions apart and most need to.
+   * Parameters: [mfg_id]
    */
   openForReceiveByMfg: `
-    SELECT po.id, po.po_no, po.sku_code, sk.name AS sku_name,
+    SELECT po.id, po.po_no, po.date, po.sku_code, sk.name AS sku_name,
+           COALESCE(pb.bom_code, lb.bom_codes) AS bom_code,
+           COALESCE(lb.live_bom_count, 0) AS live_bom_count,
            po.qty, COALESCE(po.received_qty, 0) AS received_qty,
            (po.qty - COALESCE(po.received_qty, 0)) AS remaining,
            po.expected_on, ${EFFECTIVE_STATUS_EXPR} AS status
     FROM purchase_orders po
     LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
+    LEFT JOIN master_recipe  pb ON pb.id = po.recipe_id
+    LEFT JOIN (
+      SELECT sku_id,
+             COUNT(*) AS live_bom_count,
+             GROUP_CONCAT(bom_code ORDER BY effective_from ASC, id ASC SEPARATOR ', ') AS bom_codes
+      FROM master_recipe
+      WHERE status IN ('active', 'discontinued')
+        AND effective_from <= ${SQL_TODAY_IST}
+        AND sku_id IS NOT NULL
+      GROUP BY sku_id
+    ) lb ON lb.sku_id = sk.id
     WHERE po.mfg_id = ?
       AND ${EFFECTIVE_STATUS_EXPR} IN ('raised', 'partially_received')
-    ORDER BY po.date DESC, po.id DESC
+    ORDER BY po.date ASC, po.id ASC
   `,
 
   ongoingByMfg: `

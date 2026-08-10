@@ -1,3 +1,5 @@
+import { IST } from "@/lib/date"
+
 export const num = (v: string | number | null | undefined) => Number(v ?? 0) || 0
 
 export const fmtInt = (v: string | number | null | undefined) =>
@@ -12,7 +14,7 @@ export const fmtMoney = (v: string | number | null | undefined) => {
 }
 
 export const fmtDate = (d: string | null | undefined) =>
-  d ? new Date(d).toLocaleDateString("en-CA") : "—"
+  d ? new Date(d).toLocaleDateString("en-CA", { timeZone: IST }) : "—"
 
 /** This month plan as a % of monthly capacity — used for the "X% utilised" badge and fill rate. */
 export function fillRate(thisMonthPlan: number, capacity: number): number {

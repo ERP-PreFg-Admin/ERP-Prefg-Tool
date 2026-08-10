@@ -10,6 +10,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Callout } from "@/components/ui/callout"
 import { FormField } from "@/components/masters/FormField"
 import { ManagedFuzzyField } from "@/components/masters/ManagedFuzzyField"
 
@@ -90,12 +91,12 @@ export default function AddMaterialDialog({
 
   useEffect(() => {
     if (!open || material !== "rm") return
-    fetch("/api/masters/raw-materials", {
+    fetch("/api/v1/masters/raw-materials", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "get-makes" }),
     }).then((r) => r.json()).then((d) => setMakeOptions(d.makes ?? [])).catch(() => {})
-    fetch("/api/masters/raw-materials", {
+    fetch("/api/v1/masters/raw-materials", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "get-inci-names" }),
@@ -163,7 +164,7 @@ export default function AddMaterialDialog({
       // typo of an existing one — flag it before creating a near-duplicate.
       // Skipped when the user already confirmed "keep as new" once.
       if (material === "rm" && makeIsNew && !skipFuzzyCheck) {
-        const fuzzyRes = await fetch("/api/masters/raw-materials", {
+        const fuzzyRes = await fetch("/api/v1/masters/raw-materials", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -182,7 +183,7 @@ export default function AddMaterialDialog({
       }
       // Single unified endpoint for both RM and PM base inserts.
       // The "material" field tells the route which table to insert into.
-      const endpoint = "/api/masters/material-master"
+      const endpoint = "/api/v1/masters/material-master"
 
       const payload =
         material === "rm"
@@ -370,9 +371,9 @@ export default function AddMaterialDialog({
 
           {/* Fuzzy "did you mean?" banner for a freshly-typed make */}
           {makeSuggestion && (
-            <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2.5 text-sm text-amber-800">
+            <Callout variant="warning" className="px-3 py-2.5 text-sm">
               Make "{rmExtra.make}" looks similar to an existing make — did you mean "{makeSuggestion}"?
-            </div>
+            </Callout>
           )}
 
           <DialogFooter>

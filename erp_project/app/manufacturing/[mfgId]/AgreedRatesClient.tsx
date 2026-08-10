@@ -31,7 +31,7 @@ export default function AgreedRatesClient({
           onSelect={setMode}
         />
         <DownloadButton
-          endpoint={`/api/manufacturing/${mfgId}/agreed-rates/export`}
+          endpoint={`/api/v1/manufacturing/${mfgId}/agreed-rates/export`}
           label={`Agreed ${mode.toUpperCase()} Rates`}
           extraParams={{ mode }}
         />

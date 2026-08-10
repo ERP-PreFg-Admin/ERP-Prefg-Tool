@@ -11,7 +11,7 @@
  * carries no date and always renders last, after the dated lines. See the route's
  * header comment for why manual receipts cannot be listed per-event.
  *
- * Visual language follows app/masters/bom-master/BomDetailPanel.tsx.
+ * Visual language follows app/masters/recipe-master/RecipeDetailPanel.tsx.
  */
 
 import { X, Paperclip, Loader2, History } from "lucide-react"
@@ -20,10 +20,11 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { STATUS_CONFIG, type InwardingResponse } from "./po-types"
+import { IST } from "@/lib/date"
 
 function fmtDate(d: string | null) {
   if (!d) return "—"
-  return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+  return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: IST })
 }
 
 function fmtQty(v: string | number | null | undefined) {
@@ -37,7 +38,7 @@ function fmtMoney(v: string | number | null | undefined) {
 
 async function viewInvoice(s3Key: string) {
   try {
-    const res = await fetch(`/api/files/presign?key=${encodeURIComponent(s3Key)}&view=1`)
+    const res = await fetch(`/api/v1/files/presign?key=${encodeURIComponent(s3Key)}&view=1`)
     const data = await res.json()
     if (data.url) window.open(data.url, "_blank", "noopener,noreferrer")
   } catch {

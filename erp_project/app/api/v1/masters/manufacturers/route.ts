@@ -1,10 +1,10 @@
 // API route for Manufacturers → table `mfgs`.
 //
 // Called by ManufacturersClient's AddRecordDialog / CsvImportDialog
-// (endpoint="/api/masters/manufacturers"). On success the client refreshes the
+// (endpoint="/api/v1/masters/manufacturers"). On success the client refreshes the
 // page, re-running ManufacturersPage's SELECT.
 //
-// POST /api/masters/manufacturers
+// POST /api/v1/masters/manufacturers
 //   Request  { action: "create", name, ... }
 //     Process → auto-generate code (MFG-<serial>-<XX>) + INSERT one manufacturer.
 //     Response 200 { ok, approval_id } · 400 (validation, via withGateway) · 500 { error }
@@ -50,6 +50,7 @@ import { mfgActionSchema } from "@/lib/validation/manufacturers"
 import { assertNoDuplicateBankingFields, insertMfgWithGeneratedCode } from "@/lib/master-routes/material-utils"
 import { type EditCandidate, findBestEditMatch, fetchEditMatchCandidates } from "@/lib/master-routes/edit-match"
 import { stageMfgBulkRows } from "@/lib/approvals/handlers/manufacturers"
+import { monthIST } from "@/lib/date"
 
 type MfgDetailRow = {
   id: number; mfg_id: number; status: string; location: string | null
@@ -158,7 +159,7 @@ export const POST = withGateway({
       let skipped = 0
       try {
         await conn.beginTransaction()
-        const s3Folder = `imports/manufacturers/${new Date().toISOString().slice(0, 7)}`
+        const s3Folder = `imports/manufacturers/${monthIST()}`
         const result = await stageMfgBulkRows(conn, rows, userId, s3Folder)
         staged = result.staged
         skipped = result.skipped
@@ -430,7 +431,7 @@ export const POST = withGateway({
         // staged file must only ever contain new records (see the "bulk"
         // action above), so stageMfgBulkRows can't reuse `key` as-is (the
         // originally-uploaded file has every row, edits included).
-        const s3Folder = `imports/manufacturers/${new Date().toISOString().slice(0, 7)}`
+        const s3Folder = `imports/manufacturers/${monthIST()}`
         const result = await stageMfgBulkRows(conn, rawRows, userId, s3Folder)
         staged = result.staged
         skipped = result.skipped

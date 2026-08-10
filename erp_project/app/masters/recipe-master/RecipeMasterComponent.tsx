@@ -1,9 +1,9 @@
 "use client"
 
 /**
- * CLIENT component for /masters/bom-master.
+ * CLIENT component for /masters/recipe-master.
  *
- * Receives a paginated BOM slice from the server page (one row per BOM
+ * Receives a paginated Recipe slice from the server page (one row per Recipe
  * header). Owns the URL-synced search/status filters and the toolbar, and
  * composes the table + detail panel — their shared selection/edit state
  * lives in useBomDetailPanel.
@@ -26,17 +26,17 @@ import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { EntityHistoryDialog } from "@/components/masters/EntityHistoryDialog"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { BomCreationWizard } from "./BomCreationWizard"
-import { BOM_BULK_CSV_FIELDS } from "./bom-bulk-fields"
-import { type BomMaterialOption } from "./BomLineEditorGrid"
-import { BomTable } from "./BomTable"
-import { BomDetailPanel } from "./BomDetailPanel"
-import { BomEditDialog } from "./BomEditDialog"
-import { useBomDetailPanel } from "./useBomDetailPanel"
+import { RecipeCreationWizard } from "./RecipeCreationWizard"
+import { RECIPE_BULK_CSV_FIELDS } from "./recipe-bulk-fields"
+import { type RecipeMaterialOption } from "./RecipeLineEditorGrid"
+import { RecipeTable } from "./RecipeTable"
+import { RecipeDetailPanel } from "./RecipeDetailPanel"
+import { RecipeEditDialog } from "./RecipeEditDialog"
+import { useBomDetailPanel } from "./useRecipeDetailPanel"
 import type { AccessLevel } from "@/lib/permissions"
-import type { BomListItem, Sku } from "@/types/masters"
+import type { RecipeListItem, Sku } from "@/types/masters"
 
-export default function BOMMasterComponent({
+export default function RecipeMasterComponent({
   rows,
   total,
   page,
@@ -48,15 +48,15 @@ export default function BOMMasterComponent({
   pmMaterials,
   accessLevel,
 }: {
-  rows: BomListItem[]
+  rows: RecipeListItem[]
   total: number
   page: number
   pageSize: number
   currentSearch: string
   currentStatus: string
   skus: Sku[]
-  rmMaterials: BomMaterialOption[]
-  pmMaterials: BomMaterialOption[]
+  rmMaterials: RecipeMaterialOption[]
+  pmMaterials: RecipeMaterialOption[]
   accessLevel: AccessLevel
 }) {
   const router       = useRouter()
@@ -92,7 +92,7 @@ export default function BOMMasterComponent({
 
   const panel = useBomDetailPanel()
   // Row-level approval/audit-trail dialog — distinct from the archived-
-  // recipe-content "BOM History" page linked below.
+  // recipe-content "Recipe History" page linked below.
   const [historyBomId, setHistoryBomId] = useState<number | null>(null)
 
   return (
@@ -101,10 +101,10 @@ export default function BOMMasterComponent({
       <MasterToolbar>
         <UrlSearchInput
           initialValue={currentSearch}
-          placeholder="Search by BOM code or SKU code…"
+          placeholder="Search by Recipe code or SKU code…"
         />
 
-        {/* BOM status filter */}
+        {/* Recipe status filter */}
         <select
           value={draftStatus || "all"}
           onChange={(e) =>
@@ -128,28 +128,28 @@ export default function BOMMasterComponent({
             variant="outline"
             size="sm"
             className="h-8 gap-1.5"
-            onClick={() => router.push("/masters/bom-master/history")}
+            onClick={() => router.push("/masters/recipe-master/history")}
           >
             <History className="h-3.5 w-3.5" />
             Recipe Archive
           </Button>
           <DownloadButton
-            endpoint="/api/masters/bom-master/export"
-            label="BOM Master"
+            endpoint="/api/v1/masters/recipe-master/export"
+            label="Recipe Master"
           />
           {canEdit && (
             <>
               <CsvImportDialog
-                entityLabel="BOM"
-                title="Bulk Upload BOMs via CSV"
-                endpoint="/api/masters/bom-master"
+                entityLabel="Recipe"
+                title="Bulk Upload Recipes via CSV"
+                endpoint="/api/v1/masters/recipe-master"
                 templateFilename="bom_bulk_template.csv"
-                fields={BOM_BULK_CSV_FIELDS}
+                fields={RECIPE_BULK_CSV_FIELDS}
                 enableDuplicateCheck
                 requireAllValid
                 onSuccess={refresh}
               />
-              <BomCreationWizard
+              <RecipeCreationWizard
                 skus={skus}
                 rmMaterials={rmMaterials}
                 pmMaterials={pmMaterials}
@@ -171,7 +171,7 @@ export default function BOMMasterComponent({
             panel.selectedBomId != null ? "w-[58%] shrink-0" : "w-full"
           )}
         >
-          <BomTable
+          <RecipeTable
             rows={rows}
             total={total}
             page={page}
@@ -197,7 +197,7 @@ export default function BOMMasterComponent({
           )}
         >
           {panel.selectedBomId != null && (
-            <BomDetailPanel
+            <RecipeDetailPanel
               detail={panel.detail}
               detailLoading={panel.detailLoading}
               detailError={panel.detailError}
@@ -217,9 +217,9 @@ export default function BOMMasterComponent({
 
       </div>
 
-      {/* ── Edit dialog — opened via "Update Existing BOM" or the table's
+      {/* ── Edit dialog — opened via "Update Existing Recipe" or the table's
              per-row Edit button, kept separate from the detail panel above ── */}
-      <BomEditDialog
+      <RecipeEditDialog
         open={panel.editMode}
         bomCode={panel.detail?.bom_code ?? null}
         rmRows={panel.editRmRows}

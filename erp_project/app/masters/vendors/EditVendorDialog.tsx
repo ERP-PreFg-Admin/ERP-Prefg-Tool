@@ -63,7 +63,7 @@ export function EditVendorDialog({
 
       if (vendor.status === "rejected") {
         setLoadingInfo(true)
-        fetch(`/api/approvals/entity?module=VENDOR&entity_id=${vendor.vendor_id}`)
+        fetch(`/api/v1/approvals/entity?module=VENDOR&entity_id=${vendor.vendor_id}`)
           .then((r) => r.json())
           .then((data) => {
             setRejection(data.rejection ?? null)
@@ -92,7 +92,7 @@ export function EditVendorDialog({
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch("/api/masters/vendors", {
+      const res = await fetch("/api/v1/masters/vendors", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "update", vendor_id: vendor!.vendor_id, ...form }),

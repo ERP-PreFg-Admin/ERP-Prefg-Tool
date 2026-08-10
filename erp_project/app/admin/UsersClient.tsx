@@ -4,7 +4,7 @@
  * CLIENT component for /admin (Users tab).
  *
  * Owns search (client-side — the user list is tens of rows, not thousands) and
- * the add/edit dialog. Mutations go to /api/admin/users, then router.refresh()
+ * the add/edit dialog. Mutations go to /api/v1/admin/users, then router.refresh()
  * re-runs the server page.
  *
  * A user with no roles is the quiet failure this table exists to surface: the
@@ -17,11 +17,11 @@ import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Pencil, UserPlus, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { MasterToolbar, MasterToolbarActions } from "@/components/masters/MasterToolbar"
+import { SearchInput } from "@/components/masters/SearchInput"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import { StatusBadge } from "@/components/masters/StatusBadge"
 import {
@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils"
 import type { AdminUser } from "@/lib/queries/users"
 import { splitRoles } from "./authority"
 import { UserDialog } from "./UserDialog"
+import { IST } from "@/lib/date"
 
 /** DATETIME(0) columns arrive as Date over the RSC boundary; nulls as null. */
 function formatDate(value: Date | string | null) {
@@ -39,7 +40,7 @@ function formatDate(value: Date | string | null) {
   const d = new Date(value)
   return Number.isNaN(d.getTime())
     ? null
-    : d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+    : d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST })
 }
 
 /** Absent dates mean different things per column, so neither says "—". */
@@ -136,9 +137,9 @@ export default function UsersClient({
   return (
     <>
       <MasterToolbar>
-        <Input
+        <SearchInput
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={setSearch}
           placeholder="Search by name, email or role…"
           className="sm:max-w-xs"
         />

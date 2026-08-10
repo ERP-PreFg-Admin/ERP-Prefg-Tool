@@ -5,20 +5,20 @@
 // Reads are NOT here: the admin pages query lib/queries/users.ts server-side,
 // the same way every masters page does. This route is mutations only.
 //
-// POST /api/admin/users
+// POST /api/v1/admin/users
 //   Request  { name, email, status, roles: string[] }
 //     Process → INSERT users + one user_roles row per role, in one transaction.
 //       The person can then sign in with Google: lib/auth.ts' signIn callback
 //       whitelists on this row's email + status. Nothing is emailed.
 //     Response 200 { ok, user } · 409 { error } duplicate email · 400 · 500
 //
-// PATCH /api/admin/users
+// PATCH /api/v1/admin/users
 //   Request  { id, name, status, roles: string[] }
 //     Process → UPDATE users, then replace the user's roles wholesale.
 //     Response 200 { ok, user } · 404 · 400 · 500
 //
 // There is intentionally no DELETE: users.id is referenced by approvals,
-// sessions, session_history, master_* and supplier_invoices. Setting
+// sessions, session_history, master_* and invoice_mfg. Setting
 // status = 'inactive' is the deactivation — signIn refuses those at login.
 //
 // Auth + body validation handled by withGateway (see lib/gateway/with-gateway.ts).

@@ -13,12 +13,8 @@ import { IconActionButton } from "@/components/ui/icon-action-button"
 import { StatusBadge } from "@/components/masters/StatusBadge"
 import { TruncatedCell } from "@/components/masters/TruncatedCell"
 import type { RMByMfg, Vendor, Mfg } from "@/types/masters"
-import {
-  RmRateTable,
-  fmtDate,
-  type AnyRow,
-  type ColumnDef,
-} from "./RmRateTable"
+import type { AnyRow, ColumnDef } from "@/components/masters/DataTable"
+import { RmRateTable, fmtDate } from "./RmRateTable"
 import { MfgDetailDialog } from "./MfgDetailDialog"
 import { EditRmMfgRateDialog } from "./EditRmMfgRateDialog"
 import { RateHistoryDialog } from "@/components/masters/RateHistoryDialog"

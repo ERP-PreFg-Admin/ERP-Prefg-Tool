@@ -15,10 +15,9 @@
  * Client-side sort applies on top of that to order within the current page.
  */
 
-import { useMemo, useState, useEffect, type ReactNode } from "react"
+import { useState, useEffect, type ReactNode } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { Filter, X } from "lucide-react"
-import { SortableTableHead, StaticTableHead } from "@/components/ui/sortable-table-head"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ToggleButton } from "@/components/ui/toggle-button"
@@ -26,12 +25,11 @@ import { Card, CardContent } from "@/components/ui/card"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import { Label } from "@/components/ui/label"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+  DataTable,
+  useTableSort,
+  type AnyRow,
+  type ColumnDef,
+} from "@/components/masters/DataTable"
 import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import {
@@ -40,32 +38,22 @@ import {
 } from "@/components/masters/MasterToolbar"
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { DownloadButton } from "@/components/masters/DownloadButton"
-import { cn } from "@/lib/utils"
 import { AddRawMaterialWizard } from "./AddRawMaterialWizard"
 import { RM_VRM_BULK_FIELDS } from "./rm-vrm-bulk-fields"
 import { RM_MRM_BULK_FIELDS } from "./rm-mrm-bulk-fields"
 import type { Vendor, Mfg } from "@/types/masters"
+import { IST } from "@/lib/date"
 
 /* ────────────────────────── Column config ──────────────────────────────────
- * A view = an ordered list of ColumnDef. Header + body are generated from the
- * SAME list, so they can never drift out of sync. Rows are read generically
- * (string-keyed) because the two views have different shapes.
+ * A view = an ordered list of ColumnDef. Rows are read generically
+ * (string-keyed) because the two views have different shapes. The type and the
+ * rendering both live in components/masters/DataTable — shared with PmRateTable
+ * and MaterialMasterClient so the three tables stay identical.
  * ────────────────────────────────────────────────────────────────────────── */
-export type AnyRow = Record<string, unknown>
-export type ColumnDef = {
-  key: string
-  label: string
-  sortAs: "text" | "num" | "date"
-  /** Fixed pixel width for narrow/fixed-format columns. Columns without a
-   *  width share the remaining space equally (table-layout: fixed). */
-  width?: string
-  className?: string
-  render?: (row: AnyRow) => ReactNode
-}
 
 // ── Shared cell helpers reused by both column configs ───────────────────────
 export const fmtDate = (v: unknown) =>
-  v ? new Date(v as string).toLocaleDateString("en-CA") : "—"
+  v ? new Date(v as string).toLocaleDateString("en-CA", { timeZone: IST }) : "—"
 
 export const statusBadge = (row: AnyRow) => (
   <Badge
@@ -141,9 +129,8 @@ export function RmRateTable({
   // CSV (vendor vs manufacturer) the toolbar should offer.
   const isMfgView = currentMfgCode !== undefined
 
-  // Client-side sort state (sorts within the current DB page only).
-  const [sortKey, setSortKey] = useState<string | null>(null)
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+  // Client-side sort (sorts within the current DB page only).
+  const { sorted, sortKey, sortDir, toggleSort } = useTableSort(rows, columns)
 
   // Filter panel open/close.
   const [showFilters, setShowFilters] = useState(false)
@@ -188,16 +175,6 @@ export function RmRateTable({
   // eslint-disable-next-line react-hooks/set-state-in-effect -- resets local draft field when the URL-driven mfg effective-from filter changes
   useEffect(() => { setDraftMfgEffectiveFrom(currentMfgEffectiveFrom ?? "") }, [currentMfgEffectiveFrom])
 
-  // Click a header: same column → flip direction; new column → sort ascending.
-  const toggleSort = (key: string) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
-    } else {
-      setSortKey(key)
-      setSortDir("asc")
-    }
-  }
-
   /**
    * Merge URL-param overrides, reset to page 1, then navigate.
    * Preserves ?view= so switching status/search doesn't flip vendor ↔ mfg view.
@@ -211,32 +188,6 @@ export function RmRateTable({
     params.set("page", "1")
     router.push(`${pathname}?${params.toString()}`)
   }
-
-  // Sort within current page — rows are already DB-filtered and sliced by the server.
-  const sorted = useMemo(() => {
-    if (!sortKey) return rows
-    const col = columns.find((c) => c.key === sortKey)
-    const dir = sortDir === "asc" ? 1 : -1
-    return [...rows].sort((a, b) => {
-      const av = a[sortKey]
-      const bv = b[sortKey]
-      // Empty/null values always sink to the bottom, regardless of direction.
-      const aEmpty = av === null || av === undefined || av === ""
-      const bEmpty = bv === null || bv === undefined || bv === ""
-      if (aEmpty && bEmpty) return 0
-      if (aEmpty) return 1
-      if (bEmpty) return -1
-      let cmp = 0
-      if (col?.sortAs === "num") {
-        cmp = Number(av) - Number(bv)
-      } else if (col?.sortAs === "date") {
-        cmp = new Date(av as string).getTime() - new Date(bv as string).getTime()
-      } else {
-        cmp = String(av).localeCompare(String(bv), undefined, { numeric: true })
-      }
-      return cmp * dir
-    })
-  }, [rows, columns, sortKey, sortDir])
 
   const hasFilters = currentSearch || currentStatus
     || currentMake || currentVendorCode || currentRateMin || currentRateMax || currentEffectiveFrom
@@ -322,14 +273,14 @@ export function RmRateTable({
 
         <MasterToolbarActions>
           <DownloadButton
-            endpoint="/api/masters/raw-materials/export"
+            endpoint="/api/v1/masters/raw-materials/export"
             label="Raw Materials"
           />
           {isMfgView ? (
             <CsvImportDialog
               entityLabel="Manufacturer Rate"
               entityLabelPlural="Manufacturer Rates"
-              endpoint="/api/masters/raw-materials/mrm-bulk"
+              endpoint="/api/v1/masters/raw-materials/mrm-bulk"
               templateFilename="rm_manufacturer_rate_template.csv"
               fields={RM_MRM_BULK_FIELDS}
               enableDuplicateCheck
@@ -340,7 +291,7 @@ export function RmRateTable({
             <CsvImportDialog
               entityLabel="Vendor Rate"
               entityLabelPlural="Vendor Rates"
-              endpoint="/api/masters/raw-materials/vrm-bulk"
+              endpoint="/api/v1/masters/raw-materials/vrm-bulk"
               templateFilename="rm_vendor_rate_template.csv"
               fields={RM_VRM_BULK_FIELDS}
               enableDuplicateCheck
@@ -358,7 +309,7 @@ export function RmRateTable({
 
       {/* ── Filter panel ── */}
       {showFilters && (
-        <Card className="border-blue-200 mb-5">
+        <Card className="border-blue-200 dark:border-blue-900 mb-5">
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-medium">Filters</span>
@@ -524,61 +475,19 @@ export function RmRateTable({
           onClearFilters={hasFilters ? () => navigate({ search: "", status: "", type: "", make: "", vendor_code: "", rate_min: "", rate_max: "", effective_from: "", mfg_code: "", mfg_rate_min: "", mfg_rate_max: "", mfg_effective_from: "" }) : undefined}
         />
         <CardContent className="p-0">
-          {/* table-layout:fixed + per-column widths cap narrow/fixed-format
-              columns; free-text columns (no width) share what's left and
-              truncate via TruncatedCell instead of forcing the whole table
-              to overflow the viewport. */}
-          <Table className="[&_th]:whitespace-nowrap table-fixed">
-            <TableHeader>
-              <TableRow>
-                {columns.map((col) => (
-                  <SortableTableHead
-                    key={col.key}
-                    sortKey={col.key}
-                    activeKey={sortKey}
-                    sortDir={sortDir}
-                    onSort={toggleSort}
-                    width={col.width}
-                  >
-                    {col.label}
-                  </SortableTableHead>
-                ))}
-                {actionColumn && <StaticTableHead width="112px" />}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sorted.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={columns.length + (actionColumn ? 1 : 0)}
-                    className="text-center text-muted-foreground py-10"
-                  >
-                    {hasFilters
-                      ? "No raw materials match your filters."
-                      : "No records found."}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                sorted.map((row, index) => (
-                  <TableRow key={index}>
-                    {columns.map((col) => (
-                      <TableCell
-                        key={col.key}
-                        className={cn("overflow-hidden text-ellipsis", col.className ?? "text-muted-foreground")}
-                      >
-                        {col.render
-                          ? col.render(row)
-                          : ((row[col.key] as ReactNode) ?? "—")}
-                      </TableCell>
-                    ))}
-                    {actionColumn && (
-                      <TableCell>{actionColumn(row)}</TableCell>
-                    )}
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+          <DataTable
+            rows={sorted}
+            columns={columns}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            onSort={toggleSort}
+            actionColumn={actionColumn}
+            emptyMessage={
+              hasFilters
+                ? "No raw materials match your filters."
+                : "No records found."
+            }
+          />
 
           <PaginationBar total={total} page={page} pageSize={pageSize} />
         </CardContent>

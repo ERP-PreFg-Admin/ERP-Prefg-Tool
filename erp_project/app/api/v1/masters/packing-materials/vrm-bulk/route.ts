@@ -1,7 +1,7 @@
-// POST /api/masters/packing-materials/vrm-bulk
+// POST /api/v1/masters/packing-materials/vrm-bulk
 //
-// Bulk CSV upload for PM × Vendor rates (pm_vrm_dynamic). Separate endpoint
-// from /api/masters/packing-materials — see raw-materials/vrm-bulk/route.ts's
+// Bulk CSV upload for PM × Vendor rates (cost_master_pm_ven). Separate endpoint
+// from /api/v1/masters/packing-materials — see raw-materials/vrm-bulk/route.ts's
 // header comment for why this can't share that route's own action names.
 
 import { NextResponse } from "next/server"
@@ -16,6 +16,7 @@ import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } 
 import logger from "@/lib/logger"
 import { stageBulkUploadApproval, uploadRowsAsCsv } from "@/lib/master-routes/bulk-approval"
 import { applyVendorRateApproval } from "@/lib/master-routes/material-utils"
+import { todayIST, monthIST } from "@/lib/date"
 
 const looseRow = z.record(z.string(), z.unknown())
 
@@ -118,7 +119,7 @@ export const POST = withGateway({
     let skipped = 0
     try {
       await conn.beginTransaction()
-      const today = new Date().toISOString().slice(0, 10)
+      const today = todayIST()
       const createRows: Record<string, string>[] = []
       let firstApprovalId: number | null = null
 
@@ -156,7 +157,7 @@ export const POST = withGateway({
 
       let batchApprovalId: number | null = null
       if (createRows.length > 0) {
-        const yyyymm = new Date().toISOString().slice(0, 7)
+        const yyyymm = monthIST()
         const { key, filename } = await uploadRowsAsCsv(createRows, `imports/pm-vrm-bulk/${yyyymm}`, "pm_vrm_bulk")
         batchApprovalId = await stageBulkUploadApproval(conn, {
           userId, module: "PM_VRM_BULK", s3Key: key, filename, rowCount: createRows.length,

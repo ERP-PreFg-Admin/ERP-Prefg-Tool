@@ -1,5 +1,5 @@
 /**
- * GET /api/masters/packing-materials/export
+ * GET /api/v1/masters/packing-materials/export
  *
  * Exports packing material records for either the vendor or manufacturer rate
  * view. The `view` param mirrors the toggle on /masters/packing-materials so
@@ -99,7 +99,7 @@ export const GET = withGateway({
         })
 
     logger.info({message:"Packing materials export served." , userId: session.user.id , format, view: viewLabel, rowCount: rows.length})
-    console.log(`[/api/masters/packing-materials/export] served ${rows.length} rows as ${format} (view=${viewLabel})`)
+    console.log(`[/api/v1/masters/packing-materials/export] served ${rows.length} rows as ${format} (view=${viewLabel})`)
 
     if (format === "xlsx") {
       const buffer = await buildXlsx(sheetName, columns, rows)
@@ -122,7 +122,7 @@ export const GET = withGateway({
     })
   } catch (err) {
     logger.error({message:"Packing material export failed", userId: session.user.id , format, view:viewLabel , error:err})
-    console.error("[/api/masters/packing-materials/export]", err)
+    console.error("[/api/v1/masters/packing-materials/export]", err)
     return NextResponse.json({ error: "Export failed" }, { status: 500 })
   }
   },

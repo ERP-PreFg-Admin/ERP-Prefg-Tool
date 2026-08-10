@@ -17,8 +17,8 @@ const docViewButtonVariants = cva(
   {
     variants: {
       variant: {
-        old: "bg-red-50 border-red-100 text-red-700 hover:bg-red-100",
-        new: "bg-emerald-50 border-emerald-100 text-emerald-700 hover:bg-emerald-100",
+        old: "bg-red-50 border-red-200 text-red-800 hover:bg-red-100 dark:bg-red-950/30 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/60",
+        new: "bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:border-emerald-900 dark:text-emerald-300 dark:hover:bg-emerald-950/60",
       },
     },
   }
@@ -32,7 +32,7 @@ export function DocViewButton({ s3Key, variant }: { s3Key: string; variant: "old
     setOpening(true)
     setFailed(false)
     try {
-      const res  = await fetch(`/api/files/presign?key=${encodeURIComponent(s3Key)}`)
+      const res  = await fetch(`/api/v1/files/presign?key=${encodeURIComponent(s3Key)}`)
       const data = await res.json()
       if (data.url) window.open(data.url, "_blank", "noopener,noreferrer")
       else setFailed(true)

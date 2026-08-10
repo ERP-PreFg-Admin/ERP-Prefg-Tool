@@ -9,9 +9,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
+import { Callout } from "@/components/ui/callout"
 import type { EditData, ImpromptuForm, MfgOption, SkuOption, WarehouseOption } from "./po-types"
 import { EMPTY_FORM } from "./po-types"
 import { useQuotedRate } from "./useQuotedRate"
+import { todayIST } from "@/lib/date"
 
 export default function ImpromptuPODialog({
   open, onClose, skuOptions, mfgOptions, warehouseOptions, onCreated, editData,
@@ -31,7 +33,7 @@ export default function ImpromptuPODialog({
   const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError]     = useState("")
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayIST()
 
   // Default destination to the first Mother Warehouse (MWH).
   const defaultDest = warehouseOptions.find((w) => w.type === "MWH")?.name ?? ""
@@ -99,12 +101,12 @@ export default function ImpromptuPODialog({
         reason:       form.reason.trim(),
       }
       const res = isEdit
-        ? await fetch(`/api/purchase-orders/${editData!.id}`, {
+        ? await fetch(`/api/v1/purchase-orders/${editData!.id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           })
-        : await fetch("/api/purchase-orders", {
+        : await fetch("/api/v1/purchase-orders", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -154,11 +156,11 @@ export default function ImpromptuPODialog({
             />
             {errors.sku_code && <p className="text-xs text-destructive">{errors.sku_code}</p>}
             {skuNotActive && (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <Callout variant="warning">
                 This SKU is currently{" "}
                 <strong className="capitalize">{selectedSku!.status.replace(/_/g, " ")}</strong>.
                 A PO can only be raised against an <strong>active</strong> SKU.
-              </div>
+              </Callout>
             )}
           </div>
 

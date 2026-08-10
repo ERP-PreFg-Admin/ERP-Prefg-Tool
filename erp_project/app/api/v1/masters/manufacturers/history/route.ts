@@ -1,4 +1,4 @@
-// GET /api/masters/manufacturers/history?mfg_id=123
+// GET /api/v1/masters/manufacturers/history?mfg_id=123
 //
 // Returns the full audit trail (create/edit + approve/reject resolution) for
 // one manufacturer from history_masters_edits, newest first. Backs the
@@ -17,7 +17,7 @@ export const GET = withGateway({
   handler: async ({ req, session, ctx }) => {
     const { searchParams } = new URL(req.url)
     const mfgId = searchParams.get("mfg_id")
-    const logCtx = { ...ctx, route: "/api/masters/manufacturers/history" }
+    const logCtx = { ...ctx, route: "/api/v1/masters/manufacturers/history" }
 
     if (!mfgId || isNaN(Number(mfgId))) {
       throw new ApiError(400, "validation_error", "mfg_id is required")

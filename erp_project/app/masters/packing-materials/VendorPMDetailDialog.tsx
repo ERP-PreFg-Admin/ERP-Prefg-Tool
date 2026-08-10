@@ -58,7 +58,7 @@ export function VendorPMDetailDialog({
               {vr.curr_rate != null ? `₹${Number(vr.curr_rate).toFixed(2)}` : "—"}
             </span>
             {isBest && (
-              <Badge variant="success" className="border border-emerald-200 text-[10px] px-1.5 py-0">
+              <Badge variant="success" className="border border-emerald-200 dark:border-emerald-900 text-[10px] px-1.5 py-0">
                 Best
               </Badge>
             )}

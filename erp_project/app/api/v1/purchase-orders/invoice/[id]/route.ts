@@ -1,4 +1,4 @@
-// GET /api/purchase-orders/invoice/[id]
+// GET /api/v1/purchase-orders/invoice/[id]
 // One invoice: header, its line items, and the POs each line resolved to —
 // both the inward PO it raised and the order it was received against.
 // Fetched on expand from the Invoice History dialog rather than shipped with

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import type { MfgLineOption, MiscCostLine, MiscCostType } from "@/types/masters"
+import { todayIST } from "@/lib/date"
 
 const TYPE_LABEL: Record<MiscCostType, string> = {
   jw: "Job Work",
@@ -22,7 +23,7 @@ const isPercentType = (t: MiscCostType) => t === "rm_loss" || t === "pm_loss"
 
 type FormState = {
   type: MiscCostType
-  bom_id: string
+  recipe_id: string
   cost: string
   effective_from: string
   effective_till: string
@@ -31,9 +32,9 @@ type FormState = {
 
 const EMPTY_FORM: FormState = {
   type: "jw",
-  bom_id: "",
+  recipe_id: "",
   cost: "",
-  effective_from: new Date().toISOString().slice(0, 10),
+  effective_from: todayIST(),
   effective_till: "",
   status: "active",
 }
@@ -62,7 +63,7 @@ export default function MiscCostDialog({
     if (editData) {
       setForm({
         type: editData.type,
-        bom_id: String(editData.bom_id),
+        recipe_id: String(editData.recipe_id),
         cost: editData.cost != null ? String(editData.cost) : "",
         effective_from: editData.effective_from ?? "",
         effective_till: editData.effective_till ?? "",
@@ -80,7 +81,7 @@ export default function MiscCostDialog({
   }
 
   async function handleSubmit() {
-    if (!editData && !form.bom_id) { setApiError("Select a SKU / BOM."); return }
+    if (!editData && !form.recipe_id) { setApiError("Select a SKU / Recipe."); return }
     if (!form.cost) { setApiError(isPercent ? "Enter a wastage %." : "Enter a cost."); return }
     if (isPercent && (Number(form.cost) < 0 || Number(form.cost) > 100)) { setApiError("Wastage % must be between 0 and 100."); return }
 
@@ -97,7 +98,7 @@ export default function MiscCostDialog({
           }
         : {
             action: "create-misc",
-            bom_id: Number(form.bom_id),
+            recipe_id: Number(form.recipe_id),
             mfg_id: mfgId,
             type: form.type,
             cost: Number(form.cost),
@@ -106,7 +107,7 @@ export default function MiscCostDialog({
             status: form.status,
           }
 
-      const res = await fetch("/api/manufacturing/misc-costs", {
+      const res = await fetch("/api/v1/manufacturing/misc-costs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -150,11 +151,11 @@ export default function MiscCostDialog({
 
           {!editData && (
             <div className="grid gap-1.5">
-              <Label htmlFor="mc-bom">SKU / BOM <span className="text-destructive">*</span></Label>
+              <Label htmlFor="mc-bom">SKU / Recipe <span className="text-destructive">*</span></Label>
               <FuzzySelect
                 options={options}
-                value={form.bom_id}
-                onChange={(v) => set("bom_id", v)}
+                value={form.recipe_id}
+                onChange={(v) => set("recipe_id", v)}
                 getValue={(o) => String(o.id)}
                 getLabel={(o) => `${o.sku_code ?? "—"} — ${o.sku_name ?? o.bom_code} (${o.bom_code})`}
                 searchKeys={["sku_code", "sku_name", "bom_code"]}

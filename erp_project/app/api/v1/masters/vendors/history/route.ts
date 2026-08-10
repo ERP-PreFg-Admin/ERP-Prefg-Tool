@@ -1,4 +1,4 @@
-// GET /api/masters/vendors/history?vendor_id=123
+// GET /api/v1/masters/vendors/history?vendor_id=123
 //
 // Returns the full audit trail (create/edit + approve/reject resolution) for
 // one vendor from history_masters_edits, newest first. Backs the "Edit
@@ -17,7 +17,7 @@ export const GET = withGateway({
   handler: async ({ req, session, ctx }) => {
     const { searchParams } = new URL(req.url)
     const vendorId = searchParams.get("vendor_id")
-    const logCtx = { ...ctx, route: "/api/masters/vendors/history" }
+    const logCtx = { ...ctx, route: "/api/v1/masters/vendors/history" }
 
     if (!vendorId || isNaN(Number(vendorId))) {
       throw new ApiError(400, "validation_error", "vendor_id is required")

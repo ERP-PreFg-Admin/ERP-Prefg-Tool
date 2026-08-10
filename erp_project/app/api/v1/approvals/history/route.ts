@@ -1,6 +1,6 @@
-// GET /api/approvals/history?module=&status=&page=&size=
+// GET /api/v1/approvals/history?module=&status=&page=&size=
 // Returns paginated, resolved (approved/rejected) approvals with field-level
-// diff items — the audit trail counterpart to GET /api/approvals (pending).
+// diff items — the audit trail counterpart to GET /api/v1/approvals (pending).
 // Any authenticated user can view; there is no action endpoint here since
 // history rows are read-only (already actioned).
 
@@ -28,7 +28,7 @@ type EntityLabelRow = { code: string | null; name: string | null; secondary_code
 export const GET = withGateway({
   access: { pageSlug: "/approvals", level: "viewer" },
   handler: async ({ req, ctx }) => {
-  const logCtx = { ...ctx, route: "/api/approvals/history", module: "GET_APPROVAL_HISTORY" }
+  const logCtx = { ...ctx, route: "/api/v1/approvals/history", module: "GET_APPROVAL_HISTORY" }
 
   const sp = Object.fromEntries(req.nextUrl.searchParams)
   const { page, size, offset } = parsePaginationParams(sp)

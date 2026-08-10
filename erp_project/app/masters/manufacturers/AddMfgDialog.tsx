@@ -95,13 +95,13 @@ export function AddMfgDialog({ onSuccess }: { onSuccess?: () => void }) {
         fd.append("file",   file)
         fd.append("folder", sessionFolder.current)
         fd.append("field",  tab.field)
-        const up = await fetch("/api/upload", { method: "POST", body: fd })
+        const up = await fetch("/api/v1/upload", { method: "POST", body: fd })
         const upData = await up.json()
         if (!up.ok) throw new Error(upData.error || `Failed to upload ${tab.label}`)
         docKeys[tab.key] = upData.key
       }
 
-      const res = await fetch("/api/masters/manufacturers", {
+      const res = await fetch("/api/v1/masters/manufacturers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "create", ...form, ...docKeys }),

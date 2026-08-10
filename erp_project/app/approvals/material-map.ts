@@ -1,6 +1,6 @@
 import type { MaterialMap } from "./ApprovalCard"
 
-/** Build the RM/PM id → {code, name} lookup consumed by ApprovalCard's BOM
+/** Build the RM/PM id → {code, name} lookup consumed by ApprovalCard's Recipe
  *  line diff table. `rmRows`/`pmRows` come from the cached active-material
  *  reference lists (see lib/cached-reference-data.ts). */
 export function buildMaterialMap(

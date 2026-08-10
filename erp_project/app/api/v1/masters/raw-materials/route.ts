@@ -2,14 +2,14 @@ import { NextResponse } from "next/server"
 import logger from "@/lib/logger"
 import { query } from "@/lib/db"
 import { getRmDistinctMakes, getRmDistinctInciNames } from "@/lib/cached-reference-data"
-import { bom as bomSql } from "@/lib/queries/bom"
+import { bom as bomSql } from "@/lib/queries/recipe"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { rmActionSchema } from "@/lib/validation/raw-materials"
 import {
   rmCreate, rmCheckDuplicate, rmCheckVendor,
   rmCreateFull, rmAddRates, rmBulk, rmS3Bulk,
   rmCheckMakeFuzzy, rmCheckDuplicatesBulk, rmGetMaterials,
-} from "@/app/api/masters/raw-materials/rm-handler"
+} from "@/app/api/v1/masters/raw-materials/rm-handler"
 
 export const POST = withGateway({
   schema: rmActionSchema,

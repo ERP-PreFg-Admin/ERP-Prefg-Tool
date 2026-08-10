@@ -1,7 +1,7 @@
 import type{ MasterField } from "@/components/masters/field-config"
 
 /** Pure format check — no DB round-trip needed, unlike the code-existence and
- *  RM%-total checks in app/api/masters/bom-master/route.ts's check_duplicates
+ *  RM%-total checks in app/api/v1/masters/recipe-master/route.ts's check_duplicates
  *  action. Rejects both malformed strings ("abc") and impossible calendar
  *  dates ("2026-13-45", "2026-02-30"). */
 function validateDateStr(raw: string): string | null {
@@ -13,9 +13,9 @@ function validateDateStr(raw: string): string | null {
   return null
 }
 
-export const BOM_BULK_CSV_FIELDS: MasterField[] = [
+export const RECIPE_BULK_CSV_FIELDS: MasterField[] = [
   { key: "sku_code", label: "SKU Code", required: true, placeholder: "e.g. SKU-001", sample: "SKU-001" },
-  { key: "bom_code", label: "BOM Code", placeholder: "Auto-generated if blank", sample: "" },
+  { key: "bom_code", label: "Recipe Code", placeholder: "Auto-generated if blank", sample: "" },
   {
     key: "effective_from", label: "Effective From", required: true,
     placeholder: "YYYY-MM-DD (once per SKU group)", sample: "2026-01-01",
@@ -39,11 +39,11 @@ export const BOM_BULK_CSV_FIELDS: MasterField[] = [
   { key: "uom", label: "UOM", placeholder: "e.g. kg", sample: "kg" },
   {
     key: "reason", label: "Reason for Change",
-    placeholder: "Required if the SKU already has a BOM (once per SKU group)", sample: "",
+    placeholder: "Required if the SKU already has a Recipe (once per SKU group)", sample: "",
   },
   {
     key: "change_type", label: "Type of Change", type: "select",
-    placeholder: "Required if the SKU already has a BOM", sample: "",
+    placeholder: "Required if the SKU already has a Recipe", sample: "",
     options: [
       { value: "rm", label: "RM change" },
       { value: "pm", label: "PM change" },

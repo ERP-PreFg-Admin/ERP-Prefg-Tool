@@ -1,4 +1,4 @@
-// GET /api/manufacturing/[mfgId]/lines/export
+// GET /api/v1/manufacturing/[mfgId]/lines/export
 //
 // Exports every manufacturing line for one manufacturer (active + inactive,
 // now a single merged list — see ManufacturingLinesClient) — same rows and

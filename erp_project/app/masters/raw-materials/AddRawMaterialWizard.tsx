@@ -37,7 +37,7 @@ type VendorEntry = {
   moq: string
   rate_uom: string
   /** Optional tag: "this vendor supplies to this manufacturer" — informational
-   *  only, stored on the rm_vrm_dynamic row, does not create an mrm_fixed row. */
+   *  only, stored on the cost_master_rm_ven row, does not create an mrm_fixed row. */
   mfg_id: number | null
 }
 
@@ -94,7 +94,7 @@ export function AddRawMaterialWizard({
 
   useEffect(() => {
     if (!open) return
-    fetch("/api/masters/raw-materials", {
+    fetch("/api/v1/masters/raw-materials", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "get-materials" }),
@@ -226,7 +226,7 @@ export function AddRawMaterialWizard({
         manufacturers: mfgPayload,
       }
 
-      const res = await fetch("/api/masters/raw-materials", {
+      const res = await fetch("/api/v1/masters/raw-materials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -253,7 +253,7 @@ export function AddRawMaterialWizard({
     setExistingRates((prev) => ({ ...prev, [index]: null }))
     if (!vendorId || !moq.trim() || !material) return
     try {
-      const res = await fetch("/api/masters/raw-materials", {
+      const res = await fetch("/api/v1/masters/raw-materials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -518,9 +518,9 @@ export function AddRawMaterialWizard({
                             </button>
                           </div>
                           {existingRates[i] && (
-                            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                            <Callout variant="warning" className="rounded px-2 py-1">
                               ⚠ Existing rate: ₹{existingRates[i]!.curr_rate} · MOQ {existingRates[i]!.moq} — old values will be archived and updated.
-                            </p>
+                            </Callout>
                           )}
                         </div>
                       ))}

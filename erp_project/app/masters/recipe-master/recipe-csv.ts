@@ -1,10 +1,10 @@
 /**
- * CSV import parsing for BomCreationWizard's Step 4 "Upload CSV" entry
+ * CSV import parsing for RecipeCreationWizard's Step 4 "Upload CSV" entry
  * method. Pure function, no client hooks, so it's easy to unit test in
  * isolation from the wizard's UI state.
  */
 
-import type { BomLineRow, BomMaterialOption } from "./BomLineEditorGrid"
+import type { RecipeLineRow, RecipeMaterialOption } from "./RecipeLineEditorGrid"
 
 export const CSV_HEADER = ["mtrl_type", "mtrl_code", "amount", "uom"]
 
@@ -19,9 +19,9 @@ export function buildBomCsvTemplate(): string {
 
 export function parseBomCsv(
   text: string,
-  rmMaterials: BomMaterialOption[],
-  pmMaterials: BomMaterialOption[]
-): { rows: BomLineRow[]; errors: string[] } {
+  rmMaterials: RecipeMaterialOption[],
+  pmMaterials: RecipeMaterialOption[]
+): { rows: RecipeLineRow[]; errors: string[] } {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0)
   if (lines.length === 0) return { rows: [], errors: ["The file is empty."] }
 
@@ -32,7 +32,7 @@ export function parseBomCsv(
   }
 
   const colIndex = Object.fromEntries(CSV_HEADER.map((c) => [c, header.indexOf(c)]))
-  const rows: BomLineRow[] = []
+  const rows: RecipeLineRow[] = []
   const errors: string[] = []
 
   lines.slice(1).forEach((line, i) => {

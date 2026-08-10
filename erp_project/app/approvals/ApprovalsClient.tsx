@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation"
 import { Check, ShieldCheck, History, ChevronDown, ChevronRight, CheckCheck } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Callout } from "@/components/ui/callout"
 import { Table, TableBody } from "@/components/ui/table"
 import { useToast } from "@/components/ui/toast"
 import type { Approval } from "./approvals-types"
@@ -97,7 +99,7 @@ export default function ApprovalsClient({
   async function handleApprove(approval: Approval) {
     setLoading(true); clearError(approval.id)
     try {
-      const res  = await fetch(`/api/approvals/${approval.id}`, {
+      const res  = await fetch(`/api/v1/approvals/${approval.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "approve" }),
@@ -128,7 +130,7 @@ export default function ApprovalsClient({
   async function handleReject(approval: Approval, remarks: string) {
     setLoading(true)
     try {
-      const res  = await fetch(`/api/approvals/${approval.id}`, {
+      const res  = await fetch(`/api/v1/approvals/${approval.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "reject", remarks }),
@@ -160,7 +162,7 @@ export default function ApprovalsClient({
 
     for (const a of targets) {
       try {
-        const res = await fetch(`/api/approvals/${a.id}`, {
+        const res = await fetch(`/api/v1/approvals/${a.id}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "approve" }),
@@ -191,9 +193,9 @@ export default function ApprovalsClient({
           <div className="flex items-center gap-2.5">
             <h1 className="text-xl font-semibold tracking-tight">Pending Approvals</h1>
             {approvals.length > 0 && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 text-[11px] font-bold text-amber-700">
+              <Badge variant="warning" className="h-5 min-w-5 justify-center px-1.5 text-[11px] font-bold">
                 {approvals.length}
-              </span>
+              </Badge>
             )}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -204,10 +206,10 @@ export default function ApprovalsClient({
         </div>
         <div className="flex items-center gap-2.5">
           {!isApprover && (
-            <div className="flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
+            <Callout variant="warning" className="flex items-center gap-1.5 rounded-full px-3 py-1.5">
               <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
               View only — approvals are done by the Head of each function
-            </div>
+            </Callout>
           )}
           <Button variant="outline" size="sm" className="gap-1.5" onClick={() => router.push("/approvals/history")}>
             <History className="h-3.5 w-3.5" />
@@ -220,7 +222,7 @@ export default function ApprovalsClient({
       {approvals.length === 0 ? (
         <Card className="mx-6 mb-6">
           <CardContent className="flex flex-col items-center justify-center gap-3 py-20 text-center">
-            <div className="rounded-full bg-emerald-50 p-4">
+            <div className="rounded-full bg-emerald-50 p-4 dark:bg-emerald-950/30">
               <Check className="h-6 w-6 text-emerald-600" />
             </div>
             <p className="font-medium">No pending approvals</p>
@@ -272,8 +274,8 @@ export default function ApprovalsClient({
                     { label: "Edits",        list: editItems },
                     { label: "Bulk Uploads", list: bulkItems },
                   ].filter(s => s.list.length > 0)
-                  // BOM diffs span multiple materials × fields and can't collapse into
-                  // one table row, so BOM keeps the card layout; everything else renders
+                  // Recipe diffs span multiple materials × fields and can't collapse into
+                  // one table row, so Recipe keeps the card layout; everything else renders
                   // as a condensed table, one row per approval.
                   const isBomGroup = module === "BOM"
 

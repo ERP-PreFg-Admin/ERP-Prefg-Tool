@@ -1,20 +1,22 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname } from "next/navigation"
 import {
   LayoutDashboard, Database, Factory, CalendarDays,
   Activity, DollarSign, CheckSquare, BarChart2,
   Settings, ChevronLeft, ChevronRight, ChevronDown, LogOut,
-  Package, Truck, FlaskConical, Box, Dot, Lock
+  Package, Truck, FlaskConical, Box, Lock, Sun, Moon, Bug, ExternalLink
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useTheme } from "@/components/ThemeProvider"
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
 import { handleSignOut } from "@/app/actions/auth"
 import type { AccessLevel } from "@/lib/permissions"
 
-type NavChild = { label: string; href: string ,icon?:React.ElementType  }
+type NavChild = { label: string; href: string }
 type NavItem = {
   label: string
   href?: string
@@ -22,18 +24,22 @@ type NavItem = {
   children?: NavChild[]
 }
 
+/** Where "Issues" goes. Swap this one line if the form is ever replaced. */
+const ISSUE_FORM_URL =
+  "https://docs.google.com/forms/d/e/1FAIpQLSdgTR52miUyp1yMvUoi1ir5w5UgtXkoG_2fvq0Lofwd4sk6_Q/viewform"
+
 const NAV: NavItem[] = [
   { label: "Dashboard", href: "/", icon: LayoutDashboard },
   {
     label: "Masters", icon: Database,
     children: [
-      { label: "SKUs",              href: "/masters/skus" , icon: (props) => <Dot className="text-blue-500" {...props} />  },
+      { label: "SKUs",              href: "/masters/skus" },
       { label: "Manufacturers",     href: "/masters/manufacturers" },
       { label: "Vendors",           href: "/masters/vendors" },
       {label: "Material Master",     href:"/masters/material-master"},
       { label: "RM Cost Master",     href: "/masters/raw-materials" },
       { label: "PM Cost Master", href: "/masters/packing-materials" },
-      {label: "Recipe Master" , href: "/masters/bom-master"},
+      {label: "Recipe Master" , href: "/masters/recipe-master"},
     ],
   },
   {
@@ -43,6 +49,7 @@ const NAV: NavItem[] = [
       { label: "FG POs Tracking",    href: "/po-tracking/po-procurement" },
       // { label: "RM/PM Procurement", href: "/po-tracking/rm-pm-procurement" },
       { label: "PO Inwarding",      href: "/po-tracking/po-inwarding" },
+      { label: "Invoices",          href: "/po-tracking/invoices" },
     ],
   },
   {
@@ -68,9 +75,69 @@ interface SidebarProps {
 // down the sidebar.
 const CHILD_CAP = 5
 
+// Drag-to-resize bounds. MIN is where the longest child label ("Approved
+// Procurement Rates") stops being readable; MAX is where the sidebar starts
+// eating the tables it exists to navigate to. DEFAULT matches the old w-56.
+const WIDTH_MIN = 180
+const WIDTH_MAX = 400
+const WIDTH_DEFAULT = 224
+const WIDTH_KEY = "sidebar-width"
+
 export default function Sidebar({ user, mfgs = [], access }: SidebarProps) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
+  const [width, setWidth] = useState(WIDTH_DEFAULT)
+  const [dragging, setDragging] = useState(false)
+  const asideRef = useRef<HTMLElement>(null)
+
+  // Restored after mount, not during render: localStorage doesn't exist on the
+  // server, so reading it inline would render one width on the server and
+  // another on the client. Same reasoning as ThemeProvider.
+  useEffect(() => {
+    const stored = Number(localStorage.getItem(WIDTH_KEY))
+    if (stored >= WIDTH_MIN && stored <= WIDTH_MAX) setWidth(stored)
+  }, [])
+
+  const commitWidth = (px: number) => {
+    const clamped = Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, Math.round(px)))
+    setWidth(clamped)
+    localStorage.setItem(WIDTH_KEY, String(clamped))
+    return clamped
+  }
+
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault()
+    setDragging(true)
+    // Measured from the sidebar's own left edge rather than assuming it sits at
+    // x=0, so this survives the layout ever gaining something to its left.
+    const originX = asideRef.current?.getBoundingClientRect().left ?? 0
+    // The pointer will leave the 4px handle immediately; suppressing selection
+    // stops the drag from highlighting half the page on the way past.
+    const prevSelect = document.body.style.userSelect
+    document.body.style.userSelect = "none"
+
+    const move = (ev: PointerEvent) =>
+      setWidth(Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, ev.clientX - originX)))
+
+    const stop = (ev: PointerEvent) => {
+      setDragging(false)
+      document.body.style.userSelect = prevSelect
+      commitWidth(ev.clientX - originX)
+      window.removeEventListener("pointermove", move)
+      window.removeEventListener("pointerup", stop)
+    }
+
+    window.addEventListener("pointermove", move)
+    window.addEventListener("pointerup", stop)
+  }
+
+  // Keyboard equivalent — a separator that only responds to a mouse is
+  // unreachable for anyone not using one.
+  const nudgeWidth = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+    e.preventDefault()
+    commitWidth(width + (e.key === "ArrowRight" ? 16 : -16))
+  }
   const [openSections, setOpenSections] = useState<string[]>(["Masters"])
   const [expandedSections, setExpandedSections] = useState<string[]>([])
 
@@ -128,6 +195,8 @@ export default function Sidebar({ user, mfgs = [], access }: SidebarProps) {
       ? pathname === item.href
       : !!globalActiveChild && (item.children ?? []).some(c => c.href === globalActiveChild!.href)
 
+  const { theme, toggle: toggleTheme } = useTheme()
+
   const initials = user?.name
     ? user.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)
     : "U"
@@ -135,9 +204,15 @@ export default function Sidebar({ user, mfgs = [], access }: SidebarProps) {
   return (
     <TooltipProvider delayDuration={100}>
       <aside
+        ref={asideRef}
+        // Width is inline because it's a dragged value, not one of a fixed set
+        // of classes. The transition is dropped mid-drag — animating toward
+        // every pointermove makes the edge lag the cursor.
+        style={collapsed ? undefined : { width }}
         className={cn(
-          "flex flex-col h-screen bg-sidebar border-r border-sidebar-border transition-[width] duration-200 ease-in-out shrink-0 overflow-hidden",
-          collapsed ? "w-14" : "w-56"
+          "relative flex flex-col h-screen bg-sidebar border-r border-sidebar-border ease-in-out shrink-0 overflow-hidden",
+          !dragging && "transition-[width] duration-200",
+          collapsed && "w-14"
         )}
       >
         {/* Logo row */}
@@ -146,7 +221,10 @@ export default function Sidebar({ user, mfgs = [], access }: SidebarProps) {
           collapsed ? "justify-center" : "justify-between"
         )}>
           {!collapsed && (
-            <span className="font-semibold text-sm text-sidebar-foreground truncate">ERP System</span>
+            <span className="flex items-center gap-2 min-w-0">
+              <Image src="/pep-wordmark-transparent.png" alt="" width={182} height={64} priority unoptimized className="h-5 w-auto shrink-0" />
+              <span className="font-semibold text-2xl text-sidebar-foreground truncate">ERP</span>
+            </span>
           )}
           <button
             onClick={() => setCollapsed(c => !c)}
@@ -291,6 +369,40 @@ export default function Sidebar({ user, mfgs = [], access }: SidebarProps) {
           })}
         </nav>
 
+        {/* Report an issue — a Google Form, not a page in this app, so it opens
+            in a new tab and sits outside NAV: it has no page_permissions slug
+            and must never be locked. Anyone who can sign in can report a bug. */}
+        <div className="px-2 pb-2 shrink-0">
+          {collapsed ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <a
+                  href={ISSUE_FORM_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center px-0 py-2 rounded-lg text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+                >
+                  <Bug className="h-4 w-4 shrink-0" />
+                  <span className="sr-only">Issues</span>
+                </a>
+              </TooltipTrigger>
+              <TooltipContent side="right">Issues</TooltipContent>
+            </Tooltip>
+          ) : (
+            <a
+              href={ISSUE_FORM_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+            >
+              <Bug className="h-4 w-4 shrink-0" />
+              <span className="truncate">Issues</span>
+              {/* Signals the link leaves the app before it's clicked. */}
+              <ExternalLink className="ml-auto h-3 w-3 shrink-0 text-sidebar-foreground/40" />
+            </a>
+          )}
+        </div>
+
         {/* User row */}
         <div className={cn(
           "border-t border-sidebar-border p-3 flex items-center gap-2.5 shrink-0",
@@ -308,32 +420,77 @@ export default function Sidebar({ user, mfgs = [], access }: SidebarProps) {
             )}
           </div>
 
-          {collapsed ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <form action={handleSignOut}>
-                  <button
-                    type="submit"
-                    className="p-1.5 rounded-md text-sidebar-foreground/50 hover:text-destructive hover:bg-sidebar-accent transition-colors"
-                  >
-                    <LogOut className="h-3.5 w-3.5" />
-                  </button>
-                </form>
-              </TooltipTrigger>
-              <TooltipContent side="right">Sign out</TooltipContent>
-            </Tooltip>
-          ) : (
-            <form action={handleSignOut}>
-              <button
-                type="submit"
-                className="p-1.5 rounded-md text-sidebar-foreground/50 hover:text-destructive hover:bg-sidebar-accent transition-colors shrink-0"
-                title="Sign out"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-              </button>
-            </form>
-          )}
+          {/* Theme sits with sign-out rather than in the logo row: this block
+              already handles the collapsed rail by stacking, so the toggle
+              stays reachable at w-14 where the logo row has no space for it. */}
+          <div className={cn("flex items-center gap-0.5 shrink-0", collapsed && "flex-col")}>
+            <button
+              onClick={toggleTheme}
+              aria-label="Toggle theme"
+              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              className="p-1.5 rounded-md text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+            >
+              {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+            </button>
+
+            {collapsed ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <form action={handleSignOut}>
+                    <button
+                      type="submit"
+                      className="p-1.5 rounded-md text-sidebar-foreground/50 hover:text-destructive hover:bg-sidebar-accent transition-colors"
+                    >
+                      <LogOut className="h-3.5 w-3.5" />
+                    </button>
+                  </form>
+                </TooltipTrigger>
+                <TooltipContent side="right">Sign out</TooltipContent>
+              </Tooltip>
+            ) : (
+              <form action={handleSignOut}>
+                <button
+                  type="submit"
+                  className="p-1.5 rounded-md text-sidebar-foreground/50 hover:text-destructive hover:bg-sidebar-accent transition-colors shrink-0"
+                  title="Sign out"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                </button>
+              </form>
+            )}
+          </div>
         </div>
+
+        {/* Resize handle. Hidden while collapsed — there's nothing to drag when
+            the rail is a fixed 56px, and the chevron already toggles that.
+            The hit area is 4px wide but the visible line only appears on hover
+            or drag, so it reads as an edge rather than a border until used. */}
+        {!collapsed && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize sidebar"
+            aria-valuenow={width}
+            aria-valuemin={WIDTH_MIN}
+            aria-valuemax={WIDTH_MAX}
+            tabIndex={0}
+            onPointerDown={startResize}
+            onKeyDown={nudgeWidth}
+            onDoubleClick={() => commitWidth(WIDTH_DEFAULT)}
+            title="Drag to resize · double-click to reset"
+            className={cn(
+              "absolute inset-y-0 right-0 w-1 cursor-col-resize group/resize",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+            )}
+          >
+            <div
+              className={cn(
+                "h-full w-px ml-auto transition-colors",
+                dragging ? "bg-sidebar-ring" : "bg-transparent group-hover/resize:bg-sidebar-ring"
+              )}
+            />
+          </div>
+        )}
       </aside>
     </TooltipProvider>
   )

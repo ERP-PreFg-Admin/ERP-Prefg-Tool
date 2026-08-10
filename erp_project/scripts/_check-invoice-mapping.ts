@@ -1,7 +1,7 @@
 // Guards the invoice → PO mapping logic. Run: npx tsx scripts/_check-invoice-mapping.ts
 //
 // Everything here is pure: no network, no DB. The fixture is the real response
-// captured from /api/v2/extract/sync for Invoices/Sales_RP_L_26-27_482 (1).pdf,
+// captured from /api/v1/v2/extract/sync for Invoices/Sales_RP_L_26-27_482 (1).pdf,
 // including the `_ref` keys Nanonets stamps onto every line item — those must
 // never reach the dialog, and only a real capture proves that.
 import assert from "node:assert/strict"

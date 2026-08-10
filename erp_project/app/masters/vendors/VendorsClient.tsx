@@ -7,8 +7,8 @@
  * Owns all interactive behaviour:
  *   - URL-synced search (UrlSearchInput — 350 ms debounce → ?search=)
  *   - Type filter (select → ?type=)
- *   - Add record dialog (POST /api/masters/vendors)
- *   - CSV import dialog  (POST /api/masters/vendors)
+ *   - Add record dialog (POST /api/v1/masters/vendors)
+ *   - CSV import dialog  (POST /api/v1/masters/vendors)
  *   - Pagination footer  (PaginationBar — navigates ?page= / ?size=)
  *
  * Navigation strategy: every filter/page change is merged into the current URL
@@ -176,12 +176,12 @@ export default function VendorsClient({
 
         <MasterToolbarActions>
           <DownloadButton
-            endpoint="/api/masters/vendors/export"
+            endpoint="/api/v1/masters/vendors/export"
             label="Vendors"
           />
           <CsvImportDialog
             entityLabel="Vendor"
-            endpoint="/api/masters/vendors"
+            endpoint="/api/v1/masters/vendors"
             templateFilename="vendor_template.csv"
             fields={VENDOR_CSV_FIELDS}
             onSuccess={refresh}

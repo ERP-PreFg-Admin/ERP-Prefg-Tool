@@ -1,5 +1,5 @@
 /**
- * GET /api/masters/material-master/export
+ * GET /api/v1/masters/material-master/export
  *
  * Exports base material records (no rate data) for either the RM or PM view.
  * The `material` param mirrors the toggle on /masters/material-master so the
@@ -70,7 +70,7 @@ export const GET = withGateway({
 
     const filename = buildExportFilename(`${typeLabel}`, format, { search: search || null, status: status || null })
     logger.info({message:"Material master export served." , userId: session.user.id , format, view: typeLabel, rowCount: rows.length})
-    console.log(`[/api/masters/material-master/export] served ${rows.length} rows as ${format} (material=${typeLabel})`)
+    console.log(`[/api/v1/masters/material-master/export] served ${rows.length} rows as ${format} (material=${typeLabel})`)
 
     if (format === "xlsx") {
       const buffer = await buildXlsx(sheetName, columns, rows)
@@ -93,7 +93,7 @@ export const GET = withGateway({
     })
   } catch (err) {
     logger.error({message:"Material master export failed" , userId: session.user.id , format, view:typeLabel , err})
-    console.error("[/api/masters/material-master/export]", err)
+    console.error("[/api/v1/masters/material-master/export]", err)
     return NextResponse.json({ error: "Export failed" }, { status: 500 })
   }
   },

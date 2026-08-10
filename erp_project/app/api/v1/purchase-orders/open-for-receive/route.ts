@@ -1,4 +1,4 @@
-// GET /api/purchase-orders/open-for-receive?mfg_id=123
+// GET /api/v1/purchase-orders/open-for-receive?mfg_id=123
 // Open POs (raised / partially_received) for one manufacturer, for the Add
 // Invoice dialog's per-line "Reference PO" picker. Fetched on demand rather
 // than shipped with the page: the manufacturer isn't known until the invoice

@@ -19,7 +19,7 @@ export function ApprovalActions({
     <div className="flex items-center gap-1.5">
       <Button
         size="sm" variant="outline" disabled={loading}
-        className="h-6 gap-1 text-[11px] text-red-700 border-red-200 hover:bg-red-50"
+        className="h-6 gap-1 text-[11px] text-red-700 border-red-200 hover:bg-red-50 dark:text-red-400 dark:border-red-900 dark:hover:bg-red-950/40"
         onClick={onReject}
       >
         <X className="h-3 w-3" /> Reject

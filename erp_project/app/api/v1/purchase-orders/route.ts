@@ -12,8 +12,9 @@ import { withGateway } from "@/lib/gateway/with-gateway"
 import { getUserScope, scopeParams, assertInScope } from "@/lib/scope"
 import { ApiError } from "@/lib/gateway/errors"
 import { poActionSchema } from "@/lib/validation/purchase-orders"
+import { monthIST } from "@/lib/date"
 
-// GET /api/purchase-orders — list all POs the caller is scoped to, with MFG + SKU details
+// GET /api/v1/purchase-orders — list all POs the caller is scoped to, with MFG + SKU details
 export const GET = withGateway({
   access: { pageSlug: "/po-tracking", level: "viewer" },
   handler: async ({ session }) => {
@@ -26,13 +27,13 @@ export const GET = withGateway({
   },
 })
 
-// POST /api/purchase-orders
+// POST /api/v1/purchase-orders
 // Handles two actions via the 'action' field in the request body:
 //
 //   bulk — { action:"bulk", rows }
 //     Client-parsed CSV/Excel rows (see PO_BULK_CSV_FIELDS) are re-serialized
 //     to CSV, uploaded to S3, and staged as ONE PO_BULK approval — same
-//     pattern as BOM/Vendor/RM/PM bulk uploads. Nothing is created or updated
+//     pattern as Recipe/Vendor/RM/PM bulk uploads. Nothing is created or updated
 //     until an approver approves it; poBulkHandler.applyAndArchive
 //     (lib/approvals/handlers/purchase-orders.ts) does the real
 //     create-or-update-by-po_no work and writes history_pos entries.
@@ -52,7 +53,7 @@ export const POST = withGateway({
   // z.union, and PoCreate has no "action" field at all, so a direct property
   // access wouldn't type-check without narrowing via "in" first.)
   if ("rows" in body) {
-    const yyyymm = new Date().toISOString().slice(0, 7)
+    const yyyymm = monthIST()
     const eventId = makeEventId("PO_BULK", "stage")
     recordRawEvent("PO_BULK", eventId, { rowCount: body.rows.length })
 
@@ -129,6 +130,7 @@ export const POST = withGateway({
     try {
       const [poResult] = await conn.execute(purchaseOrdersSql.insertNormal, [
         po_no, Number(mfg_id), sku_code, Number(qty), unitPrice, totalAmount, expected_on || null, destination || null,
+        Number(mfg_id), sku_code,
       ])
       const poId = (poResult as any).insertId
       await conn.commit()
@@ -155,6 +157,7 @@ export const POST = withGateway({
   try {
     const [poResult] = await conn.execute(purchaseOrdersSql.insert, [
       po_no, Number(mfg_id), sku_code, Number(qty), unitPrice, totalAmount, expected_on || null, po_type, destination || null,
+      Number(mfg_id), sku_code,
     ])
     const poId = (poResult as any).insertId
 

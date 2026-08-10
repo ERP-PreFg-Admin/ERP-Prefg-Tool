@@ -2,8 +2,8 @@
  * User activity trail — `activity_log` (see prisma/add_activity_log.sql).
  *
  * Written from exactly one place, lib/gateway/with-gateway.ts, so every API
- * mutation is captured without per-route instrumentation. Read by
- * /api/admin/activity.
+ * mutation is captured without per-route instrumentation. Read server-side by
+ * app/admin/activity/page.tsx — there is no API route for it.
  */
 
 /**
@@ -52,11 +52,22 @@ const filters = `
 `
 
 export const activitySql = {
-  /** Params: [user_id, method, path, status, duration_ms, ip_address, user_agent, request_id] */
+  /**
+   * created_on is a UTC instant — plain NOW(), because the DB session is UTC.
+   *
+   * It used to be written as CONVERT_TZ(NOW(), '+00:00', '+05:30'), i.e. IST
+   * wall-clock in a column mysql2 reads back as UTC (lib/db.ts sets
+   * `timezone: "+00:00"`). The display layer then converted to IST a second
+   * time and every row on /admin > Activity read 5½ hours into the future —
+   * and sorted wrongly against session_history, which was already UTC.
+   * Rendering happens in IST via lib/date.ts; storage stays UTC.
+   *
+   * Params: [user_id, method, path, status, duration_ms, ip_address, user_agent, request_id]
+   */
   insert: `
     INSERT INTO activity_log
       (user_id, method, path, status, duration_ms, ip_address, user_agent, request_id, created_on)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CONVERT_TZ(NOW(), '+00:00', '+05:30'))
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
   `,
 
   /** Params: [...filters, limit, offset] */

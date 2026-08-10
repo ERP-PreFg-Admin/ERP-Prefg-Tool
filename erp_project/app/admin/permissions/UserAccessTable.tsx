@@ -16,10 +16,13 @@
  */
 
 import { useMemo, useState } from "react"
+import Link from "next/link"
 import { ChevronRight, AlertTriangle } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { TableEmpty } from "@/components/ui/empty-state"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import { SearchInput } from "@/components/masters/SearchInput"
 import { PAGES } from "@/lib/pages"
 import {
   roleLabel, isKnownRole, designationsOf, domainsOf,
@@ -155,14 +158,11 @@ export default function UserAccessTable({
 
   return (
     <div className="space-y-3">
-      <div className="sm:max-w-sm">
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by name, email, role or designation…"
-          className="h-9"
-        />
-      </div>
+      <SearchInput
+        value={search}
+        onChange={setSearch}
+        placeholder="Search by name, email, role or designation…"
+      />
 
       <div className="overflow-x-auto">
         <Table>
@@ -178,11 +178,23 @@ export default function UserAccessTable({
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-10 text-sm">
-                  No users match “{search}”.
-                </TableCell>
-              </TableRow>
+              <TableEmpty
+                colSpan={6}
+                className="text-sm"
+                action={
+                  search ? (
+                    <Button variant="outline" size="sm" onClick={() => setSearch("")}>
+                      Clear search
+                    </Button>
+                  ) : (
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href="/admin">Add a user</Link>
+                    </Button>
+                  )
+                }
+              >
+                {search ? <>No users match “{search}”.</> : "No users on the roster yet."}
+              </TableEmpty>
             ) : (
               filtered.map(({ user, summary, overrideCount, unknownRole }) => {
                 const selected = user.id === selectedUserId

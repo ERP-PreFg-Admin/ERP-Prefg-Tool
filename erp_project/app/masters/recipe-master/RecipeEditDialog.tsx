@@ -1,12 +1,12 @@
 "use client"
 
 /**
- * Dedicated edit dialog for "Update Existing BOM" / the listing's per-row
+ * Dedicated edit dialog for "Update Existing Recipe" / the listing's per-row
  * Edit button — separated from the detail side panel (which was getting
  * cluttered mixing read-only detail + inline editing). Uses the table-form
- * BomLineEditorTable for a denser view of many RM/PM lines at once.
+ * RecipeLineEditorTable for a denser view of many RM/PM lines at once.
  *
- * Saving here always creates a NEW BOM version (see useBomDetailPanel's
+ * Saving here always creates a NEW Recipe version (see useBomDetailPanel's
  * saveEdit) — the Effective From entered below applies to that new version,
  * not the one currently being viewed.
  */
@@ -14,12 +14,12 @@
 import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { BomLineEditorTable } from "./BomLineEditorTable"
+import { RecipeLineEditorTable } from "./RecipeLineEditorTable"
 import { ChangeTypeCheckboxes } from "./ChangeTypeCheckboxes"
-import { BomArtifactsAddButton, BomArtifactsList } from "./BomArtifactsEditor"
-import { BOM_STATUS_VALUES } from "@/lib/validation/bom"
-import type { BomLineRow, BomMaterialOption } from "./BomLineEditorGrid"
-import type { BomArtifact } from "@/types/masters"
+import { RecipeArtifactsAddButton, RecipeArtifactsList } from "./RecipeArtifactsEditor"
+import { RECIPE_STATUS_VALUES } from "@/lib/validation/recipe"
+import type { RecipeLineRow, RecipeMaterialOption } from "./RecipeLineEditorGrid"
+import type { RecipeArtifact } from "@/types/masters"
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
@@ -30,7 +30,7 @@ const STATUS_LABELS: Record<string, string> = {
   rejected: "Rejected",
 }
 
-export function BomEditDialog({
+export function RecipeEditDialog({
   open,
   bomCode,
   rmRows,
@@ -62,20 +62,20 @@ export function BomEditDialog({
 }: {
   open: boolean
   bomCode: string | null
-  rmRows: BomLineRow[]
-  pmRows: BomLineRow[]
-  onChangeRm: (rows: BomLineRow[]) => void
-  onChangePm: (rows: BomLineRow[]) => void
+  rmRows: RecipeLineRow[]
+  pmRows: RecipeLineRow[]
+  onChangeRm: (rows: RecipeLineRow[]) => void
+  onChangePm: (rows: RecipeLineRow[]) => void
   /** Effective From for the NEW version this save will create. */
   effectiveFrom: string
   onChangeEffectiveFrom: (v: string) => void
-  /** Required — editing an existing BOM always needs a reason + change type. */
+  /** Required — editing an existing Recipe always needs a reason + change type. */
   reason: string
   onChangeReason: (v: string) => void
   changeType: ("rm" | "pm")[]
   onChangeChangeType: (v: ("rm" | "pm")[]) => void
-  rmMaterials: BomMaterialOption[]
-  pmMaterials: BomMaterialOption[]
+  rmMaterials: RecipeMaterialOption[]
+  pmMaterials: RecipeMaterialOption[]
   saveError: string | null
   saving: boolean
   onCancel: () => void
@@ -88,8 +88,8 @@ export function BomEditDialog({
   statusError: string | null
   onSaveStatus: () => void
   /** Artifacts are staged here but only applied on onSave — bundled into the
-   *  same approval as the line edits (see BomArtifactsEditor.tsx). */
-  artifacts: BomArtifact[]
+   *  same approval as the line edits (see RecipeArtifactsEditor.tsx). */
+  artifacts: RecipeArtifact[]
   pendingArtifactFiles: File[]
   onChangePendingArtifactFiles: (files: File[]) => void
   pendingArtifactRemoveIds: number[]
@@ -100,7 +100,7 @@ export function BomEditDialog({
       <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>
-            Edit BOM{bomCode ? <span className="font-mono text-muted-foreground ml-2">{bomCode}</span> : null}
+            Edit Recipe{bomCode ? <span className="font-mono text-muted-foreground ml-2">{bomCode}</span> : null}
           </DialogTitle>
         </DialogHeader>
 
@@ -137,7 +137,7 @@ export function BomEditDialog({
                 onChange={(e) => onChangeStatus(e.target.value)}
                 disabled={statusSaving}
               >
-                {BOM_STATUS_VALUES.map((v) => (
+                {RECIPE_STATUS_VALUES.map((v) => (
                   <option key={v} value={v}>{STATUS_LABELS[v] ?? v}</option>
                 ))}
               </select>
@@ -150,7 +150,7 @@ export function BomEditDialog({
 
             <div className="flex items-center gap-2 shrink-0">
               <label className="text-xs font-medium text-muted-foreground">Artifacts</label>
-              <BomArtifactsAddButton
+              <RecipeArtifactsAddButton
                 pendingFiles={pendingArtifactFiles}
                 onChangePendingFiles={onChangePendingArtifactFiles}
                 disabled={saving}
@@ -160,7 +160,7 @@ export function BomEditDialog({
 
           {statusError && <p className="text-xs text-destructive">{statusError}</p>}
 
-          <BomArtifactsList
+          <RecipeArtifactsList
             existing={artifacts}
             pendingFiles={pendingArtifactFiles}
             onChangePendingFiles={onChangePendingArtifactFiles}
@@ -179,7 +179,7 @@ export function BomEditDialog({
         </div>
 
         <div className="overflow-y-auto flex-1 min-h-0 py-1">
-          <BomLineEditorTable
+          <RecipeLineEditorTable
             rmRows={rmRows}
             pmRows={pmRows}
             onChangeRm={onChangeRm}

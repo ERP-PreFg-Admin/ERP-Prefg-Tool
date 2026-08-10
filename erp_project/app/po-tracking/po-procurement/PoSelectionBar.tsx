@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Callout } from "@/components/ui/callout"
 import { useToast } from "@/components/ui/toast"
 import type { BadgeVariant, PoRow } from "./po-types"
 import { STATUS_CONFIG } from "./po-types"
@@ -45,7 +46,7 @@ function ReviewSendDialog({
     setSubmitting(true)
     setError("")
     try {
-      const res = await fetch("/api/purchase-orders/send-mail", {
+      const res = await fetch("/api/v1/purchase-orders/send-mail", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ po_ids: selectedRows.map((r) => r.id) }),
@@ -81,13 +82,13 @@ function ReviewSendDialog({
         </DialogHeader>
 
         {isMulti && (
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex items-start gap-2">
+          <Callout variant="warning" className="text-sm flex items-start gap-2">
             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
             <div>
               You've selected POs from <strong>{groups.length} different manufacturers</strong>. Each will get its own
               separate email covering only its own POs below. Was this intentional?
             </div>
-          </div>
+          </Callout>
         )}
 
         <div className="space-y-4 max-h-[55vh] overflow-y-auto py-1">

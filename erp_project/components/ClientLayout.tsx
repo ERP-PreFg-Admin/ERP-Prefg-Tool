@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation"
 import Sidebar from "@/components/Sidebar"
 import TopBar from "@/components/TopBar"
 import { ToastProvider } from "@/components/ui/toast"
+import { ScrollFade } from "@/components/ui/scroll-fade"
 import type { AccessLevel } from "@/lib/permissions"
 
 interface Props {
@@ -27,8 +28,8 @@ export default function ClientLayout({ children, user, mfgs, access }: Props) {
         <Sidebar user={user} mfgs={mfgs} access={access} />
         <div className="flex flex-col flex-1 overflow-hidden">
           <TopBar />
-          <main className="flex-1 overflow-auto scrollbar-none [&::-webkit-scrollbar]:hidden">
-            {children}
+          <main className="flex-1 overflow-hidden">
+            <ScrollFade axis="y" className="h-full">{children}</ScrollFade>
           </main>
         </div>
       </div>

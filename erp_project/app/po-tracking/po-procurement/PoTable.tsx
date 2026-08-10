@@ -74,6 +74,19 @@ export default function PoTable({
   const pageIds = rows.map((r) => r.id)
   const allSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id))
 
+  // Excel-style frozen columns: the checkbox and PO No. stay pinned while the
+  // other 13 scroll under them. A sticky cell paints above its non-positioned
+  // siblings, so it needs an opaque background of its own — `bg-inherit` on the
+  // cell plus an opaque background on the row — or their text ghosts through it.
+  // The shadow is the seam line; `border-r` is unreliable under border-collapse.
+  // `left-10` (40px) is deliberately *short* of the checkbox column's 44px: an
+  // auto-layout table treats a width as a minimum, so that column can render
+  // wider than asked — and matching it exactly would leave a gap the moment it
+  // did, with the scrolling columns' text visible through the seam. Pinning
+  // short makes the two frozen cells overlap instead, which is invisible: the
+  // checkbox is centred in its column and ends well left of 40px.
+  const frozenPo = cn("sticky z-10 shadow-[1px_0_0_var(--color-border)]", selectable ? "left-10" : "left-0")
+
   return (
     <>
       <Card>
@@ -82,10 +95,12 @@ export default function PoTable({
               {/* The header sticks, so it needs its own ground and a hairline
                   under it — without them the column labels sit on top of the
                   scrolling rows with nothing separating the two. */}
-              <TableHeader className="sticky top-0 z-10 bg-muted/40 backdrop-blur-[2px] [&_tr]:border-b [&_tr]:border-border">
+              <TableHeader className="sticky top-0 z-20 bg-muted/40 backdrop-blur-[2px] [&_th]:border-b [&_th]:border-border">
                 <TableRow>
                   {selectable && (
-                    <TableHead className="w-9">
+                    // px-0 + centred: keeps the checkbox clear of the 40px mark,
+                    // where the frozen PO No. cell overlaps this one.
+                    <TableHead className="w-11 px-0 text-center sticky left-0 z-10">
                       <input
                         type="checkbox"
                         checked={allSelected}
@@ -94,7 +109,7 @@ export default function PoTable({
                       />
                     </TableHead>
                   )}
-                  <SortHead colKey="po_no"        {...sh}>PO No.</SortHead>
+                  <SortHead colKey="po_no"        {...sh} className={frozenPo}>PO No.</SortHead>
                   <SortHead colKey="mfg_name"     {...sh}>Manufacturer</SortHead>
                   <SortHead colKey="date"         {...sh}>PO Date</SortHead>
                   <SortHead colKey="expected_on"  {...sh}>Exp. Dispatch</SortHead>
@@ -104,6 +119,10 @@ export default function PoTable({
                   <SortHead colKey="unit_price"   {...sh}>Rate</SortHead>
                   <SortHead colKey="total_amount" {...sh}>Amount</SortHead>
                   <TableHead>Invoice No</TableHead>
+                  {/* Inward desk only. On FG Tracking this column would show a
+                      split child's parent — true and useful, but a separate
+                      decision from this one. */}
+                  {showUniwareCode && <TableHead>Reference PO</TableHead>}
                   {showUniwareCode && <TableHead>Uniware Code</TableHead>}
                   <TableHead>Destination</TableHead>
                   <SortHead colKey="status"       {...sh}>Status</SortHead>
@@ -115,7 +134,8 @@ export default function PoTable({
                 {rows.length === 0 ? (
                   <TableRow>
                     {/* 13 fixed columns, plus whichever optional ones are on. */}
-                    <TableCell colSpan={13 + (selectable ? 1 : 0) + (showUniwareCode ? 1 : 0)} className="text-center text-muted-foreground py-10">
+                    {/* Reference PO and Uniware Code both ride on showUniwareCode. */}
+                    <TableCell colSpan={13 + (selectable ? 1 : 0) + (showUniwareCode ? 2 : 0)} className="text-center text-muted-foreground py-10">
                       No purchase orders match your filters.
                     </TableCell>
                   </TableRow>
@@ -158,7 +178,7 @@ export default function PoTable({
                         label:   "Review PDF",
                         icon:    <FileText className="h-3.5 w-3.5" />,
                         onClick: async () => {
-                          const res  = await fetch(`/api/files/presign?key=${encodeURIComponent(r.attachment_key!)}`)
+                          const res  = await fetch(`/api/v1/files/presign?key=${encodeURIComponent(r.attachment_key!)}`)
                           const data = await res.json()
                           if (data.url) window.open(data.url, "_blank", "noopener,noreferrer")
                         },
@@ -189,15 +209,21 @@ export default function PoTable({
                         data-state={selectedIds.has(r.id) ? "selected" : undefined}
                         // A cancelled PO is history, not work: dimmed so the eye
                         // skips it, and brought back on hover if it's being read.
+                        // bg-card, not bg-background: the row sits inside a Card,
+                        // so it has to match the panel it's on rather than the
+                        // page behind it. Opaque either way, which is what the
+                        // frozen cells need — they use bg-inherit, and a
+                        // transparent row lets the scrolling columns' text show
+                        // through them.
                         className={cn(
-                          "transition-colors",
+                          "transition-colors bg-card hover:bg-muted",
                           status === "cancelled" && "opacity-55 hover:opacity-100",
                           // Ties the open panel to the row it describes.
-                          selectedPoId === r.id && "bg-primary/5"
+                          selectedPoId === r.id && "bg-accent"
                         )}
                       >
                         {selectable && (
-                          <TableCell>
+                          <TableCell className="w-11 px-0 text-center sticky left-0 z-10 bg-inherit">
                             <input
                               type="checkbox"
                               checked={selectedIds.has(r.id)}
@@ -209,7 +235,7 @@ export default function PoTable({
                         {/* PO Number — the row's identity, so it's the click target
                             for the inwarding panel. Not the whole row: that would
                             fight the select checkbox and the action menu. */}
-                        <TableCell className="font-mono text-xs font-medium whitespace-nowrap">
+                        <TableCell className={cn(frozenPo, "bg-inherit font-mono text-xs font-medium whitespace-nowrap")}>
                           {onOpenInwarding ? (
                             <button
                               type="button"
@@ -267,6 +293,12 @@ export default function PoTable({
 
                         {showUniwareCode && (
                           <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
+                            {r.reference_po ?? "—"}
+                          </TableCell>
+                        )}
+
+                        {showUniwareCode && (
+                          <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
                             {r.uniware_po_code ?? "—"}
                           </TableCell>
                         )}
@@ -285,7 +317,7 @@ export default function PoTable({
                             {canEdit && (
                               <button
                                 onClick={() => onEdit?.(r)}
-                                className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 transition-colors"
+                                className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-950/60 transition-colors"
                               >
                                 <Pencil className="h-3 w-3" /> Edit
                               </button>

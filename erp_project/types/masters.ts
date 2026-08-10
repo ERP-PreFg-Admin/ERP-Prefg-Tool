@@ -127,7 +127,7 @@ export type Vendor = {
     rmv.moq , rmv.uom , rmv.vendor_code , rmv.vendor_id
 */
 export type RM = {
-  /** Primary key of master_rm — for cost-impact lookups (details_bom.mtrl_id). */
+  /** Primary key of master_rm — for cost-impact lookups (details_recipe.mtrl_id). */
   rm_id: number
   rm_code: string | null
   name: string
@@ -143,12 +143,12 @@ export type RM = {
   moq:number | 0
   vendor_code: string | null
   vendor_id: string | null
-  /** Primary key of the rm_vrm_dynamic rate row — for approval flow. */
+  /** Primary key of the cost_master_rm_ven rate row — for approval flow. */
   vrm_id: number | null
-  /** Status of the rm_vrm_dynamic rate row — for approval badges. */
+  /** Status of the cost_master_rm_ven rate row — for approval badges. */
   vrm_status: string | null
   /** Optional manufacturer tag on the vendor rate row — informational only,
-   *  does not create a separate rm_mrm_fixed row. */
+   *  does not create a separate cost_master_rm_mfg row. */
   mfg_id: number | null
   mfg_name: string | null
   mfg_code: string | null
@@ -162,7 +162,7 @@ export type RM = {
  *  r.status, r.id, r.name, r.make, r.type, r.hsn_code, r.rm_code, r.inci_name
  */
 export type RMByMfg = {
-  /** Primary key of the rm_mrm_fixed rate row — used for approval entity_id. */
+  /** Primary key of the cost_master_rm_mfg rate row — used for approval entity_id. */
   rate_id: number | null
   rm_id: number
   mfg_id: number | null
@@ -174,7 +174,7 @@ export type RMByMfg = {
   uom: string | null
   /** Status of the base RM record (master_rm.status). */
   status: string | null
-  /** Status of the rate row in rm_mrm_fixed — used for approval badges. */
+  /** Status of the rate row in cost_master_rm_mfg — used for approval badges. */
   rate_status: string | null
   id: number
   name: string
@@ -205,7 +205,7 @@ export type PMVendor = {
   type: string | null
   hsn_code: string | null
   pm_id: number
-  /** Primary key of the pm_vrm_dynamic rate row — for approval flow. */
+  /** Primary key of the cost_master_pm_ven rate row — for approval flow. */
   vrm_id: number | null
   vendor_id: number | null
   vendor_code: string | null
@@ -227,21 +227,21 @@ export type PMByMfg = {
   hsn_code: string | null
   uom: string | null
   pm_id: number
-  /** Primary key of the pm_mrm_fixed rate row — used for approval entity_id. */
+  /** Primary key of the cost_master_pm_mfg rate row — used for approval entity_id. */
   rate_id: number | null
   mfg_id: number | null
   mfg_code: string | null
   curr_rate: string | null
-  /** Status of the pm_mrm_fixed rate row — used for approval badges. */
+  /** Status of the cost_master_pm_mfg rate row — used for approval badges. */
   status: string | null
   effective_from: string | null
 }
 
 
-/**Bom Master - Bill of Material details */
-export type BOM = {
+/**Recipe Master - Bill of Material details */
+export type Recipe = {
   bom_code: string | null;
-  bom_id: number | null;
+  recipe_id: number | null;
   sku_code: string | null;
   mtrl_id: number | null;
   mtrl_type: string | null;
@@ -255,14 +255,14 @@ export type BOM = {
   mtrl_name: string | null;
   mtrl_code: string | null;
   /** master_rm.status / master_pm.status for this line's material — distinct
-   *  from material_status (the details_bom line's own status). Used to flag
+   *  from material_status (the details_recipe line's own status). Used to flag
    *  lines referencing a material that's since been deactivated. */
   mtrl_master_status: string | null;
 };
 
-/** One row per BOM header, used by the BOM Master listing page. */
-export type BomListItem = {
-  bom_id: number | null;
+/** One row per Recipe header, used by the Recipe Master listing page. */
+export type RecipeListItem = {
+  recipe_id: number | null;
   bom_code: string | null;
   sku_code: string | null;
   sku_name: string | null;
@@ -270,13 +270,13 @@ export type BomListItem = {
   effective_from: Date | string | null;
   effective_till: Date | string | null;
   status: string | null;
-  /** From this BOM's own creating/editing approval's "__reason__" sentinel
-   *  item — null for a SKU's first-ever BOM or a bulk upload. */
+  /** From this Recipe's own creating/editing approval's "__reason__" sentinel
+   *  item — null for a SKU's first-ever Recipe or a bulk upload. */
   change_reason: string | null;
   /** Comma-joined "rm"/"pm" tags from the same approval's "__change_type__"
    *  sentinel item — format with formatChangeType (bom-format.ts). */
   change_type: string | null;
-  /** Count of master_bom_mfg rows with status='active' for this BOM — how
+  /** Count of master_recipe_mfg rows with status='active' for this Recipe — how
    *  many manufacturers currently produce it. */
   live_mfg_count: number;
   /** "CODE — Name" per live manufacturer, comma-joined — tooltip source for
@@ -285,13 +285,13 @@ export type BomListItem = {
 };
 
 /**
- * One row per BOM version (header) that has been through an approval, used
- * by the BOM History page — grouped/sorted SKU-wise (see
+ * One row per Recipe version (header) that has been through an approval, used
+ * by the Recipe History page — grouped/sorted SKU-wise (see
  * bom.selectHistoryPaginatedGrouped), with the creating/approving user's name
  * already resolved.
  */
-export type BomHistoryListItem = {
-  bom_id: number | null;
+export type RecipeHistoryListItem = {
+  recipe_id: number | null;
   bom_code: string | null;
   sku_id: number | null;
   sku_code: string | null;
@@ -306,23 +306,23 @@ export type BomHistoryListItem = {
   approved_by: number | null;
   approved_by_name: string | null;
   approved_on: Date | string | null;
-  /** See BomListItem's same-named fields. */
+  /** See RecipeListItem's same-named fields. */
   change_reason: string | null;
   change_type: string | null;
 };
 
-/** BOM detail side-panel payload: header + all material lines. */
-export type BomArtifact = {
+/** Recipe detail side-panel payload: header + all material lines. */
+export type RecipeArtifact = {
   id: number;
-  bom_id: number;
+  recipe_id: number;
   s3_key: string;
   file_name: string;
   uploaded_by: number | null;
   uploaded_at: Date | string;
 };
 
-export type BomDetailResponse = {
-  bom_id: number | null;
+export type RecipeDetailResponse = {
+  recipe_id: number | null;
   bom_code: string | null;
   sku_id: number | null;
   sku_code: string | null;
@@ -330,8 +330,8 @@ export type BomDetailResponse = {
   created_at: Date | string | null;
   effective_from: Date | string | null;
   effective_till: Date | string | null;
-  lines: BOM[];
-  artifacts: BomArtifact[];
+  lines: Recipe[];
+  artifacts: RecipeArtifact[];
 };
 
 export type bomType = {
@@ -353,12 +353,12 @@ export type bom_detailsType = Record<string, never>
 export type MfgLineStatus = "active" | "discontinued" | "inactive"
 
 /**
- * `master_bom_mfg` joined with `master_bom`/`master_skus`/`master_mfgs` — one
+ * `master_recipe_mfg` joined with `master_recipe`/`master_skus`/`master_mfgs` — one
  * row per SKU a manufacturer produces. Used by app/manufacturing/[mfgId].
  */
 export type MfgLine = {
   id: number
-  bom_id: number
+  recipe_id: number
   mfg_id: number
   status: MfgLineStatus
   effective_from: string | null
@@ -402,10 +402,10 @@ export type MfgMonthlyPoRow = {
 /** `bom_misc` cost type — job work, shrink wrap, shipper (absolute cost); rm_loss/pm_loss (RM/PM wastage %, stored in the same `cost` column). */
 export type MiscCostType = "jw" | "shrink" | "shipper" | "rm_loss" | "pm_loss"
 
-/** `bom_misc` joined with `master_bom`/`master_skus`. Used by the JW/Shrink Wrap/Shipper/Wastage tabs. */
+/** `bom_misc` joined with `master_recipe`/`master_skus`. Used by the JW/Shrink Wrap/Shipper/Wastage tabs. */
 export type MiscCostLine = {
   id: number
-  bom_id: number
+  recipe_id: number
   mfg_id: number
   type: MiscCostType
   cost: number | null
@@ -429,10 +429,10 @@ export type MiscCostCurrentRateRow = {
   status: string
 }
 
-/** SKU/BOM option scoped to lines a manufacturer already produces — for the JW/Shrink/Shipper "Add" dialog. */
+/** SKU/Recipe option scoped to lines a manufacturer already produces — for the JW/Shrink/Shipper "Add" dialog. */
 export type MfgLineOption = { id: number; bom_code: string | null; sku_code: string | null; sku_name: string | null }
 
-/** `rm_mrm_fixed` joined with `master_rm`/`master_vendors` for one manufacturer. Used by the RM Vendor tab. */
+/** `cost_master_rm_mfg` joined with `master_rm`/`master_vendors` for one manufacturer. Used by the RM Vendor tab. */
 export type RmVendorRow = {
   rm_code: string | null
   rm_name: string
@@ -446,7 +446,7 @@ export type RmVendorRow = {
   status: string
 }
 
-/** A superseded RM×vendor rate period for one manufacturer, from history_mrm. Used by the RM Vendor tab's history section. */
+/** A superseded RM×vendor rate period for one manufacturer, from history_cost_mfg. Used by the RM Vendor tab's history section. */
 export type RmVendorHistoryRow = {
   rm_code: string | null
   rm_name: string
@@ -456,8 +456,8 @@ export type RmVendorHistoryRow = {
   effective_to: string | null
 }
 
-/** PM×vendor rate row for one manufacturer — pm_mrm_fixed has no approved-vendor column, so the
- * vendor shown is whichever active pm_vrm_dynamic row exists for that PM (same "best effort"
+/** PM×vendor rate row for one manufacturer — cost_master_pm_mfg has no approved-vendor column, so the
+ * vendor shown is whichever active cost_master_pm_ven row exists for that PM (same "best effort"
  * vendor resolution used by pmRateHandler.applyAndArchive when archiving history). */
 export type PmVendorRow = {
   pm_code: string | null
@@ -481,7 +481,7 @@ export type PmVendorHistoryRow = {
   effective_to: string | null
 }
 
-/** Agreed RM rate for one manufacturer. rm_mrm_fixed has no effective_to column. */
+/** Agreed RM rate for one manufacturer. cost_master_rm_mfg has no effective_to column. */
 export type AgreedRmRateRow = {
   code: string | null
   name: string
@@ -504,7 +504,7 @@ export type AgreedPmRateRow = {
 
 /** One row per SKU in the Agreed Final Costing tab — computed, not stored. */
 export type FinalCostingRow = {
-  bom_id: number
+  recipe_id: number
   sku_code: string | null
   sku_name: string | null
   rm_cost: number

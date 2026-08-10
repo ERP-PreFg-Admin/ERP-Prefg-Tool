@@ -1,4 +1,4 @@
-// POST /api/purchase-orders/[id]/close
+// POST /api/v1/purchase-orders/[id]/close
 // Manually short-close a PO. Intended for cases where a significant qty remains
 // but the operator has decided not to fulfil the remainder (e.g. 500 units left
 // from a 10,000-unit order). Auto-close via the split route should handle the
@@ -25,7 +25,7 @@ export const POST = withGateway({
   // this refuses a PO belonging to an out-of-scope manufacturer/warehouse.
   await assertPoInScope(Number(session.user.id), poId)
   const eventId = makeEventId("PO_CLOSE", "short-close", poId)
-  const logCtx = { ...ctx, route: `/api/purchase-orders/${poId}/close`, eventId }
+  const logCtx = { ...ctx, route: `/api/v1/purchase-orders/${poId}/close`, eventId }
   recordRawEvent("PO_CLOSE", eventId, { poId, userId })
 
   try {

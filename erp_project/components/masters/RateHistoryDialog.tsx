@@ -9,6 +9,7 @@
 import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
+import { IST } from "@/lib/date"
 
 type RateHistoryEntry = {
   id: number
@@ -23,15 +24,15 @@ type RateHistoryEntry = {
 
 function formatDate(val: string | null) {
   if (!val) return "—"
-  return new Date(val).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+  return new Date(val).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: IST })
 }
 
 function formatDateTime(val: string | null) {
   if (!val) return "—"
-  return new Date(val).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+  return new Date(val).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST })
 }
 
-/** history_mrm.status is a plain boolean/tinyint; history_vrm.status is a status enum string — normalize both. */
+/** history_cost_mfg.status is a plain boolean/tinyint; history_cost_ven.status is a status enum string — normalize both. */
 function StatusBadge({ status }: { status: RateHistoryEntry["status"] }) {
   if (typeof status === "boolean" || typeof status === "number") {
     return status
@@ -68,8 +69,8 @@ export function RateHistoryDialog({
     const basePath = materialType === "rm" ? "raw-materials" : "packing-materials"
     const idParam = materialType === "rm" ? "rm_id" : "pm_id"
     const endpoint = kind === "mfg"
-      ? `/api/masters/${basePath}/mrm-history?${idParam}=${row.id}&mfg_id=${entityId}`
-      : `/api/masters/${basePath}/vrm-history?${idParam}=${row.id}&vendor_id=${entityId}`
+      ? `/api/v1/masters/${basePath}/mrm-history?${idParam}=${row.id}&mfg_id=${entityId}`
+      : `/api/v1/masters/${basePath}/vrm-history?${idParam}=${row.id}&vendor_id=${entityId}`
     fetch(endpoint)
       .then((r) => r.json())
       .then((data) => setEntries(data.history ?? []))

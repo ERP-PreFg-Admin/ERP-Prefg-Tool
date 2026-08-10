@@ -104,12 +104,12 @@ export default function ManufacturersClient({
         />
         <MasterToolbarActions>
           <DownloadButton
-            endpoint="/api/masters/manufacturers/export"
+            endpoint="/api/v1/masters/manufacturers/export"
             label="Manufacturers"
           />
           <CsvImportDialog
             entityLabel="Manufacturer"
-            endpoint="/api/masters/manufacturers"
+            endpoint="/api/v1/masters/manufacturers"
             templateFilename="manufacturer_template.csv"
             fields={MFG_CSV_FIELDS}
             onSuccess={refresh}

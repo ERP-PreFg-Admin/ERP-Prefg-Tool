@@ -2,6 +2,7 @@ import React from "react"
 import {
   Document, Page, Text, View, StyleSheet, Font, renderToBuffer,
 } from "@react-pdf/renderer"
+import { IST } from "@/lib/date"
 
 // react-pdf only wraps text at whitespace by default, so a long unbroken
 // token (e.g. a long PO code) overflows its column into the next one.
@@ -51,7 +52,7 @@ function fmtN(v: number | null | undefined) {
 function fmtDate(d: string | null | undefined) {
   if (!d) return "—"
   try {
-    return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: IST })
   } catch { return String(d) }
 }
 

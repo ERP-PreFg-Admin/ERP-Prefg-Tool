@@ -20,7 +20,31 @@ Next.js 16 App Router · React 19 · TypeScript · Tailwind CSS v4 · Prisma 7 (
 | `npm run db:push` | Quick schema sync (local dev only) |
 | `npm run db:studio` | Open Prisma Studio |
 | `npm run db:seed` | Seed permissions and sample data |
-| `npm run db:test` | Verify DB connection |
+| `npm test` | Pure unit tests — money math, scope, schemas. No DB, no credentials, seconds. |
+| `npm run test:db` | DB tests against `DB_NAME_TEST`, each wrapped in a transaction that is **always rolled back** |
+| `npm run test:checks` | The older `scripts/_check-*.ts` scripts (`-- --db` to include the DB ones) |
+| `npm run lint:changed` | ESLint on changed files only — the ratchet over ~238 pre-existing errors |
+| `npm run db:test` | Verify DB connection — ⚠️ **this script does not exist** (see `docs/qa-audit-2026-08.md` #9); nor do `db:generate`, `db:migrate`, `db:push`, `db:studio`, `db:seed` |
+
+---
+
+## Testing
+
+**No test framework.** Node 24's built-in `node:test` + `node:assert/strict`, run through the existing `tsx` devDependency. Do not add vitest/jest.
+
+| Path | What goes there |
+|------|-----------------|
+| `tests/unit/*.test.ts` | Pure logic only — no DB, no network, no credentials. Runs in CI. |
+| `tests/db/*.test.ts` | Real SQL, wrapped in `withRollback()`. Never runs in CI. |
+| `tests/helpers/db.ts` | `withRollback()` + fixture builders (`makePo`, `readForSplit`, `makeRmMfgRate`, …) |
+| `scripts/_check-*.ts` | Pre-existing ad-hoc checks. Left as they are; run via `npm run test:checks`. |
+| `tests/run-checks.ts`, `tests/lint-changed.mjs` | The check runner and lint ratchet. In `tests/`, **not** `scripts/`, because `.gitignore` has `/scripts/*` — new files there are silently untracked. |
+
+Three things to know before writing a DB test:
+
+1. **Import style** — use relative imports (`../../lib/po-receive`), not `@/`, matching the `_check-*` scripts.
+2. **The env must be loaded by the runtime.** `lib/env.ts` reads `process.env` at module load, and your first `import` of anything under `lib/` evaluates it — so an `import "dotenv/config"` inside a test file runs too late. That's why `test:db` passes `--env-file-if-exists=.env`. Run DB tests via `npm run test:db`, never a bare `tsx --test`.
+3. **Only connection-taking code is testable this way.** `withRollback` owns the transaction, and MySQL implicitly commits on a nested `beginTransaction()` — so a route handler (which opens its own) cannot be rolled back. Test the helper the route calls. This is why the split math was extracted to `lib/po-split.ts`, mirroring `lib/po-receive.ts`; **follow that pattern when adding logic worth testing.**
 
 ---
 
@@ -136,10 +160,10 @@ try {
 | Module code | Entity | Tables touched by applyAndArchive |
 |---|---|---|
 | `SKU` | SKU master | `master_skus` (audit trail: `history_masters_edits`, module=`SKU` — not `sku_history`, which is legacy/unused) |
-| `RM_RATE` | RM × Mfg rate | `rm_mrm` + `rm_mrm_history` |
-| `PM_RATE` | PM × Mfg rate | `pm_mrm` + history |
-| `RM_VRM` | RM × Vendor rate | `rm_vrm` + `vrm_history` |
-| `PM_VRM` | PM × Vendor rate | `pm_vrm` + `vrm_history` |
+| `RM_RATE` | RM × Mfg rate | `rm_mrm_fixed` + `history_mrm` |
+| `PM_RATE` | PM × Mfg rate | `pm_mrm_fixed` + `history_mrm` |
+| `RM_VRM` | RM × Vendor rate | `rm_vrm_dynamic` + `history_vrm` |
+| `PM_VRM` | PM × Vendor rate | `pm_vrm_dynamic` + `history_vrm` |
 | `RM_MAT` | RM base record | `master_rm` |
 | `PM_MAT` | PM base record | `master_pm` |
 | `VENDOR` | Vendor master | `master_vendors` + `details_vendor` |
@@ -235,10 +259,10 @@ This eliminates `any` type noise and gives full IntelliSense on `conn.execute`, 
 | `lib/queries/history.ts` | Generic per-module audit trail — `history_masters_edits` |
 | `lib/queries/manufacturers.ts` | Manufacturer master — master_mfgs + details_mfg |
 | `lib/queries/manufacturing.ts` | MFG Cost Manager — lines, misc costs, costing inputs |
-| `lib/queries/packing-materials.ts` | PM master — master_pm, pm_mrm, pm_vrm |
+| `lib/queries/packing-materials.ts` | PM master — master_pm, pm_mrm_fixed, pm_vrm_dynamic |
 | `lib/queries/permissions.ts` | Page access — page_permissions, user_page_permissions |
 | `lib/queries/purchase-orders.ts` | Purchase orders — full CRUD, split, receive, email, PDF, bulk CSV, scope predicates |
-| `lib/queries/raw-materials.ts` | RM master — master_rm, rm_mrm, rm_vrm |
+| `lib/queries/raw-materials.ts` | RM master — master_rm, rm_mrm_fixed, rm_vrm_dynamic |
 | `lib/queries/s3-files.ts` | S3 attachment operations — attachment_key on purchase_orders |
 | `lib/queries/sku-details.ts` | `sku_details` — fill weight, current BOM |
 | `lib/queries/skus.ts` | SKU master — master_skus, sku_history |

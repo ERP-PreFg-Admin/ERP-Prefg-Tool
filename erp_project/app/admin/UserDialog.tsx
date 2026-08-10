@@ -71,7 +71,7 @@ export function UserDialog({
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch("/api/admin/users", {
+      const res = await fetch("/api/v1/admin/users", {
         method: isNew ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(

@@ -1,25 +1,35 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
+import { ScrollFade } from "@/components/ui/scroll-fade"
 
 const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
   ({ className, ...props }, ref) => (
-    <div className="relative w-full overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
-    </div>
+    <ScrollFade axis="x" className="w-full">
+      {/* border-separate, not the preflight default of border-collapse: with
+          collapsed borders browsers paint a `position: sticky` cell in the
+          table's *background* layer, so the other columns' text draws straight
+          over a frozen column no matter its background or z-index. Spacing is 0
+          and the row borders moved to the cells below, so it looks identical. */}
+      <table
+        ref={ref}
+        className={cn("w-full caption-bottom text-sm border-separate border-spacing-0", className)}
+        {...props}
+      />
+    </ScrollFade>
   )
 )
 Table.displayName = "Table"
 
 const TableHeader = React.forwardRef<HTMLTableSectionElement, React.HTMLAttributes<HTMLTableSectionElement>>(
   ({ className, ...props }, ref) => (
-    <thead ref={ref} className={cn("[&_tr]:border-b", className)} {...props} />
+    <thead ref={ref} className={className} {...props} />
   )
 )
 TableHeader.displayName = "TableHeader"
 
 const TableBody = React.forwardRef<HTMLTableSectionElement, React.HTMLAttributes<HTMLTableSectionElement>>(
   ({ className, ...props }, ref) => (
-    <tbody ref={ref} className={cn("[&_tr:last-child]:border-0", className)} {...props} />
+    <tbody ref={ref} className={cn("[&_tr:last-child>*]:border-b-0", className)} {...props} />
   )
 )
 TableBody.displayName = "TableBody"
@@ -28,7 +38,9 @@ const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTML
   ({ className, ...props }, ref) => (
     <tr
       ref={ref}
-      className={cn("border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted", className)}
+      // The border lives on the cells, not the row: the separated-borders model
+      // above ignores borders set on a <tr>.
+      className={cn("[&>*]:border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted", className)}
       {...props}
     />
   )

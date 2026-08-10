@@ -1,6 +1,6 @@
-// GET /api/masters/raw-materials/vrm-history?rm_id=1&vendor_id=2
+// GET /api/v1/masters/raw-materials/vrm-history?rm_id=1&vendor_id=2
 //
-// Full rate-change history for one RM×Vendor pair from history_vrm, newest
+// Full rate-change history for one RM×Vendor pair from history_cost_ven, newest
 // first — backs the "Rate History" dialog on the RM Rate Master (Vendor view).
 
 import { NextResponse } from "next/server"
@@ -17,7 +17,7 @@ export const GET = withGateway({
     const { searchParams } = new URL(req.url)
     const rmId = searchParams.get("rm_id")
     const vendorId = searchParams.get("vendor_id")
-    const logCtx = { ...ctx, route: "/api/masters/raw-materials/vrm-history" }
+    const logCtx = { ...ctx, route: "/api/v1/masters/raw-materials/vrm-history" }
 
     if (!rmId || isNaN(Number(rmId)) || !vendorId || isNaN(Number(vendorId))) {
       throw new ApiError(400, "validation_error", "rm_id and vendor_id are required")

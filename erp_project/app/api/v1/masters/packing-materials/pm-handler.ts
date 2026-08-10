@@ -9,6 +9,7 @@ import { insertApprovalWithItems, applyVendorRateApproval, applyMfgRateApproval,
 import { stagePmBulkRows } from "@/lib/approvals/handlers/packing-materials"
 import { fetchEditMatchCandidates, findBestEditMatch, type EditCandidate } from "@/lib/master-routes/edit-match"
 import { roundToWholeNumber, roundToTwoDecimals } from "@/lib/numeric"
+import { todayIST, monthIST } from "@/lib/date"
 
 type PmMaterialRow = { id: number; pm_code: string; name: string; type: string; uom: string; hsn_code: string | null }
 
@@ -236,7 +237,7 @@ export async function pmCreateFull(body: PmCreateFullBody, userId: number, ctx: 
   logger.info({ ...logCtx, message: "create-full started", name: pmName, vendorCount: vendorList.length, mfgCount: mfgList.length })
   recordRawEvent("PM_FULL", eventId, { name: pmName, vendorCount: vendorList.length, mfgCount: mfgList.length })
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayIST()
   const conn = await pool.getConnection()
   await conn.beginTransaction()
   try {
@@ -351,7 +352,7 @@ export async function pmAddRates(body: PmAddRatesBody, userId: number, ctx: obje
     logger.info({ ...logCtx, message: "add-rates started", pmId, vendorCount: vendorList.length, mfgCount: mfgList.length })
     recordRawEvent("PM_RATES", eventId, { pmId, vendorCount: vendorList.length, mfgCount: mfgList.length })
 
-    const today = new Date().toISOString().slice(0, 10)
+    const today = todayIST()
     const conn = await pool.getConnection()
     await conn.beginTransaction()
     try {
@@ -432,7 +433,7 @@ export async function pmBulk(body: PmBulkBody, userId: number, ctx: object): Pro
   let staged = 0
   let skipped = 0
   try {
-    const yyyymm = new Date().toISOString().slice(0, 7)
+    const yyyymm = monthIST()
     await conn.beginTransaction()
     const result = await stagePmBulkRows(conn, rows as Record<string, string>[], userId, `imports/packing-materials/${yyyymm}`)
     staged = result.staged
@@ -491,7 +492,7 @@ export async function pmS3Bulk(body: PmS3BulkBody, userId: number, ctx: object):
   let staged = 0
   let skipped = 0
   try {
-    const yyyymm = new Date().toISOString().slice(0, 7)
+    const yyyymm = monthIST()
     await conn.beginTransaction()
     const result = await stagePmBulkRows(conn, rawRows, userId, `imports/packing-materials/${yyyymm}`)
     staged = result.staged

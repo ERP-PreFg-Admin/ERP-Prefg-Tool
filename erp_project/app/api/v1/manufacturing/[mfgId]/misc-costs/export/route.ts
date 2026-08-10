@@ -1,4 +1,4 @@
-// GET /api/manufacturing/[mfgId]/misc-costs/export
+// GET /api/v1/manufacturing/[mfgId]/misc-costs/export
 //
 // Exports the current (active) Job Work / Shrink Wrap / Shipper / Wastage
 // rates for one manufacturer — all 4 cost types in a single file,

@@ -1,18 +1,18 @@
 "use client"
 
 /**
- * The five step bodies rendered by BomCreationWizard's dialog. Split out so
+ * The five step bodies rendered by RecipeCreationWizard's dialog. Split out so
  * the wizard shell only handles dialog chrome, close-confirm, and footer
  * nav — each step here is pure presentation over useBomWizard's state.
  */
 
 import { Button } from "@/components/ui/button"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
-import { BomLineEditorGrid, rmTotal, type BomLineRow, type BomMaterialOption } from "./BomLineEditorGrid"
-import { BomArtifactsEditor } from "./BomArtifactsEditor"
+import { RecipeLineEditorGrid, rmTotal, type RecipeLineRow, type RecipeMaterialOption } from "./RecipeLineEditorGrid"
+import { RecipeArtifactsEditor } from "./RecipeArtifactsEditor"
 import { ChangeTypeCheckboxes } from "./ChangeTypeCheckboxes"
-import { CSV_HEADER, buildBomCsvTemplate } from "./bom-csv"
-import type { EntryMethod } from "./useBomWizard"
+import { CSV_HEADER, buildBomCsvTemplate } from "./recipe-csv"
+import type { EntryMethod } from "./useRecipeWizard"
 import type { Sku } from "@/types/masters"
 
 export function Step1SkuSelect({
@@ -41,7 +41,7 @@ export function Step1SkuSelect({
         placeholder="Search SKU code or name…"
         disabled={loading}
       />
-      {loading && <p className="text-xs text-muted-foreground">Checking for an existing BOM…</p>}
+      {loading && <p className="text-xs text-muted-foreground">Checking for an existing Recipe…</p>}
     </div>
   )
 }
@@ -58,15 +58,15 @@ export function Step2ExistingBom({
   return (
     <div className="space-y-4 py-2">
       <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2.5 text-sm text-amber-800 dark:bg-amber-900/20 dark:border-amber-900 dark:text-amber-400">
-        A BOM already exists for this SKU ({existingBomCode}). Would you like to update the
-        existing BOM or create a new version?
+        A Recipe already exists for this SKU ({existingBomCode}). Would you like to update the
+        existing Recipe or create a new version?
       </div>
       <div className="flex flex-col sm:flex-row gap-2">
         <Button variant="outline" size="sm" onClick={onUpdateExisting}>
-          Update Existing BOM
+          Update Existing Recipe
         </Button>
         <Button size="sm" onClick={onCreateNewVersion}>
-          Create New BOM Version →
+          Create New Recipe Version →
         </Button>
       </div>
     </div>
@@ -133,15 +133,15 @@ export function Step4LineEntry({
   csvParsed: boolean
   csvErrors: string[]
   onCsvFile: (file: File) => void
-  rmRows: BomLineRow[]
-  pmRows: BomLineRow[]
-  onChangeRm: (rows: BomLineRow[]) => void
-  onChangePm: (rows: BomLineRow[]) => void
-  rmMaterials: BomMaterialOption[]
-  pmMaterials: BomMaterialOption[]
+  rmRows: RecipeLineRow[]
+  pmRows: RecipeLineRow[]
+  onChangeRm: (rows: RecipeLineRow[]) => void
+  onChangePm: (rows: RecipeLineRow[]) => void
+  rmMaterials: RecipeMaterialOption[]
+  pmMaterials: RecipeMaterialOption[]
   pendingArtifactFiles: File[]
   onChangePendingArtifactFiles: (files: File[]) => void
-  /** True when the picked SKU already has an active BOM — this submission
+  /** True when the picked SKU already has an active Recipe — this submission
    *  will be a revision, so reason + change type are required. */
   isRevision: boolean
   reason: string
@@ -153,7 +153,7 @@ export function Step4LineEntry({
     <div className="space-y-4 py-2">
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-medium mb-1">BOM Code</label>
+          <label className="block text-xs font-medium mb-1">Recipe Code</label>
           <input
             type="text"
             disabled
@@ -201,7 +201,7 @@ export function Step4LineEntry({
           )}
         </div>
       ) : (
-        <BomLineEditorGrid
+        <RecipeLineEditorGrid
           rmRows={rmRows}
           pmRows={pmRows}
           onChangeRm={onChangeRm}
@@ -212,7 +212,7 @@ export function Step4LineEntry({
       )}
 
       <div className="rounded-md border border-border bg-muted/30 px-3 py-2.5">
-        <BomArtifactsEditor
+        <RecipeArtifactsEditor
           pendingFiles={pendingArtifactFiles}
           onChangePendingFiles={onChangePendingArtifactFiles}
           pendingRemoveIds={[]}
@@ -243,8 +243,8 @@ function SummaryLineList({
   totalBadge,
 }: {
   title: string
-  rows: BomLineRow[]
-  materials: BomMaterialOption[]
+  rows: RecipeLineRow[]
+  materials: RecipeMaterialOption[]
   totalBadge?: string
 }) {
   return (
@@ -297,10 +297,10 @@ export function Step5Review({
   skus: Sku[]
   skuId: number | null
   effectiveFrom: string
-  rmRows: BomLineRow[]
-  pmRows: BomLineRow[]
-  rmMaterials: BomMaterialOption[]
-  pmMaterials: BomMaterialOption[]
+  rmRows: RecipeLineRow[]
+  pmRows: RecipeLineRow[]
+  rmMaterials: RecipeMaterialOption[]
+  pmMaterials: RecipeMaterialOption[]
   isRevision: boolean
   reason: string
   changeType: ("rm" | "pm")[]
@@ -313,7 +313,7 @@ export function Step5Review({
           <p className="font-medium">{skus.find((s) => s.id === skuId)?.sku_code ?? "—"}</p>
         </div>
         <div>
-          <p className="text-xs text-muted-foreground">BOM Code</p>
+          <p className="text-xs text-muted-foreground">Recipe Code</p>
           <p className="font-mono font-medium text-muted-foreground">Assigned automatically on submit</p>
         </div>
         <div>
@@ -348,7 +348,7 @@ export function Step5Review({
       )}
 
       <p className="text-xs text-muted-foreground">
-        Submitting will raise this BOM for approval. It becomes active once approved.
+        Submitting will raise this Recipe for approval. It becomes active once approved.
       </p>
     </div>
   )

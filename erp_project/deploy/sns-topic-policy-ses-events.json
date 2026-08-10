@@ -1,0 +1,42 @@
+{
+  "_comment": [
+    "RESOURCE policy for the SNS topic erp-app-ses-events. This is NOT an IAM",
+    "identity policy - it attaches to the topic itself:",
+    "",
+    "  aws sns set-topic-attributes --region ap-south-1 \\",
+    "    --topic-arn arn:aws:sns:ap-south-1:157320387454:erp-app-ses-events \\",
+    "    --attribute-name Policy \\",
+    "    --attribute-value file://deploy/sns-topic-policy-ses-events.json",
+    "",
+    "Easy to miss, and the failure is silent: without it SES cannot publish, the",
+    "configuration set's event destination delivers nothing, and the suppression",
+    "list stays permanently empty while every send still looks successful.",
+    "",
+    "Strip the _comment keys before applying - SNS rejects unknown top-level keys."
+  ],
+  "Version": "2012-10-17",
+  "Id": "erp-app-ses-events-policy",
+  "Statement": [
+    {
+      "Sid": "AllowSesToPublishEvents",
+      "Effect": "Allow",
+      "Principal": { "Service": "ses.amazonaws.com" },
+      "Action": "sns:Publish",
+      "Resource": "arn:aws:sns:ap-south-1:157320387454:erp-app-ses-events",
+      "Condition": {
+        "StringEquals": {
+          "AWS:SourceAccount": "157320387454"
+        },
+        "ArnLike": {
+          "AWS:SourceArn": "arn:aws:ses:ap-south-1:157320387454:configuration-set/erp-app"
+        }
+      },
+      "_comment_condition": [
+        "SourceAccount and SourceArn guard against the confused-deputy problem:",
+        "without them any AWS account's SES could publish to this topic, and a",
+        "forged bounce event would suppress a real manufacturer address - a",
+        "denial-of-service on your own PO mail."
+      ]
+    }
+  ]
+}

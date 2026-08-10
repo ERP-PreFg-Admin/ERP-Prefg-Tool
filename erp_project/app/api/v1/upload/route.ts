@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { buildUploadKey } from "@/lib/s3-guard"
 import { uploadFile } from "@/lib/s3"
 
 const ALLOWED_SET = new Set([
@@ -29,7 +30,7 @@ const EXT_TO_MIME: Record<string, string> = Object.fromEntries(
 const MAX_BYTES = 10 * 1024 * 1024 // 10 MB
 
 export const POST = withGateway({
-  handler: async ({ req }) => {
+  handler: async ({ req, session }) => {
   const form = await req.formData()
   const file   = form.get("file")
   const folder = form.get("folder")
@@ -58,13 +59,18 @@ export const POST = withGateway({
   }
 
   const ext = MIME_TO_EXT[mimeType]
-  const key = `${folder.trim()}/${field.trim()}.${ext}`
+  // Never the plain `${folder}/${field}.${ext}` this used to be: that key was
+  // predictable, and uploadFile is a PutObject, so an upload could silently
+  // overwrite an existing invoice or vendor document. The random token makes a
+  // collision impossible, and the uploader id lets /api/v1/files/presign recognise
+  // a file this user just uploaded but hasn't saved to any row yet.
+  const key = buildUploadKey(folder.trim(), field.trim(), ext, Number(session.user.id))
 
   try {
     const buffer = Buffer.from(await file.arrayBuffer())
     await uploadFile(buffer, key, mimeType)
     return NextResponse.json({ key })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[upload] S3 upload failed:", err)
     return NextResponse.json({ error: "Upload failed" }, { status: 500 })
   }

@@ -1,4 +1,4 @@
-// GET /api/manufacturing/[mfgId]/agreed-rates/export
+// GET /api/v1/manufacturing/[mfgId]/agreed-rates/export
 //
 // Exports the "Agreed Rates" tab for one manufacturer — same rows as
 // AgreedRatesClient.tsx, via the same queries

@@ -1,11 +1,11 @@
 "use client"
 
 /**
- * Step-wise BOM creation wizard: SKU select -> existing-active-BOM check ->
+ * Step-wise Recipe creation wizard: SKU select -> existing-active-Recipe check ->
  * entry method (manual/CSV) -> RM+PM line entry -> review & submit.
  *
  * All step state/handlers live in useBomWizard; step bodies live in
- * BomWizardSteps.tsx. This file is just dialog chrome, close-confirm, and
+ * RecipeWizardSteps.tsx. This file is just dialog chrome, close-confirm, and
  * footer nav.
  */
 
@@ -18,18 +18,18 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
-import { type BomMaterialOption } from "./BomLineEditorGrid"
-import { useBomWizard } from "./useBomWizard"
+import { type RecipeMaterialOption } from "./RecipeLineEditorGrid"
+import { useBomWizard } from "./useRecipeWizard"
 import {
   Step1SkuSelect,
   Step2ExistingBom,
   Step3EntryMethod,
   Step4LineEntry,
   Step5Review,
-} from "./BomWizardSteps"
+} from "./RecipeWizardSteps"
 import type { Sku } from "@/types/masters"
 
-export function BomCreationWizard({
+export function RecipeCreationWizard({
   skus,
   rmMaterials,
   pmMaterials,
@@ -37,8 +37,8 @@ export function BomCreationWizard({
   onEditExisting,
 }: {
   skus: Sku[]
-  rmMaterials: BomMaterialOption[]
-  pmMaterials: BomMaterialOption[]
+  rmMaterials: RecipeMaterialOption[]
+  pmMaterials: RecipeMaterialOption[]
   onSuccess: () => void
   onEditExisting: (bomId: number) => void
 }) {
@@ -49,13 +49,13 @@ export function BomCreationWizard({
     <>
       <Button size="sm" onClick={() => wizard.setOpen(true)}>
         <Plus className="h-4 w-4 mr-1.5" />
-        Create BOM
+        Create Recipe
       </Button>
 
       <Dialog open={wizard.open} onOpenChange={(v) => { if (!v) wizard.requestClose() }}>
         <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle>Create BOM — Step {step} of 5</DialogTitle>
+            <DialogTitle>Create Recipe — Step {step} of 5</DialogTitle>
           </DialogHeader>
 
           {wizard.showCloseConfirm ? (

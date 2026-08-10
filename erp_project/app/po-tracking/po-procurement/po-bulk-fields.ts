@@ -1,7 +1,7 @@
 import type { MasterField } from "@/components/masters/field-config"
 import { STATUS_CONFIG, STATUS_KEYS } from "./po-types"
 
-// Same format check as app/masters/bom-master/bom-bulk-fields.ts — pure
+// Same format check as app/masters/recipe-master/bom-bulk-fields.ts — pure
 // string validation, no DB round-trip needed here.
 function validateDateStr(raw: string): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return `must be YYYY-MM-DD (got "${raw}")`

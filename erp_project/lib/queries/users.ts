@@ -5,7 +5,7 @@
  * lib/auth.ts' signIn callback whitelists on `email` + `status`, so a row must
  * exist here BEFORE someone can sign in with Google. There is deliberately no
  * delete — `users.id` is referenced by approvals, sessions, session_history,
- * master_* and supplier_invoices; deactivation is `status = 'inactive'`, which
+ * master_* and invoice_mfg; deactivation is `status = 'inactive'`, which
  * signIn already refuses.
  */
 

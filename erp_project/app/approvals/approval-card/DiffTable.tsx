@@ -4,7 +4,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import type { DiffRow } from "./types"
 
 /** Shared red/green "Old Value → New Value" comparison table used by every
- *  approval type (field diffs, BOM lines, bulk CSV upload) so all approval
+ *  approval type (field diffs, Recipe lines, bulk CSV upload) so all approval
  *  kinds read the same way instead of each inventing its own layout.
  *
  *  When every row has no prior value, this is a brand-new record — skip the

@@ -1,9 +1,9 @@
 /**
- * SERVER component for /masters/bom-master.
+ * SERVER component for /masters/recipe-master.
  *
  * Reads ?page, ?size, ?search, ?status from URL searchParams and runs a
  * DB-level LIMIT/OFFSET query so only the requested slice is fetched.
- * One row per BOM header (see bom.selectPaginatedGrouped).
+ * One row per Recipe header (see bom.selectPaginatedGrouped).
  */
 
 import { auth } from "@/lib/auth"
@@ -11,18 +11,18 @@ import { resolveAccess } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
-import { bom } from "@/lib/queries/bom"
+import { bom } from "@/lib/queries/recipe"
 import { fuzzyRank } from "@/lib/fuzzy-search"
 import {
   getActiveSkuList,
   getActiveRmMaterialOptions,
   getActivePmMaterialOptions,
 } from "@/lib/cached-reference-data"
-import type { BomListItem } from "@/types/masters"
-import type { BomMaterialOption } from "./BomLineEditorGrid"
-import BOMMasterComponent from "./BOMMasterComponent"
+import type { RecipeListItem } from "@/types/masters"
+import type { RecipeMaterialOption } from "./RecipeLineEditorGrid"
+import RecipeMasterComponent from "./RecipeMasterComponent"
 
-export default async function BOMMasterPage({
+export default async function RecipeMasterPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -31,7 +31,7 @@ export default async function BOMMasterPage({
   const session = await auth()
   if (!session) redirect("/auth/signin")
   const userId = parseInt(session.user.id)
-  const access = await resolveAccess(userId, session.user.roles, "/masters/bom-master")
+  const access = await resolveAccess(userId, session.user.roles, "/masters/recipe-master")
   if (access === "none") redirect("/auth/unauthorized")
 
   // ── Read URL params ────────────────────────────────────────────────────────
@@ -43,11 +43,11 @@ export default async function BOMMasterPage({
   const like   = search       ? `%${search}%` : null
   const status = statusFilter ? statusFilter  : null
 
-  // ── DB query (paginated, one row per BOM header) ───────────────────────────
+  // ── DB query (paginated, one row per Recipe header) ───────────────────────────
   // Param order: [like×3, status×2, LIMIT, OFFSET] (data)
   //              [like×3, status×2]                (count)
   const pageStart = performance.now()
-  console.log(`[AUDIT] BOM Master load - page=${page}, size=${size}, search=${search || "none"}, status=${status || "all"}`)
+  console.log(`[AUDIT] Recipe Master load - page=${page}, size=${size}, search=${search || "none"}, status=${status || "all"}`)
 
   const [skuRows, rmRows, pmRows] = await Promise.all([
     getActiveSkuList(),
@@ -55,11 +55,11 @@ export default async function BOMMasterPage({
     getActivePmMaterialOptions(),
   ])
 
-  let rows: BomListItem[]
+  let rows: RecipeListItem[]
   let total: number
 
   if (search) {
-    const allMatching = await timedQuery<BomListItem>(
+    const allMatching = await timedQuery<RecipeListItem>(
       bom.selectAllFilteredGrouped, [null, null, null, status, status], { label: "selectAllFilteredGrouped" }
     )
     const ranked = fuzzyRank(allMatching, search, ["bom_code", "sku_code"])
@@ -67,16 +67,16 @@ export default async function BOMMasterPage({
     rows = ranked.slice(offset, offset + size)
   } else {
     const [dbRows, countRows] = await Promise.all([
-      timedQuery<BomListItem>(bom.selectPaginatedGrouped, [like, like, like, status, status, size, offset], { label: "selectPaginatedGrouped" }),
+      timedQuery<RecipeListItem>(bom.selectPaginatedGrouped, [like, like, like, status, status, size, offset], { label: "selectPaginatedGrouped" }),
       timedQuery<{ total: number }>(bom.countGrouped, [like, like, like, status, status], { label: "countGrouped" }),
     ])
     rows = dbRows
     total = Number(countRows[0]?.total ?? 0)
   }
-  console.log(`[AUDIT] BOM Master complete: ${(performance.now() - pageStart).toFixed(2)}ms | ${rows.length}/${total} rows`)
+  console.log(`[AUDIT] Recipe Master complete: ${(performance.now() - pageStart).toFixed(2)}ms | ${rows.length}/${total} rows`)
 
-  const rmMaterials: BomMaterialOption[] = rmRows.map((r) => ({ id: r.id, code: r.rm_code, name: r.name, uom: r.uom }))
-  const pmMaterials: BomMaterialOption[] = pmRows.map((r) => ({ id: r.id, code: r.pm_code, name: r.name, uom: r.uom }))
+  const rmMaterials: RecipeMaterialOption[] = rmRows.map((r) => ({ id: r.id, code: r.rm_code, name: r.name, uom: r.uom }))
+  const pmMaterials: RecipeMaterialOption[] = pmRows.map((r) => ({ id: r.id, code: r.pm_code, name: r.name, uom: r.uom }))
 
   return (
     <div className="p-6">
@@ -86,7 +86,7 @@ export default async function BOMMasterPage({
           Bill of Materials — all active component definitions
         </p>
       </div>
-      <BOMMasterComponent
+      <RecipeMasterComponent
         rows={rows}
         total={total}
         page={page}

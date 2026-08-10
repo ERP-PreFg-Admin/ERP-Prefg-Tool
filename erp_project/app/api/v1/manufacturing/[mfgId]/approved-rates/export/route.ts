@@ -1,4 +1,4 @@
-// GET /api/manufacturing/[mfgId]/approved-rates/export
+// GET /api/v1/manufacturing/[mfgId]/approved-rates/export
 //
 // Exports the "Approved Procurement Rates" tab's main table for one
 // manufacturer — same rows as ApprovedRates.tsx, via the same queries

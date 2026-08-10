@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/toast"
 import type { MfgOption, WarehouseOption } from "./po-types"
 import { useQuotedRate } from "./useQuotedRate"
+import { todayIST } from "@/lib/date"
 
 type PoType = "normal" | "impromptu"
 
@@ -118,7 +119,7 @@ export default function AddPODialog({
   const [apiError, setApiError]     = useState("")
   const { toast } = useToast()
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayIST()
   const defaultDest =
     warehouseOptions.find((w) => w.name.toLowerCase().includes("mumbai"))?.name
     ?? warehouseOptions.find((w) => w.type === "MWH")?.name
@@ -142,7 +143,7 @@ export default function AddPODialog({
     setLoadingSkus(true)
     setSkusError("")
     setRowErrors({})
-    fetch(`/api/purchase-orders/mfg-skus?mfg_id=${mfgId}`)
+    fetch(`/api/v1/purchase-orders/mfg-skus?mfg_id=${mfgId}`)
       .then((r) => r.json())
       .then((data: { skus?: MfgSkuOption[] }) => {
         setRows(
@@ -191,7 +192,7 @@ export default function AddPODialog({
     for (const r of filled) {
       try {
         const rateRes = await fetch(
-          `/api/purchase-orders/quote-rate?sku_code=${encodeURIComponent(r.sku_code)}&mfg_id=${mfgId}`
+          `/api/v1/purchase-orders/quote-rate?sku_code=${encodeURIComponent(r.sku_code)}&mfg_id=${mfgId}`
         )
         const rateData = await rateRes.json()
         if (!rateRes.ok || rateData.rate == null) {
@@ -201,7 +202,7 @@ export default function AddPODialog({
         const unitPrice = rateData.rate as number
         const totalAmt  = unitPrice * Number(r.qty)
 
-        const res = await fetch("/api/purchase-orders", {
+        const res = await fetch("/api/v1/purchase-orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

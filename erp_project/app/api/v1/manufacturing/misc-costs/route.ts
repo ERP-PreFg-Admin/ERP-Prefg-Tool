@@ -1,8 +1,8 @@
-// POST /api/manufacturing/misc-costs
+// POST /api/v1/manufacturing/misc-costs
 //
 // Create or update a bom_misc line — a manufacturer's per-SKU Job Work /
 // Shrink Wrap / Shipper / Wastage cost. No approval flow, same directness as
-// /api/manufacturing/lines.
+// /api/v1/manufacturing/lines.
 //
 // The "bulk" action (used by CsvImportDialog) additionally requires a
 // `mfg_id` query param — every bom_misc row is scoped to one manufacturer,
@@ -40,14 +40,14 @@ export const POST = withGateway({
     }
 
     if (body.action === "create-misc") {
-      const eventId = makeEventId("MFG_MISC_COST", "create", `${body.mfg_id}-${body.bom_id}-${body.type}`)
+      const eventId = makeEventId("MFG_MISC_COST", "create", `${body.mfg_id}-${body.recipe_id}-${body.type}`)
       const logCtx = { ...ctx, eventId, module: "MFG_MISC_COST_CREATE" }
-      logger.info({ ...logCtx, mfgId: body.mfg_id, bomId: body.bom_id, type: body.type, cost: body.cost, message: "Misc. cost line create started" })
-      recordRawEvent("MFG_MISC_COST", eventId, { mfgId: body.mfg_id, bomId: body.bom_id, type: body.type, cost: body.cost })
+      logger.info({ ...logCtx, mfgId: body.mfg_id, bomId: body.recipe_id, type: body.type, cost: body.cost, message: "Misc. cost line create started" })
+      recordRawEvent("MFG_MISC_COST", eventId, { mfgId: body.mfg_id, bomId: body.recipe_id, type: body.type, cost: body.cost })
 
       try {
         const result = await execute(manufacturingSql.insertMisc, [
-          body.bom_id,
+          body.recipe_id,
           body.mfg_id,
           body.type,
           body.cost,
@@ -56,12 +56,12 @@ export const POST = withGateway({
           body.status,
         ])
         logger.info({ ...logCtx, id: result.insertId, message: "Misc. cost line created" })
-        recordProcessedEvent("MFG_MISC_COST", eventId, { id: result.insertId, mfgId: body.mfg_id, bomId: body.bom_id, type: body.type })
+        recordProcessedEvent("MFG_MISC_COST", eventId, { id: result.insertId, mfgId: body.mfg_id, bomId: body.recipe_id, type: body.type })
         return NextResponse.json({ ok: true, id: result.insertId })
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)
         const stack = err instanceof Error ? err.stack : undefined
-        recordFailedEvent("MFG_MISC_COST", eventId, { mfgId: body.mfg_id, bomId: body.bom_id, type: body.type }, message)
+        recordFailedEvent("MFG_MISC_COST", eventId, { mfgId: body.mfg_id, bomId: body.recipe_id, type: body.type }, message)
         logger.error({ ...logCtx, err: message, stack, message: "Misc. cost line create failed" })
         throw new ApiError(500, "internal", "Database error")
       }

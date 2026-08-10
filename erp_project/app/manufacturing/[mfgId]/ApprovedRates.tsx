@@ -35,7 +35,7 @@ export default function RmVendorTable({
           onSelect={setMode}
         />
         <DownloadButton
-          endpoint={`/api/manufacturing/${mfgId}/approved-rates/export`}
+          endpoint={`/api/v1/manufacturing/${mfgId}/approved-rates/export`}
           label={`Approved ${mode.toUpperCase()} Rates`}
           extraParams={{ mode }}
         />
@@ -117,7 +117,7 @@ export default function RmVendorTable({
         <div className="mb-2 flex items-center justify-between gap-3">
           <div className="text-sm font-semibold">Rate History</div>
           <DownloadButton
-            endpoint={`/api/manufacturing/${mfgId}/approved-rates/history/export`}
+            endpoint={`/api/v1/manufacturing/${mfgId}/approved-rates/history/export`}
             label={`${mode.toUpperCase()} Rate History`}
             extraParams={{ mode }}
           />

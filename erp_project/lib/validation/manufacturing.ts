@@ -4,7 +4,7 @@ export const mfgLineStatusSchema = z.enum(["active", "discontinued", "inactive"]
 
 export const createMfgLineSchema = z.object({
   action: z.literal("create"),
-  bom_id: z.coerce.number().int().positive(),
+  recipe_id: z.coerce.number().int().positive(),
   mfg_id: z.coerce.number().int().positive(),
   status: mfgLineStatusSchema,
   effective_from: z.string().trim().min(1, "effective_from is required"),
@@ -44,7 +44,7 @@ export const miscCostStatusSchema = z.enum(["active", "inactive", "discontinued"
 
 export const createMiscCostSchema = z.object({
   action: z.literal("create-misc"),
-  bom_id: z.coerce.number().int().positive(),
+  recipe_id: z.coerce.number().int().positive(),
   mfg_id: z.coerce.number().int().positive(),
   type: miscCostTypeSchema,
   cost: z.coerce.number().nonnegative(),
@@ -62,7 +62,7 @@ export const updateMiscCostSchema = z.object({
   status: miscCostStatusSchema,
 })
 
-/** Bulk CSV import — rows arrive as raw strings (from CsvImportDialog's client-side parse); the route resolves sku_code -> bom_id and coerces cost/status per row. */
+/** Bulk CSV import — rows arrive as raw strings (from CsvImportDialog's client-side parse); the route resolves sku_code -> recipe_id and coerces cost/status per row. */
 export const bulkMiscCostSchema = z.object({
   action: z.literal("bulk"),
   rows: z.array(z.record(z.string(), z.string())),

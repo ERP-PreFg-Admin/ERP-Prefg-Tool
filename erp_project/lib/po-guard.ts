@@ -5,7 +5,7 @@
  * purchase-orders.ts imports scopeParams from there, so lib/scope.ts must not
  * import the query file back.
  *
- * Every /api/purchase-orders/[id]/** route needs this. The PO list is filtered
+ * Every /api/v1/purchase-orders/[id]/** route needs this. The PO list is filtered
  * in SQL, but ids are sequential integers — without the guard, a user scoped to
  * manufacturer 1 can still read, receive, cancel, split, mail or PDF-export
  * manufacturer 7's PO by guessing its id.

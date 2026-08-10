@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { CostImpactAlert } from "@/components/masters/CostImpactAlert"
 import { RejectionBanner, type RejectionInfo } from "@/components/masters/ApprovalBanners"
 import type { RM, Mfg } from "@/types/masters"
+import { todayIST } from "@/lib/date"
 
 export function EditRmVendorRateDialog({
   row,
@@ -55,7 +56,7 @@ export function EditRmVendorRateDialog({
       // For rejected rows, fetch rejection reason + ownership info.
       if (row.vrm_status === "rejected" && row.vrm_id) {
         setLoadingInfo(true)
-        fetch(`/api/approvals/entity?module=RM_VRM&entity_id=${row.vrm_id}`)
+        fetch(`/api/v1/approvals/entity?module=RM_VRM&entity_id=${row.vrm_id}`)
           .then((r) => r.json())
           .then((data) => {
             setRejection(data.rejection ?? null)
@@ -69,7 +70,7 @@ export function EditRmVendorRateDialog({
 
   if (!row) return null
 
-  const today    = new Date().toISOString().slice(0, 10)
+  const today    = todayIST()
   const isDraft  = row.vrm_status === "rejected"
   const canEdit  = !isDraft || currentUserId === null || rejection === null || currentUserId === rejection.raised_by
 
@@ -93,7 +94,7 @@ export function EditRmVendorRateDialog({
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch("/api/masters/raw-materials", {
+      const res = await fetch("/api/v1/masters/raw-materials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -136,7 +137,7 @@ export function EditRmVendorRateDialog({
           <div className="text-xs text-muted-foreground">Vendor: {row.vendor_code}</div>
 
           <CostImpactAlert
-            endpoint="/api/masters/raw-materials"
+            endpoint="/api/v1/masters/raw-materials"
             materialIdField="rm_id"
             materialId={row.rm_id}
             scope="vendor"

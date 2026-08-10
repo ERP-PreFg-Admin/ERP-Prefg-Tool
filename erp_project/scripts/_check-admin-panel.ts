@@ -22,14 +22,14 @@ function filterParams(over: Partial<{
 
 async function main() {
   // ── activity_log insert (what withGateway does on every mutation) ──────────
-  await execute(activitySql.insert, [1, "POST", "/api/admin/users", 200, 42, "127.0.0.1", "check-script", REQUEST_ID])
+  await execute(activitySql.insert, [1, "POST", "/api/v1/admin/users", 200, 42, "127.0.0.1", "check-script", REQUEST_ID])
   const inserted = await query<{ method: string; created_on: Date }>(
     "SELECT * FROM activity_log WHERE request_id = ?", [REQUEST_ID]
   )
   assert.equal(inserted.length, 1, "insert wrote a row")
   assert.equal(inserted[0].method, "POST")
   assert.ok(inserted[0].created_on instanceof Date, "created_on is a real datetime")
-  console.log("insert ok:", inserted[0].created_on.toISOString(), "(stored as IST)")
+  console.log("insert ok:", inserted[0].created_on.toISOString(), "(stored as a UTC instant)")
 
   // ── feed: unfiltered, then one assertion per filter ───────────────────────
   type Row = { user_id: number | null; source: string; method: string | null; detail: string }

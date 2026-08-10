@@ -34,7 +34,7 @@ export const PAGES: readonly PageEntry[] = [
   { slug: "/masters/material-master",     label: "Material Master",      section: "Masters" },
   { slug: "/masters/raw-materials",       label: "RM Cost Master",       section: "Masters" },
   { slug: "/masters/packing-materials",   label: "PM Cost Master",       section: "Masters" },
-  { slug: "/masters/bom-master",          label: "Recipe Master",        section: "Masters" },
+  { slug: "/masters/recipe-master",          label: "Recipe Master",        section: "Masters" },
 
   { slug: "/manufacturing", label: "MFG Cost Manager", section: "Production" },
   { slug: "/po-tracking",                    label: "PO Tracking (all)", section: "Production" },
@@ -42,6 +42,7 @@ export const PAGES: readonly PageEntry[] = [
   { slug: "/po-tracking/po-procurement",     label: "FG POs Tracking",   section: "Production" },
   { slug: "/po-tracking/rm-pm-procurement",  label: "RM/PM Procurement", section: "Production" },
   { slug: "/po-tracking/po-inwarding",       label: "PO Inwarding",      section: "Production" },
+  { slug: "/po-tracking/invoices",           label: "Invoices",          section: "Production" },
 
   // Seeded in scripts/seed-permissions.ts but no pages exist yet.
   { slug: "/inventory",  label: "Inventory",            section: "Planned", nav: false },

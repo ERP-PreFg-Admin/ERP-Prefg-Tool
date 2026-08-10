@@ -28,7 +28,7 @@ export default function ReceivePODialog({
     if (!po || !value || value <= 0) return
     setLoading(true)
     try {
-      const res = await fetch(`/api/purchase-orders/${po.id}/receive`, {
+      const res = await fetch(`/api/v1/purchase-orders/${po.id}/receive`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ qty: value }),

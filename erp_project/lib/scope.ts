@@ -30,8 +30,8 @@
  *
  * ── Deliberately NOT scoped yet ─────────────────────────────────────────────
  * The approvals queue (`approvalsSql.listPending` stores only module +
- * entity_id, and bulk modules store entity_id = user_id), BOM master (no
- * mfg_id — linkage is via master_bom_mfg) and the supplier-invoice list. Don't
+ * entity_id, and bulk modules store entity_id = user_id), Recipe master (no
+ * mfg_id — linkage is via master_recipe_mfg) and the supplier-invoice list. Don't
  * assume a screen is scoped because this file exists; grep for the call.
  */
 

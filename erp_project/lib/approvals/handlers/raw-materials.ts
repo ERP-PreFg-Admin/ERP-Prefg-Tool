@@ -14,7 +14,7 @@ import { roundToWholeNumber, roundToTwoDecimals } from "@/lib/numeric"
 import { toRmParams } from "@/lib/master-routes/material-utils"
 import { insertHistoryEntry } from "@/lib/master-routes/history-utils"
 import { findEditMatchForRow } from "@/lib/master-routes/edit-match"
-import { type ModuleHandler, buildFieldMap, s3KeyOf } from "./types"
+import { type ModuleHandler, buildFieldMap, s3KeyOf, supersededOn } from "./types"
 
 export const rmRateHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
@@ -28,7 +28,12 @@ export const rmRateHandler: ModuleHandler = {
 
     await conn.execute(rmSql.archiveToHistoryMrm, [
       cur.mfg_id, cur.rm_id, cur.approved_vendor_id ?? 0,
-      cur.curr_rate, cur.effective_from, null,
+      // effective_to closes the archived row's validity window: the outgoing rate
+      // applied until the incoming one starts. cost_master_rm_mfg has no effective_to
+      // column of its own, so it has to be derived here — passing null left every
+      // archived manufacturer rate open-ended, so two superseded rates looked as
+      // though they applied simultaneously.
+      cur.curr_rate, cur.effective_from, supersededOn(fieldMap.effective_from),
       cur.status === STATUS.ACTIVE ? 1 : 0,
       fieldMap.remarks || null, raisedBy ?? null,
     ])
@@ -279,7 +284,7 @@ export async function stageRmBulkRows(
   }
 }
 
-// Bulk RM × Vendor rate upload — one CSV row = one rm_vrm_dynamic row,
+// Bulk RM × Vendor rate upload — one CSV row = one cost_master_rm_ven row,
 // inserted directly as 'active' (this insert IS the approval being applied).
 // Rows whose rm_code/vendor_code don't resolve are skipped, not failed —
 // matches every other *_BULK handler's file-level partial-success convention.
@@ -339,7 +344,7 @@ export const rmVrmBulkHandler: ModuleHandler = {
   },
 }
 
-// Bulk RM × Manufacturer rate upload — one CSV row = one rm_mrm_fixed row.
+// Bulk RM × Manufacturer rate upload — one CSV row = one cost_master_rm_mfg row.
 // approved_vendor_code is optional (mirrors the single-row add-rates flow).
 export const rmRateBulkHandler: ModuleHandler = {
   async setStatus() {

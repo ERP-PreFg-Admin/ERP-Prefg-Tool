@@ -1,6 +1,6 @@
-// GET /api/masters/packing-materials/vrm-history?pm_id=1&vendor_id=2
+// GET /api/v1/masters/packing-materials/vrm-history?pm_id=1&vendor_id=2
 //
-// Full rate-change history for one PM×Vendor pair from history_vrm, newest
+// Full rate-change history for one PM×Vendor pair from history_cost_ven, newest
 // first — backs the "Rate History" dialog on the PM Rate Master (Vendor view).
 
 import { NextResponse } from "next/server"
@@ -17,7 +17,7 @@ export const GET = withGateway({
     const { searchParams } = new URL(req.url)
     const pmId = searchParams.get("pm_id")
     const vendorId = searchParams.get("vendor_id")
-    const logCtx = { ...ctx, route: "/api/masters/packing-materials/vrm-history" }
+    const logCtx = { ...ctx, route: "/api/v1/masters/packing-materials/vrm-history" }
 
     if (!pmId || isNaN(Number(pmId)) || !vendorId || isNaN(Number(vendorId))) {
       throw new ApiError(400, "validation_error", "pm_id and vendor_id are required")

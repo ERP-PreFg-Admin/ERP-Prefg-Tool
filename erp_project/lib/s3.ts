@@ -79,7 +79,7 @@ export async function getPresignedDownloadUrl(key: string, expiresIn = 900): Pro
  * Every object is stored with a correct ContentType already (see uploadFile
  * callers), so letting the stored type through is both simpler and right. CSVs
  * no longer need the hack either: they're previewed as a table by
- * /api/files/preview, which parses them server-side.
+ * /api/v1/files/preview, which parses them server-side.
  */
 export async function getPresignedViewUrl(key: string, expiresIn = 900): Promise<string> {
   return getSignedUrl(

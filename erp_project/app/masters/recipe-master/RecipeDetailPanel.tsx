@@ -1,8 +1,8 @@
 "use client"
 
 /**
- * Slide-in read-only detail panel for a selected BOM row. Editing happens in
- * a separate dialog (BomEditDialog.tsx) opened via the "Edit BOM" button
+ * Slide-in read-only detail panel for a selected Recipe row. Editing happens in
+ * a separate dialog (RecipeEditDialog.tsx) opened via the "Edit Recipe" button
  * here — kept apart from this panel so the two don't compete for space and
  * the panel doesn't have to switch between read/edit layouts.
  */
@@ -12,14 +12,14 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
-import { formatDate, LOCKED_STATUSES } from "./bom-format"
+import { formatDate, LOCKED_STATUSES } from "./recipe-format"
 import { StatusBadge } from "@/components/masters/StatusBadge"
 import { SegmentedToggle } from "@/components/ui/segmented-toggle"
-import type { BomDetailResponse } from "@/types/masters"
+import type { RecipeDetailResponse } from "@/types/masters"
 
 async function viewArtifact(s3Key: string) {
   try {
-    const res = await fetch(`/api/files/presign?key=${encodeURIComponent(s3Key)}&view=1`)
+    const res = await fetch(`/api/v1/files/presign?key=${encodeURIComponent(s3Key)}&view=1`)
     const data = await res.json()
     if (data.url) window.open(data.url, "_blank", "noopener,noreferrer")
   } catch {
@@ -27,7 +27,7 @@ async function viewArtifact(s3Key: string) {
   }
 }
 
-export function BomDetailPanel({
+export function RecipeDetailPanel({
   detail,
   detailLoading,
   detailError,
@@ -42,16 +42,16 @@ export function BomDetailPanel({
   onClose,
   onEdit,
 }: {
-  detail: BomDetailResponse | null
+  detail: RecipeDetailResponse | null
   detailLoading: boolean
   detailError: string | null
   activeMtrlType: "rm" | "pm"
   onChangeMtrlType: (t: "rm" | "pm") => void
-  rmLines: BomDetailResponse["lines"]
-  pmLines: BomDetailResponse["lines"]
+  rmLines: RecipeDetailResponse["lines"]
+  pmLines: RecipeDetailResponse["lines"]
   rmDetailTotal: number
   rmIsBalanced: boolean
-  visibleLines: BomDetailResponse["lines"]
+  visibleLines: RecipeDetailResponse["lines"]
   canEdit: boolean
   onClose: () => void
   onEdit: (bomId: number) => void
@@ -64,7 +64,7 @@ export function BomDetailPanel({
             <CardTitle className="text-base font-semibold font-mono">
               {detail?.bom_code ?? "—"}
             </CardTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">BOM Detail</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Recipe Detail</p>
           </div>
           <Button
             variant="ghost"
@@ -112,7 +112,7 @@ export function BomDetailPanel({
             </div>
 
             {/* ── Artifacts — read-only here; add/remove happens in the Edit
-                   BOM dialog below, since attaching a file is bundled into
+                   Recipe dialog below, since attaching a file is bundled into
                    the same approval as the line edits. ── */}
             <div>
               <p className="text-xs font-medium text-muted-foreground mb-2">
@@ -209,15 +209,15 @@ export function BomDetailPanel({
               )}
             </div>
 
-            {canEdit && detail.bom_id != null && !LOCKED_STATUSES.has(detail.status ?? "") && (
-              <Button size="sm" variant="outline" onClick={() => onEdit(detail.bom_id!)}>
+            {canEdit && detail.recipe_id != null && !LOCKED_STATUSES.has(detail.status ?? "") && (
+              <Button size="sm" variant="outline" onClick={() => onEdit(detail.recipe_id!)}>
                 <Pencil className="h-3.5 w-3.5 mr-1.5" />
-                Edit BOM
+                Edit Recipe
               </Button>
             )}
             {LOCKED_STATUSES.has(detail.status ?? "") && (
               <p className="text-xs text-muted-foreground">
-                This BOM has a pending approval and can't be edited until it's resolved.
+                This Recipe has a pending approval and can't be edited until it's resolved.
               </p>
             )}
           </>

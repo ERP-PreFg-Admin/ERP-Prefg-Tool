@@ -10,11 +10,12 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import type { MfgLine, MfgLineStatus } from "@/types/masters"
+import { todayIST } from "@/lib/date"
 
-export type BomOption = { id: number; bom_code: string; sku_code: string | null; sku_name: string | null }
+export type RecipeOption = { id: number; bom_code: string; sku_code: string | null; sku_name: string | null }
 
 type FormState = {
-  bom_id: string
+  recipe_id: string
   status: MfgLineStatus
   effective_from: string
   effective_to: string
@@ -25,9 +26,9 @@ type FormState = {
 }
 
 const EMPTY_FORM: FormState = {
-  bom_id: "",
+  recipe_id: "",
   status: "active",
-  effective_from: new Date().toISOString().slice(0, 10),
+  effective_from: todayIST(),
   effective_to: "",
   monthly_capacity: "",
   this_month_plan: "",
@@ -45,7 +46,7 @@ export default function LineDialog({
   onClose: () => void
   onSaved: () => void
   mfgId: number
-  bomOptions: BomOption[]
+  bomOptions: RecipeOption[]
   editData: MfgLine | null
 }) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
@@ -56,7 +57,7 @@ export default function LineDialog({
     if (!open) return
     if (editData) {
       setForm({
-        bom_id: String(editData.bom_id),
+        recipe_id: String(editData.recipe_id),
         status: editData.status,
         effective_from: editData.effective_from ?? "",
         effective_to: editData.effective_to ?? "",
@@ -77,7 +78,7 @@ export default function LineDialog({
   }
 
   async function handleSubmit() {
-    if (!editData && !form.bom_id) { setApiError("Select a SKU / BOM."); return }
+    if (!editData && !form.recipe_id) { setApiError("Select a SKU / Recipe."); return }
 
     setSubmitting(true)
     try {
@@ -94,7 +95,7 @@ export default function LineDialog({
           }
         : {
             action: "create",
-            bom_id: Number(form.bom_id),
+            recipe_id: Number(form.recipe_id),
             mfg_id: mfgId,
             status: form.status,
             effective_from: form.effective_from,
@@ -105,7 +106,7 @@ export default function LineDialog({
             remarks: form.remarks.trim() || null,
           }
 
-      const res = await fetch("/api/manufacturing/lines", {
+      const res = await fetch("/api/v1/manufacturing/lines", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -130,11 +131,11 @@ export default function LineDialog({
         <div className="grid gap-4 py-1">
           {!editData && (
             <div className="grid gap-1.5">
-              <Label htmlFor="ml-bom">SKU / BOM <span className="text-destructive">*</span></Label>
+              <Label htmlFor="ml-bom">SKU / Recipe <span className="text-destructive">*</span></Label>
               <FuzzySelect
                 options={bomOptions}
-                value={form.bom_id}
-                onChange={(v) => set("bom_id", v)}
+                value={form.recipe_id}
+                onChange={(v) => set("recipe_id", v)}
                 getValue={(b) => String(b.id)}
                 getLabel={(b) => `${b.sku_code ?? "—"} — ${b.sku_name ?? b.bom_code} (${b.bom_code})`}
                 searchKeys={["sku_code", "sku_name", "bom_code"]}

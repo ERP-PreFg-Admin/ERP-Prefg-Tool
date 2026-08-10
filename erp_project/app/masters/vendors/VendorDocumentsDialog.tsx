@@ -22,6 +22,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { FileUpload } from "@/components/ui/FileUpload"
+import { Callout } from "@/components/ui/callout"
 import { cn } from "@/lib/utils"
 import type { Vendor } from "@/types/masters"
 
@@ -86,7 +87,7 @@ export function VendorDocumentsDialog({
     setLoading(true)
     setError("")
     try {
-      const res = await fetch("/api/masters/vendors", {
+      const res = await fetch("/api/v1/masters/vendors", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "update_docs", vendor_id: vendor.vendor_id, ...docs }),
@@ -110,17 +111,17 @@ export function VendorDocumentsDialog({
         </DialogHeader>
 
         {submitted && (
-          <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 mb-4 text-sm text-green-800">
+          <Callout variant="success" className="flex items-center gap-2 rounded-lg px-3 py-2.5 mb-4 text-sm">
             <CheckCircle2 className="h-4 w-4 shrink-0" />
             Documents submitted for approval. The vendor is locked until the approval is resolved.
-          </div>
+          </Callout>
         )}
 
         {!submitted && vendor.status === "in_review" && (
-          <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 mb-4 text-sm text-blue-800">
+          <Callout variant="info" className="flex items-center gap-2 rounded-lg px-3 py-2.5 mb-4 text-sm">
             <Clock className="h-4 w-4 shrink-0" />
             A change is pending approval. Documents cannot be updated until it is resolved.
-          </div>
+          </Callout>
         )}
 
         <Tabs.Root defaultValue={DOC_TABS[0].key}>

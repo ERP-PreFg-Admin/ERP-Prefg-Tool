@@ -1,5 +1,5 @@
 /**
- * GET /api/masters/manufacturers/export
+ * GET /api/v1/masters/manufacturers/export
  *
  * Exports all manufacturer records matching the current active filters.
  *
@@ -51,7 +51,7 @@ export const GET = withGateway({
     )
 
     const filename = buildExportFilename("MFG", format, { search: search || null })
-    console.log(`[/api/masters/manufacturers/export] served ${rows.length} rows as ${format}`)
+    console.log(`[/api/v1/masters/manufacturers/export] served ${rows.length} rows as ${format}`)
 
     if (format === "xlsx") {
       const buffer = await buildXlsx("Manufacturers", MFG_EXPORT_COLUMNS, rows)
@@ -73,7 +73,7 @@ export const GET = withGateway({
       },
     })
   } catch (err) {
-    console.error("[/api/masters/manufacturers/export]", err)
+    console.error("[/api/v1/masters/manufacturers/export]", err)
     return NextResponse.json({ error: "Export failed" }, { status: 500 })
   }
   },
