@@ -521,6 +521,16 @@ export type FinalCostingRow = {
   total: number
   /** True when RM/PM cost or any misc cost (jw/shrink/shipper/rm_loss/pm_loss) row is missing for this SKU x mfg. */
   incomplete: boolean
+  /** The SKU's fill weight, from master_skus or details_sku. NULL here is why
+   *  an RM cost reads 0 — it is a multiplicand, so a missing value zeroes the
+   *  whole line rather than just omitting one term. */
+  filling: number | null
+  /** RM recipe lines with no agreed rate for this manufacturer. */
+  rm_lines_without_rate: number
+  /** PM recipe lines with no agreed rate for this manufacturer. */
+  pm_lines_without_rate: number
+  /** Total RM lines on the recipe, so "2 of 3 unpriced" is expressible. */
+  rm_line_count: number
 }
 
 /**

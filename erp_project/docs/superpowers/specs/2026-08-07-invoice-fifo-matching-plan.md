@@ -12,17 +12,17 @@ this file is kept for the reasoning behind the choices, not as a description of 
 |---|---|
 | SKU fuzzy match | `matchSku` in `lib/invoice-mapping.ts`, run by `rowsFromParsed`. No match ⇒ `sku_code: ""` |
 | Mfg fuzzy match | `matchMfg`, run by `formFromParsed`. No match ⇒ `mfgId: ""` |
-| Open POs per mfg | `GET /api/purchase-orders/open-for-receive?mfg_id=` → `openForReceiveByMfg` |
+| Open POs per mfg | `GET /api/v1/purchase-orders/open-for-receive?mfg_id=` → `openForReceiveByMfg` |
 | Over-receipt guard | `lib/po-receive.ts` already throws `400 over_limit`. **Server-side availability is already safe** — the client work below is UX, not a trust boundary |
 | One Uniware PO for all lines | **Already done.** `lib/invoice-inward.ts:305` sends one `createPurchaseOrder` with `written.poLines.map(...)`. Only the reference-order field is missing |
-| `purchase_orders.bom_id` | Column exists, **never written by any INSERT**. Dead at the time of this plan — *fixed afterwards*: every creation path now stamps it, see the `bom_id` section in `docs/po-inwarding.md` |
+| `purchase_orders.recipe_id` | Column exists, **never written by any INSERT**. Dead at the time of this plan — *fixed afterwards*: every creation path now stamps it, see the `recipe_id` section in `docs/po-inwarding.md` |
 
 ---
 
 ## The one structural decision
 
 An invoice line for 500 units may need **two or three** open POs to be fulfilled. But
-`supplier_invoice_items` / the payload carry **one `reference_po_id` per line**.
+`invoice_items_mfg` / the payload carry **one `reference_po_id` per line**.
 
 **Decision: FIFO splits the invoice row into one row per PO consumed.** No schema change,
 no change to `writeInvoiceAndPos`, no change to `receivePo`. Each allocation becomes an
@@ -47,7 +47,7 @@ SELECT po.id, po.po_no, po.date, po.sku_code, sk.name AS sku_name,
        po.expected_on, <EFFECTIVE_STATUS_EXPR> AS status
 FROM purchase_orders po
 LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
-LEFT JOIN master_bom  mb ON mb.id = sk.active_bom_id  -- NEW
+LEFT JOIN master_recipe  mb ON mb.id = sk.active_bom_id  -- NEW
 WHERE po.mfg_id = ? AND <EFFECTIVE_STATUS_EXPR> IN ('raised','partially_received')
 ORDER BY po.date ASC, po.id ASC                       -- was DESC — FIFO, req #5
 ```

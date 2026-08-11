@@ -95,6 +95,22 @@ export const entityLabelSql: Record<string, string> = {
     LEFT JOIN master_skus s ON s.id = b.sku_id
     WHERE b.id = ? LIMIT 1
   `,
+  // entity_id is the bom_misc row. `bom_id` is deliberately still spelled that
+  // way — bom_misc is the one table the recipe rename never touched.
+  MFG_MISC: `
+    SELECT s.sku_code AS code, s.name, m.code AS secondary_code, m.name AS secondary_name
+    FROM bom_misc bm
+    JOIN master_recipe b ON b.id = bm.bom_id
+    LEFT JOIN master_skus s ON s.id = b.sku_id
+    JOIN master_mfgs m ON m.id = bm.mfg_id
+    WHERE bm.id = ? LIMIT 1
+  `,
+  // Bulk uploads carry the MANUFACTURER as entity_id, not a user — every
+  // bom_misc row belongs to one mfg and the uploading page already knows it.
+  MFG_MISC_BULK: `
+    SELECT code, name, NULL AS secondary_code, NULL AS secondary_name
+    FROM master_mfgs WHERE id = ? LIMIT 1
+  `,
 }
 
 export const approvalsSql = {

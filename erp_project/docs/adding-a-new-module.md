@@ -90,9 +90,9 @@ export type InventoryItem = {
 
 ## Step 2 — Build the API Route
 
-**2.1 Create `app/api/<module>/route.ts`**
+**2.1 Create `app/api/v1/<module>/route.ts`**
 
-Copy `app/api/masters/skus/route.ts` as a template. Required pattern:
+Copy `app/api/v1/masters/skus/route.ts` as a template. Required pattern:
 
 ```ts
 import { NextResponse } from "next/server";
@@ -128,7 +128,7 @@ export async function POST(req: Request) {
   }
 
   if (action === "bulk") {
-    // ... bulk insert pattern (see app/api/masters/skus/route.ts)
+    // ... bulk insert pattern (see app/api/v1/masters/skus/route.ts)
   }
 
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });
@@ -206,13 +206,13 @@ export const MODULE_HANDLERS: Record<string, ModuleHandler> = {
 }
 ```
 
-Then in the API route that submits edits for approval, use the shared `approvalsSql.insertApproval` + `approvalsSql.insertApprovalItem` queries with your module code (`"INVENTORY"`), exactly like `app/api/masters/skus/route.ts` does with `"SKU"`. The approve/reject route (`app/api/approvals/[id]/route.ts`) picks up the new handler automatically.
+Then in the API route that submits edits for approval, use the shared `approvalsSql.insertApproval` + `approvalsSql.insertApprovalItem` queries with your module code (`"INVENTORY"`), exactly like `app/api/v1/masters/skus/route.ts` does with `"SKU"`. The approve/reject route (`app/api/v1/approvals/[id]/route.ts`) picks up the new handler automatically.
 
 Also add the required SQL helpers (`setStatus`, `selectById`, `update`) to `lib/queries/<module>.ts` — the `RM_MAT` and `PM_MAT` entries in `lib/approvals/handlers/raw-materials.ts` / `packing-materials.ts` are the simplest reference implementations.
 
 **Bulk CSV variant:** if the module also needs a bulk upload (see `RM_BULK`, `PM_BULK`, `VENDOR_BULK`, `MFG_BULK`, `BOM_BULK`, `PO_BULK` in the registry), register a second `<MODULE>_BULK` handler in the same domain file. Its `applyAndArchive` parses the uploaded file from S3 via `parseS3Import` (using `s3KeyOf(items, "<MODULE>_BULK")` from `types.ts` to pull the staged file's S3 key out of the approval items) and inserts one row per valid CSV row, skipping and reporting invalid ones — see `lib/approvals/handlers/bom.ts`'s `bomBulkHandler` for the fullest example, including per-group partial success.
 
-**History/audit trail:** if the module should show up on its master page's history view, call `insertHistoryEntry` (from `lib/master-routes/history-utils.ts`) alongside the approval insert when submitting an edit — the shared approve/reject route resolves the pending row automatically via `resolvePendingHistoryEntry`. See `app/api/masters/vendors/history/route.ts` or `raw-materials/mrm-history` for reference read-side implementations.
+**History/audit trail:** if the module should show up on its master page's history view, call `insertHistoryEntry` (from `lib/master-routes/history-utils.ts`) alongside the approval insert when submitting an edit — the shared approve/reject route resolves the pending row automatically via `resolvePendingHistoryEntry`. See `app/api/v1/masters/vendors/history/route.ts` or `raw-materials/mrm-history` for reference read-side implementations.
 
 **2.3 Seed permissions for the new page slug**
 
@@ -302,7 +302,7 @@ export function InventoryClient({
           access === "editor" ? (
             <AddRecordDialog
               entityLabel="Inventory Item"
-              endpoint="/api/inventory"
+              endpoint="/api/v1/inventory"
               fields={[
                 { key: "item_code", label: "Item Code", type: "text", required: true },
                 { key: "name", label: "Name", type: "text", required: true },
@@ -398,13 +398,13 @@ Test the following scenarios in the browser:
 
 | What | Path |
 |------|------|
-| Simple API route pattern | `app/api/masters/skus/route.ts` |
-| Transactional multi-table route | `app/api/masters/vendors/route.ts` |
-| Complex multi-action route | `app/api/masters/raw-materials/route.ts` |
+| Simple API route pattern | `app/api/v1/masters/skus/route.ts` |
+| Transactional multi-table route | `app/api/v1/masters/vendors/route.ts` |
+| Complex multi-action route | `app/api/v1/masters/raw-materials/route.ts` |
 | Approval handler registry (wiring) | `lib/approvals/module-handlers.ts` |
 | Approval handler logic (per domain) | `lib/approvals/handlers/<domain>.ts` (e.g. `raw-materials.ts`, `bom.ts`), shared types in `lib/approvals/handlers/types.ts` |
 | History/audit trail helpers | `lib/queries/history.ts`, `lib/master-routes/history-utils.ts` |
-| Approval route (approve / reject) | `app/api/approvals/[id]/route.ts` |
+| Approval route (approve / reject) | `app/api/v1/approvals/[id]/route.ts` |
 | Status and approval status constants | `lib/constants.ts` |
 | Server page pattern | `app/masters/skus/page.tsx` |
 | Client component pattern | `app/masters/skus/SkusClient.tsx` |

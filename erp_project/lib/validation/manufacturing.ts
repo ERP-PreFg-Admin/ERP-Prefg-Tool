@@ -60,6 +60,9 @@ export const updateMiscCostSchema = z.object({
   effective_from: z.string().trim().min(1, "effective_from is required"),
   effective_till: z.string().trim().nullable().optional(),
   status: miscCostStatusSchema,
+  // Every other approval-flowed master requires a reason on edit and archives
+  // it with the change; misc costs go through the same gate, so they match.
+  remarks: z.string().trim().min(1, "Remarks are required"),
 })
 
 /** Bulk CSV import — rows arrive as raw strings (from CsvImportDialog's client-side parse); the route resolves sku_code -> recipe_id and coerces cost/status per row. */

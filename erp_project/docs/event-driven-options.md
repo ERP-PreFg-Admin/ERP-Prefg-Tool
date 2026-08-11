@@ -24,7 +24,7 @@ The **open decision** is *which event backbone to use*. We're already on **AWS (
 These are **not** in question â€” they apply to every option below and should be built first:
 
 1. **In-app API Gateway layer** (`lib/gateway/`): one `withGateway()` route wrapper for auth, RBAC (reusing `resolveAccess()` in `lib/permissions.ts`), Zod validation, rate limiting, request-IDs, structured logging, and a uniform error shape. No external service. (Detailed in `docs/architecture-evolution.md` Â§4.)
-2. **Service layer** (`lib/services/*`): business logic extracted out of `app/api/masters/*/route.ts` so routes become thin bindings.
+2. **Service layer** (`lib/services/*`): business logic extracted out of `app/api/v1/masters/*/route.ts` so routes become thin bindings.
 3. **Transactional outbox** (`event_outbox` table in RDS): every option that uses a *broker* needs this to avoid the dual-write problem â€” DB commit and event publish are separate systems, so a crash between them loses or duplicates events. The business row and the event row commit in the **same transaction**; a relay then publishes. The only thing that varies per option is *where the relay publishes to*.
 
 The outbox is unnecessary only for the pure in-process option (no second system).
@@ -61,7 +61,7 @@ The **open decision** is *which event backbone to use*. We're already on **AWS (
 These are **not** in question â€” they apply to every option below and should be built first:
 
 1. **In-app API Gateway layer** (`lib/gateway/`): one `withGateway()` route wrapper for auth, RBAC (reusing `resolveAccess()` in `lib/permissions.ts`), Zod validation, rate limiting, request-IDs, structured logging, and a uniform error shape. No external service. (Detailed in `docs/architecture-evolution.md` Â§4.)
-2. **Service layer** (`lib/services/*`): business logic extracted out of `app/api/masters/*/route.ts` so routes become thin bindings.
+2. **Service layer** (`lib/services/*`): business logic extracted out of `app/api/v1/masters/*/route.ts` so routes become thin bindings.
 3. **Transactional outbox** (`event_outbox` table in RDS): every option that uses a *broker* needs this to avoid the dual-write problem â€” DB commit and event publish are separate systems, so a crash between them loses or duplicates events. The business row and the event row commit in the **same transaction**; a relay then publishes. The only thing that varies per option is *where the relay publishes to*.
 
 The outbox is unnecessary only for the pure in-process option (no second system).

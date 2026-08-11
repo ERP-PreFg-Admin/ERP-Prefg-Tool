@@ -30,11 +30,11 @@ The coverage turned out uneven: some domains (SKU, Vendor, Manufacturer, RM, PM)
 
 ### 3.1 SKU (`app/masters/skus`)
 
-Backed by `app/api/masters/skus/route.ts`, on `withGateway` → `createRequestContext()` gives one `requestId`/`userId` for the whole request.
+Backed by `app/api/v1/masters/skus/route.ts`, on `withGateway` → `createRequestContext()` gives one `requestId`/`userId` for the whole request.
 
 ```mermaid
 flowchart TD
-    P["/api/masters/skus"] --> Create["Create SKU"]
+    P["/api/v1/masters/skus"] --> Create["Create SKU"]
     P --> Bulk["Bulk CSV"]
     P --> S3Bulk["Bulk from S3"]
     P --> Update["Update (approval)"]
@@ -76,7 +76,7 @@ Same shape as SKU, plus a doc-only fast path with **no approval gate**.
 
 ```mermaid
 flowchart TD
-    P["/api/masters/vendors"] --> Create["Create"]
+    P["/api/v1/masters/vendors"] --> Create["Create"]
     P --> Bulk["Bulk CSV / S3"]
     P --> Update["Update (approval)"]
     P --> Docs["Update docs (no approval)"]
@@ -104,7 +104,7 @@ flowchart TD
 
     UP -.no instrumentation.-> Dialog["Dialog opens"]
     Dialog -.no instrumentation.-> Select["CSV selected, preview shown"]
-    Select --> Submit["Submit click -> POST /api/masters/manufacturers"]
+    Select --> Submit["Submit click -> POST /api/v1/masters/manufacturers"]
     Dialog -.no instrumentation.-> Cancel["Dialog closes / cancelled"]
 
     Submit --> L1["Logger: bulk started (L133)"] --> E1["Event: raw MFG_BULK (L134)"] --> DB1[("batch INSERT master_mfgs + details_mfg")] --> L2["Logger: committed (L192)"] --> E2["Event: processed MFG_S3BULK (L437)\n** tag mismatch: raw=MFG_BULK, processed/failed=MFG_S3BULK **"]
@@ -125,11 +125,11 @@ Two-route split worth calling out: the outer router logs only one generic line p
 
 ```mermaid
 flowchart TD
-    P["/api/masters/raw-materials\n(route.ts)"] --> L0["Logger: request received (L18)\nhand-rolled ctx, no completion/duration log"]
+    P["/api/v1/masters/raw-materials\n(route.ts)"] --> L0["Logger: request received (L18)\nhand-rolled ctx, no completion/duration log"]
     L0 --> Handler["rm-handler.ts (delegate)"]
 
     Handler --> Create["create"] --> L1["Logger: started (L47)"] --> E1["Event: raw RM_MAT (L48)"] --> DB1[("INSERT master_rm")] --> L2["Logger: success (L86)"] --> E2["Event: processed RM_MAT (L85)"]
-    Handler --> Full["create-full"] --> L3["Logger: started (L145)"] --> E3["Event: raw RM_FULL (L146)"] --> DB2[("INSERT master_rm + rm_mrm_fixed + rm_vrm_dynamic")] --> L4["Logger: success (L200)"]
+    Handler --> Full["create-full"] --> L3["Logger: started (L145)"] --> E3["Event: raw RM_FULL (L146)"] --> DB2[("INSERT master_rm + cost_master_rm_mfg + cost_master_rm_ven")] --> L4["Logger: success (L200)"]
     Handler --> Rates["add-rates"] --> L5["Logger: started (L221)"] --> E4["Event: raw RM_RATES (L222)"] --> DB3[("INSERT rate row")] --> L6["Logger: success (L272)"]
     Handler --> Bulk["bulk / bulk-from-S3"] --> L7["Logger: started (L294/L338)"] --> E5["Event: raw RM_BULK / RM_S3BULK (L295/L339)"] --> DB4[("batch INSERT")] --> L8["Logger: completed (L321/L380)"]
 ```
@@ -144,7 +144,7 @@ Identical structure to Raw Material, via `pm-handler.ts`: `create` (L30/L39, tag
 
 ```mermaid
 flowchart TD
-    P["/api/masters/material-master"] --> RMc["RM create"] --> L1["Logger (L29)"] --> E1["Event: raw RM_CREATE (L30)"] --> L2["Logger: created (L68)"]
+    P["/api/v1/masters/material-master"] --> RMc["RM create"] --> L1["Logger (L29)"] --> E1["Event: raw RM_CREATE (L30)"] --> L2["Logger: created (L68)"]
     P --> PMc["PM create"] --> L3["Logger (L89)"] --> E2["Event: raw PM_CREATE (L90)"] --> L4["Logger: created (L137)"]
     P --> RMu["RM update"] --> LBlk["Logger.warn: blocked / unauthorized draft edit (L189)"] --> L5["Logger: submitted (L212)"] --> E3["Event: processed RM_UPDATE (L225)"]
     P --> PMu["PM update"] --> L6["Logger: submitted (L283)"] --> E4["Event: processed PM_UPDATE (L303)"]
@@ -152,7 +152,7 @@ flowchart TD
 
 No dedicated `export/route.ts` exists for this combined view (each of RM and PM has its own export route instead).
 
-### 3.7 BOM (`app/masters/bom-master`)
+### 3.7 BOM (`app/masters/recipe-master`)
 
 ```mermaid
 flowchart TD
@@ -162,7 +162,7 @@ flowchart TD
     Deactivate -.no instrumentation.-> Done["status: active"]
 ```
 
-**Total instrumentation gap.** `app/api/masters/bom-master/route.ts`, `[id]/route.ts`, and `export/route.ts` contain zero `logger.*` calls and zero `lib/events.ts` calls — not thin coverage, none at all. Every other masters domain has at least the create/update path instrumented; BOM has nothing, including the fan-out deactivation of sibling BOMs (`deactivateOtherActiveBomsForSku`), which is exactly the kind of side-effecting, multi-row write you'd most want a record of.
+**Total instrumentation gap.** `app/api/v1/masters/recipe-master/route.ts`, `[id]/route.ts`, and `export/route.ts` contain zero `logger.*` calls and zero `lib/events.ts` calls — not thin coverage, none at all. Every other masters domain has at least the create/update path instrumented; BOM has nothing, including the fan-out deactivation of sibling BOMs (`deactivateOtherActiveBomsForSku`), which is exactly the kind of side-effecting, multi-row write you'd most want a record of.
 
 ### 3.8 PO Procurement (`app/po-tracking/po-procurement`)
 
@@ -187,7 +187,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     SplitDialog["SplitPODialog submit"] --> C1["console: '[split dialog] success' (SplitPODialog.tsx:131)\n** only client-side console line found in the whole scope **"]
-    SplitDialog --> API["POST /api/purchase-orders/[id]/split"]
+    SplitDialog --> API["POST /api/v1/purchase-orders/[id]/split"]
     API --> L1["Logger: split started (L52)"] --> E1["Event: raw PO_SPLIT (L53)"] --> DB1[("INSERT child POs, credit parent received_qty")]
     DB1 --> L2["Logger: within tolerance -> received (L113)\nor partial -> unchanged (L116)"]
     L2 --> L3["Logger: split succeeded (L121)"] --> E2["Event: processed PO_SPLIT (L120)"]
@@ -197,7 +197,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Close["Close / short-close action"] --> API["POST /api/purchase-orders/[id]/close"]
+    Close["Close / short-close action"] --> API["POST /api/v1/purchase-orders/[id]/close"]
     API -.PO not found.-> LW["Logger.warn (L36)"]
     API --> L1["Logger: short_closed (L48)"] --> E1["Event: raw+processed purchase_order_short_closed (L29, L49)\n** snake_case tag, unlike every other UPPER_SNAKE tag **\n** no recordFailedEvent in this file at all **"]
 ```
@@ -234,11 +234,11 @@ flowchart TD
 | Finding | Where |
 |---|---|
 | Two request-context idioms: `withGateway`+`createRequestContext()` (duration-tracked, one requestId) vs hand-rolled inline `{ requestId: crypto.randomUUID(), userId, route }` (no duration tracking) | Gateway: SKU, Vendor, Manufacturer, Material-Master, PO routes. Hand-rolled: Raw Material, Packing Material, all three `approvals/*` routes |
-| `approvals/route.ts` generates two different `requestId`s within one request | `app/api/approvals/route.ts:13` and `:21` |
-| `MFG_BULK` (raw) vs `MFG_S3BULK` (processed/failed) tag mismatch for the same S3-bulk-import flow | `app/api/masters/manufacturers/route.ts:377` vs `:437/442` |
+| `approvals/route.ts` generates two different `requestId`s within one request | `app/api/v1/approvals/route.ts:13` and `:21` |
+| `MFG_BULK` (raw) vs `MFG_S3BULK` (processed/failed) tag mismatch for the same S3-bulk-import flow | `app/api/v1/masters/manufacturers/route.ts:377` vs `:437/442` |
 | Same conceptual action ("create a raw/packing material") logged under two different tag families depending on which route handled it | `material-master/route.ts` (`RM_CREATE`/`PM_CREATE`) vs `raw-materials/rm-handler.ts` / `packing-materials/pm-handler.ts` (`RM_MAT`/`RM_FULL`/`PM`/`PM_FULL`) |
-| `purchase_order_short_closed` uses snake_case, unlike every other UPPER_SNAKE module tag; no `recordFailedEvent` call exists in that route at all | `app/api/purchase-orders/[id]/close/route.ts` |
-| Zero backend instrumentation (no `logger.*`, no event calls) | BOM master — all of `app/api/masters/bom-master/route.ts`, `[id]/route.ts`, `export/route.ts`; every masters `export/route.ts` (one bare `console.error` only); PO `preview-pdf/route.ts` |
+| `purchase_order_short_closed` uses snake_case, unlike every other UPPER_SNAKE module tag; no `recordFailedEvent` call exists in that route at all | `app/api/v1/purchase-orders/[id]/close/route.ts` |
+| Zero backend instrumentation (no `logger.*`, no event calls) | BOM master — all of `app/api/v1/masters/recipe-master/route.ts`, `[id]/route.ts`, `export/route.ts`; every masters `export/route.ts` (one bare `console.error` only); PO `preview-pdf/route.ts` |
 | Zero frontend dialog instrumentation except one line | `SplitPODialog.tsx:131` is the only client-side console call in any create/edit/CSV-import dialog across all masters and PO pages — dialog-open, file-select, and preview-generated events shown in the original Manufacturers sketch don't exist in code today |
 
 ---

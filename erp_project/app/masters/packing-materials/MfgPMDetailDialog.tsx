@@ -85,6 +85,9 @@ export function MfgPMDetailDialog({
       ]}
       columns={columns}
       rows={mfgRows}
+      exportEndpoint="/api/v1/masters/packing-materials/export"
+      exportLabel="PM by Manufacturer"
+      exportParams={{ view: "manufacturer", search: String(row?.pm_code ?? "") }}
       rowKey={(_, i) => i}
       emptyMessage="No manufacturer records found for this material."
       summaryGridClassName="grid-cols-1"

@@ -41,13 +41,21 @@ function SortableTableHead({
     <TableHead style={width ? { width } : undefined} className={cn(HEAD_CLASS, className)}>
       {/* flex + min-w-0 so the label is what gives way when the column is too
           narrow; the sort chevron never collapses, or the column stops looking
-          sortable at exactly the widths where it's hardest to read. */}
+          sortable at exactly the widths where it's hardest to read.
+          The label WRAPS rather than truncating: several declared widths are
+          narrower than their own label once the chevron's ~18px is taken out
+          ("Current Rate" at 100px, "Effective From" at 110px), and a header
+          reading "Effective F…" is worse than one on two lines. */}
       <button
         onClick={() => onSort(sortKey)}
         title={typeof children === "string" ? children : undefined}
-        className="flex w-full min-w-0 items-center gap-1 font-medium hover:text-foreground transition-colors"
+        className="flex w-full min-w-0 items-center gap-1 text-left font-medium hover:text-foreground transition-colors"
       >
-        <span className="truncate">{children}</span>
+        {/* No `break-words`: on a narrow column it splits inside a word, so
+            "UOM" became "UO" / "M". Wrapping only ever happens between words;
+            a label that still doesn't fit needs a wider column, not a
+            hyphen-less break. */}
+        <span className="min-w-0">{children}</span>
         {active ? (
           sortDir === "asc"
             ? <ArrowUp className="h-3.5 w-3.5 shrink-0" />

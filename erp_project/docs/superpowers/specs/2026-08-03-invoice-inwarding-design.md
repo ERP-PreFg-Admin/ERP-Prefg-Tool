@@ -69,8 +69,8 @@ Three consequences that shape the design:
 
 | Need | Existing thing |
 |---|---|
-| PDF → S3 | `POST /api/upload` (multipart, already allows `application/pdf`, 10 MB cap) |
-| Signed URL for viewing | `GET /api/files/presign?key=…` |
+| PDF → S3 | `POST /api/v1/upload` (multipart, already allows `application/pdf`, 10 MB cap) |
+| Signed URL for viewing | `GET /api/v1/files/presign?key=…` |
 | S3 read for the parser | `getFileBuffer(key)` in `lib/s3.ts` |
 | Auth + Zod + logging on routes | `withGateway` |
 | SKU / MFG / warehouse dropdown data | `getPoDropdownOptions()`, already fetched by the page and passed into `PoProcurementClient` |
@@ -116,7 +116,7 @@ Deletes the duplicated (and broken) fetch code, which is the brief's "do not dup
 parsing logic" requirement. **This overwrites your uncommitted edits to that file** —
 those edits are the regression described above, but say the word if you want them kept.
 
-### 4. `POST /api/purchase-orders/invoice/parse` — NEW
+### 4. `POST /api/v1/purchase-orders/invoice/parse` — NEW
 
 Body `{ key }`. Pulls the PDF from S3 with `getFileBuffer`, calls `parseInvoice`, returns
 `{ ok, parsed }`. Retry from the UI is just calling this again with the same key — the
@@ -124,7 +124,7 @@ PDF is already in S3, so a retry never re-uploads.
 
 `export const maxDuration = 300` — the parse takes ~60 s and this must not be cut off.
 
-### 5. `POST /api/purchase-orders/invoice` — NEW, creates the POs
+### 5. `POST /api/v1/purchase-orders/invoice` — NEW, creates the POs
 
 Body (Zod-validated in `lib/validation/purchase-orders.ts`):
 

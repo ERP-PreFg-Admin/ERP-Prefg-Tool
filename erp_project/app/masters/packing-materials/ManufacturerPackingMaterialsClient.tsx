@@ -25,15 +25,15 @@ const rateStatusBadge = (row: AnyRow) => <StatusBadge status={row.status as stri
 function buildMfgColumns(manufacturers: Mfg[]): ColumnDef[] {
   const nameByMfgId = new Map(manufacturers.map((m) => [m.mfg_id, m.name]))
   return [
-  { key: "pm_code",        label: "PM Code",        sortAs: "text", width: "100px", className: "font-mono text-xs font-medium" },
+  { key: "pm_code",        label: "PM Code",        sortAs: "text", width: "120px", className: "font-mono text-xs font-medium" },
   { key: "name",           label: "Name",           sortAs: "text", className: "font-medium", render: (r) => <TruncatedCell value={r.name} label="Name" /> },
   { key: "type",           label: "Type",           sortAs: "text", width: "100px" },
   { key: "mfg_code",       label: "Manufacturer",   sortAs: "text", render: (r) => nameByMfgId.get(r.mfg_id as number) ?? (r.mfg_code as string | null) ?? "—" },
-  { key: "mfg_id",         label: "MFG ID",         sortAs: "num",  width: "80px" },
-  { key: "curr_rate",      label: "Current Rate",   sortAs: "num",  width: "100px", render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
-  { key: "uom",            label: "UOM",            sortAs: "text", width: "70px", className: "uppercase text-xs text-muted-foreground" },
+  { key: "mfg_id",         label: "MFG ID",         sortAs: "num",  width: "105px" },
+  { key: "curr_rate",      label: "Current Rate",   sortAs: "num",  width: "145px", render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
+  { key: "uom",            label: "UOM",            sortAs: "text", width: "90px", className: "uppercase text-xs text-muted-foreground" },
   { key: "status",         label: "Status",         sortAs: "text", width: "100px", render: rateStatusBadge },
-  { key: "effective_from", label: "Effective From", sortAs: "date", width: "110px", render: (r) => fmtDate(r.effective_from) },
+  { key: "effective_from", label: "Effective From", sortAs: "date", width: "155px", render: (r) => fmtDate(r.effective_from) },
   ]
 }
 

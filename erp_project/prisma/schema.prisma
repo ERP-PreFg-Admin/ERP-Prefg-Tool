@@ -861,6 +861,8 @@ enum bom_misc_status {
   active
   inactive
   discontinued
+  in_review
+  rejected
 }
 
 enum purchase_orders_status {

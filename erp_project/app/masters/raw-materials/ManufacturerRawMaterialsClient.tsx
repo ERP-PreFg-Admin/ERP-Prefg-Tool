@@ -26,17 +26,17 @@ function buildMfgColumns(vendors: Vendor[], manufacturers: Mfg[]): ColumnDef[] {
   const nameByVendorId = new Map(vendors.map((v) => [v.vendor_id, v.name]))
   const nameByMfgId = new Map(manufacturers.map((m) => [m.mfg_id, m.name]))
   return [
-  { key: "rm_code",              label: "RM Code",         sortAs: "text", width: "100px", className: "font-mono text-xs font-medium" },
+  { key: "rm_code",              label: "RM Code",         sortAs: "text", width: "120px", className: "font-mono text-xs font-medium" },
   { key: "name",                 label: "Name",            sortAs: "text", className: "font-medium", render: (r) => <TruncatedCell value={r.name} label="Name" /> },
   { key: "inci_name",            label: "INCI Name",       sortAs: "text", render: (r) => <TruncatedCell value={r.inci_name} label="INCI Name" /> },
   { key: "make",                 label: "Make",            sortAs: "text", render: (r) => <TruncatedCell value={r.make} label="Make" /> },
   { key: "type",                 label: "Type",            sortAs: "text", width: "100px" },
-  { key: "curr_rate",            label: "Current Rate",    sortAs: "num",  width: "100px", render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
+  { key: "curr_rate",            label: "Current Rate",    sortAs: "num",  width: "145px", render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
   { key: "mfg_code",             label: "Manufacturer",    sortAs: "text", render: (r) => nameByMfgId.get(r.mfg_id as number) ?? (r.mfg_code as string | null) ?? "—" },
   { key: "approved_vendor_code", label: "Approved Vendor", sortAs: "text", render: (r) => nameByVendorId.get(r.approved_vendor_id as number) ?? (r.approved_vendor_code as string | null) ?? "—" },
   { key: "rate_status",          label: "Status",          sortAs: "text", width: "100px", render: rateStatusBadge },
-  { key: "uom",                  label: "UOM",             sortAs: "text", width: "70px", className: "uppercase text-xs text-muted-foreground" },
-  { key: "effective_from",       label: "Effective From",  sortAs: "date", width: "110px", render: (r) => fmtDate(r.effective_from) },
+  { key: "uom",                  label: "UOM",             sortAs: "text", width: "90px", className: "uppercase text-xs text-muted-foreground" },
+  { key: "effective_from",       label: "Effective From",  sortAs: "date", width: "155px", render: (r) => fmtDate(r.effective_from) },
   ]
 }
 

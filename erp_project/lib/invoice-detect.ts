@@ -14,21 +14,17 @@ import { extractText , getDocumentProxy} from "unpdf"
 import { query } from "./db"
 import { manufacturers } from "./queries/manufacturers"
 import logger from "./logger"
+// GSTIN shape and which ones are ours live in ./gstin — pure, so callers that
+// only need those stay unit-testable without the DB credentials ./db requires.
+import { findGstins, sellerGstinsOf } from "./gstin"
 
-/** GSTIN: 2-digit state code, 5-letter PAN prefix, 4 digits, PAN check letter,
- *  entity number, a literal Z, then a checksum character. */
-
-const GSTIN_PATTERN =  /\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b/g
+export { findGstins }
 
 export type DetectedMfg = {
     mfgId : number
     code  : string
     name  : string
     gstin : string
-}
-
-export function findGstins(text:string) : string[] {
-    return [... new Set(text.match(GSTIN_PATTERN) ?? [])]
 }
 
 export async function extractPdfText(buffer:Buffer) : Promise<string> {
@@ -71,9 +67,19 @@ export async function lookupMfgByGstin(gstins: string[]) : Promise<DetectedMfg |
 } 
 
 export async function detectFromPdf(buffer: Buffer): Promise<{
+  /** Full text layer. Returned so a caller can parse the invoice locally without
+   *  paying for a second extraction — it costs ~190ms and we already have it. */
+  text: string
+  /** Every GSTIN on the document, the buyer's included. */
   gstins: string[]
+  /** Only the ones that aren't ours — the safe input for both the manufacturer
+   *  lookup and strategy selection. */
+  sellerGstins: string[]
   mfg: DetectedMfg | null
 }> {
-  const gstins = findGstins(await extractPdfText(buffer))
-  return { gstins, mfg: await lookupMfgByGstin(gstins) }
+  const text = await extractPdfText(buffer)
+  const gstins = findGstins(text)
+  const sellerGstins = sellerGstinsOf(gstins)
+
+  return { text, gstins, sellerGstins, mfg: await lookupMfgByGstin(sellerGstins) }
 }

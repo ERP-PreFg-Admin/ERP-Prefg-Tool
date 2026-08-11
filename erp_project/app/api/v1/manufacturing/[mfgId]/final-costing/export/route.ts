@@ -41,11 +41,22 @@ export const GET = withGateway({
     try {
       const [lineRows, materialCostRows, miscCostRows] = await Promise.all([
         query<MfgLine>(manufacturingSql.selectLiveLinesByMfg, [mfgId]),
-        query<{ recipe_id: number; rm_cost: string; pm_cost: string }>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId]),
+        query<{
+          recipe_id: number; rm_cost: string; pm_cost: string
+          filling: string | null; rm_line_count: number
+          rm_lines_without_rate: number; pm_lines_without_rate: number
+        }>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId]),
         query<{ recipe_id: number; type: MiscCostType; cost: string }>(manufacturingSql.selectMiscCostsByMfg, [mfgId]),
       ])
 
-      const materialByBom = new Map(materialCostRows.map((r) => [r.recipe_id, { rm: Number(r.rm_cost), pm: Number(r.pm_cost) }]))
+      const materialByBom = new Map(materialCostRows.map((r) => [r.recipe_id, {
+        rm: Number(r.rm_cost),
+        pm: Number(r.pm_cost),
+        filling: r.filling == null ? null : Number(r.filling),
+        rmLinesWithoutRate: Number(r.rm_lines_without_rate ?? 0),
+        pmLinesWithoutRate: Number(r.pm_lines_without_rate ?? 0),
+        rmLineCount: Number(r.rm_line_count ?? 0),
+      }]))
       const miscByBom = new Map<number, Partial<Record<MiscCostType, number>>>()
       for (const r of miscCostRows) {
         const entry = miscByBom.get(r.recipe_id) ?? {}
@@ -81,6 +92,10 @@ export const GET = withGateway({
           wastage,
           total,
           incomplete,
+          filling: material?.filling ?? null,
+          rm_lines_without_rate: material?.rmLinesWithoutRate ?? 0,
+          pm_lines_without_rate: material?.pmLinesWithoutRate ?? 0,
+          rm_line_count: material?.rmLineCount ?? 0,
         }
       })
 

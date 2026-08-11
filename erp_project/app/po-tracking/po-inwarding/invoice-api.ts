@@ -4,9 +4,11 @@
 import type { OpenPoOption, ParsedInvoice } from "@/types/invoice"
 import type { DetectedMfg } from "@/lib/invoice-detect"
 import { monthIST } from "@/lib/date"
+import { tooLargeMessage } from "./invoice-form"
 
 /** Thrown with the server's own message so the dialog can show something actionable. */
 export class InvoiceApiError extends Error {}
+
 
 async function messageFrom(res: Response, fallback: string): Promise<string> {
   const data = await res.json().catch(() => ({}))
@@ -15,24 +17,32 @@ async function messageFrom(res: Response, fallback: string): Promise<string> {
 
 /**
  * Parse a PDF. Posted as multipart straight from the browser — nothing is
- * stored, so an abandoned review leaves no orphaned S3 object behind. Takes
- * ~60s; the caller is responsible for saying so.
+ * stored, so an abandoned review leaves no orphaned S3 object behind.
  *
- * v2 reads the seller's GSTIN from the PDF before the Nanonets call, so a
- * per-manufacturer extraction strategy can be applied, and returns the
- * manufacturer it recognised. `detected` is null when the PDF had no text
- * layer or carried no known GSTIN — callers fall back to matching on `from`.
+ * Timing depends on which path answers. Invoices we can read from the PDF's own
+ * text layer come back in well under a second; the rest fall through to Nanonets
+ * and take ~60s, so the caller still has to warn about the slow case.
  *
- * v1 is still live and contract-compatible: switch this URL back to
- * /api/v1/... to get base extraction with no strategy, no code change needed.
+ * `source` names the path that answered — "local:<layout>" or "nanonets".
  */
 export async function parseInvoiceFile(
   file: File
-): Promise<{ parsed: ParsedInvoice; detected: DetectedMfg | null }> {
+): Promise<{ parsed: ParsedInvoice; detected: DetectedMfg | null; source: string | null }> {
+  // Guard at the transport boundary, not only in the picker: nginx refuses an
+  // oversized body with its own HTML error page, which `messageFrom` can't read
+  // — so without this the caller gets a bare "Invoice parsing failed".
+  const tooLarge = tooLargeMessage(file)
+  if (tooLarge) throw new InvoiceApiError(tooLarge)
+
   const form = new FormData()
   form.append("file", file)
 
   // No Content-Type header — the browser must set the multipart boundary.
+  //
+  // v1 remains live and contract-identical: it always calls Nanonets, with no
+  // local parse and no detection. If the local parser misreads an invoice in
+  // production, changing this one URL back to /api/v1/ restores the old
+  // behaviour without a code change anywhere else.
   const res = await fetch("/api/v2/purchase-orders/invoice/parse", { method: "POST", body: form })
   if (!res.ok) throw new InvoiceApiError(await messageFrom(res, "Invoice parsing failed."))
 
@@ -40,6 +50,7 @@ export async function parseInvoiceFile(
   return {
     parsed: data.parsed as ParsedInvoice,
     detected: (data.detected ?? null) as DetectedMfg | null,
+    source: (data.source ?? null) as string | null,
   }
 }
 

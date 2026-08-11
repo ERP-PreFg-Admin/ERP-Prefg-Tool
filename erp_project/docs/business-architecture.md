@@ -6,7 +6,7 @@
 
 ## 1. Executive Business Summary
 
-**What business this ERP supports** (Fact, evidence throughout §5–§9): a **multi-brand D2C consumer-goods company** — the generated PO PDF letterhead reads "Pep Technologies Pvt Ltd, MCaffeine" (`lib/pdf/po-document.tsx`) — that designs and sells branded SKUs (at least two brands are live: **mcaffeine** and **hyphen**, `app/api/purchase-orders/route.ts:163-166`) manufactured by **contract manufacturers**, not made in-house. The presence of `inci_name` (International Nomenclature of Cosmetic Ingredients) on raw materials (Inference, `lib/queries/raw-materials.ts`, `types/masters.ts`) strongly implies the product category is **cosmetics/personal-care/FMCG**, where ingredient declarations are regulated.
+**What business this ERP supports** (Fact, evidence throughout §5–§9): a **multi-brand D2C consumer-goods company** — the generated PO PDF letterhead reads "Pep Technologies Pvt Ltd, MCaffeine" (`lib/pdf/po-document.tsx`) — that designs and sells branded SKUs (at least two brands are live: **mcaffeine** and **hyphen**, `app/api/v1/purchase-orders/route.ts:163-166`) manufactured by **contract manufacturers**, not made in-house. The presence of `inci_name` (International Nomenclature of Cosmetic Ingredients) on raw materials (Inference, `lib/queries/raw-materials.ts`, `types/masters.ts`) strongly implies the product category is **cosmetics/personal-care/FMCG**, where ingredient declarations are regulated.
 
 **Major business problems it solves today (Fact):**
 - **Governs changes to reference data that money and compliance depend on** — vendor bank/GST/PAN details, manufacturer rates, product formulations — via a maker-checker approval workflow, so no single person can unilaterally alter data that feeds costing, payments, or regulatory declarations (§9, Approval workflow).
@@ -127,13 +127,13 @@ Master Data Governance ──► [AWS S3]     (compliance docs, external)
 | Term | Definition (business meaning) | Owner | Related concepts | Evidence |
 |---|---|---|---|---|
 | **SKU** | A sellable finished product identity (code, name, brand, category) — the anchor everything else (formulation, purchase orders) attaches to. | Master Data Governance | Brand, BOM, Purchase Order | `types/masters.ts:24-34` |
-| **Brand** | Which product line a SKU belongs to — the company runs at least two: mcaffeine and hyphen. | Master Data Governance | SKU, PO numbering | `app/api/purchase-orders/route.ts:163-166` |
+| **Brand** | Which product line a SKU belongs to — the company runs at least two: mcaffeine and hyphen. | Master Data Governance | SKU, PO numbering | `app/api/v1/purchase-orders/route.ts:163-166` |
 | **Vendor** | A supplier used for procurement pricing and compliance tracking (GST, banking, PAN) — scoped to raw materials, packing materials, or both. | Master Data Governance | Raw Material, Packing Material, Vendor Rate | `types/masters.ts:57-71` |
 | **Manufacturer** | A contract manufacturing partner who both makes finished SKUs AND can be a fixed-rate pricing source for raw/packing materials. | Master Data Governance / Procurement | Purchase Order, Manufacturer Rate | `types/masters.ts:37-55`, `lib/pdf/po-document.tsx` |
 | **Raw Material (RM)** | An ingredient used in a formulation, identified in part by its INCI name (the regulated cosmetic-ingredient identifier). | Master Data Governance | BOM line, Vendor/Manufacturer Rate | `lib/queries/raw-materials.ts` |
 | **Packing Material (PM)** | A packaging component (bottle, cap, carton, label) with its own color/spec (pantone) and rate structure, distinct from ingredients. | Master Data Governance | BOM line, Vendor/Manufacturer Rate | `types/masters.ts:132-181` |
-| **Vendor Rate ("dynamic")** | The price a vendor currently charges for an RM/PM — called "dynamic" because vendor pricing is expected to change more often. | Master Data Governance | Vendor, RM, PM | `rm_vrm_dynamic`/`pm_vrm_dynamic`, `lib/queries/raw-materials.ts` |
-| **Manufacturer Rate ("fixed")** | The price a manufacturer has agreed for an RM/PM for a period — called "fixed" because it's a negotiated rate held stable, as opposed to a fluctuating vendor rate. | Master Data Governance | Manufacturer, RM, PM, Approved Vendor | `rm_mrm_fixed`/`pm_mrm_fixed`, `lib/queries/raw-materials.ts:336-339` |
+| **Vendor Rate ("dynamic")** | The price a vendor currently charges for an RM/PM — called "dynamic" because vendor pricing is expected to change more often. | Master Data Governance | Vendor, RM, PM | `cost_master_rm_ven`/`cost_master_pm_ven`, `lib/queries/raw-materials.ts` |
+| **Manufacturer Rate ("fixed")** | The price a manufacturer has agreed for an RM/PM for a period — called "fixed" because it's a negotiated rate held stable, as opposed to a fluctuating vendor rate. | Master Data Governance | Manufacturer, RM, PM, Approved Vendor | `cost_master_rm_mfg`/`cost_master_pm_mfg`, `lib/queries/raw-materials.ts:336-339` |
 | **Approved Vendor** | On a manufacturer's RM rate, an optional reference to which vendor's material that manufacturer's rate is tied to — a three-way manufacturer↔vendor↔material relationship. | Master Data Governance | Manufacturer Rate, Vendor | `lib/queries/raw-materials.ts:336-339` |
 | **BOM (Bill of Materials)** | The formulation/recipe for one SKU — a set of Raw Material lines (as percentages of the formula) and Packing Material lines (as fixed quantities per unit). | Product Formulation | SKU, RM line, PM line | `lib/validation/bom.ts:26`, `lib/queries/bom.ts:6-9` |
 | **RM Line percentage** | On a BOM, each raw-material line's `amount` IS its percentage share of the formulation — all RM lines on an active BOM must total between 99.9% and 100.1%. | Product Formulation | BOM | `lib/validation/bom.ts:10-18,26,61-68` |
@@ -141,19 +141,19 @@ Master Data Governance ──► [AWS S3]     (compliance docs, external)
 | **Update Existing (BOM mode)** | Correcting/amending the CURRENT formulation in place — the prior line values are archived before being overwritten. | Product Formulation | BOM, BOM History | `lib/approvals/module-handlers.ts:527-537` |
 | **Superseded BOM** | A formulation that was active for a SKU and has just been automatically deactivated because a different BOM for that same SKU was just approved/activated — enforces exactly one active formulation per SKU. | Product Formulation | BOM | `lib/approvals/module-handlers.ts:553-574` |
 | **Purchase Order (PO)** | A request to a manufacturer to produce and dispatch a quantity of a SKU to a destination warehouse by an expected date. | Procurement | Manufacturer, SKU, Destination | `lib/queries/purchase-orders.ts:5-8` |
-| **Normal PO** | A routine, planned purchase order raised directly with the manufacturer with no extra sign-off — implies it follows an already-vetted procurement plan. | Procurement | Purchase Order, Impromptu PO | `app/api/purchase-orders/route.ts:185-186` |
-| **Impromptu PO** | An ad-hoc, off-plan purchase order that requires a mandatory reason and goes through approval before being authorized to the manufacturer. | Procurement / Approval & Governance | Purchase Order, Reason | `AddPODialog.tsx:108-112`, `app/api/purchase-orders/route.ts:211-243` |
+| **Normal PO** | A routine, planned purchase order raised directly with the manufacturer with no extra sign-off — implies it follows an already-vetted procurement plan. | Procurement | Purchase Order, Impromptu PO | `app/api/v1/purchase-orders/route.ts:185-186` |
+| **Impromptu PO** | An ad-hoc, off-plan purchase order that requires a mandatory reason and goes through approval before being authorized to the manufacturer. | Procurement / Approval & Governance | Purchase Order, Reason | `AddPODialog.tsx:108-112`, `app/api/v1/purchase-orders/route.ts:211-243` |
 | **Destination (CWH/MWH)** | The warehouse (Company Warehouse / Mother Warehouse) the manufacturer should dispatch a PO's goods to. | Procurement | Purchase Order | `app/po-tracking/po-procurement/po-types.ts:33` |
-| **Splitting a PO** | The mechanism by which received quantity is credited against a PO — the original ordered quantity is never changed; received quantity accumulates via one or more splits. There is no separate "receive" action. | Procurement | Purchase Order | `app/api/purchase-orders/[id]/split/route.ts:4-7,100` |
-| **Short-closing a PO** | A deliberate decision to stop chasing a remaining, uncollected quantity that's larger than the automatic tolerance — formally closing the order without full receipt. | Procurement | Purchase Order | `app/api/purchase-orders/[id]/close/route.ts:1-5` |
-| **Receipt tolerance** | The smaller of 100 units or 10% of the original order — a shortfall within this band is treated as fully received automatically, without anyone deciding to short-close. | Procurement | Purchase Order, Split | `app/api/purchase-orders/[id]/split/route.ts:104-117` |
+| **Splitting a PO** | The mechanism by which received quantity is credited against a PO — the original ordered quantity is never changed; received quantity accumulates via one or more splits. There is no separate "receive" action. | Procurement | Purchase Order | `app/api/v1/purchase-orders/[id]/split/route.ts:4-7,100` |
+| **Short-closing a PO** | A deliberate decision to stop chasing a remaining, uncollected quantity that's larger than the automatic tolerance — formally closing the order without full receipt. | Procurement | Purchase Order | `app/api/v1/purchase-orders/[id]/close/route.ts:1-5` |
+| **Receipt tolerance** | The smaller of 100 units or 10% of the original order — a shortfall within this band is treated as fully received automatically, without anyone deciding to short-close. | Procurement | Purchase Order, Split | `app/api/v1/purchase-orders/[id]/split/route.ts:104-117` |
 | **Approval** | A pending change to a master record, formulation, or PO that has been submitted and is awaiting a decision from an authorized reviewer. | Approval & Governance | Approval Item, Diff | `lib/queries/approvals.ts:88-93` |
 | **Approval Item** | One changed field on a pending approval, recorded as its old value and its proposed new value. | Approval & Governance | Approval | `lib/queries/approvals.ts:98-101` |
 | **In Review** | The status a record is locked to the moment a change is submitted for approval — blocks any further edits until the approval is resolved. | Approval & Governance | Draft, Active | `lib/constants.ts:8-13` |
-| **Draft (post-rejection)** | The status a record returns to after a rejection — editable again, but only by the person who originally submitted the change. | Approval & Governance | In Review, Rejection Remarks | `app/api/masters/material-master/route.ts:185-191` |
-| **Rejection Remarks** | A mandatory, free-text reason an approver must give when rejecting a change — the only place human judgment is captured as text rather than a field diff. | Approval & Governance | Approval, Draft | `app/api/approvals/[id]/route.ts:55-58` |
+| **Draft (post-rejection)** | The status a record returns to after a rejection — editable again, but only by the person who originally submitted the change. | Approval & Governance | In Review, Rejection Remarks | `app/api/v1/masters/material-master/route.ts:185-191` |
+| **Rejection Remarks** | A mandatory, free-text reason an approver must give when rejecting a change — the only place human judgment is captured as text rather than a field diff. | Approval & Governance | Approval, Draft | `app/api/v1/approvals/[id]/route.ts:55-58` |
 | **Company Google Account** | The identity credential for every user — sign-in only works for an email that already exists in the system's own user list; Google verifies the person, it does not create their access. | Identity & Access | User, Role | `app/auth/signin/page.tsx:15`, `lib/auth.ts:13-20` |
-| **Role** | A functional job-title-shaped grouping (e.g. `bom_creator`, `cost_creator`, `production_head`) that grants default page-level access; distinct from the separately-checked `admin`/`manager` roles that gate approval actions. | Identity & Access | Page Permission, Approver | `scripts/seed-permissions.ts`, `app/api/approvals/[id]/route.ts:35-39` |
+| **Role** | A functional job-title-shaped grouping (e.g. `bom_creator`, `cost_creator`, `production_head`) that grants default page-level access; distinct from the separately-checked `admin`/`manager` roles that gate approval actions. | Identity & Access | Page Permission, Approver | `scripts/seed-permissions.ts`, `app/api/v1/approvals/[id]/route.ts:35-39` |
 | **Per-user Override** | An individual exception to a user's role-based access for one specific page — completely replaces the role-based answer for that page when present. | Identity & Access | Role, Page Permission | `lib/permissions.ts:19-37`, `docs/authentication-and-permissions.md:77-79` |
 
 ---
@@ -196,7 +196,7 @@ Aggregate boundaries below reflect where the code enforces **transactional consi
 - **Why this boundary exists (Inference):** a SKU by itself carries no compliance risk (it's just an identity + classification), which is why it alone among masters is allowed to go live without review — the aggregate is intentionally small and low-friction.
 
 ### 6.2 Vendor
-- **Aggregate Root:** Vendor (spans two tables — `master_vendors` + `details_vendor` — inserted/updated together in one transaction, Fact, `app/api/masters/vendors/route.ts:6-11`)
+- **Aggregate Root:** Vendor (spans two tables — `master_vendors` + `details_vendor` — inserted/updated together in one transaction, Fact, `app/api/v1/masters/vendors/route.ts:6-11`)
 - **Contained entities:** Vendor Details (location, zone, GST, bank, documents) — always written atomically with the root
 - **Business invariants:** `code` unique and auto-generated; every create AND every field/document edit requires approval; at most one pending approval at a time
 - **Consistency boundary:** the vendor + its details row together
@@ -213,16 +213,16 @@ Aggregate boundaries below reflect where the code enforces **transactional consi
 ### 6.4 Raw Material (three separate aggregates, not one)
 The code treats "a Raw Material" as **three independently governable aggregates**, even though a business person might describe them as "one RM":
 1. **RM base record** (module `RM_MAT`) — Aggregate Root: `master_rm`. Invariant: unique by `name`+`make`+`inci_name` (case-insensitive duplicate check, Fact, `lib/queries/raw-materials.ts:342-348`). No history table — an approved edit overwrites the prior name/make/type/uom/hsn/inci_name with no archive (Fact, `lib/approvals/module-handlers.ts:185-206`; see §17 risk).
-2. **RM × Vendor Rate** (module `RM_VRM`) — Aggregate Root: one `rm_vrm_dynamic` row. Invariant: at most one pending approval per RM+vendor pair; archived to `history_vrm` before every approved overwrite.
-3. **RM × Manufacturer Rate** (module `RM_RATE`) — Aggregate Root: one `rm_mrm_fixed` row, which can additionally carry an "approved vendor" reference. Archived to `history_mrm` before overwrite.
+2. **RM × Vendor Rate** (module `RM_VRM`) — Aggregate Root: one `cost_master_rm_ven` row. Invariant: at most one pending approval per RM+vendor pair; archived to `history_cost_ven` before every approved overwrite.
+3. **RM × Manufacturer Rate** (module `RM_RATE`) — Aggregate Root: one `cost_master_rm_mfg` row, which can additionally carry an "approved vendor" reference. Archived to `history_cost_mfg` before overwrite.
 - **Why this boundary exists (Inference):** identity (what the ingredient IS) and price (what it COSTS from a given source) change for different reasons, on different schedules, decided by different people potentially — separating them into independent aggregates means a rate renegotiation doesn't need to touch or re-approve the ingredient's core identity, and vice versa.
 
 ### 6.5 Packing Material
 - Same three-aggregate split as Raw Material (`PM_MAT`, `PM_VRM`, `PM_RATE`) — Fact, mirrored handler structure in `lib/approvals/module-handlers.ts`. One asymmetry worth naming as its own finding: a brand-new PM's bundled rate can be written `active` immediately in one create path while RM's equivalent path always forces `in_review` (Fact, `pm-handler.ts:61,72` vs `rm-handler.ts:27,39` — see §17 risk).
 
 ### 6.6 BOM
-- **Aggregate Root:** `master_bom` (header)
-- **Contained entities:** BOM Lines (`details_bom`) — always written/replaced together with the header, never independently
+- **Aggregate Root:** `master_recipe` (header)
+- **Contained entities:** BOM Lines (`details_recipe`) — always written/replaced together with the header, never independently
 - **Business invariants:** exactly one `active` BOM per SKU at any time (enforced at approval time by deactivating siblings, Fact, `lib/approvals/module-handlers.ts:553-574`); RM lines must sum to 99.9%–100.1%; at least one RM line required; lines are never written until the governing approval is decided
 - **Consistency boundary:** one BOM header + its full current line set
 - **Lifecycle:** submit (new-version or update-existing) → in_review → active (siblings deactivated) → eventually superseded → inactive
@@ -235,7 +235,7 @@ The code treats "a Raw Material" as **three independently governable aggregates*
 ### 6.7 Purchase Order
 - **Aggregate Root:** one `purchase_orders` row
 - **Contained entities:** none directly, but a PO can produce child POs via splitting — each child is its OWN aggregate instance, linked by `parent_po_id`, not a contained sub-entity
-- **Business invariants:** ordered quantity (`qty`) is never mutated after creation — only `received_qty` accumulates (Fact, `app/api/purchase-orders/[id]/split/route.ts:4-7`); SKU must be `active` at creation and at re-edit time; no backdating of `expected_on`; only the original submitter may re-edit a draft
+- **Business invariants:** ordered quantity (`qty`) is never mutated after creation — only `received_qty` accumulates (Fact, `app/api/v1/purchase-orders/[id]/split/route.ts:4-7`); SKU must be `active` at creation and at re-edit time; no backdating of `expected_on`; only the original submitter may re-edit a draft
 - **Consistency boundary:** one PO row (plus, transactionally, its Approval when impromptu)
 - **Lifecycle:** `draft → raised → punched → partially_received/received`, or `→ short_closed`/`cancelled`; splitting can happen from `draft`, `raised`, `punched`, or `partially_received`
 - **State machine:** see §10 for the full transition table
@@ -265,7 +265,7 @@ Rules are grouped by context. Every rule cites its enforcement site.
 
 **BR-001 — SKU code is unique and immutable.**
 Description: Once a SKU is created, its `sku_code` can never be changed by any update path.
-Evidence: `lib/queries/skus.ts:79` (comment: "sku_code is immutable"); `app/api/masters/skus/route.ts:42-45` (409 on duplicate).
+Evidence: `lib/queries/skus.ts:79` (comment: "sku_code is immutable"); `app/api/v1/masters/skus/route.ts:42-45` (409 on duplicate).
 Reason: a SKU code is likely referenced externally (packaging, listings, other systems) — changing it after the fact would break traceability.
 Enforced where: SKU create/update route.
 Impacted entities: SKU.
@@ -287,14 +287,14 @@ Reason (Inference): same protection as BR-002, but the case-sensitivity differen
 Impacted entities: Packing Material.
 
 **BR-004 — A rejected/draft master record may only be re-edited by its original submitter.**
-Evidence: `app/api/masters/material-master/route.ts:185-191,257-263` (RM and PM); mirrored across Vendor/Manufacturer edit dialogs.
+Evidence: `app/api/v1/masters/material-master/route.ts:185-191,257-263` (RM and PM); mirrored across Vendor/Manufacturer edit dialogs.
 Reason: preserves accountability — the person whose name is on a rejected submission is the one responsible for fixing it, not a colleague.
 Impacted entities: Vendor, Manufacturer, Raw Material, Packing Material.
 Status: Fact.
 Possible future event: `*.updateRejected` already carries this context via `remarks`.
 
 **BR-005 — Vendor/Manufacturer document changes are gated by approval exactly like field changes** (not a lower-risk bypass, as one might assume).
-Evidence: `app/api/masters/vendors/route.ts:362-425`, manufacturer `update_docs` action; `VENDOR_DOC_FIELDS`/`MFG_DOC_FIELDS` in `lib/approvals/module-handlers.ts:234-236,285-287`.
+Evidence: `app/api/v1/masters/vendors/route.ts:362-425`, manufacturer `update_docs` action; `VENDOR_DOC_FIELDS`/`MFG_DOC_FIELDS` in `lib/approvals/module-handlers.ts:234-236,285-287`.
 Reason (Inference): GST certificates, cancelled cheques, and PAN cards directly affect statutory/banking risk, so they get the same scrutiny as a name or bank-account change.
 Status: Fact.
 
@@ -327,50 +327,50 @@ Reason (Inference): every product needs an ingredient composition to exist at al
 Status: Fact (the rule); Assumption (the reason for the RM/PM asymmetry).
 
 **BR-010 — A BOM line dropped from an "update-existing" submission is recorded as removed, not silently deleted, and the prior BOM state is fully archived before any line is touched.**
-Evidence: `app/api/masters/bom-master/route.ts:106-115` (removed-line sentinel); `lib/approvals/module-handlers.ts:527-537` (full snapshot to `history_bom` before delete/reinsert).
+Evidence: `app/api/v1/masters/recipe-master/route.ts:106-115` (removed-line sentinel); `lib/approvals/module-handlers.ts:527-537` (full snapshot to `history_recipe` before delete/reinsert).
 Reason: preserves a recoverable, queryable audit trail of every formulation revision — a real business need for recipe/regulatory audit (per the BOM domain research).
 Status: Fact.
 
 ### Procurement
 
 **BR-011 — A Purchase Order cannot be raised (or re-edited) against a SKU that is not `active`.**
-Evidence: `app/api/purchase-orders/route.ts:150-160`; `app/api/purchase-orders/[id]/route.ts:44-52`.
+Evidence: `app/api/v1/purchase-orders/route.ts:150-160`; `app/api/v1/purchase-orders/[id]/route.ts:44-52`.
 Reason: prevents new manufacturing spend against a product that's been sunset, is mid-reformulation, or otherwise unsellable.
 Impacted entities: Purchase Order, SKU.
 Status: Fact.
 
 **BR-012 — Expected dispatch date on a PO can never be backdated.**
-Evidence: `app/api/purchase-orders/[id]/route.ts:36-42`; mirrored client-side (`min={today}` on the date field).
+Evidence: `app/api/v1/purchase-orders/[id]/route.ts:36-42`; mirrored client-side (`min={today}` on the date field).
 Reason: the expected date is a real commitment communicated to the manufacturer — a date in the past is not a meaningful instruction.
 Status: Fact.
 
 **BR-013 — "Normal" POs are raised directly with no approval; "Impromptu" POs must be approved, and must carry a reason.**
-Evidence: `app/api/purchase-orders/route.ts:185-186` (comment: "Normal PO: insert directly as raised, no approval needed"); mandatory reason field only on impromptu (`AddPODialog.tsx:58-59,192-196`).
+Evidence: `app/api/v1/purchase-orders/route.ts:185-186` (comment: "Normal PO: insert directly as raised, no approval needed"); mandatory reason field only on impromptu (`AddPODialog.tsx:58-59,192-196`).
 Reason (Inference): normal POs follow an already-vetted procurement plan; impromptu POs are off-plan and therefore need a second pair of eyes plus a documented justification.
 Status: Fact (mechanism); Inference (business motive).
 
 **BR-014 — Only the PO's original submitter may re-edit it while it's a draft, and only while it is `draft` with no pending approval.**
-Evidence: `app/api/purchase-orders/[id]/route.ts:58-76`.
+Evidence: `app/api/v1/purchase-orders/[id]/route.ts:58-76`.
 Reason: preserves accountability for who is amending a not-yet-authorized commercial request.
 Status: Fact.
 
 **BR-015 — Receiving is implicit, via splitting: ordered quantity is immutable, received quantity accumulates via one or more split actions, with no dedicated "receive" endpoint.**
-Evidence: `app/api/purchase-orders/[id]/split/route.ts:4-7,100`.
+Evidence: `app/api/v1/purchase-orders/[id]/split/route.ts:4-7,100`.
 Reason: allows a single order to be fulfilled across multiple partial deliveries/allocations, each independently trackable.
 Status: Fact.
 
 **BR-016 — A shortfall within the smaller of 100 units or 10% of the original order quantity is automatically treated as fully received; a larger shortfall requires either further splitting or a deliberate short-close.**
-Evidence: `app/api/purchase-orders/[id]/split/route.ts:104-117`.
+Evidence: `app/api/v1/purchase-orders/[id]/split/route.ts:104-117`.
 Reason: contract manufacturing rarely delivers the exact ordered quantity (yield loss, batch rounding, minor rejects) — the tolerance absorbs routine imprecision so POs don't sit open forever over negligible shortfalls.
 Status: Fact.
 
 **BR-017 — Short-closing is reserved for a deliberate decision not to fulfil a remainder that is LARGER than the automatic tolerance.**
-Evidence: `app/api/purchase-orders/[id]/close/route.ts:1-5` (comment gives the "500 units left from 10,000" example); UI gates the action to `remaining > tolerance` (`PoTable.tsx:263`).
+Evidence: `app/api/v1/purchase-orders/[id]/close/route.ts:1-5` (comment gives the "500 units left from 10,000" example); UI gates the action to `remaining > tolerance` (`PoTable.tsx:263`).
 Reason: distinct from BR-016's automatic closure — this is a human decision to stop chasing a real, non-trivial shortfall.
 Status: Fact.
 
 **BR-018 — Approving an impromptu PO automatically sends the PO document to the manufacturer by email, exactly once.**
-Evidence: `app/api/approvals/[id]/route.ts:113-131`; `lib/queries/purchase-orders.ts:150` (`setEmailSentAt` guarded to fire once).
+Evidence: `app/api/v1/approvals/[id]/route.ts:113-131`; `lib/queries/purchase-orders.ts:150` (`setEmailSentAt` guarded to fire once).
 Reason: the approved PO is the commercial/legal instrument authorizing the manufacturer to produce — sending it immediately on approval closes the loop without a manual step.
 Status: Fact.
 
@@ -382,12 +382,12 @@ Reason: prevents a maker from stacking concurrent edits, and prevents an approve
 Status: Fact.
 
 **BR-020 — Rejection requires a non-empty remark.**
-Evidence: `app/api/approvals/[id]/route.ts:55-58`.
+Evidence: `app/api/v1/approvals/[id]/route.ts:55-58`.
 Reason: a rejection reverts real business data to draft and sends the maker back to rework it — without a stated reason there's no way to know what to fix, and no audit trail for why a change was denied.
 Status: Fact.
 
 **BR-021 — Only `admin`/`manager` roles may approve or reject; there is no rule preventing the same person from approving their own submission.**
-Evidence: `app/api/approvals/[id]/route.ts:35-39` (role check exists); no comparison anywhere of `approval.raised_by` to the acting approver's id.
+Evidence: `app/api/v1/approvals/[id]/route.ts:35-39` (role check exists); no comparison anywhere of `approval.raised_by` to the acting approver's id.
 Reason: role-based separation exists, but transaction-level maker-checker (the classic "you cannot approve your own request") does not. This is explicitly named as an open risk in the team's own prior architecture notes (`architecture-discussion-framework.md:609,650`).
 Status: **Fact** (the gap); flagged again in §17.
 
@@ -520,7 +520,7 @@ Status: Fact.
 | draft | in_review | Resubmitted by original submitter | — | Back into review |
 
 ### Raw Material / Packing Material base record (identical shape to Vendor)
-Same transition table as Vendor/Manufacturer, applied independently to the base record and — separately — to each rate row (which has its own `in_review ⇄ active`/`draft` cycle against `history_mrm`/`history_vrm`).
+Same transition table as Vendor/Manufacturer, applied independently to the base record and — separately — to each rate row (which has its own `in_review ⇄ active`/`draft` cycle against `history_cost_mfg`/`history_cost_ven`).
 
 ### BOM
 | From | To | Trigger | Approval required? | Business meaning |
@@ -555,7 +555,7 @@ Invalid transitions worth naming: a PO cannot be edited once it leaves `draft` (
 | Workflow | Must occur atomically | May occur after commit | May become asynchronous | Should eventually use an Outbox | Why |
 |---|---|---|---|---|---|
 | **Master data create/edit submission** | Diff computation, approval + approval-item insert, entity status flip to `in_review` | Nothing found today | Audit-log/event recording (already logged after commit in the companion technical review) | Yes, once a real event bus exists | The record's visible lock state (`in_review`) and the approval record that will eventually unlock it must never disagree — a crash between them would leave a record permanently stuck locked with no way to review it. |
-| **Approval decision (approve)** | Module apply-and-archive (history snapshot + overwrite/insert) + status flip to `active` + approval marked `approved`, all in one DB transaction (Fact, confirmed in the companion review) | The PO auto-email send (already fire-and-forget, deliberately outside the transaction — Fact, `app/api/approvals/[id]/route.ts:113-131`) | The PO email already is; any future notification to the submitter should be too | Yes for the email step specifically — today a crash after commit but before the email send would silently skip notifying the manufacturer, with only a log line as evidence | The business-critical part (does the change actually take effect, consistently) must be atomic; the notification is a nice-to-have that shouldn't be able to roll back a governance decision if it fails. |
+| **Approval decision (approve)** | Module apply-and-archive (history snapshot + overwrite/insert) + status flip to `active` + approval marked `approved`, all in one DB transaction (Fact, confirmed in the companion review) | The PO auto-email send (already fire-and-forget, deliberately outside the transaction — Fact, `app/api/v1/approvals/[id]/route.ts:113-131`) | The PO email already is; any future notification to the submitter should be too | Yes for the email step specifically — today a crash after commit but before the email send would silently skip notifying the manufacturer, with only a log line as evidence | The business-critical part (does the change actually take effect, consistently) must be atomic; the notification is a nice-to-have that shouldn't be able to roll back a governance decision if it fails. |
 | **BOM activation with sibling deactivation** | Header activation + line insert/reinsert + sibling deactivation, all in one transaction (Fact) | Nothing found today | The per-sibling audit event (already the case per the companion review) | Yes, once real events exist — today, if the process crashes mid-fan-out, some siblings could be left active alongside the new BOM until a retry, which would (briefly) violate BR-008 | The one-active-BOM-per-SKU invariant is the whole point of this workflow — it cannot be allowed to be partially true. |
 | **PO split** | Child PO insert(s) + parent `received_qty` credit + parent status recompute, in one transaction (Fact, confirmed pattern from `close/route.ts` similarly wrapped) | Nothing found today | None identified | Not obviously needed — no cross-system side effect here today | Received quantity and the resulting status must never disagree, or the PO's completion state becomes untrustworthy. |
 | **PO bulk CSV import** | Each valid row's PO insert (Fact — wrapped in one transaction per the companion review's PO_BULK handler) | Nothing found today | None identified | Not obviously needed | A partially-committed bulk file would leave an ambiguous "which rows actually landed" state for the person who uploaded it. |
@@ -605,15 +605,15 @@ Per the instructions, this section derives potential events FROM business activi
 
 | Business Capability | Module (code) | Owner (role, Inference) | Primary Aggregate | External Dependencies |
 |---|---|---|---|---|
-| SKU Management | `app/api/masters/skus/`, `lib/queries/skus.ts` | General editor role(s); no SKU-specific role name found | SKU | None |
-| Vendor Management | `app/api/masters/vendors/` | General editor role(s); no vendor-specific role name found | Vendor | AWS S3 (compliance docs) |
-| Manufacturer Management | `app/api/masters/manufacturers/` | General editor role(s); no manufacturer-specific role name found | Manufacturer | AWS S3 (compliance docs) |
-| Raw Material Management | `app/api/masters/raw-materials/`, `app/api/masters/material-master/` | `cost_creator` (rates), general editor (base record) — Inference from role naming | Raw Material (×3 sub-aggregates) | None |
-| Packing Material Management | `app/api/masters/packing-materials/`, `app/api/masters/material-master/` | Same as Raw Material | Packing Material (×3 sub-aggregates) | None |
-| Product Formulation (BOM) | `app/api/masters/bom-master/` | `bom_creator` (Fact, `scripts/seed-permissions.ts`) | BOM | None |
-| Procurement (Purchase Orders) | `app/api/purchase-orders/` | `production_operations`, `production_head` (Fact — editor on `/po-tracking`) | Purchase Order | Gmail SMTP, AWS S3 |
-| Approval & Governance | `app/api/approvals/`, `lib/approvals/module-handlers.ts` | `admin`/`manager` (Fact, but not seeded anywhere found — see §17) | Approval | None |
-| Identity & Access | `lib/auth.ts`, `lib/permissions.ts`, `app/api/admin/` | `developer` (Fact — only role permitted to manage permissions) | User / Permission | Google OAuth |
+| SKU Management | `app/api/v1/masters/skus/`, `lib/queries/skus.ts` | General editor role(s); no SKU-specific role name found | SKU | None |
+| Vendor Management | `app/api/v1/masters/vendors/` | General editor role(s); no vendor-specific role name found | Vendor | AWS S3 (compliance docs) |
+| Manufacturer Management | `app/api/v1/masters/manufacturers/` | General editor role(s); no manufacturer-specific role name found | Manufacturer | AWS S3 (compliance docs) |
+| Raw Material Management | `app/api/v1/masters/raw-materials/`, `app/api/v1/masters/material-master/` | `cost_creator` (rates), general editor (base record) — Inference from role naming | Raw Material (×3 sub-aggregates) | None |
+| Packing Material Management | `app/api/v1/masters/packing-materials/`, `app/api/v1/masters/material-master/` | Same as Raw Material | Packing Material (×3 sub-aggregates) | None |
+| Product Formulation (BOM) | `app/api/v1/masters/recipe-master/` | `bom_creator` (Fact, `scripts/seed-permissions.ts`) | BOM | None |
+| Procurement (Purchase Orders) | `app/api/v1/purchase-orders/` | `production_operations`, `production_head` (Fact — editor on `/po-tracking`) | Purchase Order | Gmail SMTP, AWS S3 |
+| Approval & Governance | `app/api/v1/approvals/`, `lib/approvals/module-handlers.ts` | `admin`/`manager` (Fact, but not seeded anywhere found — see §17) | Approval | None |
+| Identity & Access | `lib/auth.ts`, `lib/permissions.ts`, `app/api/v1/admin/` | `developer` (Fact — only role permitted to manage permissions) | User / Permission | Google OAuth |
 | Inventory / Manufacturing / Finance / Sales-CRM / HR-Payroll / Reporting | Page shells only | Unknown | None yet | None yet |
 | Uniware/Unicommerce sync | `scripts/testing_uniware_connection.ts` only | Unknown | None yet | Unknown external system (Assumption) |
 

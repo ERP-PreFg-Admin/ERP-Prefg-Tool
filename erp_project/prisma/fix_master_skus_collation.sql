@@ -1,0 +1,63 @@
+-- master_skus: align the collation with the rest of the schema.
+--
+-- WHAT WAS WRONG
+-- prod.master_skus was created with utf8mb4_unicode_ci on all 8 of its string
+-- columns, while every other table in the schema uses utf8mb4_0900_ai_ci (177
+-- columns). MySQL refuses to compare two columns of different collations, so
+-- EVERY join between master_skus and another table on a string column threw:
+--
+--   Illegal mix of collations (utf8mb4_unicode_ci,IMPLICIT)
+--   and (utf8mb4_0900_ai_ci,IMPLICIT)
+--
+-- That is 7 joins in lib/queries/, all on `sk.sku_code = <other>.sku_code`, and
+-- they sit in exactly two files:
+--   lib/queries/manufacturing.ts:80, 95
+--   lib/queries/purchase-orders.ts:197, 713, 749, 781, 819
+-- purchase-orders.ts:197 is inside SELECT_COLS, the main PO list query, so the
+-- whole FG PO tracking page 500'd rather than one widget on it.
+--
+-- Symptom reported: HTTP 500 on https://erp.mcaffeine.com/po-tracking/mfg-overview
+-- and the manufacturer pages. It was never a code fault — no commit introduced
+-- it and no rollback would have fixed it.
+--
+-- WHY IT NEVER REPRODUCED LOCALLY
+-- dev.master_skus was already on utf8mb4_0900_ai_ci. The two schemas had drifted,
+-- so the same query passed in dev and failed in prod. Worth remembering the next
+-- time "works locally" is offered as evidence about a prod fault.
+--
+-- SAFETY
+-- The 4 foreign keys pointing at master_skus all reference master_skus.id (INT),
+-- not a string column, so none of them is affected by a collation change.
+-- 300 rows; the rebuild took 193ms. Data verified byte-identical afterwards —
+-- row count 300 -> 300 and MD5(GROUP_CONCAT(sku_code ORDER BY id)) unchanged at
+-- 42a7e73d8d17f9d2ded1400179d1d6b3.
+--
+-- RE-RUNNABLE: yes. Converting a table already in the target collation is a no-op
+-- rebuild.
+--
+-- Applied to mcaff_prefg_prod on 2026-08-10. NOT needed on mcaff_prefg_dev,
+-- which already had the correct collation — running it there is harmless.
+
+ALTER TABLE master_skus
+  CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+
+-- Verify: expect 8 rows, all utf8mb4_0900_ai_ci.
+--
+--   SELECT COLUMN_NAME, COLLATION_NAME
+--     FROM information_schema.COLUMNS
+--    WHERE TABLE_SCHEMA = DATABASE()
+--      AND TABLE_NAME   = 'master_skus'
+--      AND COLLATION_NAME IS NOT NULL;
+--
+-- And confirm the join that was failing now runs:
+--
+--   SELECT COUNT(*) FROM purchase_orders po
+--     LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code;
+
+-- STILL OUTSTANDING, deliberately not fixed here
+--
+-- cost_master_pm_mfg keeps utf8mb4_general_ci on pm_code, mfg_code, uom and
+-- status, in BOTH schemas. Nothing joins that table on a string column today, so
+-- it is latent rather than broken — but the first query that does will fail the
+-- same way. Fix it in its own migration when something needs it, so this one
+-- stays a single-purpose change that is easy to reason about and revert.

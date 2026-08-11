@@ -13,7 +13,7 @@ Every other master (SKU, Vendor, Manufacturer, RM, PM, BOM) has a page under `/m
 | Consumer | Column | Where |
 |---|---|---|
 | Purchase orders | `purchase_orders.destination` (VARCHAR) | `lib/queries/purchase-orders.ts:486` — `LEFT JOIN master_warehouse wh ON wh.name = po.destination` |
-| Supplier invoices | `supplier_invoices.destination` (VARCHAR) | `lib/invoice-inward.ts` |
+| Supplier invoices | `invoice_mfg.destination` (VARCHAR) | `lib/invoice-inward.ts` |
 | Warehouse mail routing | `entity_emails.entity_code` where `entity_type='warehouse'` | `lib/mailer.ts:320` `resolveRecipients("warehouse", destination)` |
 | Per-user data scope | resolved id → **name** once per request | `lib/scope.ts:78-82`, `entityScopeSql.warehouseNamesByIds` |
 | Invoice OCR matching | fuzzy match on `name`/`location`/`zone` | `lib/invoice-mapping.ts:74` |
@@ -66,9 +66,9 @@ Run on **both** schemas, then mirror into `prisma/schema.prisma`: add the four f
   ```
 - `lib/queries/purchase-orders.ts:299` `warehouseOptions` — add `WHERE status = 'active'` so a closed warehouse leaves the PO destination dropdown without orphaning historical POs. Do the same for `entityScopeSql.warehouseOptions` (`lib/queries/entity-scope.ts:47`) and the `entityEmails.warehouseOptions` used by `app/po-tracking/po-procurement/entity-emails/page.tsx:61`.
 
-## 3 · API — `app/api/masters/warehouses/route.ts` (new)
+## 3 · API — `app/api/v1/masters/warehouses/route.ts` (new)
 
-Copy the structure of `app/api/masters/manufacturers/route.ts`, minus the bulk/docs/duplicate-banking actions. Goes through `withGateway` with `access: { pageSlug: "/masters/warehouses", level: "editor" }`. Zod schema in `lib/validation/warehouses.ts` (new), alongside the other twelve.
+Copy the structure of `app/api/v1/masters/manufacturers/route.ts`, minus the bulk/docs/duplicate-banking actions. Goes through `withGateway` with `access: { pageSlug: "/masters/warehouses", level: "editor" }`. Zod schema in `lib/validation/warehouses.ts` (new), alongside the other twelve.
 
 Two actions:
 
@@ -107,7 +107,7 @@ export const warehouseHandler: ModuleHandler = {
 Register in three places, one line each:
 - `lib/approvals/module-handlers.ts` → `WAREHOUSE: warehouseHandler`
 - `app/approvals/approvals-types.ts` → `MODULE_LABEL.WAREHOUSE = "Warehouse"` and a `MODULE_COLOR` entry (unused hue: `bg-sky-50 text-sky-700 border-sky-200`)
-- `app/api/approvals/[id]/route.ts:110` → `if (approval.module === "WAREHOUSE") revalidateTag("ref:po-options", "max")` — without this, `getPoDropdownOptions` (`lib/cached-reference-data.ts:126`, 120s TTL) means a newly approved warehouse doesn't appear in the PO destination dropdown for up to two minutes.
+- `app/api/v1/approvals/[id]/route.ts:110` → `if (approval.module === "WAREHOUSE") revalidateTag("ref:po-options", "max")` — without this, `getPoDropdownOptions` (`lib/cached-reference-data.ts:126`, 120s TTL) means a newly approved warehouse doesn't appear in the PO destination dropdown for up to two minutes.
 
 No new approval-card renderer needed: `FieldDiffTable` handles the flat field diff already.
 
@@ -118,7 +118,7 @@ Copy `app/masters/manufacturers/` and strip out the documents/banking parts.
 - **`page.tsx`** — server component, mirrors `app/masters/manufacturers/page.tsx`: `auth()` → `resolveAccess(userId, roles, "/masters/warehouses")` → redirect on `none` → `parsePaginationParams` → `timedQuery`. No `getUserScope` call (unscoped by decision). With ~10 rows the fuzzy-search branch is unnecessary — a single `selectAll` and client-side filter is enough; skip `parsePaginationParams` and the `pagination-bar` too unless the list grows.
 - **`WarehousesClient.tsx`** — reuse `MasterToolbar`, `SearchInput`, `StatusBadge`, `RecordCountHeader`, `DownloadButton`, `TableEmpty` (`components/ui/empty-state.tsx`), and `ApprovalBanners` from `components/masters/`. Columns: Name · Location · Zone · Type (CWH/MWH badge) · Status · Actions.
 - **`AddWarehouseDialog.tsx`** — name, location, zone, type. All four required.
-- **`EditWarehouseDialog.tsx`** — the three-state approval-aware pattern from `app/masters/manufacturers/EditMfgDialog.tsx`: normal / `in_review` locked with blue banner / `rejected` with amber banner fetched from `/api/approvals/entity?module=WAREHOUSE&entity_id=Y`. **Plus the fourth thing specific to this page**: the name input is always `disabled` with the helper text *"Used as the join key by POs, invoices and mail routing — cannot be changed."*
+- **`EditWarehouseDialog.tsx`** — the three-state approval-aware pattern from `app/masters/manufacturers/EditMfgDialog.tsx`: normal / `in_review` locked with blue banner / `rejected` with amber banner fetched from `/api/v1/approvals/entity?module=WAREHOUSE&entity_id=Y`. **Plus the fourth thing specific to this page**: the name input is always `disabled` with the helper text *"Used as the join key by POs, invoices and mail routing — cannot be changed."*
 
 ## 6 · Wiring
 
@@ -159,4 +159,4 @@ npm run dev
 
 - `app/po-tracking/po-procurement/AddPODialog.tsx:123` picks its default destination with `name.toLowerCase().includes("mumbai")`, falling back to the first `MWH`. Deactivating the Mumbai warehouse silently changes PO defaults. Left alone — out of scope, but worth a `ponytail:` comment when someone next touches that file.
 - A new warehouse still needs its mail recipients added separately at `/po-tracking/po-procurement/entity-emails` (`entity_type='warehouse'`, `entity_code` = the exact name). Nothing links the two screens; consider a hint on the create-success toast.
-- The real fix for the whole name-as-FK problem is a stable `warehouse_code` plus migrating `purchase_orders.destination` / `supplier_invoices.destination` / `entity_emails.entity_code` to it. That is a data migration across three tables and thousands of rows — deliberately out of scope. Immutable names make it unnecessary until then.
+- The real fix for the whole name-as-FK problem is a stable `warehouse_code` plus migrating `purchase_orders.destination` / `invoice_mfg.destination` / `entity_emails.entity_code` to it. That is a data migration across three tables and thousands of rows — deliberately out of scope. Immutable names make it unnecessary until then.

@@ -26,6 +26,15 @@ const LINES_SELECT = `
   INNER JOIN master_mfgs   m  ON m.id     = l.mfg_id
 `
 
+// A SKU's fill weight, the multiplicand in every RM cost. It lives on BOTH
+// master_skus and details_sku, and which one is populated depends on how the
+// SKU was created — so read whichever has it. When neither does, the RM cost
+// silently collapses to 0 (NULL * anything = NULL), which is exactly the bug
+// this expression exists to stop: an unpriced recipe used to read as a free one.
+// selectMaterialCostByMfg returns `filling` alongside the totals so the page can
+// say WHY a cost is zero instead of guessing.
+const SKU_FILLING = `COALESCE(NULLIF(sk.filling, 0), NULLIF(ds.filling, 0))`
+
 export const manufacturingSql = {
   /**
    * All lines for one manufacturer, optionally filtered by status.
@@ -184,11 +193,19 @@ export const manufacturingSql = {
   // ── Misc. Cost: JW / Shrink Wrap / Shipper / Wastage (bom_misc) ────────────
   // rm_loss/pm_loss hold a wastage PERCENTAGE in the same `cost` column
   // jw/shrink/shipper use for an absolute currency amount.
+  //
+  // `bom_misc.bom_id` kept its old name through the recipe rename — it is the
+  // one table that was never renamed. Every one of these SELECTs therefore
+  // aliases it to `recipe_id`, because all the TS row types and every caller
+  // key on `recipe_id`. Do not drop the alias: `timedQuery<T>`/`query<T>` are
+  // unchecked casts, so a bare `bom_id` compiles fine and then reads back
+  // `undefined` at runtime — which silently zeroed JW/Shrink/Shipper/Wastage
+  // on the Agreed Final Costing page and in the PO rate quote.
 
   /** All JW/Shrink/Shipper/Wastage lines for one manufacturer — the client toggles between types. Params: [mfg_id] */
   selectMiscByMfg: `
     SELECT
-      bm.id, bm.bom_id, bm.mfg_id, bm.type, bm.cost,
+      bm.id, bm.bom_id AS recipe_id, bm.mfg_id, bm.type, bm.cost,
       bm.effective_from, bm.effective_till, bm.status,
       b.bom_code, sk.sku_code, sk.name AS sku_name
     FROM bom_misc bm
@@ -277,7 +294,35 @@ export const manufacturingSql = {
 
   /** Fetch a single bom_misc line by id. Params: [id] */
   selectMiscLineById: `
-    SELECT id, bom_id, mfg_id, type FROM bom_misc WHERE id = ? LIMIT 1
+    SELECT id, bom_id AS recipe_id, mfg_id, type FROM bom_misc WHERE id = ? LIMIT 1
+  `,
+
+  /** Full bom_misc row — the approval flow diffs against these fields. Params: [id] */
+  selectMiscFullById: `
+    SELECT id, bom_id AS recipe_id, mfg_id, type, cost, effective_from, effective_till, status
+    FROM bom_misc WHERE id = ? LIMIT 1
+  `,
+
+  /** Lock/unlock a misc cost line for the approval flow. Params: [status, id] */
+  setMiscStatus: `
+    UPDATE bom_misc SET status = ? WHERE id = ?
+  `,
+
+  /**
+   * Apply an approved misc-cost edit. Deliberately does NOT touch `status` —
+   * the handler sets that separately, so an approved edit to a line that was
+   * inactive before does not silently reactivate it.
+   * Params: [cost, effective_from, effective_till, id]
+   */
+  applyMiscEdit: `
+    UPDATE bom_misc SET cost = ?, effective_from = ?, effective_till = ? WHERE id = ?
+  `,
+
+  /** Is there already a pending misc line for this (mfg, recipe, type)? Params: [mfg_id, recipe_id, type] */
+  selectPendingMiscFor: `
+    SELECT id FROM bom_misc
+    WHERE mfg_id = ? AND bom_id = ? AND type = ? AND status = 'in_review'
+    LIMIT 1
   `,
 
   // ── RM Vendor (read-only) ─────────────────────────────────────────────────
@@ -404,11 +449,19 @@ export const manufacturingSql = {
    */
   selectMaterialCostByMfg: `
     SELECT mbm.recipe_id,
-      COALESCE(SUM(CASE WHEN db.mtrl_type = 'rm' THEN (db.amount * sk.filling * rmm.curr_rate) / 100000 ELSE 0 END), 0) AS rm_cost,
-      COALESCE(SUM(CASE WHEN db.mtrl_type = 'pm' THEN db.amount * pmm.curr_rate ELSE 0 END), 0) AS pm_cost
+      COALESCE(SUM(CASE WHEN db.mtrl_type = 'rm' THEN (db.amount * ${SKU_FILLING} * rmm.curr_rate) / 100000 ELSE 0 END), 0) AS rm_cost,
+      COALESCE(SUM(CASE WHEN db.mtrl_type = 'pm' THEN db.amount * pmm.curr_rate ELSE 0 END), 0) AS pm_cost,
+      -- Why an RM cost is zero. Without these the page can only say "possibly
+      -- missing RM cost", which points at the rate when the cause is usually
+      -- the SKU's fill weight — the two need different people to fix.
+      MAX(${SKU_FILLING})                                                            AS filling,
+      SUM(db.mtrl_type = 'rm')                                                       AS rm_line_count,
+      SUM(db.mtrl_type = 'rm' AND rmm.curr_rate IS NULL)                             AS rm_lines_without_rate,
+      SUM(db.mtrl_type = 'pm' AND pmm.curr_rate IS NULL)                             AS pm_lines_without_rate
     FROM master_recipe_mfg mbm
     INNER JOIN master_recipe  b  ON b.id = mbm.recipe_id
     LEFT  JOIN master_skus sk ON sk.id = b.sku_id
+    LEFT  JOIN details_sku ds ON ds.sku_id = sk.id
     INNER JOIN details_recipe db ON db.recipe_id = mbm.recipe_id AND db.status = 'active'
     LEFT  JOIN cost_master_rm_mfg rmm ON rmm.rm_id = db.mtrl_id AND rmm.mfg_id = ? AND rmm.status = 'active' AND db.mtrl_type = 'rm'
     LEFT  JOIN cost_master_pm_mfg pmm ON pmm.pm_id = db.mtrl_id AND pmm.mfg_id = ? AND pmm.status = 'active' AND db.mtrl_type = 'pm'
@@ -416,9 +469,72 @@ export const manufacturingSql = {
     GROUP BY mbm.recipe_id
   `,
 
+  /**
+   * The APPROVED vendor's current rate per RM, for this manufacturer — the third
+   * scenario in the Agreed Final Costing comparison, alongside cheapest and
+   * most-expensive.
+   *
+   * `cost_master_rm_mfg.approved_vendor_id` names the vendor, so this is exact
+   * for RM (unlike the PM sibling below). Vendor scope is applied in BOTH the
+   * rate subquery and the name join, for the same reason selectMinMaxVrmRateByRm
+   * repeats it: scoping the rate but not the name still leaks an out-of-scope
+   * vendor's identity.
+   * Params: [mfg_id, ...scopeParams(vendorIds) x 2]
+   */
+  selectApprovedVendorRateByRm: `
+    SELECT
+      rmm.rm_id,
+      ven.curr_rate AS approved_rate,
+      v.code  AS approved_vendor_code,
+      v.name  AS approved_vendor_name
+    FROM cost_master_rm_mfg rmm
+    LEFT JOIN cost_master_rm_ven ven ON ven.id = (
+      SELECT id FROM cost_master_rm_ven
+      WHERE rm_id = rmm.rm_id AND vendor_id = rmm.approved_vendor_id AND status = 'active'
+        AND effective_from <= ${SQL_TODAY_IST}
+        AND (effective_to IS NULL OR effective_to >= ${SQL_TODAY_IST})
+        AND (? IS NULL OR vendor_id IN (?))
+      ORDER BY id LIMIT 1
+    )
+    LEFT JOIN master_vendors v
+      ON v.id = rmm.approved_vendor_id
+     AND (? IS NULL OR v.id IN (?))
+    WHERE rmm.mfg_id = ? AND rmm.status = 'active'
+  `,
+
+  /**
+   * Same, for PM — but `cost_master_pm_mfg` has NO approved_vendor_id column.
+   * This reuses the identical best-effort pick selectPmVendorByMfg already
+   * makes ("whichever active cost_master_pm_ven row exists, lowest id"), so the
+   * two tabs agree with each other. A PM quoted by several vendors therefore
+   * costs at an arbitrary one of them — accepted deliberately; the fix is a
+   * real approved_vendor_id column on cost_master_pm_mfg.
+   * Params: [mfg_id, ...scopeParams(vendorIds) x 2]
+   */
+  selectApprovedVendorRateByPm: `
+    SELECT
+      pmm.pm_id,
+      ven.curr_rate AS approved_rate,
+      v.code  AS approved_vendor_code,
+      v.name  AS approved_vendor_name
+    FROM cost_master_pm_mfg pmm
+    LEFT JOIN cost_master_pm_ven ven ON ven.id = (
+      SELECT id FROM cost_master_pm_ven
+      WHERE pm_id = pmm.pm_id AND status = 'active'
+        AND effective_from <= ${SQL_TODAY_IST}
+        AND (effective_to IS NULL OR effective_to >= ${SQL_TODAY_IST})
+        AND (? IS NULL OR vendor_id IN (?))
+      ORDER BY id LIMIT 1
+    )
+    LEFT JOIN master_vendors v
+      ON v.id = ven.vendor_id
+     AND (? IS NULL OR v.id IN (?))
+    WHERE pmm.mfg_id = ? AND pmm.status = 'active'
+  `,
+
   /** Active JW/Shrink/Shipper costs for this manufacturer, keyed by recipe_id + type in application code. Params: [mfg_id] */
   selectMiscCostsByMfg: `
-    SELECT bom_id, type, cost FROM bom_misc WHERE mfg_id = ? AND status = 'active'
+    SELECT bom_id AS recipe_id, type, cost FROM bom_misc WHERE mfg_id = ? AND status = 'active'
   `,
 
   /**
@@ -430,10 +546,11 @@ export const manufacturingSql = {
    * Params: [mfg_id]
    */
   selectBomLineInputsByMfg: `
-    SELECT mbm.recipe_id, db.mtrl_type, db.mtrl_id, db.amount, sk.filling
+    SELECT mbm.recipe_id, db.mtrl_type, db.mtrl_id, db.amount, ${SKU_FILLING} AS filling
     FROM master_recipe_mfg mbm
     INNER JOIN master_recipe  b  ON b.id = mbm.recipe_id
     LEFT  JOIN master_skus sk ON sk.id = b.sku_id
+    LEFT  JOIN details_sku ds ON ds.sku_id = sk.id
     INNER JOIN details_recipe db ON db.recipe_id = mbm.recipe_id AND db.status = 'active'
     WHERE mbm.mfg_id = ? AND mbm.status IN ('active', 'discontinued')
   `,

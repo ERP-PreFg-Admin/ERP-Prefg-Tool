@@ -101,7 +101,30 @@ server {
     }
 }
 NGINXCONF
+
+# Upload limits live in their OWN file, not in erp.conf above, because
+# `certbot --nginx` rewrites erp.conf when it installs and renews the
+# certificate. Keeping these here means one source of truth that certbot never
+# touches, and rolling back is deleting one file. Bare directives (no server
+# block) are valid because nginx.conf includes conf.d/*.conf inside `http`.
+cat > /etc/nginx/conf.d/00-erp-limits.conf <<'LIMITSCONF'
+# Supplier invoices are uploaded through this proxy. nginx defaults to 1m, which
+# silently 413s the SCANNED invoices (Anuspa, Yasharth) — those are page images
+# several MB each, while every text-layer invoice is well under 1m and sailed
+# through. It read as a parser bug because the only suppliers it hit were the
+# ones that need OCR anyway.
+client_max_body_size 10m;
+
+# Match the parse route's own budget (maxDuration = 300 in
+# app/api/v2/purchase-orders/invoice/parse/route.ts). Nanonets OCR runs 50-70s
+# on a scanned PDF and nginx defaults to 60s — without this, raising the size
+# limit alone would just turn the 413 into a 504 on exactly the same files.
+proxy_read_timeout 300s;
+proxy_send_timeout 300s;
+LIMITSCONF
+
 rm -f /etc/nginx/conf.d/default.conf
+nginx -t
 systemctl restart nginx
 
 # Requires the domain's DNS to already point at this instance's IP (Elastic

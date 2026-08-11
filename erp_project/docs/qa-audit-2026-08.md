@@ -22,7 +22,7 @@
 
 ### 1. Splitting the same PO twice always fails — HIGH
 
-**Where:** `lib/po-split.ts` `childPoNo()` (extracted verbatim from `app/api/purchase-orders/[id]/split/route.ts`)
+**Where:** `lib/po-split.ts` `childPoNo()` (extracted verbatim from `app/api/v1/purchase-orders/[id]/split/route.ts`)
 
 Child PO numbers are derived from the position within the **current request** (`-S001`, `-S002`, …), not from the children that already exist. `purchase_orders.po_no` is `UNIQUE`, so the second split of any PO regenerates `-S001` and dies on the unique index.
 
@@ -77,7 +77,7 @@ await conn.execute(rmSql.archiveToHistoryMrm, [
 ])
 ```
 
-`rmVrmHandler` in the same file passes `cur.effective_to`. So vendor rate history can say when a rate stopped applying and manufacturer rate history cannot — every `history_mrm` row has an open-ended validity window.
+`rmVrmHandler` in the same file passes `cur.effective_to`. So vendor rate history can say when a rate stopped applying and manufacturer rate history cannot — every `history_cost_mfg` row has an open-ended validity window.
 
 **Failure scenario:** open the Rate History popup on RM Cost Master (Manufacturer view). Every superseded rate shows a start date and a blank end date, so two archived rates appear to have been in force simultaneously. Any costing back-calculation over a date range can't pick the right one.
 
@@ -91,38 +91,38 @@ await conn.execute(rmSql.archiveToHistoryMrm, [
 
 ### 5. Any signed-in user can read or overwrite any S3 object — HIGH
 
-**Where:** `app/api/files/presign/route.ts`, `app/api/files/preview/route.ts`, `app/api/upload/route.ts`
+**Where:** `app/api/v1/files/presign/route.ts`, `app/api/v1/files/preview/route.ts`, `app/api/v1/upload/route.ts`
 
 All three are wrapped in `withGateway` (so a session is required) but declare **no `access` rule** and **no entity scope**, and they take the S3 key or folder straight from the caller:
 
 | Route | Caller controls | Consequence |
 |-------|-----------------|-------------|
-| `GET /api/files/presign?key=…` | the full object key | A presigned download/view URL for **any** object in the bucket — another manufacturer's documents, any supplier invoice PDF, any uploaded bulk CSV |
-| `GET /api/files/preview?key=…` | the full object key | The parsed contents of any CSV/XLSX in the bucket, returned as JSON |
-| `POST /api/upload` (`folder` + `field`) | the full key path | `uploadFile` is a plain `PutObject`, which **overwrites**. An existing invoice PDF or vendor document can be replaced. |
+| `GET /api/v1/files/presign?key=…` | the full object key | A presigned download/view URL for **any** object in the bucket — another manufacturer's documents, any supplier invoice PDF, any uploaded bulk CSV |
+| `GET /api/v1/files/preview?key=…` | the full object key | The parsed contents of any CSV/XLSX in the bucket, returned as JSON |
+| `POST /api/v1/upload` (`folder` + `field`) | the full key path | `uploadFile` is a plain `PutObject`, which **overwrites**. An existing invoice PDF or vendor document can be replaced. |
 
 The only validation is a `key.includes("..")` check, which does nothing here — these are S3 keys, not filesystem paths, so no traversal is needed to reach a sibling object. Keys are also guessable/enumerable from the UI (`attachment_key` and `csv_source_key` are returned in ordinary list responses).
 
-**Reproduce:** sign in as any active user, note an `attachment_key` from a PO belonging to a manufacturer outside your entity scope, then `GET /api/files/presign?key=<that key>&view=1`.
+**Reproduce:** sign in as any active user, note an `attachment_key` from a PO belonging to a manufacturer outside your entity scope, then `GET /api/v1/files/presign?key=<that key>&view=1`.
 
-**Fix:** two layers. (a) Add an `access` rule to each route. (b) Authorize the *object*, not just the session: resolve the key back to the row that owns it (`purchase_orders.attachment_key`, `supplier_invoices.attachment_key`, `approvals`' `s3_key` item) and run the existing `assertInScope` / `assertPoInScope` against it. For `upload`, derive the key server-side from the entity being uploaded against instead of accepting a caller-supplied path.
+**Fix:** two layers. (a) Add an `access` rule to each route. (b) Authorize the *object*, not just the session: resolve the key back to the row that owns it (`purchase_orders.attachment_key`, `invoice_mfg.attachment_key`, `approvals`' `s3_key` item) and run the existing `assertInScope` / `assertPoInScope` against it. For `upload`, derive the key server-side from the entity being uploaded against instead of accepting a caller-supplied path.
 
 **Fixed for `presign` and `upload`.** New `lib/s3-guard.ts` (mirrors `lib/po-guard.ts`):
 
-- `assertKeyReadable(userId, key)` resolves the key through `s3FilesSql.selectKeyOwners` — a UNION over every column that stores one (`purchase_orders.attachment_key`/`csv_source_key`, `supplier_invoices.attachment_key`, `history_pos.s3_key`, the four `*_key` columns on `details_vendor` and `details_mfg`, `bom_artifacts.s3_key`, `approval_items.old_value`/`new_value`) — then applies `inScope` to the owner's `mfg_id` / `destination`. **A key owned by nothing is refused**, which is what closes enumeration. Master and approval-queue documents resolve unscoped, matching the list pages that show their rows (`lib/scope.ts`).
-- `/api/upload` now writes `${folder}/${field}-u<userId>-<12 hex>.${ext}`. The random token makes the `PutObject` overwrite impossible; the `-u<id>-` segment lets `presign` recognise a file the caller just uploaded but hasn't saved to any row yet — without it the document preview in the Add Vendor / Add Manufacturer dialogs (`components/ui/FileUpload.tsx` presigns straight after upload) would break.
+- `assertKeyReadable(userId, key)` resolves the key through `s3FilesSql.selectKeyOwners` — a UNION over every column that stores one (`purchase_orders.attachment_key`/`csv_source_key`, `invoice_mfg.attachment_key`, `history_pos.s3_key`, the four `*_key` columns on `details_vendor` and `details_mfg`, `artifacts_recipe.s3_key`, `approval_items.old_value`/`new_value`) — then applies `inScope` to the owner's `mfg_id` / `destination`. **A key owned by nothing is refused**, which is what closes enumeration. Master and approval-queue documents resolve unscoped, matching the list pages that show their rows (`lib/scope.ts`).
+- `/api/v1/upload` now writes `${folder}/${field}-u<userId>-<12 hex>.${ext}`. The random token makes the `PutObject` overwrite impossible; the `-u<id>-` segment lets `presign` recognise a file the caller just uploaded but hasn't saved to any row yet — without it the document preview in the Add Vendor / Add Manufacturer dialogs (`components/ui/FileUpload.tsx` presigns straight after upload) would break.
 - The `key.includes("..")` check is gone — it could never have caught anything.
 - No `access` page rule was added: `presign` serves approvals, PO tracking, invoice history, BOM and the masters dialogs, so no single slug fits, and the per-object check is the stronger gate. A deliberate departure from (a), recorded here rather than done silently.
 
 **Tests:** `tests/unit/s3-guard.test.ts` (the marker cannot be forged through the caller-supplied `field`; no two uploads share a key) and `tests/db/s3-key-owners.test.ts` (the UNION is valid against the real schema; an unowned key resolves to zero owners).
 
-**Still open: `/api/files/preview`** — same hole, and the fix is now two lines (`assertKeyReadable`, drop the `..` check). Left out only because this pass was scoped to presign.
+**Still open: `/api/v1/files/preview`** — same hole, and the fix is now two lines (`assertKeyReadable`, drop the `..` check). Left out only because this pass was scoped to presign.
 
 ### 6. Supplier invoices are readable by id regardless of scope — MEDIUM
 
-**Where:** `app/api/purchase-orders/invoice/[id]/route.ts`, `GET /api/purchase-orders/invoice`
+**Where:** `app/api/v1/purchase-orders/invoice/[id]/route.ts`, `GET /api/v1/purchase-orders/invoice`
 
-Both carry `access: { pageSlug: "/po-tracking", level: "viewer" }` but no scope assertion, while `supplier_invoices.mfg_id` makes every invoice manufacturer-owned. A user scoped to one manufacturer can read another's invoice header (both GSTINs, bill-to/ship-to, totals) and its line items by walking sequential ids.
+Both carry `access: { pageSlug: "/po-tracking", level: "viewer" }` but no scope assertion, while `invoice_mfg.mfg_id` makes every invoice manufacturer-owned. A user scoped to one manufacturer can read another's invoice header (both GSTINs, bill-to/ship-to, totals) and its line items by walking sequential ids.
 
 `lib/scope.ts` already documents the supplier-invoice list as not-yet-scoped, so this is a known gap rather than a surprise — recorded here because the data is commercially sensitive and the fix is small: `assertInScope(scope, "mfg", invoice.mfg_id)` after loading the header, and `scopeClause("si.mfg_id")` on the list query.
 
@@ -158,7 +158,7 @@ The script imports `PrismaClient` from `app/generated/prisma/client.ts` and `@pr
 
 ### 10. `rm_mrm` and `rm_vrm` do not exist — LOW (documentation)
 
-`CLAUDE.md`'s registered-modules table said `RM_RATE` touches `rm_mrm` + `rm_mrm_history` and `RM_VRM` touches `rm_vrm`. The real tables are **`rm_mrm_fixed`** and **`rm_vrm_dynamic`**, archiving to **`history_mrm`** / **`history_vrm`** — `SHOW COLUMNS FROM rm_mrm` errors outright. This cost time during this audit, and it is the exact class of error `CLAUDE.md` itself warns about ("always check `lib/queries/*.ts` for the real table names") while getting it wrong.
+`CLAUDE.md`'s registered-modules table said `RM_RATE` touches `rm_mrm` + `rm_mrm_history` and `RM_VRM` touches `rm_vrm`. The real tables are **`cost_master_rm_mfg`** and **`cost_master_rm_ven`**, archiving to **`history_cost_mfg`** / **`history_cost_ven`** — `SHOW COLUMNS FROM rm_mrm` errors outright. This cost time during this audit, and it is the exact class of error `CLAUDE.md` itself warns about ("always check `lib/queries/*.ts` for the real table names") while getting it wrong.
 
 `docs/database-schema.md` has it **right** — it maps each Prisma model name to its real table. The defect was confined to `CLAUDE.md`.
 
@@ -166,7 +166,7 @@ The script imports `PrismaClient` from `app/generated/prisma/client.ts` and `@pr
 
 ### 11. Stale reference to a route that does not exist — TRIVIAL
 
-`lib/queries/activity.ts`'s header says the feed is "Read by `/api/admin/activity`". There is no such route — `app/admin/activity/page.tsx` queries server-side and says so itself.
+`lib/queries/activity.ts`'s header says the feed is "Read by `/api/v1/admin/activity`". There is no such route — `app/admin/activity/page.tsx` queries server-side and says so itself.
 
 ### 12. `.gitignore` silently swallows new files in `scripts/` — MEDIUM
 

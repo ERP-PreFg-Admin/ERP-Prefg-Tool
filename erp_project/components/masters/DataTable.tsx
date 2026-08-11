@@ -26,33 +26,15 @@ export type ColumnDef = {
   width?: string
   className?: string
   render?: (row: AnyRow) => ReactNode
+  /** Blank is a legitimate value here, so don't flag it as missing data —
+   *  e.g. an "Effective To" that is empty because the rate is open-ended. */
+  optional?: boolean
 }
 
-/** Trailing action column, shared so the three tables line up with each other. */
-const ACTION_WIDTH = 112
-
-/** Narrowest a free-text column may get before its header stops being readable.
- *  Columns that declare no `width` share whatever space is left, so this is the
- *  floor that decides when the table starts scrolling instead of squeezing. */
-const MIN_FLEX_COL = 140
-
-/**
- * `table-layout: fixed` on a `w-full` table makes the table fit its container
- * at ANY width — zoom in far enough and the flexible columns squeeze toward
- * zero while the fixed ones hold their px, so headers collide and the
- * horizontal scroll never engages. A min-width floors that: past this point
- * the table stops shrinking and ScrollFade's edge fade + chevron take over.
- */
-function minTableWidth(columns: ColumnDef[], hasActions: boolean) {
-  const declared = (w?: string) => {
-    const px = w?.endsWith("px") ? parseInt(w, 10) : NaN
-    return Number.isFinite(px) ? px : MIN_FLEX_COL
-  }
-  return (
-    columns.reduce((sum, c) => sum + declared(c.width), 0) +
-    (hasActions ? ACTION_WIDTH : 0)
-  )
-}
+// Shared with MaterialRateTable so the two tables can't drift on the one number
+// that decides when they scroll instead of squeezing.
+import { ACTION_WIDTH, minTableWidth } from "./table-width"
+import { isMissingValue, MISSING_CELL_CLASS } from "./missing-value"
 
 /**
  * Click-to-sort over the rows already on screen. Rows arrive DB-filtered and
@@ -127,7 +109,10 @@ export function DataTable({
 }) {
   return (
     <Table
-      className="[&_th]:whitespace-nowrap table-fixed"
+      // No `whitespace-nowrap` on `th`: headers wrap to a second line instead of
+      // being clipped, since several declared widths are narrower than their own
+      // label. `align-top` keeps a one-line header level with a two-line one.
+      className="table-fixed [&_th]:align-top"
       style={{ minWidth: minTableWidth(columns, !!actionColumn) }}
     >
       <TableHeader>
@@ -157,17 +142,23 @@ export function DataTable({
         ) : (
           rows.map((row, index) => (
             <TableRow key={index}>
-              {columns.map((col) => (
-                <TableCell
-                  key={col.key}
-                  className={cn(
-                    "overflow-hidden text-ellipsis",
-                    col.className ?? "text-muted-foreground"
-                  )}
-                >
-                  {col.render ? col.render(row) : ((row[col.key] as ReactNode) ?? "—")}
-                </TableCell>
-              ))}
+              {columns.map((col) => {
+                const missing = !col.optional && isMissingValue(row[col.key])
+                return (
+                  <TableCell
+                    key={col.key}
+                    title={missing ? `${col.label} is not filled in` : undefined}
+                    className={cn(
+                      "overflow-hidden text-ellipsis",
+                      col.className ?? "text-muted-foreground",
+                      // Last so the amber wins over the column's own text colour.
+                      missing && MISSING_CELL_CLASS
+                    )}
+                  >
+                    {col.render ? col.render(row) : ((row[col.key] as ReactNode) ?? "—")}
+                  </TableCell>
+                )
+              })}
               {actionColumn && <TableCell>{actionColumn(row)}</TableCell>}
             </TableRow>
           ))

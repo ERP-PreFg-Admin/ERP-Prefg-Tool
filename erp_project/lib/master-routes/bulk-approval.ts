@@ -47,13 +47,18 @@ export async function uploadRowsAsCsv(
  * Inserts ONE `approvals` row + `s3_key`/`filename`/`row_count`
  * `approval_items`, mirroring the PO_BULK convention (entity_id = uploader's
  * user id, since no real entity exists until the batch is approved).
+ *
+ * `entityId` overrides that default for a batch that DOES belong to a real
+ * entity — MFG_MISC_BULK passes the manufacturer, because every bom_misc row
+ * in the file belongs to it and the handler needs it to resolve SKU codes.
+ * Omit it and the uploader's user id is used, as before.
  */
 export async function stageBulkUploadApproval(
   conn: PoolConnection,
-  params: { userId: number; module: string; s3Key: string; filename: string; rowCount: number },
+  params: { userId: number; module: string; s3Key: string; filename: string; rowCount: number; entityId?: number },
 ): Promise<number> {
-  const { userId, module, s3Key, filename, rowCount } = params
-  const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, module, userId, "create"])
+  const { userId, module, s3Key, filename, rowCount, entityId } = params
+  const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, module, entityId ?? userId, "create"])
   const approvalId = (ar as { insertId: number }).insertId
   await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "s3_key", "", s3Key])
   await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "filename", "", filename])

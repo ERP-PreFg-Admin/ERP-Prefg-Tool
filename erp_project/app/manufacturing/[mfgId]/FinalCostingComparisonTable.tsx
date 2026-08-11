@@ -2,12 +2,15 @@
 
 import { Card, CardContent } from "@/components/ui/card"
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table, TableBody, TableCell, TableHeader, TableRow,
 } from "@/components/ui/table"
 import { TableEmpty } from "@/components/ui/empty-state"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import type { FinalCostingComparisonRow } from "@/types/masters"
 import { fmtMoney } from "../mfg-utils"
+import {
+  CostingHeadRow, CostingCells, ScenarioLabelRow, bestTotalIndex, COSTING_COL_COUNT,
+} from "./costing-columns"
 
 function fmtPct(v: number) {
   const sign = v > 0 ? "+" : ""
@@ -26,19 +29,22 @@ function deltaClass(v: number) {
 }
 
 export default function FinalCostingComparisonTable({
-  title, subtitle, rows, exportEndpoint,
+  title, subtitle, scenarioLabel, rows, exportEndpoint,
 }: {
   title: string
   subtitle: string
+  /** Short name repeated inside the table body — see ScenarioLabelRow. */
+  scenarioLabel: string
   rows: FinalCostingComparisonRow[]
   /**
-   * Export for the comparison pair, rendered on this table's heading line.
-   * One workbook covers BOTH the cheapest and most-expensive views, so only
-   * the last comparison on the page passes this — a second copy on the other
-   * table would download the identical file.
+   * Export for the whole comparison stack, rendered on this table's heading
+   * line. One workbook covers all three scenarios (approved / cheapest / most
+   * expensive), so only the last table on the page passes this — a copy on the
+   * others would download the identical file.
    */
   exportEndpoint?: string
 }) {
+  const best = bestTotalIndex(rows)
   return (
     <div className="space-y-2 text-xs">
       {/* Heading left, export right — the same header shape FinalCostingTable
@@ -52,8 +58,8 @@ export default function FinalCostingComparisonTable({
         {exportEndpoint && (
           <div className="shrink-0">
             {/* Label carries the scope, since the caption row is gone: the
-                button's tooltip reads "Download Both Vendor Rate Comparisons". */}
-            <DownloadButton endpoint={exportEndpoint} label="Both Vendor Rate Comparisons" />
+                button's tooltip reads "Download All Vendor Rate Comparisons". */}
+            <DownloadButton endpoint={exportEndpoint} label="All Vendor Rate Comparisons" />
           </div>
         )}
       </div>
@@ -61,32 +67,24 @@ export default function FinalCostingComparisonTable({
         <CardContent className="p-0">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>SKU Name</TableHead>
-                  <TableHead className="text-right">RM Cost</TableHead>
-                  <TableHead className="text-right">PM Cost</TableHead>
-                  <TableHead className="text-right">Wastage</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead className="text-right">RM Δ vs MRM</TableHead>
-                  <TableHead className="text-right">PM Δ vs MRM</TableHead>
-                  <TableHead className="text-right">Total Δ vs MRM</TableHead>
-                </TableRow>
+                <CostingHeadRow />
               </TableHeader>
               <TableBody>
+                <ScenarioLabelRow label={scenarioLabel} />
                 {rows.length === 0 ? (
                   // No action here: this table always renders under FinalCostingTable, which
                   // already offers the "Add SKUs" button for the same empty condition.
-                  <TableEmpty colSpan={9}>No active SKUs to cost yet.</TableEmpty>
+                  <TableEmpty colSpan={COSTING_COL_COUNT}>No active SKUs to cost yet.</TableEmpty>
                 ) : (
-                  rows.map((r) => (
+                  rows.map((r, i) => (
                     <TableRow key={r.recipe_id}>
                       <TableCell className="font-mono">{r.sku_code ?? "—"}</TableCell>
-                      <TableCell className="max-w-40 truncate">{r.sku_name ?? "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{fmtMoney(r.rm_cost)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{fmtMoney(r.pm_cost)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{fmtMoney(r.wastage)}</TableCell>
-                      <TableCell className="text-right tabular-nums font-semibold">{fmtMoney(r.total)}</TableCell>
+                      <TableCell className="max-w-40 truncate text-muted-foreground">{r.sku_name ?? "—"}</TableCell>
+                      {/* JWW / Shrinkage / Shipper are inside CostingCells and
+                          carry the SAME values as the MRM table — a scenario only
+                          moves RM and PM. They were omitted here before, which is
+                          why these totals looked like they didn't add up. */}
+                      <CostingCells row={r} best={i === best} />
                       <TableCell className={"text-right tabular-nums " + deltaClass(r.rm_delta)}>
                         {fmtDelta(r.rm_delta)} ({fmtPct(r.rm_delta_pct)})
                       </TableCell>

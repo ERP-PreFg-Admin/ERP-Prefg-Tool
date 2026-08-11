@@ -55,7 +55,7 @@ This is a direct re-use of `approval_items`'s existing `(field_name, old_value, 
 
 | Event | Fires from | Payload (beyond envelope) | Maps to today |
 |---|---|---|---|
-| `sku.created` | `app/api/masters/skus/route.ts` `action:"create"` | `skuCode, name, brand, category` | `INSERT master_skus` |
+| `sku.created` | `app/api/v1/masters/skus/route.ts` `action:"create"` | `skuCode, name, brand, category` | `INSERT master_skus` |
 | `sku.bulkImported` | same route, `action:"bulk"` / `"bulk_from_s3"` | `count, source: "manual" \| "s3"` | batch `INSERT master_skus` |
 | `sku.updateRequested` | same route, `action:"update"` (diff computed, before approval) | `changes[]` | `INSERT approvals`+`approval_items`, `master_skus.status → in_review` |
 | `sku.updated` | `applyAndArchive` for `SKU` in `lib/approvals/module-handlers.ts` | `changes[]` | pre-edit row → `INSERT sku_history`, then `UPDATE master_skus` |
@@ -65,7 +65,7 @@ This is a direct re-use of `approval_items`'s existing `(field_name, old_value, 
 
 | Event | Fires from | Payload | Maps to today |
 |---|---|---|---|
-| `vendor.created` | `app/api/masters/vendors/route.ts` `action:"create"` | `code, name, type` | `INSERT master_vendors`+`details_vendor` |
+| `vendor.created` | `app/api/v1/masters/vendors/route.ts` `action:"create"` | `code, name, type` | `INSERT master_vendors`+`details_vendor` |
 | `vendor.bulkImported` | same route, `"bulk"`/`"bulk_from_s3"` | `count, source` | batch insert |
 | `vendor.updateRequested` | same route, `"update"` | `changes[]` | approval submission |
 | `vendor.updated` | `VENDOR` handler in `module-handlers.ts` (field-change path) | `changes[]` | `UPDATE master_vendors`/`details_vendor` — **no history table today**; this event is the only durable record of the prior value (see §5) |
@@ -78,7 +78,7 @@ Mirrors Vendor exactly (same dual-table, doc-vs-field split in `module-handlers.
 
 | Event | Fires from | Payload | Maps to today |
 |---|---|---|---|
-| `mfg.created` | `app/api/masters/manufacturers/route.ts` `"create"` | `mfgId, code, name` | `INSERT master_mfgs`+`details_mfg` |
+| `mfg.created` | `app/api/v1/masters/manufacturers/route.ts` `"create"` | `mfgId, code, name` | `INSERT master_mfgs`+`details_mfg` |
 | `mfg.bulkImported` | `"bulk"`/`"bulk_from_s3"` | `count, source` | batch insert |
 | `mfg.updateRequested` | `"update"` | `changes[]` | approval submission |
 | `mfg.updated` | `MFG` handler, field-change path | `changes[]` | `UPDATE master_mfgs`/`details_mfg` — **no history table today** |
@@ -89,30 +89,30 @@ Mirrors Vendor exactly (same dual-table, doc-vs-field split in `module-handlers.
 
 | Event | Fires from | Payload | Maps to today |
 |---|---|---|---|
-| `rawMaterial.created` | `app/api/masters/raw-materials/route.ts` `"create"` / `"create-full"` | `rmCode, name, make, uom` | `INSERT master_rm` (+ rate rows if `create-full`) |
+| `rawMaterial.created` | `app/api/v1/masters/raw-materials/route.ts` `"create"` / `"create-full"` | `rmCode, name, make, uom` | `INSERT master_rm` (+ rate rows if `create-full`) |
 | `rawMaterial.bulkImported` | `"bulk"`/`"bulk_from_s3"` | `count, source` | batch insert |
 | `rawMaterial.updateRequested` | base-record update (`RM_MAT`) | `changes[]` | approval submission |
 | `rawMaterial.updated` | `RM_MAT` handler | `changes[]` | `UPDATE master_rm` — **no history table today** |
-| `rawMaterial.rateAdded` | `"add-rates"` (mfg rate, `RM_RATE`) | `mfgId, rate, effectiveFrom` | `INSERT rm_mrm_fixed` |
-| `rawMaterial.rateUpdateRequested` / `.rateUpdated` | `RM_RATE` handler | `changes[]` | pre-edit row → `INSERT history_mrm`, then `UPDATE rm_mrm_fixed` |
-| `rawMaterial.vendorRateAdded` | `"add-rates"` (vendor rate, `RM_VRM`) | `vendorId, rate, effectiveFrom` | `INSERT rm_vrm_dynamic` |
-| `rawMaterial.vendorRateUpdateRequested` / `.vendorRateUpdated` | `RM_VRM` handler | `changes[]` | pre-edit row → `INSERT history_vrm`, then `UPDATE rm_vrm_dynamic` |
+| `rawMaterial.rateAdded` | `"add-rates"` (mfg rate, `RM_RATE`) | `mfgId, rate, effectiveFrom` | `INSERT cost_master_rm_mfg` |
+| `rawMaterial.rateUpdateRequested` / `.rateUpdated` | `RM_RATE` handler | `changes[]` | pre-edit row → `INSERT history_cost_mfg`, then `UPDATE cost_master_rm_mfg` |
+| `rawMaterial.vendorRateAdded` | `"add-rates"` (vendor rate, `RM_VRM`) | `vendorId, rate, effectiveFrom` | `INSERT cost_master_rm_ven` |
+| `rawMaterial.vendorRateUpdateRequested` / `.vendorRateUpdated` | `RM_VRM` handler | `changes[]` | pre-edit row → `INSERT history_cost_ven`, then `UPDATE cost_master_rm_ven` |
 | `rawMaterial.*Rejected` (base/rate/vendorRate) | respective handler `setStatus` | `remarks` | status → `draft` |
 
 ### Masters — Packing Material (modules `PM_MAT`, `PM_RATE`, `PM_VRM`)
 
 Identical structure to Raw Material, entity-prefixed `packingMaterial.*`:
 
-`packingMaterial.created`, `.bulkImported`, `.updateRequested`/`.updated` (`PM_MAT`, no history table), `.rateAdded`/`.rateUpdateRequested`/`.rateUpdated` (`PM_RATE`, → `history_mrm`), `.vendorRateAdded`/`.vendorRateUpdateRequested`/`.vendorRateUpdated` (`PM_VRM`, → `history_vrm`), `.*Rejected`.
+`packingMaterial.created`, `.bulkImported`, `.updateRequested`/`.updated` (`PM_MAT`, no history table), `.rateAdded`/`.rateUpdateRequested`/`.rateUpdated` (`PM_RATE`, → `history_cost_mfg`), `.vendorRateAdded`/`.vendorRateUpdateRequested`/`.vendorRateUpdated` (`PM_VRM`, → `history_cost_ven`), `.*Rejected`.
 
 ### Masters — BOM (module `BOM`)
 
 | Event | Fires from | Payload | Maps to today |
 |---|---|---|---|
-| `bom.submitted` | `app/api/masters/bom-master/route.ts` main submit path | `mode: "new-version" \| "update-existing", skuId, lineCount` | `INSERT approvals`+`approval_items` (flat `line:<rm\|pm>:<id>:<field>` diff) |
-| `bom.activated` | `BOM` handler in `module-handlers.ts`, both modes | `bomId, skuId` | `update-existing`: snapshot every current line → `INSERT history_bom`, delete, reinsert; `new-version`: insert only. Both then `master_bom.status → active` |
+| `bom.submitted` | `app/api/v1/masters/recipe-master/route.ts` main submit path | `mode: "new-version" \| "update-existing", skuId, lineCount` | `INSERT approvals`+`approval_items` (flat `line:<rm\|pm>:<id>:<field>` diff) |
+| `bom.activated` | `BOM` handler in `module-handlers.ts`, both modes | `bomId, skuId` | `update-existing`: snapshot every current line → `INSERT history_recipe`, delete, reinsert; `new-version`: insert only. Both then `master_recipe.status → active` |
 | `bom.deactivated` | same handler, once per sibling BOM | `bomId, skuId, reason: "supersededBy": <newBomId>` | `deactivateOtherActiveBomsForSku` — **fan-out**: one approval can emit many of these (see §4.3) |
-| `bom.updateRejected` | `BOM` handler `setStatus` | `remarks` | `master_bom.status → draft` |
+| `bom.updateRejected` | `BOM` handler `setStatus` | `remarks` | `master_recipe.status → draft` |
 
 ### Approvals (cross-cutting — module `APPROVAL`)
 
@@ -121,19 +121,19 @@ These wrap every masters module's decision step. A module-specific event (e.g. `
 | Event | Fires from | Payload | Maps to today |
 |---|---|---|---|
 | `approval.raised` | any masters/PO route that computes a diff and needs sign-off | `module, entityId, approvalType: "new" \| "update", itemCount` | `INSERT approvals`+`approval_items` |
-| `approval.approved` | `app/api/approvals/[id]/route.ts` POST, `action:"approve"` | `module, entityId, approverId` | `MODULE_HANDLERS[module].applyAndArchive`, `approvals.status → approved` |
+| `approval.approved` | `app/api/v1/approvals/[id]/route.ts` POST, `action:"approve"` | `module, entityId, approverId` | `MODULE_HANDLERS[module].applyAndArchive`, `approvals.status → approved` |
 | `approval.rejected` | same route, `action:"reject"` | `module, entityId, approverId, remarks` (remarks mandatory) | `MODULE_HANDLERS[module].setStatus(draft)`, `approvals.status → rejected` |
 
 ### Purchase Orders (modules `PO`, `PO_BULK`)
 
 | Event | Fires from | Payload | Maps to today |
 |---|---|---|---|
-| `po.raised` | `app/api/masters/purchase-orders` POST, impromptu | `poId, skuId, vendorId, amount` | `INSERT purchase_orders` (status `draft`) + `approval.raised` |
+| `po.raised` | `app/api/v1/masters/purchase-orders` POST, impromptu | `poId, skuId, vendorId, amount` | `INSERT purchase_orders` (status `draft`) + `approval.raised` |
 | `po.raisedDirect` | same route, normal PO | `poId, skuId, vendorId, amount` | `INSERT purchase_orders` (status `raised`, no approval) |
 | `po.bulkImported` | `PO_BULK` handler, CSV from S3 | `count, s3Key` | batch `INSERT purchase_orders` (status `raised`) — replaces the module's own double S3 log today (see §5) |
 | `po.approved` | `approval.approved` for module `PO` | `poId` | `purchase_orders.status → raised` |
-| `po.emailSent` | `sendPoEmail()` fire-and-forget call in `app/api/approvals/[id]/route.ts:116-131` | `poId, mfgEmail, pdfKey` | PDF generated, uploaded to S3, sent via Gmail SMTP, `email_sent_at` stamped — **formalizes the one real async side-effect pattern already in the codebase** |
-| `po.split` | `app/api/masters/purchase-orders/[id]/split/route.ts` | `parentPoId, childPoIds[], splitQty` | inserts child POs, credits parent `received_qty` |
+| `po.emailSent` | `sendPoEmail()` fire-and-forget call in `app/api/v1/approvals/[id]/route.ts:116-131` | `poId, mfgEmail, pdfKey` | PDF generated, uploaded to S3, sent via Gmail SMTP, `email_sent_at` stamped — **formalizes the one real async side-effect pattern already in the codebase** |
+| `po.split` | `app/api/v1/masters/purchase-orders/[id]/split/route.ts` | `parentPoId, childPoIds[], splitQty` | inserts child POs, credits parent `received_qty` |
 | `po.statusChanged` | `[id]/route.ts` PATCH, `[id]/close/route.ts` | `poId, from, to` | covers `raised→punched→partially_received→received`, `→short_closed`, `→cancelled` transitions |
 | `po.closed` | `[id]/close/route.ts` | `poId, invoiceNo` | status → `short_closed` or `received` |
 
@@ -211,13 +211,13 @@ sequenceDiagram
     participant Bus as Event bus
 
     AR->>H: applyAndArchive (mode: new-version)
-    H->>DB: snapshot lines -> history_bom (update-existing only)
-    H->>DB: INSERT/UPDATE details_bom
-    H->>DB: master_bom.status = active (target BOM)
+    H->>DB: snapshot lines -> history_recipe (update-existing only)
+    H->>DB: INSERT/UPDATE details_recipe
+    H->>DB: master_recipe.status = active (target BOM)
     H->>Bus: emit bom.activated (target)
     H->>DB: SELECT other active BOMs for same sku_id
     loop each sibling BOM
-        H->>DB: UPDATE master_bom.status = inactive
+        H->>DB: UPDATE master_recipe.status = inactive
         H->>Bus: emit bom.deactivated (sibling, supersededBy: target)
     end
 ```

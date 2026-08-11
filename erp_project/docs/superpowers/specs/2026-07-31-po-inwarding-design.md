@@ -18,7 +18,7 @@ against open POs.
 | Permission slug list | `app/layout.tsx:33` | `/po-tracking/dispatch-calendar` |
 | FG POs Tracking page | `app/po-tracking/po-procurement/` | Live — server fetch + `PoProcurementClient` + `PoTable` |
 | Receive dialog | `app/po-tracking/po-procurement/ReceivePODialog.tsx` | **Already built and working** |
-| Receive API | `app/api/purchase-orders/[id]/receive/route.ts` | **Already built** — row-locked, tolerance-based auto-close, history row, event log |
+| Receive API | `app/api/v1/purchase-orders/[id]/receive/route.ts` | **Already built** — row-locked, tolerance-based auto-close, history row, event log |
 
 So the receiving mechanics need **no new backend work**. This is a page + view change.
 

@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import { IST } from "@/lib/date"
+import { DownloadButton } from "@/components/masters/DownloadButton"
 
 /** Same "—" for null/blank as every rate-comparison dialog needs. */
 export function fmt(v: string | number | null | undefined) {
@@ -96,6 +97,9 @@ export function MaterialComparisonDialog<T>({
   emptyMessage,
   summary,
   summaryGridClassName = "grid-cols-2",
+  exportEndpoint,
+  exportLabel,
+  exportParams,
 }: {
   open: boolean
   onClose: () => void
@@ -109,6 +113,13 @@ export function MaterialComparisonDialog<T>({
   summary?: ReactNode
   /** Grid column count for the summary row — defaults to 2, pass "grid-cols-1" when there's only one stat card. */
   summaryGridClassName?: string
+  /** Adds a CSV/Excel pair for the rows behind this comparison. The summary
+   *  answers "which is cheapest"; the download is for checking the detail. */
+  exportEndpoint?: string
+  exportLabel?: string
+  /** Scopes the export to this one material — the endpoints already filter by
+   *  `search` (matched against the material code) and `view`. */
+  exportParams?: Record<string, string>
 }) {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -151,6 +162,21 @@ export function MaterialComparisonDialog<T>({
           </div>
 
           {summary && <div className={cn("grid gap-3", summaryGridClassName)}>{summary}</div>}
+
+          {/* Below the summary on purpose: the cards answer the question at a
+              glance, the download is for taking the detail away and checking it. */}
+          {exportEndpoint && rows.length > 0 && (
+            <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
+              <p className="text-xs text-muted-foreground">
+                {rows.length} {rows.length === 1 ? "row" : "rows"} behind this comparison.
+              </p>
+              <DownloadButton
+                endpoint={exportEndpoint}
+                label={exportLabel ?? "Comparison"}
+                extraParams={exportParams}
+              />
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

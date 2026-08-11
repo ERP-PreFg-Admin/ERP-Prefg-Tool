@@ -12,13 +12,13 @@ Master data records are created once and referenced repeatedly by transactional 
 
 | Entity | Route | API Endpoint | Tables |
 |--------|-------|-------------|--------|
-| SKUs | `/masters/skus` | `POST /api/masters/skus` | `skus` |
-| Vendors | `/masters/vendors` | `POST /api/masters/vendors` | `master_vendors`, `vendor_details` |
-| Manufacturers | `/masters/manufacturers` | `POST /api/masters/manufacturers` | `master_mfgs`, `mfg_details` |
-| Raw Materials | `/masters/raw-materials` | `POST /api/masters/raw-materials` | `master_rm`, `rm_vrm_dynamic`, `rm_mrm_fixed`, `vrm_history`, `history_vrm`, `history_mrm` |
-| Packing Materials | `/masters/packing-materials` | `POST /api/masters/packing-materials` | `master_pm`, `pm_vrm_dynamic`, `pm_mrm_fixed`, `history_vrm`, `history_mrm` |
-| Material Master | `/masters/material-master` | `POST /api/masters/material-master` | `master_rm`, `master_pm` |
-| BOM Master | `/masters/bom-master` | `POST /api/masters/bom-master` | `bom`, `bom_details` |
+| SKUs | `/masters/skus` | `POST /api/v1/masters/skus` | `skus` |
+| Vendors | `/masters/vendors` | `POST /api/v1/masters/vendors` | `master_vendors`, `vendor_details` |
+| Manufacturers | `/masters/manufacturers` | `POST /api/v1/masters/manufacturers` | `master_mfgs`, `mfg_details` |
+| Raw Materials | `/masters/raw-materials` | `POST /api/v1/masters/raw-materials` | `master_rm`, `cost_master_rm_ven`, `cost_master_rm_mfg`, `vrm_history`, `history_cost_ven`, `history_cost_mfg` |
+| Packing Materials | `/masters/packing-materials` | `POST /api/v1/masters/packing-materials` | `master_pm`, `cost_master_pm_ven`, `cost_master_pm_mfg`, `history_cost_ven`, `history_cost_mfg` |
+| Material Master | `/masters/material-master` | `POST /api/v1/masters/material-master` | `master_rm`, `master_pm` |
+| BOM Master | `/masters/recipe-master` | `POST /api/v1/masters/recipe-master` | `bom`, `bom_details` |
 
 ## Server + Client Component Pattern
 
@@ -62,7 +62,7 @@ export default async function SkusPage() {
 flowchart LR
     U["User action\n(Add record / Upload CSV)"]
     CC["Client Component\n(*Client.tsx)"]
-    AR["API Route\n(/api/masters/*)"]
+    AR["API Route\n(/api/v1/masters/*)"]
     DB["MariaDB\n(via lib/db.ts)"]
     SC["Server Component\n(page.tsx re-runs)"]
     T["Updated table\nin browser"]
@@ -87,7 +87,7 @@ A generic form dialog for creating a single record. Driven by a `fields: MasterF
 ```ts
 <AddRecordDialog
   entityLabel="SKU"
-  endpoint="/api/masters/skus"
+  endpoint="/api/v1/masters/skus"
   fields={[
     { key: "sku_code", label: "SKU Code", type: "text", required: true },
     { key: "name", label: "Name", type: "text", required: true },
@@ -130,8 +130,8 @@ Extracted from per-page copies; **reuse these rather than re-rolling the same bl
 | Component | What it is |
 |-----------|-----------|
 | `FormField` | One "Label + Input\|select" row driven by a `FormFieldConfig`, so an add/edit dialog renders its whole form as `fields.map(f => <FormField … />)`. Keep the plain `<select>` — every one of these dialogs relies on it. |
-| `ApprovalBanners` | The `InReviewBanner` (blue, locked) and rejection banner every approval-aware edit dialog needs, plus the `RejectionInfo` shape returned by `GET /api/approvals/entity` |
-| `RateHistoryDialog` | Generic RM/PM × mfg/vendor rate history. `RmRateHistoryDialog` and `PmRateHistoryDialog` were byte-for-byte identical apart from the id field name and API base path, so both collapsed into this. Shows the superseded rate **plus who changed it and why** (`history_vrm`/`history_mrm`.`remarks`, `changed_by`). |
+| `ApprovalBanners` | The `InReviewBanner` (blue, locked) and rejection banner every approval-aware edit dialog needs, plus the `RejectionInfo` shape returned by `GET /api/v1/approvals/entity` |
+| `RateHistoryDialog` | Generic RM/PM × mfg/vendor rate history. `RmRateHistoryDialog` and `PmRateHistoryDialog` were byte-for-byte identical apart from the id field name and API base path, so both collapsed into this. Shows the superseded rate **plus who changed it and why** (`history_cost_ven`/`history_cost_mfg`.`remarks`, `changed_by`). |
 | `MaterialComparisonDialog` | The shared shell for every rate-comparison dialog (vendor vs vendor, mfg vs mfg) |
 | `EntityHistoryDialog` | Generic per-entity History dialog for every master. Reads the **same** `approvals`/`approval_items` trail `/approvals/history` browses, scoped to one entity, and reuses `ApprovalCard` read-only (`isApprover=false`) rather than a second diff renderer — so it shows the real field-level old→new diff for every edit ever raised against the row, pending or resolved. |
 | `RecordCountHeader` | The `"{n} records[, matching "x"]"` card header every master list opens with |
@@ -147,13 +147,13 @@ Vendors and Manufacturers support in-place editing via a pencil (✏) button in 
 
 Editable fields: `name`, `type` (rm/pm/both), `location`, `gst_number`, `status` (active/inactive/blacklisted/discontinued).
 
-Submits `POST /api/masters/vendors` with `action: "update"` and `vendor_id`. The route runs a transaction updating both `master_vendors` and `vendor_details`.
+Submits `POST /api/v1/masters/vendors` with `action: "update"` and `vendor_id`. The route runs a transaction updating both `master_vendors` and `vendor_details`.
 
 ### Manufacturer Edit (`EditMfgDialog.tsx`)
 
 Editable fields: `name`, `location`, `gst_number`, `status` (active/inactive).
 
-Submits `POST /api/masters/manufacturers` with `action: "update"` and `mfg_id`. The route updates both `master_mfgs` and `mfg_details`.
+Submits `POST /api/v1/masters/manufacturers` with `action: "update"` and `mfg_id`. The route updates both `master_mfgs` and `mfg_details`.
 
 Both dialogs use `useEffect` (not `useState` initializer) to re-populate the form whenever a different row is selected, so switching between rows always shows the correct data.
 
@@ -163,12 +163,12 @@ Every master except BOM/Recipe (which has its own dedicated history page — see
 
 | Dialog | File | Backed by |
 |--------|------|-----------|
-| Any master entity | `components/masters/EntityHistoryDialog.tsx` | `GET /api/masters/<entity>/history` (per-entity `approvals` trail) |
-| RM / PM rate | `components/masters/RateHistoryDialog.tsx` | `GET /api/masters/raw-materials/mrm-history` \| `vrm-history` · same two for `packing-materials` |
+| Any master entity | `components/masters/EntityHistoryDialog.tsx` | `GET /api/v1/masters/<entity>/history` (per-entity `approvals` trail) |
+| RM / PM rate | `components/masters/RateHistoryDialog.tsx` | `GET /api/v1/masters/raw-materials/mrm-history` \| `vrm-history` · same two for `packing-materials` |
 
 > The per-page copies (`app/masters/manufacturers/EditHistoryDialog.tsx`, `app/masters/vendors/EditHistoryDialog.tsx`, `RmRateHistoryDialog.tsx`, `PmRateHistoryDialog.tsx`) are **gone** — they collapsed into those two shared components.
 
-**Edits now require a reason.** SKU, vendor, manufacturer and material-master update schemas all carry `remarks: z.string().trim().min(1, "Remarks are required")`, archived to `history_masters_edits.remarks`; rate edits archive `remarks` + `changed_by` to `history_vrm`/`history_mrm` so the Rate History popup can show who changed a rate and why. `historySql.selectPendingRemarks` reads back the submitter's reason for a currently pending edit (a reliable 1:1 lookup, since `hasPending` already guarantees at most one pending approval per `(module, entity_id)`).
+**Edits now require a reason.** SKU, vendor, manufacturer and material-master update schemas all carry `remarks: z.string().trim().min(1, "Remarks are required")`, archived to `history_masters_edits.remarks`; rate edits archive `remarks` + `changed_by` to `history_cost_ven`/`history_cost_mfg` so the Rate History popup can show who changed a rate and why. `historySql.selectPendingRemarks` reads back the submitter's reason for a currently pending edit (a reliable 1:1 lookup, since `hasPending` already guarantees at most one pending approval per `(module, entity_id)`).
 
 Each row shown is one entry in the generic `history_masters_edits` audit table (`lib/queries/history.ts`), populated **alongside** (not instead of) the `approvals`/`approval_items` pending-review mechanism: `insertHistoryEntry` (`lib/master-routes/history-utils.ts`) writes one row per create/edit/delete submission with an auto-incrementing `version_no` per `(module, entity_id)`, and the shared approve/reject route calls `resolvePendingHistoryEntry` to mark that same row approved/rejected — safe to call unconditionally even for modules that don't participate. Each entry shows who submitted it, who approved/rejected it, and when.
 
@@ -180,10 +180,10 @@ Vendor rate and manufacturer rate rows in the Raw Materials and Packing Material
 
 | Dialog | File | Calls |
 |--------|------|-------|
-| RM vendor rate | `EditRmVendorRateDialog.tsx` | `POST /api/masters/raw-materials` `add-rates` |
-| RM mfg rate | `EditRmMfgRateDialog.tsx` | `POST /api/masters/raw-materials` `add-rates` |
-| PM vendor rate | `EditPmVendorRateDialog.tsx` | `POST /api/masters/packing-materials` `add-rates` |
-| PM mfg rate | `EditPmMfgRateDialog.tsx` | `POST /api/masters/packing-materials` `add-rates` |
+| RM vendor rate | `EditRmVendorRateDialog.tsx` | `POST /api/v1/masters/raw-materials` `add-rates` |
+| RM mfg rate | `EditRmMfgRateDialog.tsx` | `POST /api/v1/masters/raw-materials` `add-rates` |
+| PM vendor rate | `EditPmVendorRateDialog.tsx` | `POST /api/v1/masters/packing-materials` `add-rates` |
+| PM mfg rate | `EditPmMfgRateDialog.tsx` | `POST /api/v1/masters/packing-materials` `add-rates` |
 
 PM edit dialogs pass `pm_id` directly in the request body to avoid the name+type lookup (which can fail if type is null). The `add-rates` handler short-circuits the `checkDuplicate` query when `pm_id` is provided.
 
@@ -203,20 +203,20 @@ A vendor rate row is keyed by `(rm_id/pm_id, vendor_id, moq)`, not just `(materi
 
 ### Bulk CSV Upload for Rate Masters
 
-RM and PM vendor/manufacturer rates support bulk CSV upload via **dedicated endpoints**, separate from each entity's main `/api/masters/*` route (which already has its own unrelated base-material `bulk`/`check_duplicates` actions):
+RM and PM vendor/manufacturer rates support bulk CSV upload via **dedicated endpoints**, separate from each entity's main `/api/v1/masters/*` route (which already has its own unrelated base-material `bulk`/`check_duplicates` actions):
 
 | Dialog context | Endpoint | Field config |
 |---|---|---|
-| RM vendor rates | `POST /api/masters/raw-materials/vrm-bulk` | `rm-vrm-bulk-fields.ts` (`RM_VRM_BULK_FIELDS`) |
-| RM manufacturer rates | `POST /api/masters/raw-materials/mrm-bulk` | `rm-mrm-bulk-fields.ts` (`RM_MRM_BULK_FIELDS`) |
-| PM vendor rates | `POST /api/masters/packing-materials/vrm-bulk` | `pm-vrm-bulk-fields.ts` (`PM_VRM_BULK_FIELDS`) |
-| PM manufacturer rates | `POST /api/masters/packing-materials/mrm-bulk` | `pm-mrm-bulk-fields.ts` (`PM_MRM_BULK_FIELDS`) |
+| RM vendor rates | `POST /api/v1/masters/raw-materials/vrm-bulk` | `rm-vrm-bulk-fields.ts` (`RM_VRM_BULK_FIELDS`) |
+| RM manufacturer rates | `POST /api/v1/masters/raw-materials/mrm-bulk` | `rm-mrm-bulk-fields.ts` (`RM_MRM_BULK_FIELDS`) |
+| PM vendor rates | `POST /api/v1/masters/packing-materials/vrm-bulk` | `pm-vrm-bulk-fields.ts` (`PM_VRM_BULK_FIELDS`) |
+| PM manufacturer rates | `POST /api/v1/masters/packing-materials/mrm-bulk` | `pm-mrm-bulk-fields.ts` (`PM_MRM_BULK_FIELDS`) |
 
 Each endpoint supports two actions:
 - `check_duplicates` — CsvImportDialog's preview-time deep check; resolves `rm_code`/`pm_code`, `vendor_code`, `mfg_code` against the DB (existence + active status) and flags duplicate material+vendor / material+mfg pairs within the same file, before the user ever hits "Upload".
 - `bulk` — does **not** insert rows directly. It uploads the whole validated row set as one CSV to S3 (`uploadRowsAsCsv`) and stages the **entire file as a single pending approval** (module `RM_VRM_BULK` / `RM_RATE_BULK` / `PM_VRM_BULK` / `PM_RATE_BULK`) via `stageBulkUploadApproval`. The real per-row insert only happens in that module's `applyAndArchive` handler once an approver approves the batch — see `lib/approvals/module-handlers.ts` and `lib/approvals/handlers/raw-materials.ts` / `packing-materials.ts`.
 
-Base-material bulk uploads (RM/PM/Vendor/Manufacturer `action: "bulk"` on the main `/api/masters/*` routes) follow the same approval-staged pattern — see the updated CSV Import Workflow section below.
+Base-material bulk uploads (RM/PM/Vendor/Manufacturer `action: "bulk"` on the main `/api/v1/masters/*` routes) follow the same approval-staged pattern — see the updated CSV Import Workflow section below.
 
 ### A CSV row can be an edit, not just a new record
 
@@ -260,8 +260,8 @@ A multi-step modal wizard instead of the standard `AddRecordDialog`. Steps:
 
 Two history tables are written when a rate is updated:
 
-- **Vendor rate update (`rm_vrm_dynamic`):** First archived to `vrm_history` (legacy, via `archiveVendorRate`) and also to `history_vrm` (via `archiveToHistoryVrm`). Then the live row is updated in place.
-- **Mfg rate update (`rm_mrm_fixed`):** The existing row is archived to `history_mrm` (via `archiveToHistoryMrm`) before updating. The `vendor_id` for the history row comes from `approved_vendor_id` on the rate row; if that is null, the first vendor linked to the RM in `rm_vrm_dynamic` is used; fallback is `0`.
+- **Vendor rate update (`cost_master_rm_ven`):** First archived to `vrm_history` (legacy, via `archiveVendorRate`) and also to `history_cost_ven` (via `archiveToHistoryVrm`). Then the live row is updated in place.
+- **Mfg rate update (`cost_master_rm_mfg`):** The existing row is archived to `history_cost_mfg` (via `archiveToHistoryMrm`) before updating. The `vendor_id` for the history row comes from `approved_vendor_id` on the rate row; if that is null, the first vendor linked to the RM in `cost_master_rm_ven` is used; fallback is `0`.
 
 Both archive steps happen inside the same database transaction as the update.
 
@@ -272,8 +272,8 @@ Packing Materials mirrors the Raw Materials pattern with the same dual-view and 
 ### Dual View
 
 The `/masters/packing-materials` page supports two views:
-- `?view=vendor` (default) — shows `pm_vrm_dynamic` rows joined with `master_pm`
-- `?view=manufacturer` — shows `pm_mrm_fixed` rows joined with `master_pm`
+- `?view=vendor` (default) — shows `cost_master_pm_ven` rows joined with `master_pm`
+- `?view=manufacturer` — shows `cost_master_pm_mfg` rows joined with `master_pm`
 
 ### Add Packing Material Wizard (`AddPackingMaterialWizard.tsx`)
 
@@ -286,8 +286,8 @@ Same 3-step pattern as RM:
 
 ### Rate Archive Pattern
 
-- **Vendor rate update (`pm_vrm_dynamic`):** Archived to `history_vrm` (via `archiveVendorRate`, which already targets `history_vrm` for PM). No separate `archiveToHistoryVrm` call — that would duplicate the entry.
-- **Mfg rate update (`pm_mrm_fixed`):** Archived to `history_mrm` (via `archiveToHistoryMrm`). The `vendor_id` is looked up from `pm_vrm_dynamic` for the same `pm_id`; fallback is `0`. `pm_mrm_fixed` does not have an `approved_vendor_id` column (unlike `rm_mrm_fixed`).
+- **Vendor rate update (`cost_master_pm_ven`):** Archived to `history_cost_ven` (via `archiveVendorRate`, which already targets `history_cost_ven` for PM). No separate `archiveToHistoryVrm` call — that would duplicate the entry.
+- **Mfg rate update (`cost_master_pm_mfg`):** Archived to `history_cost_mfg` (via `archiveToHistoryMrm`). The `vendor_id` is looked up from `cost_master_pm_ven` for the same `pm_id`; fallback is `0`. `cost_master_pm_mfg` does not have an `approved_vendor_id` column (unlike `cost_master_rm_mfg`).
 
 ---
 
@@ -310,7 +310,7 @@ A simple single-step dialog (no wizard). Fields shown depend on the active mater
 
 **Packing Material fields:** Name\*, Type\*, UOM, HSN Code, Status
 
-Posts to the dedicated `POST /api/masters/material-master` route with `{ action: "create", material: "rm" | "pm" }`. No vendor or manufacturer data is collected — those are managed from the individual Raw/Packing Materials pages.
+Posts to the dedicated `POST /api/v1/masters/material-master` route with `{ action: "create", material: "rm" | "pm" }`. No vendor or manufacturer data is collected — those are managed from the individual Raw/Packing Materials pages.
 
 ### File Structure
 
@@ -343,11 +343,11 @@ bom (header)
     └── mtrl_cost: cost per unit
 ```
 
-> **Recipe-level effective dates:** `effective_from`/`effective_till` moved from the line level to the BOM header (`master_bom`) — there is one validity window per recipe, not one per RM/PM line. `effective_from` is entered when the BOM is created/edited as a new version; `effective_till` is set automatically to the approval date when the recipe is discontinued or superseded. `details_bom`/`history_bom` still carry the same two columns for legacy rows predating this change (surfaced read-only on the BOM History page), but new lines no longer populate them.
+> **Recipe-level effective dates:** `effective_from`/`effective_till` moved from the line level to the BOM header (`master_recipe`) — there is one validity window per recipe, not one per RM/PM line. `effective_from` is entered when the BOM is created/edited as a new version; `effective_till` is set automatically to the approval date when the recipe is discontinued or superseded. `details_recipe`/`history_recipe` still carry the same two columns for legacy rows predating this change (surfaced read-only on the BOM History page), but new lines no longer populate them.
 
 ### Bulk BOM Upload via CSV
 
-`BOMMasterComponent.tsx` offers a `CsvImportDialog` (fields in `bom-bulk-fields.ts` → `BOM_BULK_CSV_FIELDS`) for creating many BOM lines across SKUs in one file: `sku_code`, optional `bom_code` (auto-generated if blank), `effective_from` (once per SKU group), `mtrl_type` (rm/pm), `mtrl_code`, `amount`, `uom`. Like the rate-master bulk uploads above, `POST /api/masters/bom-master` with `action: "bulk"` doesn't insert immediately — it stages the whole file as one `BOM_BULK` pending approval (`stageBulkUploadApproval`); the real per-row inserts happen in that module's `applyAndArchive` handler on approval. A separate `check_duplicates` action does the preview-time deep check (SKU/material code existence, RM%-total per SKU group) before the user uploads.
+`BOMMasterComponent.tsx` offers a `CsvImportDialog` (fields in `bom-bulk-fields.ts` → `BOM_BULK_CSV_FIELDS`) for creating many BOM lines across SKUs in one file: `sku_code`, optional `bom_code` (auto-generated if blank), `effective_from` (once per SKU group), `mtrl_type` (rm/pm), `mtrl_code`, `amount`, `uom`. Like the rate-master bulk uploads above, `POST /api/v1/masters/recipe-master` with `action: "bulk"` doesn't insert immediately — it stages the whole file as one `BOM_BULK` pending approval (`stageBulkUploadApproval`); the real per-row inserts happen in that module's `applyAndArchive` handler on approval. A separate `check_duplicates` action does the preview-time deep check (SKU/material code existence, RM%-total per SKU group) before the user uploads.
 
 ### Status Lifecycle
 
@@ -356,17 +356,17 @@ draft → in_review → active → inactive
                            → discontinued
 ```
 
-A SKU can have multiple BOMs (different versions or different manufacturing sites). The currently active BOM is referenced by `sku_details.curr_bom_id`.
+A SKU can have multiple BOMs (different versions or different manufacturing sites). The currently active BOM is referenced by `details_sku.curr_bom_id`.
 
 ### BOM Code Versioning — `<sku_code>RM<n>PM<n>`
 
-`master_bom.rm_version` and `pm_version` bump **independently**: creating a new BOM version increments only the side (RM lines or PM lines) that actually changed versus the SKU's immediately-prior BOM. `lib/masters/bom-version.ts`' `diffBomLines` compares the RM-line set and the PM-line set separately — any addition, removal, or `amount`/`uom` change on a side marks that side changed.
+`master_recipe.rm_version` and `pm_version` bump **independently**: creating a new BOM version increments only the side (RM lines or PM lines) that actually changed versus the SKU's immediately-prior BOM. `lib/masters/bom-version.ts`' `diffBomLines` compares the RM-line set and the PM-line set separately — any addition, removal, or `amount`/`uom` change on a side marks that side changed.
 
-Applies to **new (non-backfilled), non-bulk** BOMs only — the `new-version` path in `app/api/masters/bom-master/route.ts`. Both columns default to `1`, so pre-existing rows are untouched (`prisma/add_manufacturing_v2_columns.sql`).
+Applies to **new (non-backfilled), non-bulk** BOMs only — the `new-version` path in `app/api/v1/masters/recipe-master/route.ts`. Both columns default to `1`, so pre-existing rows are untouched (`prisma/add_manufacturing_v2_columns.sql`).
 
 ### BOMMasterComponent
 
-`app/masters/bom-master/BOMMasterComponent.tsx` renders a flat joined view of `bom_details` + `bom` (one row per material line). Each row shows the BOM code, SKU code, material type and ID, amounts, costs, and effective dates.
+`app/masters/recipe-master/BOMMasterComponent.tsx` renders a flat joined view of `bom_details` + `bom` (one row per material line). Each row shows the BOM code, SKU code, material type and ID, amounts, costs, and effective dates.
 
 ## CSV Import Workflow
 

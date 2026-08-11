@@ -33,7 +33,7 @@
 flowchart LR
     Browser["Browser"] --> MW["middleware.ts\n(auth gate)"]
     MW --> SC["Server Component\n(app/**/page.tsx)"]
-    MW --> AR["API Route\n(app/api/**/route.ts)"]
+    MW --> AR["API Route\n(app/api/v1/**/route.ts)"]
     SC --> LDB["lib/db.ts\n(mysql2 pool)"]
     SC --> LP["lib/permissions.ts\n(resolveAccess)"]
     AR --> LDB
@@ -77,7 +77,7 @@ sequenceDiagram
     participant R as route.ts (API)
     participant DB as lib/db.ts → MariaDB
 
-    C->>R: POST /api/masters/skus\n{ action: "create", sku_code: "SKU001", name: "..." }
+    C->>R: POST /api/v1/masters/skus\n{ action: "create", sku_code: "SKU001", name: "..." }
     R->>R: auth() — verify session (401 if missing)
     R->>R: Parse body, validate required fields (400 if missing)
     R->>DB: execute(INSERT INTO skus ...)
@@ -92,7 +92,7 @@ sequenceDiagram
 | Path | Purpose |
 |------|---------|
 | `app/` | Next.js App Router — all pages, layouts, and API routes |
-| `app/api/` | REST API route handlers (mutations only; reads happen in server components) |
+| `app/api/v1/` | REST API route handlers (mutations only; reads happen in server components) |
 | `app/masters/` | The fully-implemented Masters module (SKUs, Vendors, Manufacturers, RM, PM, BOM) |
 | `app/admin/` | Admin panel — Users · Permissions · Data Access · Activity. One access guard in `layout.tsx`; `authority.ts` mirrors `resolveAccess` for display. See [Admin Panel & Data Scoping](./admin-and-data-scoping.md) |
 | `app/approvals/` | Approval queue. `approval-card/` holds the card and its per-shape diff renderers (field diff, BOM line diff, CSV diff, entity info, actions) |
@@ -109,7 +109,7 @@ sequenceDiagram
 | `lib/pages.ts` | The canonical permission-controlled page-slug list — one source for the admin grid, sidebar locks, and breadcrumb labels |
 | `lib/roles.ts` | The declared role taxonomy (4 domains × 3 designations + `developer`/`admin`) and its derived helpers |
 | `lib/scope.ts` | Per-user entity scoping — `getUserScope`, `scopeClause`/`scopeParams`, `assertInScope`, `filterByScope`. Absence of rows = unrestricted |
-| `lib/po-guard.ts` | `assertPoInScope` — scope guard every `/api/purchase-orders/[id]/**` route needs (ids are guessable) |
+| `lib/po-guard.ts` | `assertPoInScope` — scope guard every `/api/v1/purchase-orders/[id]/**` route needs (ids are guessable) |
 | `lib/admin-guards.ts` | `assertNotSelfLockout` / `assertNotSelfScope` — refuse admin changes with no UI recovery path |
 | `lib/gateway/with-gateway.ts` | The route wrapper: auth → access rule → Zod → handler → structured error shape, plus the `activity_log` write on every non-GET |
 | `lib/invoice-inward.ts` | The whole supplier-invoice → inward-PO sequence (S3 → DB → Uniware → email) and its compensation rules |
@@ -173,10 +173,10 @@ The following modules have an `app/<module>/page.tsx` file showing a "Coming soo
 - `app/sales-crm/`
 - `app/reports/`
 
-> `app/manufacturing/` is no longer a stub — it is the **MFG Cost Manager**. `/manufacturing/[mfgId]` carries seven tabs: SKUs (manufacturing lines, with `active` / `discontinued` / `inactive` status counts), Misc. Cost, Approved Procurement Rates, Agreed Rates, Agreed Final Costing (plus a cheapest/max-vendor comparison table), and two placeholders with no backend yet — Common RMs and Vendor Ing Mapping. Costing math lives in `lib/costing/final-costing.ts` so the rate table, the comparison tables, the exports and PO quote-rate all share one formula. Both the page and every `/api/manufacturing/**` route enforce entity scope on `mfgId`.
+> `app/manufacturing/` is no longer a stub — it is the **MFG Cost Manager**. `/manufacturing/[mfgId]` carries seven tabs: SKUs (manufacturing lines, with `active` / `discontinued` / `inactive` status counts), Misc. Cost, Approved Procurement Rates, Agreed Rates, Agreed Final Costing (plus a cheapest/max-vendor comparison table), and two placeholders with no backend yet — Common RMs and Vendor Ing Mapping. Costing math lives in `lib/costing/final-costing.ts` so the rate table, the comparison tables, the exports and PO quote-rate all share one formula. Both the page and every `/api/v1/manufacturing/**` route enforce entity scope on `mfgId`.
 
-> The former `tech_transfer` line status is gone, and `on_hold` was renamed: `master_bom_mfg.status` is now `active` / `discontinued` / `inactive` (`discontinued` = still live but winding down; `inactive` = no new POs). It's a `VARCHAR(50)`, not a DB enum, so the change was pure data migration — `prisma/rename_mfg_line_on_hold_to_inactive.sql` and `add_manufacturing_v2_columns.sql`.
+> The former `tech_transfer` line status is gone, and `on_hold` was renamed: `master_recipe_mfg.status` is now `active` / `discontinued` / `inactive` (`discontinued` = still live but winding down; `inactive` = no new POs). It's a `VARCHAR(50)`, not a DB enum, so the change was pure data migration — `prisma/rename_mfg_line_on_hold_to_inactive.sql` and `add_manufacturing_v2_columns.sql`.
 
-> `app/po-tracking/` is **fully implemented**, and now includes supplier-invoice inwarding — see [PO Inwarding](./po-inwarding.md). PO types are `normal` / `impromptu` / `inward`. A PO's lifecycle runs `raised` → `split` (into child POs via `app/api/purchase-orders/[id]/split/route.ts`) and/or `receive` (partial or full goods receipt via `app/api/purchase-orders/[id]/receive/route.ts`, auto-closing to `received` once the remainder is within tolerance) → `cancel` / `short_close` for early termination. The procurement table (`app/po-tracking/po-procurement/PoTable.tsx`) delegates cell rendering to `PoTableCells.tsx` and row actions to `PoActionMenu.tsx`, with one dialog per action (`SplitPODialog.tsx`, `ReceivePODialog.tsx`, `CancelPODialog.tsx`, `ShortClosePODialog.tsx`). See [API Reference](./api-reference.md#purchase-orders) for the full PO API surface.
+> `app/po-tracking/` is **fully implemented**, and now includes supplier-invoice inwarding — see [PO Inwarding](./po-inwarding.md). PO types are `normal` / `impromptu` / `inward`. A PO's lifecycle runs `raised` → `split` (into child POs via `app/api/v1/purchase-orders/[id]/split/route.ts`) and/or `receive` (partial or full goods receipt via `app/api/v1/purchase-orders/[id]/receive/route.ts`, auto-closing to `received` once the remainder is within tolerance) → `cancel` / `short_close` for early termination. The procurement table (`app/po-tracking/po-procurement/PoTable.tsx`) delegates cell rendering to `PoTableCells.tsx` and row actions to `PoActionMenu.tsx`, with one dialog per action (`SplitPODialog.tsx`, `ReceivePODialog.tsx`, `CancelPODialog.tsx`, `ShortClosePODialog.tsx`). See [API Reference](./api-reference.md#purchase-orders) for the full PO API surface.
 
 See [Adding a New Module](./adding-a-new-module.md) for how to implement one from scratch, and [docs/architecture-evolution.md](./architecture-evolution.md) for the planned gateway + events pattern to adopt when building them.

@@ -138,7 +138,7 @@ Ad-hoc assertions written alongside each feature, run with `npx tsx scripts/<fil
 
 ## Google Sheets Integration
 
-The `/api/google-sheet` endpoint fetches Google Sheets data as CSV. No Google API key is required — it uses the public CSV export URL.
+The `/api/v1/google-sheet` endpoint fetches Google Sheets data as CSV. No Google API key is required — it uses the public CSV export URL.
 
 **Requirement:** The sheet must be published publicly.
 1. In Google Sheets: **File → Share → Publish to web**

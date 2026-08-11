@@ -39,7 +39,7 @@ ratio                          1.179996   ← exactly +18%
 
 Null is *correct output* there, not an extraction failure. No prompt wording can populate
 those fields, and instructing the model to derive them would fabricate money that
-`toInwardPayload` (`invoice-form.ts:452`) persists to `supplier_invoice_items`. Whether this
+`toInwardPayload` (`invoice-form.ts:452`) persists to `invoice_items_mfg`. Whether this
 holds for other manufacturers is the single most useful thing the samples will tell us.
 
 ---
@@ -109,7 +109,7 @@ PDFs or the DB; the route is the only place the three meet. Keeps each unit test
 
 | Route | Change |
 |---|---|
-| `POST /api/purchase-orders/invoice/parse` | Detect the manufacturer from the PDF, select its profile, pass it to `parseInvoice`. Response gains `detected`. `maxDuration = 300` and `runtime = "nodejs"` stay as they are. |
+| `POST /api/v1/purchase-orders/invoice/parse` | Detect the manufacturer from the PDF, select its profile, pass it to `parseInvoice`. Response gains `detected`. `maxDuration = 300` and `runtime = "nodejs"` stay as they are. |
 
 Handler, inserted after the existing file validation and before `parseInvoice`:
 
@@ -148,7 +148,7 @@ the fallback when detection returns null.
 
 | Route | Purpose | Cost |
 |---|---|---|
-| `POST /api/purchase-orders/invoice/detect` | Detect-only. Returns the same `detected` object in ~200 ms with **no Nanonets call**, so the dialog can name the manufacturer and start the open-PO fetch while the 60 s parse is still running. | Posts the PDF twice (≤10 MB each). Worth it only if the serialised open-PO fetch proves slow in practice. Measure before building. |
+| `POST /api/v1/purchase-orders/invoice/detect` | Detect-only. Returns the same `detected` object in ~200 ms with **no Nanonets call**, so the dialog can name the manufacturer and start the open-PO fetch while the 60 s parse is still running. | Posts the PDF twice (≤10 MB each). Worth it only if the serialised open-PO fetch proves slow in practice. Measure before building. |
 
 Both would share `detectMfgFromPdf` — the detect route is a thin wrapper, not a second
 implementation.
@@ -238,7 +238,7 @@ Every profile inherits this, so improving it reduces how much each profile must 
 
 - Add `description` to the six bare fields: `invoice_number`, `eway_bill_number`,
   `vehicle_number`, `batch`, `hsn`, `discount`. `invoice_number` is the worst gap — it backs
-  `UNIQUE (mfg_id, invoice_no)` on `supplier_invoices`, so a misread defeats the duplicate
+  `UNIQUE (mfg_id, invoice_no)` on `invoice_mfg`, so a misread defeats the duplicate
   guard and the same invoice can be inwarded twice.
 - Tighten `from` to ask for the registered legal name with entity suffix. `matchMfg`
   (`lib/invoice-mapping.ts:87`) deliberately tries `registered_name` first and currently

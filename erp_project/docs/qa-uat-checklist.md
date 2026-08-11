@@ -40,13 +40,13 @@ Legend: **P** = pass · **F** = fail (open a ticket and link it) · **N/A** = no
 | 3.1 | Leave a user unscoped | They see **every** manufacturer/vendor/warehouse — absence of rows means unrestricted | | |
 | 3.2 | Scope them to one manufacturer | Manufacturers list, PO table, MFG Cost Manager and the sidebar's manufacturer list all show only that one | | |
 | 3.3 | Export a scoped list to CSV/Excel | The export contains the same rows as the screen — no wider | | |
-| 3.4 | Note a PO id belonging to an out-of-scope manufacturer, open `/api/purchase-orders/<id>` directly | `403 out_of_scope` | | |
+| 3.4 | Note a PO id belonging to an out-of-scope manufacturer, open `/api/v1/purchase-orders/<id>` directly | `403 out_of_scope` | | |
 | 3.5 | Same for receive / cancel / split / send-mail / preview-pdf on that id | All `403` | | |
 | 3.6 | Try to change **your own** data access | Refused (self-scope guard) | | |
 | 3.7 | Switch a section to "Only selected" with nothing selected and save | Refused — that would mean no data at all | | |
 | 3.8 | Clear a scope back to "All" | Rows are deleted and the user sees everything again | | |
 | 3.9 | Scope by **warehouse**, then check the PO list | Filtering works even though `destination` stores a name, not an id | | |
-| 3.10 | ⚠️ Take an `attachment_key` from an out-of-scope PO and call `/api/files/presign?key=…&view=1` | **Currently returns a working URL — known HIGH finding, audit #5.** Confirm whether it has been fixed this release. | | |
+| 3.10 | ⚠️ Take an `attachment_key` from an out-of-scope PO and call `/api/v1/files/presign?key=…&view=1` | **Currently returns a working URL — known HIGH finding, audit #5.** Confirm whether it has been fixed this release. | | |
 
 ## 4. Approval flow
 
@@ -108,7 +108,7 @@ The least-covered flow — external services, long-running, and it books stock. 
 | 6.7 | Close the tab mid-review, then reopen Add Invoice | The draft (**including the PDF**) is offered back from IndexedDB; no re-parse needed | | |
 | 6.8 | Abandon a review without submitting, then check S3 | **No orphaned object** — nothing is stored until submit | | |
 | 6.9 | Submit and watch the step stream | Four steps report in order: stored → POs created → Uniware → warehouse notified | | |
-| 6.10 | Check the results | One inward PO per line (`po_type = 'inward'`), `expected_on` = the **invoice date** (backdated), `supplier_invoices` + `supplier_invoice_items` written | | |
+| 6.10 | Check the results | One inward PO per line (`po_type = 'inward'`), `expected_on` = the **invoice date** (backdated), `invoice_mfg` + `invoice_items_mfg` written | | |
 | 6.11 | **Submit the same invoice again** | Refused by `UNIQUE (mfg_id, invoice_no)`. Critically: `received_qty` on any referenced PO is **not** credited twice. | | |
 | 6.12 | On a line, pick an existing open PO as Reference PO | That PO's `received_qty` is credited **and** the line still raises its own inward PO (`link_type = 'received'`, both PO links stored) | | |
 | 6.13 | Reference a PO belonging to an out-of-scope manufacturer | Not offered in the picker; refused if forced | | |
@@ -116,7 +116,7 @@ The least-covered flow — external services, long-running, and it books stock. 
 | 6.15 | Unset the `UNIWARE_*` vars and submit | Uniware step reports **skipped**; the invoice still commits | | |
 | 6.16 | Submit for a warehouse with **no** `entity_emails` row | Mail step reports skipped; the invoice still commits (goods are physically here) | | |
 | 6.17 | Check the warehouse email | Correct subject; the original invoice PDF attached; the Uniware PO document attached when available; a SKU summary in the body; signed with the filer's name | | |
-| 6.18 | Check the Uniware PO code | Stored on `supplier_invoices` **and** on every inward PO from that invoice | | |
+| 6.18 | Check the Uniware PO code | Stored on `invoice_mfg` **and** on every inward PO from that invoice | | |
 | 6.19 | Open the Invoice History dialog and expand a row | Header, line items, and both PO links per line | | |
 | 6.20 | Force a failure (e.g. bad Uniware credentials) | The failure is reported as a step event; the DB is rolled back and the S3 object removed — **no half-committed invoice** | | |
 
@@ -146,7 +146,7 @@ The least-covered flow — external services, long-running, and it books stock. 
 | 8.6 | Create a new BOM version changing **only** RM lines | `bom_code` bumps the **RM** number only (`<sku>RM2PM1`) | | |
 | 8.7 | Create a version changing only PM lines | Only the PM number bumps | | |
 | 8.8 | Re-save a BOM with lines in a different order | **No** version bump — order is not a change | | |
-| 8.9 | Check RM line amounts round-trip | A formulation percentage isn't rounded away (`details_bom.amount` is `DECIMAL(12,4)`) | | |
+| 8.9 | Check RM line amounts round-trip | A formulation percentage isn't rounded away (`details_recipe.amount` is `DECIMAL(12,4)`) | | |
 | 8.10 | Download a bulk template, upload it with 2 valid and 2 invalid rows | Invalid rows flagged with reasons and downloadable; only valid rows stage | | |
 
 ## 9. Manufacturing cost manager

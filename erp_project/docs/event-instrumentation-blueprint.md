@@ -58,7 +58,7 @@ flowchart LR
 
 ## 3. Manufacturer (`app/masters/manufacturers`) — full detail, both branches
 
-Structure confirmed against `AddMfgDialog.tsx` (2-step wizard: Details → optional Documents, single submit) and `CsvImportDialog.tsx` (CSV parsed client-side with preview; Excel uploaded to S3 immediately on file-select). Existing backend instrumentation confirmed against `app/api/masters/manufacturers/route.ts`.
+Structure confirmed against `AddMfgDialog.tsx` (2-step wizard: Details → optional Documents, single submit) and `CsvImportDialog.tsx` (CSV parsed client-side with preview; Excel uploaded to S3 immediately on file-select). Existing backend instrumentation confirmed against `app/api/v1/masters/manufacturers/route.ts`.
 
 ```mermaid
 flowchart TD
@@ -74,7 +74,7 @@ flowchart TD
     Upload --> C2["Console: dialog opened [NEW]"]:::consoleNew
     C2 --> FileType{File type?}
     FileType -->|.xlsx| C3x["Console: excel selected, uploading to S3 [NEW]"]:::consoleNew
-    C3x --> S3up["POST /api/upload (stage file)"] --> C4x["Console: staged, s3Key [NEW]"]:::consoleNew
+    C3x --> S3up["POST /api/v1/upload (stage file)"] --> C4x["Console: staged, s3Key [NEW]"]:::consoleNew
     FileType -->|.csv| C3c["Console: csv selected, parsing client-side [NEW]"]:::consoleNew
     C3c --> Preview["Client parses rows, shows preview table"] --> C4c["Console: parsed N rows, M invalid [NEW]"]:::consoleNew
 
@@ -115,7 +115,7 @@ flowchart TD
 
     Page --> RowEdit["Edit icon on a row\n(ManufacturersClient.tsx:159-167,\ndisabled while status=in_review)"]
     RowEdit --> C11["Console: edit dialog opened, mfg_id [NEW]"]:::consoleNew
-    C11 --> RejCheck["GET /api/approvals/entity?module=MFG&entity_id=...\n(EditMfgDialog.tsx:67 — shows rejection banner\nif row status=draft; edit-locked to original submitter)"]
+    C11 --> RejCheck["GET /api/v1/approvals/entity?module=MFG&entity_id=...\n(EditMfgDialog.tsx:67 — shows rejection banner\nif row status=draft; edit-locked to original submitter)"]
     RejCheck --> ChangeFields["User edits fields"] --> SubmitEdit["Save click\n(handleSave, EditMfgDialog.tsx:94)"]
     SubmitEdit --> LBlkE["Logger.warn: blocked, pending approval (route.ts:280)"]:::logger
     SubmitEdit --> LE1["Logger: update started (route.ts:290)"]:::logger --> DiffE{diff vs current}
@@ -126,7 +126,7 @@ flowchart TD
 
     Page --> RowDocs["Documents icon on a row\n(ManufacturersClient.tsx:168-175, always enabled)"]
     RowDocs --> C12["Console: docs dialog opened, mfg_id [NEW]"]:::consoleNew --> DocsFill["User selects doc files per tab"] --> SubmitDocs["Save click\n(handleSave, ManufacturerDocumentsDialog.tsx:91)"]
-    SubmitDocs --> C13["Console: uploading N pending docs to S3 [NEW]"]:::consoleNew --> DocsUp["POST /api/upload per file"]
+    SubmitDocs --> C13["Console: uploading N pending docs to S3 [NEW]"]:::consoleNew --> DocsUp["POST /api/v1/upload per file"]
     DocsUp --> LBlkD["Logger.warn: blocked, pending approval (route.ts:218)"]:::logger
     DocsUp --> LD1["Logger: doc update started [NEW — none exists\nbetween route.ts:211-224 today]"]:::loggerNew --> DiffD{diff vs current doc keys}
     DiffD -->|changed| ARD["Approval: INSERT approvals + approval_items\n(route.ts:248-254)"]:::approval --> StatusD1["Status: in_review (route.ts:255)"]:::status --> LD2["Logger: submitted for approval (route.ts:258)"]:::logger --> PD1["Processed Event: mfg.docsUpdated (route.ts:259)"]:::procEvt
@@ -260,15 +260,15 @@ flowchart TD
     Step2 --> SelectVendor["Vendor selected"] --> Chk2["Duplicate-rate check: action=check-vendor\n(wizard.tsx:298-309)"] --> Step3["Step 3: Approved At"] --> SubmitW["Submit"]
 
     SubmitW --> Branch{New material\nor existing?}
-    Branch -->|new| L1["Logger: create-full started (L145)"]:::logger --> R1["Raw Event: rawMaterial.created (L146)"]:::rawEvt --> DB1["DB Write: INSERT master_rm + rm_mrm_fixed + rm_vrm_dynamic\n(create-full, wizard.tsx:236-262)"]:::dbWrite --> L2["Logger: success (L200)"]:::logger
-    Branch -->|existing, add-rates| L3["Logger: add-rates started (L221)"]:::logger --> R2["Raw Event: rawMaterial.rateAdded / vendorRateAdded (L222)"]:::rawEvt --> DB2["DB Write: INSERT rm_mrm_fixed / rm_vrm_dynamic"]:::dbWrite --> L4["Logger: success (L272)"]:::logger
+    Branch -->|new| L1["Logger: create-full started (L145)"]:::logger --> R1["Raw Event: rawMaterial.created (L146)"]:::rawEvt --> DB1["DB Write: INSERT master_rm + cost_master_rm_mfg + cost_master_rm_ven\n(create-full, wizard.tsx:236-262)"]:::dbWrite --> L2["Logger: success (L200)"]:::logger
+    Branch -->|existing, add-rates| L3["Logger: add-rates started (L221)"]:::logger --> R2["Raw Event: rawMaterial.rateAdded / vendorRateAdded (L222)"]:::rawEvt --> DB2["DB Write: INSERT cost_master_rm_mfg / cost_master_rm_ven"]:::dbWrite --> L4["Logger: success (L272)"]:::logger
 
     Handler --> Bulk["Bulk CSV / S3"] --> C4["Console: N rows parsed [NEW]"]:::consoleNew --> L7["Logger: started (L294/338)"]:::logger --> R4["Raw Event: rawMaterial.bulkImported (L295/339)"]:::rawEvt --> DB4["DB Write: batch INSERT"]:::dbWrite --> L8["Logger: completed (L321/380)"]:::logger
 
     Handler --> RowEditRate["Edit-rate icon on a row\n(EditRmVendorRateDialog.tsx / EditRmMfgRateDialog.tsx,\ndisabled while locked/in-review)"]
-    RowEditRate --> C5["Console: rate edit dialog opened [NEW]"]:::consoleNew --> RejCheck["GET /api/approvals/entity?module=RM_VRM|RM_RATE\n(dialog.tsx:58 / :53 — rejection banner if draft)"]
+    RowEditRate --> C5["Console: rate edit dialog opened [NEW]"]:::consoleNew --> RejCheck["GET /api/v1/approvals/entity?module=RM_VRM|RM_RATE\n(dialog.tsx:58 / :53 — rejection banner if draft)"]
     RejCheck --> SubmitRate["Save click — POSTs the SAME action=add-rates\nas the wizard's rate step, single-entry array\n(EditRmVendorRateDialog.tsx:95-113)"]
-    SubmitRate --> AR["Approval: INSERT approvals+items"]:::approval --> Status1["Status: in_review"]:::status --> Appr["Approval decision (see §10)"] --> ApplyEvt["rawMaterial.rateUpdated —\npre-edit row archived to history_mrm/history_vrm,\nthen UPDATE rate row"]:::dbWrite --> Status2["Status: active"]:::status
+    SubmitRate --> AR["Approval: INSERT approvals+items"]:::approval --> Status1["Status: in_review"]:::status --> Appr["Approval decision (see §10)"] --> ApplyEvt["rawMaterial.rateUpdated —\npre-edit row archived to history_cost_mfg/history_cost_ven,\nthen UPDATE rate row"]:::dbWrite --> Status2["Status: active"]:::status
 
     Handler --> Compare["Compare icon on a row\n(VendorDetailDialog.tsx / MfgDetailDialog.tsx,\nread-only, no mutating action)"]
     Compare --> C6["Console: compare dialog opened [NEW]"]:::consoleNew
@@ -300,7 +300,7 @@ flowchart TD
     Submit --> L1["Logger: started (route.ts:29/89)"]:::logger --> R1["Raw Event: RM_CREATE / PM_CREATE (route.ts:30/90)\n** should be retired in favor of RM_MAT/PM, see §6 **"]:::rawEvt --> DB1["DB Write: INSERT master_rm / master_pm"]:::dbWrite --> L2["Logger: created (route.ts:68/137)"]:::logger
 
     Page --> RowEdit["Pencil/EditButton on a row\n(MaterialMasterClient.tsx:301,318)"]
-    RowEdit --> C3["Console: dialog opened, material type [NEW]"]:::consoleNew --> RejCheck["GET /api/approvals/entity?module=RM_MAT|PM_MAT\n(EditMaterialDialog.tsx:77-88 — rejection\nbanner + submitter-only edit lock if draft)"]
+    RowEdit --> C3["Console: dialog opened, material type [NEW]"]:::consoleNew --> RejCheck["GET /api/v1/approvals/entity?module=RM_MAT|PM_MAT\n(EditMaterialDialog.tsx:77-88 — rejection\nbanner + submitter-only edit lock if draft)"]
     RejCheck --> LBlk["Logger.warn: unauthorized draft edit / blocked (route.ts:189)"]:::logger --> L3["Logger: submitted (route.ts:212/283)"]:::logger --> AR["Approval: INSERT approvals+items"]:::approval --> Status1["Status: in_review"]:::status --> P1["Processed Event: RM_UPDATE / PM_UPDATE (route.ts:225/303)"]:::procEvt
     Status1 --> Appr["Approval decision (see §10)"] --> ApplyEvt["rawMaterial.updated / packingMaterial.updated —\nNO history table today for RM_MAT/PM_MAT;\nchanges[] payload is the only durable record"]:::dbWrite --> Status2["Status: active"]:::status
 
@@ -315,15 +315,15 @@ flowchart TD
 
 ---
 
-## 8. BOM (`app/masters/bom-master`) — backend mutation path now instrumented; frontend + a few gaps remain
+## 8. BOM (`app/masters/recipe-master`) — backend mutation path now instrumented; frontend + a few gaps remain
 
-> **Update (2026-07-05):** the backend logging/eventing described as "[NEW]" below has been **implemented** — `app/api/masters/bom-master/route.ts` now logs/emits `BOM` raw/processed/failed events around submit, and `bomHandler.applyAndArchive` in `lib/approvals/module-handlers.ts` now logs + emits a processed event on activation and **one per sibling BOM** inside the deactivation loop (a new `selectOtherActiveBomsForSku` query reads sibling ids before the bulk `UPDATE` runs, since MariaDB's `UPDATE` has no `RETURNING`). Diagram nodes below are updated to solid/existing styling where this is now true; genuinely remaining gaps keep the dashed "[NEW]" styling.
+> **Update (2026-07-05):** the backend logging/eventing described as "[NEW]" below has been **implemented** — `app/api/v1/masters/recipe-master/route.ts` now logs/emits `BOM` raw/processed/failed events around submit, and `bomHandler.applyAndArchive` in `lib/approvals/module-handlers.ts` now logs + emits a processed event on activation and **one per sibling BOM** inside the deactivation loop (a new `selectOtherActiveBomsForSku` query reads sibling ids before the bulk `UPDATE` runs, since MariaDB's `UPDATE` has no `RETURNING`). Diagram nodes below are updated to solid/existing styling where this is now true; genuinely remaining gaps keep the dashed "[NEW]" styling.
 >
 > Two corrections to this section's original framing, found while implementing:
 > - The route was **already** on `withGateway` with a real Zod schema (`bomActionSchema`) before this instrumentation work — it was never on a "hand-rolled" request context the way RM/PM/Approvals are. Auth/RBAC/validation/request-tracing were already present at the same tier as SKU; only the business-fact logging/eventing was missing.
 > - The approval-item diff is richer than "flat `line:<rm|pm>:<id>:<field>`" alone: it also includes a `__mode__` sentinel item recording `new-version`/`update-existing`, and `line:<type>:<id>:__removed__` sentinel items for any line dropped from an existing BOM.
 >
-> Also not previously documented here: a read-only **BOM History page** (`app/masters/bom-master/history/`) exists, listing BOM headers with archived `history_bom` revisions. It already has the same `[AUDIT]` page-load `console.log` pattern as the main listing (`lib/query-timing.ts`'s `timedQuery`) — no mutation path, so no action needed on it below.
+> Also not previously documented here: a read-only **BOM History page** (`app/masters/recipe-master/history/`) exists, listing BOM headers with archived `history_recipe` revisions. It already has the same `[AUDIT]` page-load `console.log` pattern as the main listing (`lib/query-timing.ts`'s `timedQuery`) — no mutation path, so no action needed on it below.
 
 ```mermaid
 flowchart TD
@@ -334,13 +334,13 @@ flowchart TD
 
     Page --> DetailPanel["BOM listing row -> detail panel"] --> EditBtn["Edit BOM button\n(BomDetailPanel.tsx:169-174,\nshown only if canEdit && status not locked)"]
     EditBtn --> SharedEdit["BomEditDialog.tsx (BomLineEditorTable)\n— ONE dialog, TWO entry points\n(openEditMode, useBomDetailPanel.ts:163-171)"]
-    SharedEdit --> C1b["Console: edit dialog opened, bom_id, entry=wizard|panel [NEW]"]:::consoleNew --> EditLines["User edits RM%/PM lines"] --> SaveEdit["Save for Approval click\n(BomEditDialog.tsx:72-74 -> saveEdit,\nuseBomDetailPanel.ts:179-232)"]
+    SharedEdit --> C1b["Console: edit dialog opened, recipe_id, entry=wizard|panel [NEW]"]:::consoleNew --> EditLines["User edits RM%/PM lines"] --> SaveEdit["Save for Approval click\n(BomEditDialog.tsx:72-74 -> saveEdit,\nuseBomDetailPanel.ts:179-232)"]
 
     Submit --> L1a["Logger: bom submit started, mode=new-version\n(route.ts, DONE)"]:::logger
     SaveEdit --> L1b["Logger: bom submit started, mode=update-existing\n(route.ts, DONE)"]:::logger
     L1a --> R1["Raw Event: bom.submitted (tag BOM, DONE)"]:::rawEvt
     L1b --> R1
-    R1 --> Post["POST /api/masters/bom-master\naction=create-full, mode=new-version|update-existing\n(useBomWizard.ts:182 / useBomDetailPanel.ts:207-219)"]
+    R1 --> Post["POST /api/v1/masters/recipe-master\naction=create-full, mode=new-version|update-existing\n(useBomWizard.ts:182 / useBomDetailPanel.ts:207-219)"]
     Post --> AR["Approval: INSERT approvals + approval_items\n(__mode__ sentinel + per-field line:&lt;rm|pm&gt;:&lt;id&gt;:&lt;field&gt; diff\n+ __removed__ sentinels for dropped lines)"]:::approval
     AR --> L2["Logger: submitted for approval (DONE)"]:::logger --> P1["Processed Event: bom.submitted (DONE)"]:::procEvt
     AR --> Status1["Status: in review\n** literal DB value has a space, unlike every other module's in_review —\ndeliberate, per lib/queries/bom.ts comment, not an oversight **"]:::status
@@ -348,15 +348,15 @@ flowchart TD
 
     Status1 --> Appr["Approval decision (see §10)"]
     Appr --> Mode2{update-existing?}
-    Mode2 -->|yes| Snap["DB Write: snapshot every current line\nto history_bom [still NEW: no dedicated\nlogger.info before/after the snapshot loop itself]"]:::dbWrite
+    Mode2 -->|yes| Snap["DB Write: snapshot every current line\nto history_recipe [still NEW: no dedicated\nlogger.info before/after the snapshot loop itself]"]:::dbWrite
     Mode2 -->|no| Skip["(nothing to snapshot)"]
-    Snap --> DB2["DB Write: delete + reinsert details_bom"]:::dbWrite
+    Snap --> DB2["DB Write: delete + reinsert details_recipe"]:::dbWrite
     Skip --> DB2
     DB2 --> L4["Logger: BOM activated, bomId, skuId, approverId\n(module-handlers.ts, DONE)"]:::logger --> R2["Processed Event: BOM (activation)\n(module-handlers.ts, DONE)"]:::procEvt
     R2 --> Status2["Status: active"]:::status
 
     Status2 --> Fanout["selectOtherActiveBomsForSku\n(reads sibling ids BEFORE the bulk UPDATE —\nMariaDB UPDATE has no RETURNING, DONE)"] --> Loop{"for each sibling BOM"}
-    Loop --> DB3["DB Write: UPDATE master_bom.status = inactive\n(single bulk statement, all siblings at once)"]:::dbWrite
+    Loop --> DB3["DB Write: UPDATE master_recipe.status = inactive\n(single bulk statement, all siblings at once)"]:::dbWrite
     DB3 --> L5["Logger: BOM deactivated (superseded),\nbomId, supersededBy — once per sibling\n(module-handlers.ts, DONE)"]:::logger --> R3["Processed Event: BOM (deactivation)\n— one per sibling, not one for the whole batch\n(module-handlers.ts, DONE — this is the fan-out\ncase event-catalog.md §4.3 describes)"]:::procEvt
     R3 --> Loop
 
@@ -374,12 +374,12 @@ flowchart TD
 ```
 
 **Implementation checklist — BOM:**
-1. ~~Add `logger.info`/`recordRawEvent`/`recordProcessedEvent`/`recordFailedEvent` to `app/api/masters/bom-master/route.ts` at submit~~ — **Done.** Layered inside the existing `withGateway` handler; no route-wiring change was needed.
+1. ~~Add `logger.info`/`recordRawEvent`/`recordProcessedEvent`/`recordFailedEvent` to `app/api/v1/masters/recipe-master/route.ts` at submit~~ — **Done.** Layered inside the existing `withGateway` handler; no route-wiring change was needed.
 2. ~~Add the same to `lib/approvals/module-handlers.ts`'s `BOM` handler at activation and inside the sibling-deactivation loop, one event per sibling~~ — **Done.**
 3. Add a `logger.warn` when the DB's literal `"in review"` (with a space) status is set/read, so it's never silently confused with every other module's `in_review` — **still open.** Low priority: this is a deliberate, commented value (`lib/queries/bom.ts`), not an accidental one, so the runtime guard is a safety net, not a bug fix.
-4. Add a bare `console.error`/success log to `bom-master/export/route.ts` — **already satisfied**, both before and after this pass (matches every other export route's baseline; a success-path `console.log` was added to all masters export routes in the same session that did items 1–2).
+4. Add a bare `console.error`/success log to `recipe-master/export/route.ts` — **already satisfied**, both before and after this pass (matches every other export route's baseline; a success-path `console.log` was added to all masters export routes in the same session that did items 1–2).
 5. Tag the started-log's payload with `entry: "wizard" | "panel"` so the two entry points into the shared edit surface stay distinguishable in logs — **still open, deliberately deferred.** This needs a new field on the wizard's/detail-panel's POST body, which is an API-contract change, not a backend-only logging fix.
-6. **New item, not in the original checklist:** add a `logger.info` immediately before/after the `history_bom` snapshot loop in `bomHandler.applyAndArchive`, reporting how many lines were archived — the activation-level log (item 2) exists, but the snapshot step itself still has no dedicated line-count log, so "how many prior lines were archived on this update" isn't currently visible in a log line, only inferable from the DB.
+6. **New item, not in the original checklist:** add a `logger.info` immediately before/after the `history_recipe` snapshot loop in `bomHandler.applyAndArchive`, reporting how many lines were archived — the activation-level log (item 2) exists, but the snapshot step itself still has no dedicated line-count log, so "how many prior lines were archived on this update" isn't currently visible in a log line, only inferable from the DB.
 7. **New item, not in the original checklist:** the BOM History page is read-only with page-load audit logging already in place — explicitly excluded from any future "BOM has no instrumentation" claim; no action needed.
 
 ---
@@ -403,7 +403,7 @@ flowchart TD
     Page --> RowEdit["Edit button on a row\n(PoTable.tsx:364-371,\ncanEdit = status=draft && raised_by=me, PoTable.tsx:255)"]
     RowEdit --> C4["Console: re-edit dialog opened, po_id [NEW]"]:::consoleNew --> Reopen["ImpromptuPODialog reopened with editData\n(isEdit=true, ImpromptuPODialog.tsx:25,\ntitle changes to 'Re-edit Draft PO')"]
     Reopen --> SubmitEdit["Submit click"]
-    SubmitEdit --> LE1["Logger: PO re-edit started (route.ts:81)"]:::logger --> PUT["PUT /api/purchase-orders/[id]\n(ImpromptuPODialog.tsx:94-99 — NOT AddPODialog,\nwhich is never reused for edit)"]
+    SubmitEdit --> LE1["Logger: PO re-edit started (route.ts:81)"]:::logger --> PUT["PUT /api/v1/purchase-orders/[id]\n(ImpromptuPODialog.tsx:94-99 — NOT AddPODialog,\nwhich is never reused for edit)"]
     PUT --> AR2["Approval: INSERT approvals + approval_items\n(route.ts, re-edit flow)"]:::approval --> LE2["Logger: PO re-edit submitted for approval (route.ts:120)"]:::logger
     PUT -.error.-> FE1["Logger.error: PO re-edit failed (route.ts:125)\n[NEW: pair with a recordFailedEvent — none exists today]"]:::loggerNew
 
@@ -512,7 +512,7 @@ flowchart TD
 2. Add a distinct `recordProcessedEvent("APPROVAL_REJECTED", ...)` (or equivalent) so reject has its own processed-event trail instead of only the generic `APPROVAL` tag shared with approve.
 3. Add a `console.debug` when an approval card is viewed, for basic "who looked at this" visibility ahead of a real audit-log UI.
 
-**Cross-cutting pattern — not part of this page's own flow, but consumed by every module's edit dialog:** `GET /api/approvals/entity?module=...&entity_id=...` is called from seven different masters Edit dialogs (`EditMfgDialog.tsx:67`, `EditMaterialDialog.tsx:80`, `EditRmVendorRateDialog.tsx:58`, `EditRmMfgRateDialog.tsx:53`, `EditPmVendorRateDialog.tsx:57`, `EditPmMfgRateDialog.tsx:53`, `EditVendorDialog.tsx:59`) — never from `RejectDialog.tsx` or `ApprovalCard.tsx` themselves. Each fires only when the row's own status is `draft` (previously rejected), populating a "Rejected by X: '...'" banner and a submitter-only edit lock. Document this once, here, rather than repeating it in every page's own diagram — but don't attach it to the Approvals page's instrumentation, since nothing on this page consumes it.
+**Cross-cutting pattern — not part of this page's own flow, but consumed by every module's edit dialog:** `GET /api/v1/approvals/entity?module=...&entity_id=...` is called from seven different masters Edit dialogs (`EditMfgDialog.tsx:67`, `EditMaterialDialog.tsx:80`, `EditRmVendorRateDialog.tsx:58`, `EditRmMfgRateDialog.tsx:53`, `EditPmVendorRateDialog.tsx:57`, `EditPmMfgRateDialog.tsx:53`, `EditVendorDialog.tsx:59`) — never from `RejectDialog.tsx` or `ApprovalCard.tsx` themselves. Each fires only when the row's own status is `draft` (previously rejected), populating a "Rejected by X: '...'" banner and a submitter-only edit lock. Document this once, here, rather than repeating it in every page's own diagram — but don't attach it to the Approvals page's instrumentation, since nothing on this page consumes it.
 
 ---
 

@@ -44,7 +44,7 @@ import { useRouter } from "next/navigation";
 const router = useRouter();
 
 async function handleCreate(data: FormData) {
-  const res = await fetch("/api/masters/skus", { method: "POST", body: ... });
+  const res = await fetch("/api/v1/masters/skus", { method: "POST", body: ... });
   if (res.ok) router.refresh(); // ← triggers server-side re-fetch
 }
 ```
@@ -183,7 +183,7 @@ The approval card grew from "render a field diff" to "render whatever this modul
 | `CsvDiff.tsx` | Bulk-upload file cards |
 | `EntityInfo.tsx`, `DocViewButton.tsx`, `ApprovalActions.tsx` | Entity summary, attachment viewer, approve/reject buttons |
 
-The queue itself groups by module (busiest first), folds each `*_BULK` module into its base module's group via `groupKeyFor`, then splits each group into **New** (every changed field has no prior value), **Edits**, and **Bulk Uploads** — so each reads as its own condensed section instead of one undifferentiated stack. Bulk files open in `CsvPreviewDialog`, which renders the file as a table via `GET /api/files/preview` rather than handing a non-technical approver a raw CSV download.
+The queue itself groups by module (busiest first), folds each `*_BULK` module into its base module's group via `groupKeyFor`, then splits each group into **New** (every changed field has no prior value), **Edits**, and **Bulk Uploads** — so each reads as its own condensed section instead of one undifferentiated stack. Bulk files open in `CsvPreviewDialog`, which renders the file as a table via `GET /api/v1/files/preview` rather than handing a non-technical approver a raw CSV download.
 
 `EntityHistoryDialog` reuses `ApprovalCard` read-only (`isApprover={false}`) instead of a second diff renderer — worth copying whenever a "show me this record's changes" surface appears.
 

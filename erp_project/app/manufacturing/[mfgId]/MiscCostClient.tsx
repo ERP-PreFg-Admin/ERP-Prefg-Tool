@@ -138,11 +138,24 @@ export default function MiscCostClient({
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{fmtDate(r.effective_from)}</TableCell>
                       <TableCell className="whitespace-nowrap">{fmtDate(r.effective_till)}</TableCell>
-                      <TableCell><Badge variant={r.status === "active" ? "success" : "secondary"} className="capitalize">{r.status}</Badge></TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={r.status === "active" ? "success" : r.status === "in_review" ? "warning" : "secondary"}
+                          className="capitalize"
+                        >
+                          {r.status === "in_review" ? "In Review" : r.status}
+                        </Badge>
+                      </TableCell>
                       <TableCell className="text-right">
+                        {/* A line awaiting approval can't be edited — the route
+                            would 409 on the pending approval anyway, so say so
+                            here instead of letting someone fill in the dialog
+                            first. */}
                         <button
                           onClick={() => setDialogTarget(r)}
-                          className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent transition-colors"
+                          disabled={r.status === "in_review"}
+                          title={r.status === "in_review" ? "Awaiting approval — cannot be edited until approved or rejected" : undefined}
+                          className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                         >
                           <Pencil className="h-3 w-3" /> Edit
                         </button>

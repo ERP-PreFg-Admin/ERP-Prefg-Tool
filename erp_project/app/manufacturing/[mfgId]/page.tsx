@@ -20,12 +20,20 @@ import MiscCostClient from "./MiscCostClient"
 import RmVendorTable from "./ApprovedRates"
 import AgreedRatesClient from "./AgreedRatesClient"
 import FinalCostingTable from "./FinalCostingTable"
-import FinalCostingComparisonTable from "./FinalCostingComparisonTable"
+import VendorCostingComparison from "./VendorCostingComparison"
 import CommonRmsTable from "./CommonRmsTable"
 import VendorIngMappingClient from "./VendorIngMappingClient"
 // import MfgMonthlyPoSummary from "./MfgMonthlyPoSummary"
 
 type RecipeLineInputRow = { recipe_id: number; mtrl_type: "rm" | "pm"; mtrl_id: number; amount: string; filling: string | null }
+/** manufacturingSql.selectApprovedVendorRate{ByRm,ByPm} — one of rm_id/pm_id is set. */
+type ApprovedVendorRateRow = {
+  rm_id?: number
+  pm_id?: number
+  approved_rate: string | null
+  approved_vendor_code: string | null
+  approved_vendor_name: string | null
+}
 type MinMaxRateRow = {
   rm_id?: number
   pm_id?: number
@@ -73,16 +81,12 @@ export default async function ManufacturerDetailPage({
   const tabParam = String(sp.tab ?? "active")
   const tab = (VALID_TABS.includes(tabParam as MfgTab) ? tabParam : "active") as MfgTab
 
-  const [mfgRows, statusCountRows, monthlyPoRows] = await Promise.all([
+  const [mfgRows, monthlyPoRows] = await Promise.all([
     timedQuery<{ id: number; code: string; name: string }>(manufacturersSql.selectNameById, [id]),
-    timedQuery<{ status: string; cnt: number }>(manufacturingSql.statusCountsByMfg, [id], { label: "manufacturing.statusCountsByMfg" }),
     timedQuery<MfgMonthlyPoRow>(manufacturingSql.selectMonthlyPoSummaryByMfg, [id], { label: "manufacturing.selectMonthlyPoSummaryByMfg" }),
   ])
   const mfg = mfgRows[0]
   if (!mfg) notFound()
-
-  const statusCounts: Record<string, number> = { active: 0, discontinued: 0, inactive: 0 }
-  for (const r of statusCountRows) statusCounts[r.status] = Number(r.cnt)
 
   return (
     <div className="p-6">
@@ -95,7 +99,7 @@ export default async function ManufacturerDetailPage({
       </div>
 
       <div className="space-y-4">
-        <TabBar mfgId={id} currentTab={tab} statusCounts={statusCounts} />
+        <TabBar mfgId={id} currentTab={tab} />
         {tab === "active" && <LineStatusTabContent mfgId={id} />}
         {tab === "misc_cost" && <MiscTabContent mfgId={id} />}
         {tab === "rm_vendor" && <RmVendorTabContent mfgId={id} />}
@@ -106,6 +110,7 @@ export default async function ManufacturerDetailPage({
           <FinalCostingTabContent
             mfgId={id}
             vendorScope={[...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds)]}
+            approvedScope={[...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds)]}
           />
         )}
         {tab === "common_rms" && <CommonRmsTable mfgId={id} />}
@@ -162,17 +167,38 @@ async function AgreedRatesTabContent({ mfgId }: { mfgId: number }) {
   return <AgreedRatesClient mfgId={mfgId} rmRows={rmRows} pmRows={pmRows} />
 }
 
-async function FinalCostingTabContent({ mfgId, vendorScope }: { mfgId: number; vendorScope: unknown[] }) {
-  const [lineRows, materialCostRows, miscCostRows, bomLineInputRows, minMaxRmRows, minMaxPmRows] = await Promise.all([
+async function FinalCostingTabContent({
+  mfgId, vendorScope, approvedScope,
+}: { mfgId: number; vendorScope: unknown[]; approvedScope: unknown[] }) {
+  const [
+    lineRows, materialCostRows, miscCostRows, bomLineInputRows,
+    minMaxRmRows, minMaxPmRows, approvedRmRows, approvedPmRows,
+  ] = await Promise.all([
     timedQuery<MfgLine>(manufacturingSql.selectLiveLinesByMfg, [mfgId], { label: "manufacturing.selectLiveLinesByMfg (costing)" }),
-    timedQuery<{ recipe_id: number; rm_cost: string; pm_cost: string }>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId], { label: "manufacturing.selectMaterialCostByMfg" }),
+    timedQuery<{
+      recipe_id: number; rm_cost: string; pm_cost: string
+      filling: string | null; rm_line_count: number
+      rm_lines_without_rate: number; pm_lines_without_rate: number
+    }>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId], { label: "manufacturing.selectMaterialCostByMfg" }),
     timedQuery<{ recipe_id: number; type: MiscCostType; cost: string }>(manufacturingSql.selectMiscCostsByMfg, [mfgId], { label: "manufacturing.selectMiscCostsByMfg" }),
     timedQuery<RecipeLineInputRow>(manufacturingSql.selectBomLineInputsByMfg, [mfgId], { label: "manufacturing.selectBomLineInputsByMfg" }),
     timedQuery<MinMaxRateRow>(rawMaterials.selectMinMaxVrmRateByRm, vendorScope, { label: "rawMaterials.selectMinMaxVrmRateByRm" }),
     timedQuery<MinMaxRateRow>(packingMaterials.selectMinMaxVrmRateByPm, vendorScope, { label: "packingMaterials.selectMinMaxVrmRateByPm" }),
+    timedQuery<ApprovedVendorRateRow>(manufacturingSql.selectApprovedVendorRateByRm, [...approvedScope, mfgId], { label: "manufacturing.selectApprovedVendorRateByRm" }),
+    timedQuery<ApprovedVendorRateRow>(manufacturingSql.selectApprovedVendorRateByPm, [...approvedScope, mfgId], { label: "manufacturing.selectApprovedVendorRateByPm" }),
   ])
 
-  const materialByBom = new Map(materialCostRows.map((r) => [r.recipe_id, { rm: Number(r.rm_cost), pm: Number(r.pm_cost) }]))
+  const materialByBom = new Map(materialCostRows.map((r) => [r.recipe_id, {
+    rm: Number(r.rm_cost),
+    pm: Number(r.pm_cost),
+    // Carried so the table can name the real cause of a zero. A missing fill
+    // weight and a missing agreed rate both render as 0.00 but are fixed by
+    // different people, in different masters.
+    filling: r.filling == null ? null : Number(r.filling),
+    rmLinesWithoutRate: Number(r.rm_lines_without_rate ?? 0),
+    pmLinesWithoutRate: Number(r.pm_lines_without_rate ?? 0),
+    rmLineCount: Number(r.rm_line_count ?? 0),
+  }]))
   // Keys are only set when a row actually exists — a missing type and a genuine
   // 0% are different states, and the "incomplete costing" flag needs to tell them apart.
   const miscByBom = new Map<number, Partial<Record<MiscCostType, number>>>()
@@ -210,6 +236,10 @@ async function FinalCostingTabContent({ mfgId, vendorScope }: { mfgId: number; v
       wastage,
       total,
       incomplete,
+      filling: material?.filling ?? null,
+      rm_lines_without_rate: material?.rmLinesWithoutRate ?? 0,
+      pm_lines_without_rate: material?.pmLinesWithoutRate ?? 0,
+      rm_line_count: material?.rmLineCount ?? 0,
     }
   })
 
@@ -219,10 +249,22 @@ async function FinalCostingTabContent({ mfgId, vendorScope }: { mfgId: number; v
     arr.push(l)
     linesByBom.set(l.recipe_id, arr)
   }
-  const rmRateMap = new Map(minMaxRmRows.map((r) => [r.rm_id as number, { min: Number(r.min_rate ?? 0), max: Number(r.max_rate ?? 0) }]))
-  const pmRateMap = new Map(minMaxPmRows.map((r) => [r.pm_id as number, { min: Number(r.min_rate ?? 0), max: Number(r.max_rate ?? 0) }]))
+  // One map per material carrying all three scenarios, so buildComparisonRows
+  // stays a single code path indexed by scenario name.
+  const approvedRmMap = new Map(approvedRmRows.map((r) => [Number(r.rm_id), Number(r.approved_rate ?? 0)]))
+  const approvedPmMap = new Map(approvedPmRows.map((r) => [Number(r.pm_id), Number(r.approved_rate ?? 0)]))
+  const rmRateMap = new Map(minMaxRmRows.map((r) => [r.rm_id as number, {
+    min: Number(r.min_rate ?? 0),
+    max: Number(r.max_rate ?? 0),
+    approved: approvedRmMap.get(r.rm_id as number) ?? 0,
+  }]))
+  const pmRateMap = new Map(minMaxPmRows.map((r) => [r.pm_id as number, {
+    min: Number(r.min_rate ?? 0),
+    max: Number(r.max_rate ?? 0),
+    approved: approvedPmMap.get(r.pm_id as number) ?? 0,
+  }]))
 
-  function buildComparisonRows(scenario: "min" | "max"): FinalCostingComparisonRow[] {
+  function buildComparisonRows(scenario: "min" | "max" | "approved"): FinalCostingComparisonRow[] {
     return rows.map((mrmRow) => {
       const lines = linesByBom.get(mrmRow.recipe_id) ?? []
       let rmCost = 0
@@ -266,23 +308,13 @@ async function FinalCostingTabContent({ mfgId, vendorScope }: { mfgId: number; v
     })
   }
 
-  const cheapestRows = buildComparisonRows("min")
-  const maxRows = buildComparisonRows("max")
-
   return (
     <div className="space-y-6">
       <FinalCostingTable mfgId={mfgId} rows={rows} />
-      <FinalCostingComparisonTable
-        title="Cheapest Available Vendor Rate"
-        subtitle="Recomputed using the lowest currently-effective vendor (VRM) rate per RM/PM component, compared against the agreed MRM rate above."
-        rows={cheapestRows}
-      />
-      {/* The detailed-breakup workbook is both comparisons in one file, so the
-          export hangs off the second one — i.e. below the pair. */}
-      <FinalCostingComparisonTable
-        title="Most Expensive Available Vendor Rate"
-        subtitle="Recomputed using the highest currently-effective vendor (VRM) rate per RM/PM component, compared against the agreed MRM rate above."
-        rows={maxRows}
+      <VendorCostingComparison
+        approvedRows={buildComparisonRows("approved")}
+        minRows={buildComparisonRows("min")}
+        maxRows={buildComparisonRows("max")}
         exportEndpoint={`/api/v1/manufacturing/${mfgId}/final-costing/detailed-export`}
       />
     </div>

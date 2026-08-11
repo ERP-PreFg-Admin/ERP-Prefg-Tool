@@ -67,3 +67,17 @@ These docs capture ongoing architectural decisions. Do not edit them without con
 | Sales & CRM | Stub | `app/sales-crm/` |
 | Reports & Analytics | Stub | `app/reports/` |
 | Sheet Viewer | Partial | `app/sheet-viewer/` |
+
+---
+
+## Recent structural changes
+
+- **2026-08 schema rename** — `bom_*` → `recipe_*`, rate tables → `cost_master_*`,
+  `supplier_invoices` → `invoice_mfg`. Full mapping and the partial column renames
+  are in [Database Schema](./database-schema.md#the-2026-08-rename).
+- **API versioned** — everything moved to `/api/v1/`, except `/api/auth` and
+  `/api/health`. See [API Reference](./api-reference.md).
+- **BOM is now called Recipe** in the UI and in code. The stored `approvals.module`
+  code is still `BOM` — see [Database Schema](./database-schema.md#the-2026-08-rename).
+- **New page** — `/po-tracking/invoices`, every supplier invoice with its line items
+  and the POs each line resolved to. Documented in [PO Inwarding](./po-inwarding.md).

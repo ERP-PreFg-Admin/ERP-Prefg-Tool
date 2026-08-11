@@ -34,12 +34,12 @@ Reuse the existing `withRetry` helper — no new retry logic needed. `execute()`
 ### 3. Which call sites migrate to `queryReplica()`
 
 Only reads that are **not** immediately downstream of a write in the same user action. Good first candidates (verified via grep — these are pure list/export reads with no adjacent write in the request):
-- `app/api/masters/skus/export/route.ts`, `.../material-master/export/route.ts`, `.../bom-master/export/route.ts` — CSV/Excel export queries
-- The paginated list `GET` handlers in `app/api/masters/*/route.ts` (skus, vendors, manufacturers, raw-materials, packing-materials, bom-master, material-master) — these call `lib/queries/*.ts`'s `selectPaginated`-style queries with no preceding write
-- `app/api/reports/*` and `app/sheet-viewer` data fetches, if/when they hit `lib/db.ts` directly
+- `app/api/v1/masters/skus/export/route.ts`, `.../material-master/export/route.ts`, `.../recipe-master/export/route.ts` — CSV/Excel export queries
+- The paginated list `GET` handlers in `app/api/v1/masters/*/route.ts` (skus, vendors, manufacturers, raw-materials, packing-materials, recipe-master, material-master) — these call `lib/queries/*.ts`'s `selectPaginated`-style queries with no preceding write
+- `app/api/v1/reports/*` and `app/sheet-viewer` data fetches, if/when they hit `lib/db.ts` directly
 
 **Never migrate:**
-- `approvalsSql.hasPending` calls (8 call sites found: `masters/skus`, `masters/vendors` (×2), `masters/manufacturers` (×2), `masters/material-master` (×2), `masters/bom-master`, `purchase-orders/[id]`) — these are double-submit guards checked immediately before an insert; a stale replica read would let a duplicate pending approval through.
+- `approvalsSql.hasPending` calls (8 call sites found: `masters/skus`, `masters/vendors` (×2), `masters/manufacturers` (×2), `masters/material-master` (×2), `masters/recipe-master`, `purchase-orders/[id]`) — these are double-submit guards checked immediately before an insert; a stale replica read would let a duplicate pending approval through.
 - Anything inside `lib/master-routes/material-utils.ts` — already reads via `conn.execute` on the open transaction, correctly pinned to primary.
 - Any read that immediately follows a write in the same handler (e.g. re-fetching a row right after `applyAndArchive` to return updated state).
 

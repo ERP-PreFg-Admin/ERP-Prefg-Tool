@@ -84,20 +84,20 @@ type ColumnDef = {
 const statusBadge = (row: AnyRow) => <StatusBadge status={row.status as string | null} />
 
 const RM_COLUMNS: ColumnDef[] = [
-  { key: "rm_code",   label: "RM Code",   sortAs: "text", width: "110px", className: "font-mono text-xs font-medium" },
+  { key: "rm_code",   label: "RM Code",   sortAs: "text", width: "120px", className: "font-mono text-xs font-medium" },
   { key: "name",      label: "Name",      sortAs: "text", className: "font-medium", render: (row) => <TruncatedCell value={row.name} label="Name" /> },
   { key: "make",      label: "Make",      sortAs: "text", render: (row) => <TruncatedCell value={row.make} label="Make" /> },
   { key: "type",      label: "Type",      sortAs: "text", width: "110px" },
-  { key: "uom",       label: "UOM",       sortAs: "text", width: "80px", className: "uppercase text-xs text-muted-foreground" },
+  { key: "uom",       label: "UOM",       sortAs: "text", width: "90px", className: "uppercase text-xs text-muted-foreground" },
   { key: "inci_name", label: "INCI Name", sortAs: "text", render: (row) => <TruncatedCell value={row.inci_name} label="INCI Name" /> },
   { key: "status",    label: "Status",    sortAs: "text", width: "110px", render: statusBadge },
 ]
 
 const PM_COLUMNS: ColumnDef[] = [
-  { key: "pm_code",       label: "PM Code",      sortAs: "text", width: "110px", className: "font-mono text-xs font-medium" },
+  { key: "pm_code",       label: "PM Code",      sortAs: "text", width: "120px", className: "font-mono text-xs font-medium" },
   { key: "name",          label: "Name",         sortAs: "text", className: "font-medium", render: (row) => <TruncatedCell value={row.name} label="Name" /> },
   { key: "type",          label: "Type",         sortAs: "text", width: "120px" },
-  { key: "uom",           label: "UOM",          sortAs: "text", width: "80px", className: "uppercase text-xs text-muted-foreground" },
+  { key: "uom",           label: "UOM",          sortAs: "text", width: "90px", className: "uppercase text-xs text-muted-foreground" },
   { key: "pantone_color", label: "Pantone Color", sortAs: "text", render: (row) => <TruncatedCell value={row.pantone_color} label="Pantone Color" /> },
   { key: "status",        label: "Status",       sortAs: "text", width: "110px", render: statusBadge },
 ]
@@ -297,7 +297,8 @@ export default function MaterialMasterClient({
           onClearFilters={hasFilters ? clearAllFilters : undefined}
         />
         <CardContent className="p-0">
-          <Table className="[&_th]:whitespace-nowrap table-fixed">
+          {/* Headers wrap rather than clip — see components/ui/sortable-table-head. */}
+          <Table className="table-fixed [&_th]:align-top">
             <TableHeader>
               <TableRow>
                 {columns.map((col) => (

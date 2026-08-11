@@ -52,6 +52,13 @@ type MinMaxRateRow = {
   max_vendor_code: string | null
   max_vendor_name: string | null
 }
+type ApprovedVendorRateRow = {
+  rm_id?: number
+  pm_id?: number
+  approved_rate: string | null
+  approved_vendor_code: string | null
+  approved_vendor_name: string | null
+}
 
 function pctDelta(delta: number, base: number): number {
   return base ? (delta / base) * 100 : 0
@@ -71,16 +78,22 @@ export const GET = withGateway({
     // The two min/max rate queries below span every vendor, so they carry the
     // vendor scope as well — this workbook names the cheapest/priciest vendor.
     const vendorScope = [...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds)]
+    const approvedScope = [...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds)]
     const format = req.nextUrl.searchParams.get("format") === "xlsx" ? "xlsx" : "csv"
 
     try {
-      const [lineRows, materialCostRows, miscCostRows, lineDetailRows, minMaxRmRows, minMaxPmRows] = await Promise.all([
+      const [
+        lineRows, materialCostRows, miscCostRows, lineDetailRows,
+        minMaxRmRows, minMaxPmRows, approvedRmRows, approvedPmRows,
+      ] = await Promise.all([
         query<MfgLine>(manufacturingSql.selectLiveLinesByMfg, [mfgId]),
         query<MaterialCostRow>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId]),
         query<MiscCostRow>(manufacturingSql.selectMiscCostsByMfg, [mfgId]),
         query<RecipeLineDetailRow>(manufacturingSql.selectBomLineDetailByMfg, [mfgId, mfgId, mfgId]),
         query<MinMaxRateRow>(rawMaterials.selectMinMaxVrmRateByRm, vendorScope),
         query<MinMaxRateRow>(packingMaterials.selectMinMaxVrmRateByPm, vendorScope),
+        query<ApprovedVendorRateRow>(manufacturingSql.selectApprovedVendorRateByRm, [...approvedScope, mfgId]),
+        query<ApprovedVendorRateRow>(manufacturingSql.selectApprovedVendorRateByPm, [...approvedScope, mfgId]),
       ])
 
       const materialByBom = new Map(materialCostRows.map((r) => [r.recipe_id, { rm: Number(r.rm_cost), pm: Number(r.pm_cost) }]))
@@ -90,8 +103,24 @@ export const GET = withGateway({
         entry[r.type] = Number(r.cost)
         miscByBom.set(r.recipe_id, entry)
       }
-      const rmRateMap = new Map(minMaxRmRows.map((r) => [r.rm_id as number, { min: Number(r.min_rate ?? 0), max: Number(r.max_rate ?? 0), minVendor: r.min_vendor_name, maxVendor: r.max_vendor_name }]))
-      const pmRateMap = new Map(minMaxPmRows.map((r) => [r.pm_id as number, { min: Number(r.min_rate ?? 0), max: Number(r.max_rate ?? 0), minVendor: r.min_vendor_name, maxVendor: r.max_vendor_name }]))
+      // Must stay in step with the page's own maps in
+      // app/manufacturing/[mfgId]/page.tsx — this route rebuilds the same rows
+      // independently, so a scenario added in one place and not the other makes
+      // the workbook silently disagree with the screen.
+      const approvedRm = new Map(approvedRmRows.map((r) => [Number(r.rm_id), { rate: Number(r.approved_rate ?? 0), vendor: r.approved_vendor_name }]))
+      const approvedPm = new Map(approvedPmRows.map((r) => [Number(r.pm_id), { rate: Number(r.approved_rate ?? 0), vendor: r.approved_vendor_name }]))
+      const rmRateMap = new Map(minMaxRmRows.map((r) => [r.rm_id as number, {
+        min: Number(r.min_rate ?? 0), max: Number(r.max_rate ?? 0),
+        approved: approvedRm.get(r.rm_id as number)?.rate ?? 0,
+        minVendor: r.min_vendor_name, maxVendor: r.max_vendor_name,
+        approvedVendor: approvedRm.get(r.rm_id as number)?.vendor ?? null,
+      }]))
+      const pmRateMap = new Map(minMaxPmRows.map((r) => [r.pm_id as number, {
+        min: Number(r.min_rate ?? 0), max: Number(r.max_rate ?? 0),
+        approved: approvedPm.get(r.pm_id as number)?.rate ?? 0,
+        minVendor: r.min_vendor_name, maxVendor: r.max_vendor_name,
+        approvedVendor: approvedPm.get(r.pm_id as number)?.vendor ?? null,
+      }]))
 
       const linesByBom = new Map<number, RecipeLineDetailRow[]>()
       for (const l of lineDetailRows) {
@@ -100,7 +129,7 @@ export const GET = withGateway({
         linesByBom.set(l.recipe_id, arr)
       }
 
-      function scenarioTotal(bomId: number, scenario: "min" | "max"): { rm: number; pm: number; total: number } {
+      function scenarioTotal(bomId: number, scenario: "min" | "max" | "approved"): { rm: number; pm: number; total: number } {
         const lines = linesByBom.get(bomId) ?? []
         let rm = 0
         let pm = 0
@@ -126,14 +155,19 @@ export const GET = withGateway({
         const misc = miscByBom.get(l.recipe_id) ?? {}
         const { total: mrmWastage } = computeWastage(material.rm, material.pm, misc.rm_loss ?? 0, misc.pm_loss ?? 0)
         const mrmTotal = computeTotalCosting({ rmCost: material.rm, pmCost: material.pm, wastageTotal: mrmWastage, jw: misc.jw ?? 0, shrink: misc.shrink ?? 0, shipper: misc.shipper ?? 0 })
+        const approved = scenarioTotal(l.recipe_id, "approved")
         const cheapest = scenarioTotal(l.recipe_id, "min")
         const max = scenarioTotal(l.recipe_id, "max")
+        const approvedDelta = approved.total - mrmTotal
         const cheapestDelta = cheapest.total - mrmTotal
         const maxDelta = max.total - mrmTotal
         return {
           sku_code: l.sku_code,
           sku_name: l.sku_name,
           mrm_total: mrmTotal,
+          approved_total: approved.total,
+          approved_delta: approvedDelta,
+          approved_delta_pct: pctDelta(approvedDelta, mrmTotal),
           cheapest_total: cheapest.total,
           cheapest_delta: cheapestDelta,
           cheapest_delta_pct: pctDelta(cheapestDelta, mrmTotal),
@@ -149,10 +183,15 @@ export const GET = withGateway({
         const mrmRate = Number(line.mrm_rate ?? 0)
         const mrmCost = line.mtrl_type === "rm" ? computeRmCost(filling, amount, mrmRate) : computePmCost(amount, mrmRate)
         const rates = line.mtrl_type === "rm" ? rmRateMap.get(line.mtrl_id) : pmRateMap.get(line.mtrl_id)
+        const approvedRate = rates?.approved ?? 0
         const cheapestRate = rates?.min ?? 0
         const maxRate = rates?.max ?? 0
-        const cheapestCost = line.mtrl_type === "rm" ? computeRmCost(filling, amount, cheapestRate) : computePmCost(amount, cheapestRate)
-        const maxCost = line.mtrl_type === "rm" ? computeRmCost(filling, amount, maxRate) : computePmCost(amount, maxRate)
+        const cost = (rate: number) =>
+          line.mtrl_type === "rm" ? computeRmCost(filling, amount, rate) : computePmCost(amount, rate)
+        const approvedCost = cost(approvedRate)
+        const cheapestCost = cost(cheapestRate)
+        const maxCost = cost(maxRate)
+        const approvedDelta = approvedCost - mrmCost
         const cheapestDelta = cheapestCost - mrmCost
         const maxDelta = maxCost - mrmCost
         return {
@@ -163,6 +202,11 @@ export const GET = withGateway({
           mtrl_name: line.mtrl_name,
           mrm_rate: mrmRate,
           mrm_cost: mrmCost,
+          approved_vendor: rates?.approvedVendor ?? null,
+          approved_rate: approvedRate,
+          approved_cost: approvedCost,
+          approved_delta: approvedDelta,
+          approved_delta_pct: pctDelta(approvedDelta, mrmCost),
           cheapest_vendor: rates?.minVendor ?? null,
           cheapest_rate: cheapestRate,
           cheapest_cost: cheapestCost,

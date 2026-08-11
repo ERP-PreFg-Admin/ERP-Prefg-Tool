@@ -24,20 +24,42 @@ esac
 # join('=',[Name,Value]) rather than the tab-separated two-column output, so
 # there's no tab handling to get wrong; sed then strips the /erp-app/<env>/
 # prefix, leaving KEY=value.
+#
+# The [ ... ] wrapping join() is LOAD-BEARING and must not be "simplified" away.
+# get-parameters-by-path paginates at 10, and with --output text a FLAT list
+# (Parameters[].join(...)) prints one line PER PAGE with the entries joined by
+# tabs — so 24 parameters came out as 3 lines, and sed (anchored with ^) only
+# stripped the prefix off the first entry of each. Wrapping each element in its
+# own list makes it a ROW, so text output is newline-separated regardless of how
+# many pages come back. Verified on erp-app-prod: flat = 3 lines, wrapped = 24.
 echo "== Refreshing /etc/erp/env from SSM ($SSM_PARAM_PATH) =="
 mkdir -p /etc/erp
 aws ssm get-parameters-by-path \
   --path "$SSM_PARAM_PATH" --with-decryption --region "$AWS_REGION" \
-  --query "Parameters[].join('=',[Name,Value])" --output text \
+  --query "Parameters[].[join('=',[Name,Value])]" --output text \
   | sed "s|^${SSM_PARAM_PATH}/||" > /etc/erp/env.new
-# Only replace the live file once the fetch has actually produced something —
-# an empty result would otherwise wipe every secret on the box.
-if [ -s /etc/erp/env.new ]; then
+
+# Guard on the COUNT, not on -s. A non-empty check is worthless against the
+# pagination bug above: the broken output was 3 non-empty lines that even looked
+# like KEY=value, so `[ -s ]` passed and would have cut the container's
+# environment from 23 secrets to 3 — losing the DB password, AUTH_SECRET and the
+# S3 credentials on a routine deploy. Compare against what is actually in SSM.
+EXPECTED=$(aws ssm get-parameters-by-path \
+  --path "$SSM_PARAM_PATH" --region "$AWS_REGION" \
+  --query "length(Parameters[])" --output text | awk '{ n += $1 } END { print n }')
+GOT=$(grep -cE '^[A-Za-z_][A-Za-z0-9_]*=' /etc/erp/env.new || true)
+
+if [ "${EXPECTED:-0}" -gt 0 ] && [ "$GOT" -eq "$EXPECTED" ]; then
   chmod 600 /etc/erp/env.new
+  # Keep the outgoing file: if a deploy ever does land a bad env, the previous
+  # one is right there rather than only in SSM.
+  [ -f /etc/erp/env ] && cp -a /etc/erp/env "/etc/erp/env.bak-$(date +%Y%m%d-%H%M%S)"
   mv /etc/erp/env.new /etc/erp/env
+  echo "   $GOT parameters written to /etc/erp/env"
 else
   rm -f /etc/erp/env.new
-  echo "SSM returned no parameters for $SSM_PARAM_PATH — keeping existing /etc/erp/env" >&2
+  echo "Refusing to write /etc/erp/env: parsed $GOT of $EXPECTED parameters from $SSM_PARAM_PATH." >&2
+  echo "Existing /etc/erp/env left untouched." >&2
   exit 1
 fi
 

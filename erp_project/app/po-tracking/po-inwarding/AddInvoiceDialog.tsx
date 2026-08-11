@@ -29,7 +29,7 @@ import { cn } from "@/lib/utils"
 import type { OpenPoOption } from "@/types/invoice"
 import type { MfgOption, SkuOption, WarehouseOption } from "../po-procurement/po-types"
 import {
-  EMPTY_FORM, MAX_BYTES, allocateFifo, collectProblems, emptyRow, formFromParsed,
+  EMPTY_FORM, MAX_MB, tooLargeMessage, allocateFifo, collectProblems, emptyRow, formFromParsed,
   matchSummary, rowsFromParsed, sumLineItems, toInwardPayload,
   type InvoiceForm, type Row, type Shortage,
 } from "./invoice-form"
@@ -235,7 +235,10 @@ export default function AddInvoiceDialog({
     if (!picked) return
     const isPdf = picked.type === "application/pdf" || picked.name.toLowerCase().endsWith(".pdf")
     if (!isPdf) { setError("Only PDF invoices can be uploaded."); return }
-    if (picked.size > MAX_BYTES) { setError("That file is over the 10 MB limit."); return }
+    // Before the preview blob and the parse: refusing early costs nothing, and
+    // the message names the actual size rather than just the rule.
+    const tooLarge = tooLargeMessage(picked)
+    if (tooLarge) { setError(tooLarge); return }
 
     setError("")
     setFile(picked)
@@ -382,7 +385,7 @@ export default function AddInvoiceDialog({
                 {draft ? "Start a new invoice instead" : "Choose a PDF invoice"}
               </span>
               <span className="text-xs">
-                {draft ? "Replaces the unfinished review" : "or drop it here — max 10 MB"}
+                {draft ? "Replaces the unfinished review" : `or drop it here — max ${MAX_MB} MB`}
               </span>
             </button>
             <input
@@ -430,7 +433,8 @@ export default function AddInvoiceDialog({
                   <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Extraction usually takes about a minute. Nothing is saved yet — the invoice is
+                  Most invoices are read instantly. Ones we can&apos;t read directly fall back to a
+                  slower extraction that takes about a minute. Nothing is saved yet — the invoice is
                   stored only once you create the inward POs.
                 </p>
               </>

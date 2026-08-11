@@ -108,6 +108,9 @@ export function VendorPMDetailDialog({
       ]}
       columns={columns}
       rows={vendorRows}
+      exportEndpoint="/api/v1/masters/packing-materials/export"
+      exportLabel="PM by Vendor"
+      exportParams={{ view: "vendor", search: String(row?.pm_code ?? "") }}
       rowKey={(_, i) => i}
       emptyMessage="No vendor records found for this material."
       summary={

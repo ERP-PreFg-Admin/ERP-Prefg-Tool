@@ -95,6 +95,9 @@ export function MfgDetailDialog({
       ]}
       columns={columns}
       rows={mfgRows}
+      exportEndpoint="/api/v1/masters/raw-materials/export"
+      exportLabel="RM by Manufacturer"
+      exportParams={{ view: "manufacturer", search: String(row?.rm_code ?? "") }}
       rowKey={(_, i) => i}
       emptyMessage="No manufacturer records found for this material."
       summary={

@@ -29,6 +29,7 @@ type FormState = {
   effective_from: string
   effective_till: string
   status: "active" | "inactive" | "discontinued"
+  remarks: string
 }
 
 const EMPTY_FORM: FormState = {
@@ -38,6 +39,7 @@ const EMPTY_FORM: FormState = {
   effective_from: new Date().toISOString().slice(0, 10),
   effective_till: "",
   status: "active",
+  remarks: "",
 }
 
 export default function MiscCostDialog({
@@ -67,6 +69,7 @@ export default function MiscCostDialog({
         effective_from: editData.effective_from ?? "",
         effective_till: editData.effective_till ?? "",
         status: (editData.status as FormState["status"]) ?? "active",
+        remarks: "",
       })
     } else {
       setForm(EMPTY_FORM)
@@ -81,6 +84,7 @@ export default function MiscCostDialog({
     if (!editData && !form.recipe_id) { toast({ title: "Select a SKU / Recipe.", variant: "error" }); return }
     if (!form.cost) { toast({ title: isPercent ? "Enter a wastage %." : "Enter a cost.", variant: "error" }); return }
     if (isPercent && (Number(form.cost) < 0 || Number(form.cost) > 100)) { toast({ title: "Wastage % must be between 0 and 100.", variant: "error" }); return }
+    if (editData && !form.remarks.trim()) { toast({ title: "Remarks are required.", description: "Say why this cost is changing — approvers see it.", variant: "error" }); return }
 
     setSubmitting(true)
     try {
@@ -92,6 +96,7 @@ export default function MiscCostDialog({
             effective_from: form.effective_from,
             effective_till: form.effective_till || null,
             status: form.status,
+            remarks: form.remarks.trim(),
           }
         : {
             action: "create-misc",
@@ -111,7 +116,13 @@ export default function MiscCostDialog({
       })
       const data = await res.json()
       if (!res.ok) { toast({ title: "Couldn't save misc. cost", description: data.error, variant: "error" }); return }
-      toast({ title: editData ? "Cost updated" : "Cost added", variant: "success" })
+      toast({
+        title: data.unchanged ? "No changes to submit" : "Submitted for approval",
+        description: data.unchanged
+          ? undefined
+          : "This cost starts applying to costing once an approver accepts it.",
+        variant: "success",
+      })
       onSaved()
     } catch {
       toast({ title: "Couldn't save misc. cost", description: "Network error. Please try again.", variant: "error" })
@@ -200,12 +211,29 @@ export default function MiscCostDialog({
               <option value="discontinued">Discontinued</option>
             </Select>
           </div>
+
+          {editData && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="mc-remarks">Remarks <span className="text-destructive">*</span></Label>
+              <Input
+                id="mc-remarks"
+                placeholder="Why is this cost changing?"
+                value={form.remarks} onChange={(e) => set("remarks", e.target.value)}
+              />
+            </div>
+          )}
+
+          <p className="text-[11px] text-muted-foreground">
+            {editData
+              ? "This edit goes to the approval queue. The current cost keeps applying until it is approved."
+              : "This cost goes to the approval queue and is excluded from costing until approved."}
+          </p>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={submitting}>
-            {submitting ? "Saving…" : editData ? "Save Changes" : "Add Cost"}
+            {submitting ? "Submitting…" : "Submit for Approval"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -30,8 +30,8 @@
 Next.js 16 (App Router) · React 19 · TypeScript 6 (strict) · Tailwind v4 · shadcn/ui + Radix · mysql2 3 (runtime DB access) · Prisma 7 (schema/migrations only — client at `app/generated/prisma/`, never imported at runtime) · MariaDB on AWS RDS · NextAuth v5-beta (Google OAuth, JWT) · Winston + winston-daily-rotate-file · AWS SDK S3 client (two buckets: `AWS_S3_BUCKET_FILES`, `AWS_S3_BUCKET_EVENTS`) · nodemailer via Gmail SMTP for PO emails (Resend present in `.env` but commented out, unused) · @react-pdf/renderer (PO PDFs) · exceljs (CSV/XLSX import-export) · Zod (pilot — see the BOM correction in §9: it now covers **two** routes, SKU and BOM, not one).
 
 ### Project structure
-- `app/` — pages + API routes. Live business pages: `masters/` (skus, vendors, manufacturers, raw-materials, packing-materials, material-master, bom-master), `po-tracking/` (**3 sub-pages**, not 1 — `po-procurement`, `rm-pm-procurement`, `po-inwarding`; only `po-procurement` has real API routes of its own — `po-inwarding` reuses them), `approvals/` + `approvals/history/`, `auth/`. Page shells with no route logic yet: `inventory/`, `manufacturing/`, `finance/`, `sales-crm/`, `hr-payroll/`, `reports/`, `sheet-viewer/`.
-- `app/api/` — `masters/`, `purchase-orders/`, `approvals/`, `admin/`, `auth/`, `upload/`, `files/`, `google-sheet/`.
+- `app/` — pages + API routes. Live business pages: `masters/` (skus, vendors, manufacturers, raw-materials, packing-materials, material-master, recipe-master), `po-tracking/` (**3 sub-pages**, not 1 — `po-procurement`, `rm-pm-procurement`, `po-inwarding`; only `po-procurement` has real API routes of its own — `po-inwarding` reuses them), `approvals/` + `approvals/history/`, `auth/`. Page shells with no route logic yet: `inventory/`, `manufacturing/`, `finance/`, `sales-crm/`, `hr-payroll/`, `reports/`, `sheet-viewer/`.
+- `app/api/v1/` — `masters/`, `purchase-orders/`, `approvals/`, `admin/`, `auth/`, `upload/`, `files/`, `google-sheet/`.
 - `lib/` — `db.ts`, `auth.ts`, `permissions.ts`, `logger.ts`, `events.ts`, `s3.ts`, `constants.ts`, `request-context.ts`, `query-timing.ts` (new, see below), `gateway/` (pilot), `validation/` (Zod, SKU only), `approvals/` (strategy-pattern module handlers), `master-routes/`, `pdf/`, `queries/`.
 - `prisma/schema.prisma` — schema source of truth; model names diverge from real MariaDB table names (mapping table in `CLAUDE.md`).
 - `scripts/` — includes `testing_uniware_connection.ts` (new, untracked).
@@ -56,7 +56,7 @@ Browser → `middleware.ts` (NextAuth JWT gate) → Server Component (`page.tsx`
 - **Approval workflow** (canonical, all masters): submit → diff computed → `approvals` + `approval_items` rows inserted → entity `status → in_review` (locks further edits) → approver reviews at `/approvals` → approve (`applyAndArchive`, status → `active`) or reject (`setStatus`, status → `draft`, original submitter can re-edit).
 - **PO lifecycle**: `draft` (impromptu, needs approval) or `raised` directly (normal PO, no approval) → `approved` → `raised` → `punched` → `partially_received`/`received` → `short_closed`/`cancelled`. Splitting a PO is the *only* receiving mechanism — there's no dedicated "Receive" action.
 - **BOM lifecycle**: submit (new-version or update-existing) → approval → activation (writes lines, sets `active`) → fan-out: every other active BOM for the same SKU is deactivated in a loop (one DB write + one status change per sibling).
-- **New from the §9 correction below:** there is a dedicated, previously-undocumented **BOM History page** (`app/masters/bom-master/history/`) — a read-only listing of every BOM header that has at least one archived revision in `history_bom`, reusing the same `BomTable`/`BomListItem` shape as the live listing. It has its own server page, client component, and hook (`useBomHistoryPanel.ts`). No mutations happen here; it exists purely so a "when did this BOM last change and what did it look like before" question is answerable without a DB console. This wasn't in the event catalog, instrumentation blueprint, or logging map at all.
+- **New from the §9 correction below:** there is a dedicated, previously-undocumented **BOM History page** (`app/masters/recipe-master/history/`) — a read-only listing of every BOM header that has at least one archived revision in `history_recipe`, reusing the same `BomTable`/`BomListItem` shape as the live listing. It has its own server page, client component, and hook (`useBomHistoryPanel.ts`). No mutations happen here; it exists purely so a "when did this BOM last change and what did it look like before" question is answerable without a DB console. This wasn't in the event catalog, instrumentation blueprint, or logging map at all.
 
 **Entity & Aggregate Discovery:**
 - Prisma model names ≠ real MariaDB table names (`skus`→`master_skus`, `vendors`→`master_vendors`, `vendor_details`→`details_vendor`, `mfgs`→`master_mfgs`, `mfg_details`→`details_mfg`, `rm`→`master_rm`, `pm`→`master_pm`).
@@ -77,14 +77,14 @@ Today the ERP is a **synchronous monolith**:
 
 - One Next.js 16 app, one MariaDB (AWS RDS), accessed via raw `mysql2` in `lib/db.ts`.
 - Every side-effect runs **inline** inside the HTTP request: a masters insert, its audit trail, any future approval/notification logic all happen in one blocking transaction.
-- Cross-cutting concerns (auth, validation, rate limiting, logging, error shape) are **copy-pasted per route** (`app/api/masters/*`, `app/api/admin/*`). There is no Zod, no request ID, no central error format.
+- Cross-cutting concerns (auth, validation, rate limiting, logging, error shape) are **copy-pasted per route** (`app/api/v1/masters/*`, `app/api/v1/admin/*`). There is no Zod, no request ID, no central error format.
 
 > **Already addressed (June–July 2026):**
 > - The approval handler now uses a **Strategy pattern** — per-module logic lives in `lib/approvals/module-handlers.ts`; the route is a thin dispatcher. Adding a new module requires one new entry there, not a route edit.
 > - `lib/constants.ts` provides typed `STATUS` and `APPROVAL_STATUS` constants eliminating raw string literals.
 > - **Winston structured logger** (`lib/logger.ts`) is deployed and adopted across all API routes (masters, approvals, PO). Every log line includes `requestId`, `module`, `userId`, and relevant domain fields. Console transport uses a human-readable pretty format; file transports write JSON to `logs/app-*.log` and `logs/error-*.log` with daily rotation.
 > - **S3 event pipeline** (`lib/events.ts` → `lib/s3.ts`) records `raw-events`, `processed-events`, and `failed-events` to a dedicated S3 bucket for all master and PO operations.
-> - **API Gateway (Part A) — Step 1 & pilot done (2026-07-01):** `lib/gateway/with-gateway.ts` + `lib/gateway/errors.ts` ship the `withGateway` wrapper described in §4.2 (auth, opt-in RBAC via `resolveAccess()`, Zod validation, structured logging via `lib/logger.ts`, uniform `{error, code, requestId}` error shape). It intentionally skips rate limiting and the `middleware.ts` request-ID change for now — request IDs still come from `lib/request-context.ts`'s `createRequestContext()`, reused as-is rather than duplicated. `app/api/masters/skus/route.ts` is the first (and so far only) route migrated, proving the pattern with zero behavior change; validation schemas live in `lib/validation/skus.ts`. Every other route (vendors, manufacturers, raw-materials, packing-materials, material-master, purchase-orders, approvals, admin) is still on the old manual-validation pattern — see the updated §6 rollout.
+> - **API Gateway (Part A) — Step 1 & pilot done (2026-07-01):** `lib/gateway/with-gateway.ts` + `lib/gateway/errors.ts` ship the `withGateway` wrapper described in §4.2 (auth, opt-in RBAC via `resolveAccess()`, Zod validation, structured logging via `lib/logger.ts`, uniform `{error, code, requestId}` error shape). It intentionally skips rate limiting and the `middleware.ts` request-ID change for now — request IDs still come from `lib/request-context.ts`'s `createRequestContext()`, reused as-is rather than duplicated. `app/api/v1/masters/skus/route.ts` is the first (and so far only) route migrated, proving the pattern with zero behavior change; validation schemas live in `lib/validation/skus.ts`. Every other route (vendors, manufacturers, raw-materials, packing-materials, material-master, purchase-orders, approvals, admin) is still on the old manual-validation pattern — see the updated §6 rollout.
 > - Remaining gaps: rolling `withGateway` out to the rest of the routes, rate limiting, centralised request IDs in `middleware.ts`, and all of Part B (event bus) are still open.
 
 This is fine at today's size but creates two concrete problems as modules grow:
@@ -333,7 +333,7 @@ if (!g.__erpBus) {
 3. **PO status changes** — `po.statusChanged` (draft→raised→received…) → handlers can later drive notifications and dashboards without touching the PO write path.
 4. **Notifications** — `notifications.ts` is a stub today (logs to console); becomes email/WhatsApp/in-app later with zero caller changes.
 
-**Service + event pattern** — `lib/services/skus.ts`, business logic extracted from `app/api/masters/skus/route.ts`:
+**Service + event pattern** — `lib/services/skus.ts`, business logic extracted from `app/api/v1/masters/skus/route.ts`:
 
 ```ts
 import { execute } from "@/lib/db";
@@ -358,7 +358,7 @@ export async function createSku(input: { skuCode: string; name: string; brand?: 
 The route becomes a thin binding:
 
 ```ts
-// app/api/masters/skus/route.ts
+// app/api/v1/masters/skus/route.ts
 import { withGateway } from "@/lib/gateway/with-gateway";
 import { skuCreateSchema } from "@/lib/validation/masters";
 import { createSku } from "@/lib/services/skus";
@@ -385,7 +385,7 @@ That's the moment retries, durability, and true background processing arrive. De
 No big-bang. Each step is shippable on its own.
 
 - **Step 1 — Gateway scaffolding. ✅ Done (2026-07-01).** Added `lib/gateway/with-gateway.ts`, `lib/gateway/errors.ts`, and `lib/validation/skus.ts` (per-domain, not a shared `masters.ts`). Skipped the `middleware.ts` request-ID change — reused the existing `createRequestContext()` from `lib/request-context.ts` instead.
-- **Step 2 — Migrate one route. ✅ Done (2026-07-01), partial.** Converted `app/api/masters/skus/route.ts` to `withGateway`. Business logic stayed inline inside the route's `handler` callback rather than being extracted to `lib/services/skus.ts` — the pilot deliberately touched only the route file. Behaviour confirmed identical. `lib/services/*` extraction remains a follow-up if/when a route's handler grows unwieldy.
+- **Step 2 — Migrate one route. ✅ Done (2026-07-01), partial.** Converted `app/api/v1/masters/skus/route.ts` to `withGateway`. Business logic stayed inline inside the route's `handler` callback rather than being extracted to `lib/services/skus.ts` — the pilot deliberately touched only the route file. Behaviour confirmed identical. `lib/services/*` extraction remains a follow-up if/when a route's handler grows unwieldy.
 - **Step 3 — Event bus + audit handler.** Add `lib/events/*`, emit `sku.created`, write an audit row in the handler. Verify the row appears and the response is unaffected if the handler throws.
 - **Step 4 — Roll the pattern across masters.** vendors, raw-materials, packing-materials, manufacturers — one PR each, reusing the now-proven pattern.
 - **Step 5 — Approvals via events.** Wire `approval.raised` into the `approvals`/`approval_items` tables for masters edits that need sign-off.
@@ -439,7 +439,7 @@ The **open decision** is *which event backbone to use*. Already on **AWS (RDS)**
 ### 4.2 What stays the same regardless of the choice
 
 1. **In-app API Gateway layer** (`lib/gateway/`): one `withGateway()` route wrapper for auth, RBAC (reusing `resolveAccess()`), Zod validation, rate limiting, request-IDs, structured logging, and a uniform error shape. No external service.
-2. **Service layer** (`lib/services/*`): business logic extracted out of `app/api/masters/*/route.ts` so routes become thin bindings.
+2. **Service layer** (`lib/services/*`): business logic extracted out of `app/api/v1/masters/*/route.ts` so routes become thin bindings.
 3. **Transactional outbox** (`event_outbox` table in RDS): every option that uses a *broker* needs this to avoid the dual-write problem — DB commit and event publish are separate systems, so a crash between them loses or duplicates events. The business row and the event row commit in the **same transaction**; a relay then publishes. The only thing that varies per option is *where the relay publishes to*.
 
 The outbox is unnecessary only for the pure in-process option (no second system).
@@ -603,7 +603,7 @@ This is a direct re-use of `approval_items`'s existing `(field_name, old_value, 
 
 | Event | Fires from | Payload (beyond envelope) | Maps to today |
 |---|---|---|---|
-| `sku.created` | `app/api/masters/skus/route.ts` `action:"create"` | `skuCode, name, brand, category` | `INSERT master_skus` |
+| `sku.created` | `app/api/v1/masters/skus/route.ts` `action:"create"` | `skuCode, name, brand, category` | `INSERT master_skus` |
 | `sku.bulkImported` | same route, `action:"bulk"` / `"bulk_from_s3"` | `count, source: "manual" \| "s3"` | batch `INSERT master_skus` |
 | `sku.updateRequested` | same route, `action:"update"` (diff computed, before approval) | `changes[]` | `INSERT approvals`+`approval_items`, `master_skus.status → in_review` |
 | `sku.updated` | `applyAndArchive` for `SKU` in `lib/approvals/module-handlers.ts` | `changes[]` | pre-edit row → `INSERT sku_history`, then `UPDATE master_skus` |
@@ -613,7 +613,7 @@ This is a direct re-use of `approval_items`'s existing `(field_name, old_value, 
 
 | Event | Fires from | Payload | Maps to today |
 |---|---|---|---|
-| `vendor.created` | `app/api/masters/vendors/route.ts` `action:"create"` | `code, name, type` | `INSERT master_vendors`+`details_vendor` |
+| `vendor.created` | `app/api/v1/masters/vendors/route.ts` `action:"create"` | `code, name, type` | `INSERT master_vendors`+`details_vendor` |
 | `vendor.bulkImported` | same route, `"bulk"`/`"bulk_from_s3"` | `count, source` | batch insert |
 | `vendor.updateRequested` | same route, `"update"` | `changes[]` | approval submission |
 | `vendor.updated` | `VENDOR` handler in `module-handlers.ts` (field-change path) | `changes[]` | `UPDATE master_vendors`/`details_vendor` — **no history table today**; this event is the only durable record of the prior value |
@@ -624,7 +624,7 @@ This is a direct re-use of `approval_items`'s existing `(field_name, old_value, 
 
 | Event | Fires from | Payload | Maps to today |
 |---|---|---|---|
-| `mfg.created` | `app/api/masters/manufacturers/route.ts` `"create"` | `mfgId, code, name` | `INSERT master_mfgs`+`details_mfg` |
+| `mfg.created` | `app/api/v1/masters/manufacturers/route.ts` `"create"` | `mfgId, code, name` | `INSERT master_mfgs`+`details_mfg` |
 | `mfg.bulkImported` | `"bulk"`/`"bulk_from_s3"` | `count, source` | batch insert |
 | `mfg.updateRequested` | `"update"` | `changes[]` | approval submission |
 | `mfg.updated` | `MFG` handler, field-change path | `changes[]` | `UPDATE master_mfgs`/`details_mfg` — **no history table today** |
@@ -635,47 +635,47 @@ This is a direct re-use of `approval_items`'s existing `(field_name, old_value, 
 
 | Event | Fires from | Payload | Maps to today |
 |---|---|---|---|
-| `rawMaterial.created` | `app/api/masters/raw-materials/route.ts` `"create"` / `"create-full"` | `rmCode, name, make, uom` | `INSERT master_rm` (+ rate rows if `create-full`) |
+| `rawMaterial.created` | `app/api/v1/masters/raw-materials/route.ts` `"create"` / `"create-full"` | `rmCode, name, make, uom` | `INSERT master_rm` (+ rate rows if `create-full`) |
 | `rawMaterial.bulkImported` | `"bulk"`/`"bulk_from_s3"` | `count, source` | batch insert |
 | `rawMaterial.updateRequested` | base-record update (`RM_MAT`) | `changes[]` | approval submission |
 | `rawMaterial.updated` | `RM_MAT` handler | `changes[]` | `UPDATE master_rm` — **no history table today** |
-| `rawMaterial.rateAdded` | `"add-rates"` (mfg rate, `RM_RATE`) | `mfgId, rate, effectiveFrom` | `INSERT rm_mrm_fixed` |
-| `rawMaterial.rateUpdateRequested` / `.rateUpdated` | `RM_RATE` handler | `changes[]` | pre-edit row → `INSERT history_mrm`, then `UPDATE rm_mrm_fixed` |
-| `rawMaterial.vendorRateAdded` | `"add-rates"` (vendor rate, `RM_VRM`) | `vendorId, rate, effectiveFrom` | `INSERT rm_vrm_dynamic` |
-| `rawMaterial.vendorRateUpdateRequested` / `.vendorRateUpdated` | `RM_VRM` handler | `changes[]` | pre-edit row → `INSERT history_vrm`, then `UPDATE rm_vrm_dynamic` |
+| `rawMaterial.rateAdded` | `"add-rates"` (mfg rate, `RM_RATE`) | `mfgId, rate, effectiveFrom` | `INSERT cost_master_rm_mfg` |
+| `rawMaterial.rateUpdateRequested` / `.rateUpdated` | `RM_RATE` handler | `changes[]` | pre-edit row → `INSERT history_cost_mfg`, then `UPDATE cost_master_rm_mfg` |
+| `rawMaterial.vendorRateAdded` | `"add-rates"` (vendor rate, `RM_VRM`) | `vendorId, rate, effectiveFrom` | `INSERT cost_master_rm_ven` |
+| `rawMaterial.vendorRateUpdateRequested` / `.vendorRateUpdated` | `RM_VRM` handler | `changes[]` | pre-edit row → `INSERT history_cost_ven`, then `UPDATE cost_master_rm_ven` |
 | `rawMaterial.*Rejected` (base/rate/vendorRate) | respective handler `setStatus` | `remarks` | status → `draft` |
 
-**Masters — Packing Material (modules `PM_MAT`, `PM_RATE`, `PM_VRM`)** — identical structure to Raw Material, entity-prefixed `packingMaterial.*`: `.created`, `.bulkImported`, `.updateRequested`/`.updated` (`PM_MAT`, no history table), `.rateAdded`/`.rateUpdateRequested`/`.rateUpdated` (`PM_RATE`, → `history_mrm`), `.vendorRateAdded`/`.vendorRateUpdateRequested`/`.vendorRateUpdated` (`PM_VRM`, → `history_vrm`), `.*Rejected`.
+**Masters — Packing Material (modules `PM_MAT`, `PM_RATE`, `PM_VRM`)** — identical structure to Raw Material, entity-prefixed `packingMaterial.*`: `.created`, `.bulkImported`, `.updateRequested`/`.updated` (`PM_MAT`, no history table), `.rateAdded`/`.rateUpdateRequested`/`.rateUpdated` (`PM_RATE`, → `history_cost_mfg`), `.vendorRateAdded`/`.vendorRateUpdateRequested`/`.vendorRateUpdated` (`PM_VRM`, → `history_cost_ven`), `.*Rejected`.
 
 **Masters — BOM (module `BOM`)**
 
 | Event | Fires from | Payload | Maps to today |
 |---|---|---|---|
-| `bom.submitted` | `app/api/masters/bom-master/route.ts`, `action:"create-full"` (there's also a non-mutating `action:"check-existing"` dry-run fired the instant a SKU is picked, which is not an event candidate — it changes nothing) | `mode: "new-version" \| "update-existing", skuId, lineCount, source: "manual" \| "csv"` | `INSERT approvals`+`approval_items` — one `__mode__` sentinel item, one `line:<rm\|pm>:<mtrlId>:<field>` item per changed field (`amount`/`uom`/`effective_from`/`effective_till`), plus one `line:<type>:<id>:__removed__` sentinel per line dropped from an existing BOM (update-existing only) |
-| `bom.activated` | `BOM` handler in `module-handlers.ts`, both modes | `bomId, skuId` | `update-existing`: snapshot **every** current line → `INSERT history_bom`, delete all current lines, reinsert the new set (skipping any marked `__removed__`); `new-version`: insert only. Both then `master_bom.status → active` |
+| `bom.submitted` | `app/api/v1/masters/recipe-master/route.ts`, `action:"create-full"` (there's also a non-mutating `action:"check-existing"` dry-run fired the instant a SKU is picked, which is not an event candidate — it changes nothing) | `mode: "new-version" \| "update-existing", skuId, lineCount, source: "manual" \| "csv"` | `INSERT approvals`+`approval_items` — one `__mode__` sentinel item, one `line:<rm\|pm>:<mtrlId>:<field>` item per changed field (`amount`/`uom`/`effective_from`/`effective_till`), plus one `line:<type>:<id>:__removed__` sentinel per line dropped from an existing BOM (update-existing only) |
+| `bom.activated` | `BOM` handler in `module-handlers.ts`, both modes | `bomId, skuId` | `update-existing`: snapshot **every** current line → `INSERT history_recipe`, delete all current lines, reinsert the new set (skipping any marked `__removed__`); `new-version`: insert only. Both then `master_recipe.status → active` |
 | `bom.deactivated` | same handler, once per sibling BOM | `bomId, skuId, reason: "supersededBy": <newBomId>` | `deactivateOtherActiveBomsForSku` — **fan-out**: one approval can emit many of these |
-| `bom.updateRejected` | `BOM` handler `setStatus` | `remarks` | `master_bom.status → draft` |
+| `bom.updateRejected` | `BOM` handler `setStatus` | `remarks` | `master_recipe.status → draft` |
 
-> **Correction (verified in §9):** `app/api/masters/bom-master/route.ts` is now built on `withGateway` with a real Zod schema (`bomActionSchema` from `lib/validation/bom.ts`) — the same pattern used by the SKU route. This is a real update, not just a refactor: BOM gets auth/RBAC/validation/request-tracing for free from the gateway today, ahead of every other masters route except SKU. What it still does **not** get from the gateway is domain-specific audit logging or event recording — see §9 for the precise boundary between "covered by the gateway" and "still a gap."
+> **Correction (verified in §9):** `app/api/v1/masters/recipe-master/route.ts` is now built on `withGateway` with a real Zod schema (`bomActionSchema` from `lib/validation/bom.ts`) — the same pattern used by the SKU route. This is a real update, not just a refactor: BOM gets auth/RBAC/validation/request-tracing for free from the gateway today, ahead of every other masters route except SKU. What it still does **not** get from the gateway is domain-specific audit logging or event recording — see §9 for the precise boundary between "covered by the gateway" and "still a gap."
 
 **Approvals (cross-cutting — module `APPROVAL`)** — module-specific events (e.g. `sku.updated`) fire *from inside* `approval.approved` handling in `module-handlers.ts`, not independently — `approval.approved`/`approval.rejected` is the trigger, the module event is the effect.
 
 | Event | Fires from | Payload | Maps to today |
 |---|---|---|---|
 | `approval.raised` | any masters/PO route that computes a diff and needs sign-off | `module, entityId, approvalType: "new" \| "update", itemCount` | `INSERT approvals`+`approval_items` |
-| `approval.approved` | `app/api/approvals/[id]/route.ts` POST, `action:"approve"` | `module, entityId, approverId` | `MODULE_HANDLERS[module].applyAndArchive`, `approvals.status → approved` |
+| `approval.approved` | `app/api/v1/approvals/[id]/route.ts` POST, `action:"approve"` | `module, entityId, approverId` | `MODULE_HANDLERS[module].applyAndArchive`, `approvals.status → approved` |
 | `approval.rejected` | same route, `action:"reject"` | `module, entityId, approverId, remarks` (remarks mandatory) | `MODULE_HANDLERS[module].setStatus(draft)`, `approvals.status → rejected` |
 
 **Purchase Orders (modules `PO`, `PO_BULK`)**
 
 | Event | Fires from | Payload | Maps to today |
 |---|---|---|---|
-| `po.raised` | `app/api/masters/purchase-orders` POST, impromptu | `poId, skuId, vendorId, amount` | `INSERT purchase_orders` (status `draft`) + `approval.raised` |
+| `po.raised` | `app/api/v1/masters/purchase-orders` POST, impromptu | `poId, skuId, vendorId, amount` | `INSERT purchase_orders` (status `draft`) + `approval.raised` |
 | `po.raisedDirect` | same route, normal PO | `poId, skuId, vendorId, amount` | `INSERT purchase_orders` (status `raised`, no approval) |
 | `po.bulkImported` | `PO_BULK` handler, CSV from S3 | `count, s3Key` | batch `INSERT purchase_orders` (status `raised`) — replaces the module's own double S3 log today |
 | `po.approved` | `approval.approved` for module `PO` | `poId` | `purchase_orders.status → raised` |
-| `po.emailSent` | `sendPoEmail()` fire-and-forget call in `app/api/approvals/[id]/route.ts:116-131` | `poId, mfgEmail, pdfKey` | PDF generated, uploaded to S3, sent via Gmail SMTP, `email_sent_at` stamped — formalizes the one real async side-effect pattern already in the codebase |
-| `po.split` | `app/api/masters/purchase-orders/[id]/split/route.ts` | `parentPoId, childPoIds[], splitQty` | inserts child POs, credits parent `received_qty` |
+| `po.emailSent` | `sendPoEmail()` fire-and-forget call in `app/api/v1/approvals/[id]/route.ts:116-131` | `poId, mfgEmail, pdfKey` | PDF generated, uploaded to S3, sent via Gmail SMTP, `email_sent_at` stamped — formalizes the one real async side-effect pattern already in the codebase |
+| `po.split` | `app/api/v1/masters/purchase-orders/[id]/split/route.ts` | `parentPoId, childPoIds[], splitQty` | inserts child POs, credits parent `received_qty` |
 | `po.statusChanged` | `[id]/route.ts` PATCH, `[id]/close/route.ts` | `poId, from, to` | covers `raised→punched→partially_received→received`, `→short_closed`, `→cancelled` transitions |
 | `po.closed` | `[id]/close/route.ts` | `poId, invoiceNo` | status → `short_closed` or `received` |
 
@@ -744,13 +744,13 @@ sequenceDiagram
     participant Bus as Event bus
 
     AR->>H: applyAndArchive (mode: new-version)
-    H->>DB: snapshot lines -> history_bom (update-existing only)
-    H->>DB: INSERT/UPDATE details_bom
-    H->>DB: master_bom.status = active (target BOM)
+    H->>DB: snapshot lines -> history_recipe (update-existing only)
+    H->>DB: INSERT/UPDATE details_recipe
+    H->>DB: master_recipe.status = active (target BOM)
     H->>Bus: emit bom.activated (target)
     H->>DB: SELECT other active BOMs for same sku_id
     loop each sibling BOM
-        H->>DB: UPDATE master_bom.status = inactive
+        H->>DB: UPDATE master_recipe.status = inactive
         H->>Bus: emit bom.deactivated (sibling, supersededBy: target)
     end
 ```
@@ -812,7 +812,7 @@ Nodes are color-coded by call type and by whether the call already exists (solid
 
 ### 6.3 Manufacturer (`app/masters/manufacturers`) — full detail, both branches
 
-Structure confirmed against `AddMfgDialog.tsx` (2-step wizard: Details → optional Documents, single submit) and `CsvImportDialog.tsx` (CSV parsed client-side with preview; Excel uploaded to S3 immediately on file-select). Existing backend instrumentation confirmed against `app/api/masters/manufacturers/route.ts`.
+Structure confirmed against `AddMfgDialog.tsx` (2-step wizard: Details → optional Documents, single submit) and `CsvImportDialog.tsx` (CSV parsed client-side with preview; Excel uploaded to S3 immediately on file-select). Existing backend instrumentation confirmed against `app/api/v1/masters/manufacturers/route.ts`.
 
 Key flow: page load logs → bulk CSV/S3 upload (started → raw event `MFG_BULK` → DB write → committed → processed event, tag mismatch flagged: raw=`MFG_BULK`, processed/failed=`MFG_S3BULK`) → status `in_review` → approval → status `active`. Create-new (2-step wizard) → started → raw event `MFG` → DB write → created → processed event `MFG`. Row edit (blocked-while-pending logger, update-started, diff, no-changes vs changed branches, raw event `MFG_UPDATE`, approval insert, status `in_review`, submitted, processed event) → approval decision → `mfg.updated` (no history table — `changes[]` is the only durable record) → status `active`. Row Documents icon (no approval gate) → doc update started [NEW — currently missing between the pending-check and the diff] → diff → approval insert → status `in_review` → submitted → processed event `MFG_DOCS` → approval decision → status `active`.
 
@@ -837,7 +837,7 @@ Same shape as SKU plus the doc-only fast path (no approval gate): doc upload sta
 
 ### 6.6 Raw Material & Packing Material (`app/masters/raw-materials`, `app/masters/packing-materials`)
 
-Identical structure for both domains (RM shown, PM is a mechanical substitution: `rawMaterial.*` → `packingMaterial.*`, `rm-handler.ts` → `pm-handler.ts`). Outer router logs only a hand-rolled "request received" line with no completion log [fix: adopt `withGateway`]. Wizard (3 steps: Details → Vendor Pricing → Approved At) has duplicate-detection branching (`check-RM`/`check-vendor` actions) with zero logging today. New-material and add-rates paths are both backend-instrumented (started/raw-event/DB-write/success). Edit-rate dialogs POST the same `add-rates` action as the wizard's rate step — approval flow applies, ending in `rawMaterial.rateUpdated` with pre-edit row archived to `history_mrm`/`history_vrm`.
+Identical structure for both domains (RM shown, PM is a mechanical substitution: `rawMaterial.*` → `packingMaterial.*`, `rm-handler.ts` → `pm-handler.ts`). Outer router logs only a hand-rolled "request received" line with no completion log [fix: adopt `withGateway`]. Wizard (3 steps: Details → Vendor Pricing → Approved At) has duplicate-detection branching (`check-RM`/`check-vendor` actions) with zero logging today. New-material and add-rates paths are both backend-instrumented (started/raw-event/DB-write/success). Edit-rate dialogs POST the same `add-rates` action as the wizard's rate step — approval flow applies, ending in `rawMaterial.rateUpdated` with pre-edit row archived to `history_cost_mfg`/`history_cost_ven`.
 
 Note: editing the **base** `master_rm`/`master_pm` record (`RM_MAT`/`PM_MAT` module) is **not** a dialog under these two pages — it lives on the separate Material Master page (§6.7). Don't look for it here.
 
@@ -847,21 +847,21 @@ Note: editing the **base** `master_rm`/`master_pm` record (`RM_MAT`/`PM_MAT` mod
 
 This is the **only** place the base `master_rm`/`master_pm` record (`RM_MAT`/`PM_MAT` module) can be edited. Create dialog → started → raw event `RM_CREATE`/`PM_CREATE` [should be retired in favor of `RM_MAT`/`PM`, per §6.6] → DB write → created. Row edit → rejection-banner check → blocked/unauthorized-draft-edit warn → submitted → approval insert → status `in_review` → processed event `RM_UPDATE`/`PM_UPDATE` → approval decision → `rawMaterial.updated`/`packingMaterial.updated` (no history table for `RM_MAT`/`PM_MAT` today — `changes[]` is the only durable record) → status `active`.
 
-### 6.8 BOM (`app/masters/bom-master`) — near-total gap, full proposed instrumentation
+### 6.8 BOM (`app/masters/recipe-master`) — near-total gap, full proposed instrumentation
 
 **Corrected in this pass (see §9 for the full verification):** this section previously said BOM had *zero* backend instrumentation and a hand-rolled request context. Both claims needed correcting:
-- The API route (`app/api/masters/bom-master/route.ts`) is on **`withGateway`** with a Zod schema (`bomActionSchema`), same as SKU — so it already gets auth, RBAC, request-id, and a request-level completion log line for free. What's still missing is *domain-specific* logging/eventing (started/created/activated/deactivated at the business-fact level) — that gap is real and is what the checklist below closes.
-- Page-load auditing already exists and always has: `page.tsx` logs `[AUDIT] BOM Master load ...` / `complete ...` via plain `console.log`, matching the pattern used on SKUs/Vendors/Raw Materials pages (`lib/query-timing.ts`'s `timedQuery` wraps the underlying listing queries here too). The **BOM History page** (`app/masters/bom-master/history/page.tsx`) has the identical pattern. So "BOM has nothing" was too broad — it's specifically the *mutation* path (submit → activate → deactivate) that has nothing, not the reads.
+- The API route (`app/api/v1/masters/recipe-master/route.ts`) is on **`withGateway`** with a Zod schema (`bomActionSchema`), same as SKU — so it already gets auth, RBAC, request-id, and a request-level completion log line for free. What's still missing is *domain-specific* logging/eventing (started/created/activated/deactivated at the business-fact level) — that gap is real and is what the checklist below closes.
+- Page-load auditing already exists and always has: `page.tsx` logs `[AUDIT] BOM Master load ...` / `complete ...` via plain `console.log`, matching the pattern used on SKUs/Vendors/Raw Materials pages (`lib/query-timing.ts`'s `timedQuery` wraps the underlying listing queries here too). The **BOM History page** (`app/masters/recipe-master/history/page.tsx`) has the identical pattern. So "BOM has nothing" was too broad — it's specifically the *mutation* path (submit → activate → deactivate) that has nothing, not the reads.
 
 Every node in the flow below marked **[NEW]** is still a real gap. This remains the highest-priority page to instrument, since the fan-out side effect (deactivating sibling BOMs) is exactly the kind of side-effecting, multi-row write that most needs an audit trail, and today it has none.
 
-Flow: wizard opens (always mode `new-version` — confirmed in `useBomWizard.ts`; picking "Update Existing BOM" at step 2 just closes the wizard and hands off to the detail panel's edit mode, it never itself submits `update-existing`) → 5 steps (SKU select → existing-BOM check `action:"check-existing"` → entry method manual/CSV → RM+PM line entry, validated to a 99.9–100.1% RM total both client-side and (redundantly, correctly) server-side → review). Submit, from either the wizard (`new-version`) or the detail panel's shared edit surface (`update-existing`, `useBomDetailPanel.ts`'s `saveEdit()`) → both POST the same `action:"create-full"` → bom submit started [NEW] → raw event `bom.submitted` [NEW] → approval insert (`__mode__` sentinel + per-field `line:<rm|pm>:<mtrlId>:<field>` diff + `__removed__` sentinels for dropped lines) → submitted for approval [NEW] → processed event [NEW] → status `"in review"` (**literal space in the DB value**, unlike every other module's `in_review` — this is deliberate and commented in `lib/queries/bom.ts`, not an oversight). Approval decision → (if `update-existing`) snapshot **every** current line to `history_bom` [NEW logging] → delete+reinsert `details_bom` → `master_bom.status = active` + `bom.activated` [NEW] → fan-out: for each sibling BOM, `UPDATE master_bom.status = inactive` + `bom.deactivated` [NEW] — **one event per sibling, not one for the whole batch** (`bomHandler.applyAndArchive` in `module-handlers.ts`, confirmed to still have zero `logger.*`/event calls of any kind).
+Flow: wizard opens (always mode `new-version` — confirmed in `useBomWizard.ts`; picking "Update Existing BOM" at step 2 just closes the wizard and hands off to the detail panel's edit mode, it never itself submits `update-existing`) → 5 steps (SKU select → existing-BOM check `action:"check-existing"` → entry method manual/CSV → RM+PM line entry, validated to a 99.9–100.1% RM total both client-side and (redundantly, correctly) server-side → review). Submit, from either the wizard (`new-version`) or the detail panel's shared edit surface (`update-existing`, `useBomDetailPanel.ts`'s `saveEdit()`) → both POST the same `action:"create-full"` → bom submit started [NEW] → raw event `bom.submitted` [NEW] → approval insert (`__mode__` sentinel + per-field `line:<rm|pm>:<mtrlId>:<field>` diff + `__removed__` sentinels for dropped lines) → submitted for approval [NEW] → processed event [NEW] → status `"in review"` (**literal space in the DB value**, unlike every other module's `in_review` — this is deliberate and commented in `lib/queries/bom.ts`, not an oversight). Approval decision → (if `update-existing`) snapshot **every** current line to `history_recipe` [NEW logging] → delete+reinsert `details_recipe` → `master_recipe.status = active` + `bom.activated` [NEW] → fan-out: for each sibling BOM, `UPDATE master_recipe.status = inactive` + `bom.deactivated` [NEW] — **one event per sibling, not one for the whole batch** (`bomHandler.applyAndArchive` in `module-handlers.ts`, confirmed to still have zero `logger.*`/event calls of any kind).
 
 **Implementation checklist — BOM (highest priority):**
-1. Add `logger.info`/`recordRawEvent`/`recordProcessedEvent`/`recordFailedEvent` to `app/api/masters/bom-master/route.ts` at submit, layered *inside* the existing `withGateway` handler — no route-wiring change needed, just business-level log/event calls alongside the diff-building logic that's already there.
+1. Add `logger.info`/`recordRawEvent`/`recordProcessedEvent`/`recordFailedEvent` to `app/api/v1/masters/recipe-master/route.ts` at submit, layered *inside* the existing `withGateway` handler — no route-wiring change needed, just business-level log/event calls alongside the diff-building logic that's already there.
 2. Add the same to the `BOM` handler (`bomHandler.applyAndArchive`) in `module-handlers.ts` at activation and — critically — **inside the sibling-deactivation loop**, one event per sibling.
 3. Add a `logger.warn` when the DB's literal `"in review"` (with a space) status is set/read, so it's never silently confused with every other module's `in_review` — even though it's intentional and commented, a runtime guard costs little.
-4. Add a bare `console.error` to `bom-master/export/route.ts` at minimum (currently the one exception to "zero instrumentation" — already exists, matches every other export route's baseline).
+4. Add a bare `console.error` to `recipe-master/export/route.ts` at minimum (currently the one exception to "zero instrumentation" — already exists, matches every other export route's baseline).
 5. Since the shared edit surface is reachable from two entry points (wizard hand-off vs. per-row Edit button) but funnels into one code path, tag the started-log's payload with `entry: "wizard" | "panel"` so the two paths stay distinguishable in logs.
 6. **New item, not in the original checklist:** the BOM History page is read-only and already has page-load audit logging — no action needed there, but worth explicitly excluding from future "BOM has no instrumentation" claims.
 
@@ -894,7 +894,7 @@ List load → unauthenticated warn (generates its own requestId, **different fro
 2. Add a distinct `recordProcessedEvent("APPROVAL_REJECTED", ...)` so reject has its own processed-event trail.
 3. Add a `console.debug` when an approval card is viewed, for basic "who looked at this" visibility.
 
-**Cross-cutting pattern:** `GET /api/approvals/entity?module=...&entity_id=...` is called from seven different masters Edit dialogs (`EditMfgDialog.tsx`, `EditMaterialDialog.tsx`, `EditRmVendorRateDialog.tsx`, `EditRmMfgRateDialog.tsx`, `EditPmVendorRateDialog.tsx`, `EditPmMfgRateDialog.tsx`, `EditVendorDialog.tsx`) — never from `RejectDialog.tsx` or `ApprovalCard.tsx` themselves. Fires only when the row's own status is `draft` (previously rejected), populating a "Rejected by X: '...'" banner and a submitter-only edit lock.
+**Cross-cutting pattern:** `GET /api/v1/approvals/entity?module=...&entity_id=...` is called from seven different masters Edit dialogs (`EditMfgDialog.tsx`, `EditMaterialDialog.tsx`, `EditRmVendorRateDialog.tsx`, `EditRmMfgRateDialog.tsx`, `EditPmVendorRateDialog.tsx`, `EditPmMfgRateDialog.tsx`, `EditVendorDialog.tsx`) — never from `RejectDialog.tsx` or `ApprovalCard.tsx` themselves. Fires only when the row's own status is `draft` (previously rejected), populating a "Rejected by X: '...'" banner and a submitter-only edit lock.
 
 ### 6.11 Cross-page conventions to standardize before implementing any of this
 
@@ -935,7 +935,7 @@ Coverage is uneven: some domains (SKU, Vendor, Manufacturer, RM, PM) are richly 
 
 ### 7.3 Page-by-page
 
-**SKU (`app/masters/skus`)** — backed by `app/api/masters/skus/route.ts`, on `withGateway` → `createRequestContext()` gives one `requestId`/`userId` for the whole request. Create: started (L25) → raw event (L26) → `INSERT master_skus` → created (L38) → processed event (L37); dup code → warn (L43). Bulk: started (L57) → raw `SKU_BULK` (L58) → batch insert → committed (L88) → processed `SKU_BULK` (L87). S3 Bulk: parse-failure warn (L187) → import started (L196) → raw event (L197) → batch insert → committed (L229). Update: blocked-pending warn (L111) → started (L119) → diff (no-changes log L143, or changed → raw `SKU_UPDATE` L120 → approval insert → submitted L163 → processed `SKU_UPDATE` L162). All four sub-flows have a matching `recordFailedEvent`/`logger.error` on their catch branch (L46, L93, L169, L234).
+**SKU (`app/masters/skus`)** — backed by `app/api/v1/masters/skus/route.ts`, on `withGateway` → `createRequestContext()` gives one `requestId`/`userId` for the whole request. Create: started (L25) → raw event (L26) → `INSERT master_skus` → created (L38) → processed event (L37); dup code → warn (L43). Bulk: started (L57) → raw `SKU_BULK` (L58) → batch insert → committed (L88) → processed `SKU_BULK` (L87). S3 Bulk: parse-failure warn (L187) → import started (L196) → raw event (L197) → batch insert → committed (L229). Update: blocked-pending warn (L111) → started (L119) → diff (no-changes log L143, or changed → raw `SKU_UPDATE` L120 → approval insert → submitted L163 → processed `SKU_UPDATE` L162). All four sub-flows have a matching `recordFailedEvent`/`logger.error` on their catch branch (L46, L93, L169, L234).
 
 **Vendor (`app/masters/vendors`)** — same shape as SKU, plus a doc-only fast path with **no approval gate**. Create: started (L50) → raw `VENDOR` (L51) → DB write → created (L74) → processed (L107). Bulk: started (L125/L285) → raw `VENDOR_BULK` (L126/L295, same tag for CSV & S3, disambiguated by `source` field) → batch insert → committed (L175/L342). Update: blocked-pending warn (L203) → started (L211) → diff → approval insert → submitted (L260) → processed `VENDOR_UPDATE` (L261). Docs: blocked-pending warn (L372) → started (L381) → `UPDATE details_vendor` doc keys → submitted for approval (L425) → processed `VENDOR_DOCS` (L426).
 
@@ -947,7 +947,7 @@ Coverage is uneven: some domains (SKU, Vendor, Manufacturer, RM, PM) are richly 
 
 **Material Master combined view (`app/masters/material-master`)** — RM create (L29/L30/L68, raw `RM_CREATE`), PM create (L89/L90/L137, raw `PM_CREATE`), RM update (blocked/unauthorized warn L189 → submitted L212 → processed `RM_UPDATE` L225), PM update (submitted L283 → processed `PM_UPDATE` L303). No dedicated `export/route.ts` exists for this combined view (RM and PM each have their own export route instead).
 
-**BOM (`app/masters/bom-master`)** — **near-total instrumentation gap, corrected.** The *mutation* path is confirmed still uninstrumented: `route.ts` and `[id]/route.ts` contain zero `logger.*` calls and zero `lib/events.ts` calls (verified again in §9); `export/route.ts` has exactly the one `console.error` baseline every other export route has. Every other masters domain has at least the create/update path instrumented at the business-fact level; BOM's mutation path has nothing, including the fan-out deactivation of sibling BOMs (`deactivateOtherActiveBomsForSku`), exactly the kind of side-effecting, multi-row write you'd most want a record of. **However**, unlike the original framing of this finding: (1) the route runs through `withGateway` (auth/RBAC/Zod/request-id/completion-log all already present at the request level — same tier as SKU, ahead of RM/PM/Vendor/Mfg/Approvals), and (2) both `page.tsx` (BOM Master) and the previously-undocumented `history/page.tsx` (BOM History) already have `[AUDIT]` page-load logging via plain `console.log`, matching the SKU/Vendor/Raw-Materials pattern. So the accurate statement is: **BOM's reads and request plumbing are instrumented; its business-level writes (submit/activate/deactivate) are not** — a narrower, more precise gap than "BOM has nothing."
+**BOM (`app/masters/recipe-master`)** — **near-total instrumentation gap, corrected.** The *mutation* path is confirmed still uninstrumented: `route.ts` and `[id]/route.ts` contain zero `logger.*` calls and zero `lib/events.ts` calls (verified again in §9); `export/route.ts` has exactly the one `console.error` baseline every other export route has. Every other masters domain has at least the create/update path instrumented at the business-fact level; BOM's mutation path has nothing, including the fan-out deactivation of sibling BOMs (`deactivateOtherActiveBomsForSku`), exactly the kind of side-effecting, multi-row write you'd most want a record of. **However**, unlike the original framing of this finding: (1) the route runs through `withGateway` (auth/RBAC/Zod/request-id/completion-log all already present at the request level — same tier as SKU, ahead of RM/PM/Vendor/Mfg/Approvals), and (2) both `page.tsx` (BOM Master) and the previously-undocumented `history/page.tsx` (BOM History) already have `[AUDIT]` page-load logging via plain `console.log`, matching the SKU/Vendor/Raw-Materials pattern. So the accurate statement is: **BOM's reads and request plumbing are instrumented; its business-level writes (submit/activate/deactivate) are not** — a narrower, more precise gap than "BOM has nothing."
 
 **PO Procurement (`app/po-tracking/po-procurement`)** — largest domain. Create: impromptu → `INSERT purchase_orders` (draft) → approval insert → approval flow → auto-send email (`approvals/[id]/route.ts:116-131`) → email sent (L123)/skipped-no-email warn (L125)/send-failed error (L128, approval already committed either way). Normal PO: `logger.error` on failure only (L198), no success-path log. Bulk CSV: `logger.error` on failure only (L138); raw/processed/failed `PO_BULK` events exist but live inside `applyAndArchive` in `module-handlers.ts`, not the route. Split: `SplitPODialog.tsx:131` — **the only client-side console line found in the whole scope** — then split started (L52) → raw `PO_SPLIT` (L53) → `INSERT child POs, credit parent received_qty` → tolerance check → within-tolerance→received or partial→unchanged (L113/L116) → split succeeded (L121) → processed `PO_SPLIT` (L120). Close/short-close: PO-not-found warn (L36) → short_closed log (L48) → raw+processed event tagged **`purchase_order_short_closed`** (snake_case, unlike every other UPPER_SNAKE tag; **no `recordFailedEvent` in this file at all**). `preview-pdf/route.ts` has no instrumentation at all; `send-email/route.ts` has Logger lines (L20/L39/L31/L43) but no event calls.
 
@@ -958,11 +958,11 @@ Coverage is uneven: some domains (SKU, Vendor, Manufacturer, RM, PM) are richly 
 | Finding | Where |
 |---|---|
 | Two request-context idioms: `withGateway`+`createRequestContext()` (duration-tracked, one requestId) vs hand-rolled inline `{ requestId: crypto.randomUUID(), userId, route }` (no duration tracking) | Gateway: SKU, Vendor, Manufacturer, Material-Master, PO routes. Hand-rolled: Raw Material, Packing Material, all three `approvals/*` routes |
-| `approvals/route.ts` generates two different `requestId`s within one request | `app/api/approvals/route.ts:13` and `:21` |
-| `MFG_BULK` (raw) vs `MFG_S3BULK` (processed/failed) tag mismatch for the same S3-bulk-import flow | `app/api/masters/manufacturers/route.ts:377` vs `:437/442` |
+| `approvals/route.ts` generates two different `requestId`s within one request | `app/api/v1/approvals/route.ts:13` and `:21` |
+| `MFG_BULK` (raw) vs `MFG_S3BULK` (processed/failed) tag mismatch for the same S3-bulk-import flow | `app/api/v1/masters/manufacturers/route.ts:377` vs `:437/442` |
 | Same conceptual action ("create a raw/packing material") logged under two different tag families depending on which route handled it | `material-master/route.ts` (`RM_CREATE`/`PM_CREATE`) vs `raw-materials/rm-handler.ts` / `packing-materials/pm-handler.ts` (`RM_MAT`/`RM_FULL`/`PM`/`PM_FULL`) |
-| `purchase_order_short_closed` uses snake_case, unlike every other UPPER_SNAKE module tag; no `recordFailedEvent` call exists in that route at all | `app/api/purchase-orders/[id]/close/route.ts` |
-| Zero backend instrumentation (no `logger.*`, no event calls) | BOM master — all of `app/api/masters/bom-master/route.ts`, `[id]/route.ts`, `export/route.ts`; every masters `export/route.ts` (one bare `console.error` only); PO `preview-pdf/route.ts` |
+| `purchase_order_short_closed` uses snake_case, unlike every other UPPER_SNAKE module tag; no `recordFailedEvent` call exists in that route at all | `app/api/v1/purchase-orders/[id]/close/route.ts` |
+| Zero backend instrumentation (no `logger.*`, no event calls) | BOM master — all of `app/api/v1/masters/recipe-master/route.ts`, `[id]/route.ts`, `export/route.ts`; every masters `export/route.ts` (one bare `console.error` only); PO `preview-pdf/route.ts` |
 | Zero frontend dialog instrumentation except one line | `SplitPODialog.tsx:131` is the only client-side console call in any create/edit/CSV-import dialog across all masters and PO pages |
 | A second, undocumented logging mechanism exists (Phase 0 finding) | `lib/query-timing.ts` + `QUERY_AUDIT_GUIDE.md` — `console.log`-based query-duration tracking on SKUs/Vendors/Raw-Materials pages, entirely separate from Winston |
 
@@ -979,15 +979,15 @@ All additive/low-risk items below were implemented directly in this pass (verifi
 
 | Fix | Where | Status |
 |---|---|---|
-| Two different `requestId`s generated within one request | `app/api/approvals/route.ts` | **Fixed** — one `requestId` generated at the top, reused in both the unauthenticated branch and `ctx`. |
-| `MFG_BULK` (raw) vs `MFG_S3BULK` (processed/failed) tag mismatch, same flow | `app/api/masters/manufacturers/route.ts` (`bulk_from_s3` branch) | **Fixed** — processed/failed events now tagged `MFG_BULK`, matching the raw event and the CSV-bulk branch; `source: "s3"` in the payload still distinguishes it from CSV. |
-| `purchase_order_short_closed` is snake_case; every other tag is UPPER_SNAKE; no `recordFailedEvent` in that file at all | `app/api/purchase-orders/[id]/close/route.ts` | **Fixed** — tag renamed to `PO_CLOSE` (raw + processed), the previously-unguarded logic wrapped in a `try/catch` with a new `recordFailedEvent` call. |
+| Two different `requestId`s generated within one request | `app/api/v1/approvals/route.ts` | **Fixed** — one `requestId` generated at the top, reused in both the unauthenticated branch and `ctx`. |
+| `MFG_BULK` (raw) vs `MFG_S3BULK` (processed/failed) tag mismatch, same flow | `app/api/v1/masters/manufacturers/route.ts` (`bulk_from_s3` branch) | **Fixed** — processed/failed events now tagged `MFG_BULK`, matching the raw event and the CSV-bulk branch; `source: "s3"` in the payload still distinguishes it from CSV. |
+| `purchase_order_short_closed` is snake_case; every other tag is UPPER_SNAKE; no `recordFailedEvent` in that file at all | `app/api/v1/purchase-orders/[id]/close/route.ts` | **Fixed** — tag renamed to `PO_CLOSE` (raw + processed), the previously-unguarded logic wrapped in a `try/catch` with a new `recordFailedEvent` call. |
 | Same conceptual action logged under two tag families depending on entry route | `material-master/route.ts` (`RM_CREATE`/`PM_CREATE`) vs `rm-handler.ts`/`pm-handler.ts` (`RM_MAT`/`PM`) | **Fixed** — `material-master/route.ts`'s create path (tag + `logCtx.module`) renamed to `RM_MAT`/`PM`, matching the dedicated pages' family. Left `RM_UPDATE`/`PM_UPDATE` untouched — those aren't duplicated anywhere else (base-record editing only ever happens on this route), so there's no second family to reconcile. |
-| Zero backend instrumentation on BOM, including the sibling-deactivation fan-out | `app/api/masters/bom-master/route.ts`, `lib/approvals/module-handlers.ts` BOM handler | **Fixed** — `route.ts` now logs/emits `BOM` raw/processed/failed events around the submit transaction; `bomHandler.applyAndArchive` now logs + emits a processed event on activation, and — the highest-value part — **one** log line + processed event **per sibling BOM** inside the deactivation loop (a new `selectOtherActiveBomsForSku` query reads the sibling ids before the bulk `UPDATE` runs, since MariaDB's `UPDATE` has no `RETURNING`). The `entry: "wizard"\|"panel"` tagging from the original checklist item 5 was **not** added — that needs a new field on the wizard/detail-panel's POST body, which is an API-contract change, not a backend-only logging fix; flagged as a follow-up, not silently dropped. |
-| Every export route has only a bare `console.error`, no success-path logging | All 6 `app/api/masters/*/export/route.ts` | **Fixed** — one `console.log` added to each, reporting row count + format (+ view/material label where relevant), matching the existing lightweight style of these routes rather than pulling in the full Winston logger for a one-line addition. |
-| PO Normal-create and Bulk-CSV log only on failure, no success path | `app/api/purchase-orders/route.ts` | **Fixed** — added `logger.info` success lines to all three branches (bulk-CSV, normal create, impromptu). Also found and fixed a related gap not in the original list: the impromptu-PO catch block had `recordFailedEvent` but no `logger.error` at all — added one for consistency with every other branch. |
-| PO re-edit failure has a `logger.error` but no paired `recordFailedEvent` | `app/api/purchase-orders/[id]/route.ts` | **Not a real gap — verified already correct.** Both `recordFailedEvent` (line 124) and `logger.error` (line 125) are already present in the current code. The original punch-list entry was stale; no change made. |
-| `preview-pdf/route.ts` has zero instrumentation, not even `console.error` | `app/api/purchase-orders/[id]/preview-pdf/route.ts` | **Fixed** — added `logger.info` at request start and on successful PDF generation, `logger.warn` on the two not-found branches, using the `ctx` already provided by `withGateway`. |
+| Zero backend instrumentation on BOM, including the sibling-deactivation fan-out | `app/api/v1/masters/recipe-master/route.ts`, `lib/approvals/module-handlers.ts` BOM handler | **Fixed** — `route.ts` now logs/emits `BOM` raw/processed/failed events around the submit transaction; `bomHandler.applyAndArchive` now logs + emits a processed event on activation, and — the highest-value part — **one** log line + processed event **per sibling BOM** inside the deactivation loop (a new `selectOtherActiveBomsForSku` query reads the sibling ids before the bulk `UPDATE` runs, since MariaDB's `UPDATE` has no `RETURNING`). The `entry: "wizard"\|"panel"` tagging from the original checklist item 5 was **not** added — that needs a new field on the wizard/detail-panel's POST body, which is an API-contract change, not a backend-only logging fix; flagged as a follow-up, not silently dropped. |
+| Every export route has only a bare `console.error`, no success-path logging | All 6 `app/api/v1/masters/*/export/route.ts` | **Fixed** — one `console.log` added to each, reporting row count + format (+ view/material label where relevant), matching the existing lightweight style of these routes rather than pulling in the full Winston logger for a one-line addition. |
+| PO Normal-create and Bulk-CSV log only on failure, no success path | `app/api/v1/purchase-orders/route.ts` | **Fixed** — added `logger.info` success lines to all three branches (bulk-CSV, normal create, impromptu). Also found and fixed a related gap not in the original list: the impromptu-PO catch block had `recordFailedEvent` but no `logger.error` at all — added one for consistency with every other branch. |
+| PO re-edit failure has a `logger.error` but no paired `recordFailedEvent` | `app/api/v1/purchase-orders/[id]/route.ts` | **Not a real gap — verified already correct.** Both `recordFailedEvent` (line 124) and `logger.error` (line 125) are already present in the current code. The original punch-list entry was stale; no change made. |
+| `preview-pdf/route.ts` has zero instrumentation, not even `console.error` | `app/api/v1/purchase-orders/[id]/preview-pdf/route.ts` | **Fixed** — added `logger.info` at request start and on successful PDF generation, `logger.warn` on the two not-found branches, using the `ctx` already provided by `withGateway`. |
 | `PO_BULK` double-logs the same bulk import to S3 under two different tags | `lib/events.ts` call sites — generic `APPROVAL` vs `PO_BULK` | **Not a bug — corrected finding.** Re-examined `lib/approvals/module-handlers.ts`: the generic `APPROVAL` raw/processed events record the fact "an approval was approved" (true for every module), while `PO_BULK`'s own events record the domain-specific fact "a PO bulk import was applied." These are two different, independently meaningful facts about the same approve action, not a duplicate of the same fact — the original framing overstated this as a bug. No change made. |
 
 **Deliberately not applied — this is not actually a quick fix:** migrating Raw Material, Packing Material, and the three `approvals/*` routes onto `withGateway`/`createRequestContext()`. `withGateway`'s wrapper returns `NextResponse.json({ data, requestId })` — every one of those routes today returns a flat, un-wrapped JSON body (`{ok, approval_id}`, arrays, etc.) that frontend code parses directly. Migrating the route without updating every caller would silently break those pages. This needs to be a coordinated route + frontend change, scoped and tested on its own — not something to fold into a punch-list pass.
@@ -1001,12 +1001,12 @@ The first pass of this report only spot-checked three narrow claims (route instr
 
 | Claim in the original docs | What's actually true | Where fixed |
 |---|---|---|
-| BOM route uses hand-rolled request context (implied by "zero instrumentation") | `app/api/masters/bom-master/route.ts` runs on **`withGateway`** with a real Zod schema (`bomActionSchema` in `lib/validation/bom.ts`) — auth, RBAC, request-id, and a completion log line all already exist at the request level, same tier as SKU | §5.3 BOM table note, §6.8, §7.3 |
+| BOM route uses hand-rolled request context (implied by "zero instrumentation") | `app/api/v1/masters/recipe-master/route.ts` runs on **`withGateway`** with a real Zod schema (`bomActionSchema` in `lib/validation/bom.ts`) — auth, RBAC, request-id, and a completion log line all already exist at the request level, same tier as SKU | §5.3 BOM table note, §6.8, §7.3 |
 | Zod validation is a SKU-only pilot | Zod now covers **two** routes: SKU and BOM | §1 tech stack line |
 | Actions are a generic "submit path" | Actual actions are `check-existing` (non-mutating dry-run) and `create-full` (the real submit, for both modes) | §5.3, §6.8 |
 | Diff is "flat `line:<rm\|pm>:<id>:<field>`" | Confirmed, plus two details not previously named: a `__mode__` sentinel item recording `new-version`/`update-existing`, and `__removed__` sentinel items per line dropped from an existing BOM | §5.3 |
 | "BOM has zero instrumentation" | True only for the **mutation** path (`route.ts`, `[id]/route.ts`, and the `BOM` handler in `module-handlers.ts` — confirmed, still zero `logger.*`/event calls anywhere in that path). **False** for reads: `page.tsx` has `[AUDIT]` page-load `console.log`s via `lib/query-timing.ts`'s `timedQuery`, matching SKU/Vendor/RM | §6.8, §7.3 |
-| (not mentioned at all) | A dedicated **BOM History page** exists (`app/masters/bom-master/history/`) — read-only, lists BOM headers with archived `history_bom` revisions, same page-load audit pattern as the main listing | §2, §6.8 |
+| (not mentioned at all) | A dedicated **BOM History page** exists (`app/masters/recipe-master/history/`) — read-only, lists BOM headers with archived `history_recipe` revisions, same page-load audit pattern as the main listing | §2, §6.8 |
 | Wizard mode | Confirmed accurate as originally stated: the wizard is *always* `new-version`; picking "Update Existing BOM" hands off to the detail panel's edit surface rather than submitting itself | no change needed |
 | `bomHandler.applyAndArchive` behavior (snapshot → delete → reinsert → activate → deactivate siblings) | Confirmed accurate as originally stated, including that it still has zero logging/eventing | no change needed |
 
@@ -1026,7 +1026,7 @@ For every event type in §5.3, where should it actually be written, for how long
 | `*.created` (SKU/Vendor/Mfg/RM/PM) | — | ✓ | optional | ✓ (once broker chosen) | ✓ (already happens) | later | Creates aren't disputed later — logs + the existing S3 archive are enough. No urgent need for a queryable audit table since the row itself is the record. |
 | `*.bulkImported` | — | ✓ | — | ✓ | ✓ (already happens) | later | Same reasoning as create, at batch granularity; `count`/`source` in the payload is enough context. |
 | `*.updateRequested` / `*.updated` / `*.rejected` for modules **without** a history table (Vendor, Mfg, RM_MAT, PM_MAT) | — | ✓ | **✓ — required** | ✓ | ✓ (already happens) | later | This is the one category where storage choice has real consequences: the `changes[]` payload is *currently the only place the prior value survives*. S3 JSON blobs are not queryable by "show me every change to vendor X" — a real `audit_log` table (or the missing history tables themselves) is the actual fix, not just picking a bucket. |
-| `*.updated` for modules **with** a history table (SKU→`sku_history`, RM_RATE→`history_mrm`, RM_VRM→`history_vrm`, BOM→`history_bom`) | — | ✓ | — (DB row is the audit trail) | ✓ | ✓ (already happens) | later | The history table already is durable, queryable audit storage. No new storage needed — just emit the event for downstream consumers (notifications, dashboards), don't duplicate the record. |
+| `*.updated` for modules **with** a history table (SKU→`sku_history`, RM_RATE→`history_cost_mfg`, RM_VRM→`history_cost_ven`, BOM→`history_recipe`) | — | ✓ | — (DB row is the audit trail) | ✓ | ✓ (already happens) | later | The history table already is durable, queryable audit storage. No new storage needed — just emit the event for downstream consumers (notifications, dashboards), don't duplicate the record. |
 | `approval.raised` / `.approved` / `.rejected` | — | ✓ | ✓ (the `approvals`/`approval_items` rows already are this) | ✓ | ✓ (already happens) | later | Already durable via the existing tables. Storage decision here is really "don't build a second audit trail" — reuse what exists. |
 | `bom.activated` / `bom.deactivated` (fan-out) | — | **✓ — currently missing, see §6.8/§8** | ✓ (recommend: log every sibling deactivation individually, not batched) | ✓ | ✓ (once instrumented) | later | Highest-priority gap in the whole catalog (§8, top risk). One approval can silently deactivate N BOMs today with zero record of which ones or why. |
 | `po.raised` / `.raisedDirect` / `.approved` / `.split` / `.statusChanged` / `.closed` | — | ✓ (mostly exists) | optional | ✓ | ✓ (already happens for most) | **yes — natural fit** | PO lifecycle data is the most likely near-term analytics candidate (turnaround time, split frequency, on-time receipt rate) once volume justifies a dashboard. |
@@ -1060,7 +1060,7 @@ Whether to close the "no history table" gap (Vendor, Mfg, RM_MAT, PM_MAT) by (a)
 - **Transaction-boundary rule is already correctly enforced** per `CLAUDE.md`: `beginTransaction`/`commit`/`rollback` only ever called in route handlers, never in `lib/approvals/module-handlers.ts`. This matters specifically because MariaDB implicitly commits an open transaction when a nested `BEGIN` runs — a real footgun avoided by discipline, not by a guard in code. No violation found in the modules reviewed for this report.
 - **Duplicate business logic across two entry points**: creating/updating a raw or packing material's base record works through *either* `raw-materials/rm-handler.ts` (tag `RM_MAT`/`RM_FULL`) *or* `material-master/route.ts` (tag `RM_CREATE`/`RM_UPDATE`) — same table, same conceptual action, two independently-maintained code paths that can drift out of sync with each other over time. This is a cohesion problem, not just a tagging problem — the tag mismatch (§8's punch list) is the symptom; the duplicate logic is the disease.
 - **Scalability ceiling, not yet hit:** the in-memory rate limiter (`lib/gateway/rate-limit.ts`, SKU pilot only) and the planned in-process `EventBus` (§3.5) both stop being correct the moment the app runs on more than one instance — both docs already flag this (§3.8's decision-trigger table), it's not new, but worth restating in one place: **today this is fine (single instance), but it is a real ceiling, not a hypothetical one**, once horizontal scaling is needed.
-- **No circular dependencies observed** between `lib/queries/*`, `lib/approvals/*`, and `app/api/*` in the files reviewed for this report.
+- **No circular dependencies observed** between `lib/queries/*`, `lib/approvals/*`, and `app/api/v1/*` in the files reviewed for this report.
 
 ### 11.2 Observability gaps (consolidated from §6/§7)
 

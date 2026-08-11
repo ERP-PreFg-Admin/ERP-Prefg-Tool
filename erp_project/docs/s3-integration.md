@@ -113,8 +113,8 @@ To add attachment support to another entity (e.g. invoices), add new queries her
 
 ---
 
-### `app/api/upload/route.ts`
-`POST /api/upload` — accepts `multipart/form-data`, uploads to the files bucket, returns `{ key }`.
+### `app/api/v1/upload/route.ts`
+`POST /api/v1/upload` — accepts `multipart/form-data`, uploads to the files bucket, returns `{ key }`.
 
 **Form fields:**
 
@@ -132,8 +132,8 @@ To add attachment support to another entity (e.g. invoices), add new queries her
 
 ---
 
-### `app/api/files/presign/route.ts`
-`GET /api/files/presign?key=...` — auth-gated, returns a 1-hour signed URL for viewing any file in the files bucket.
+### `app/api/v1/files/presign/route.ts`
+`GET /api/v1/files/presign?key=...` — auth-gated, returns a 1-hour signed URL for viewing any file in the files bucket.
 
 **Query param:** `key` — the S3 object key (e.g. `attachments/purchase-orders/42/attachment.pdf`)
 
@@ -165,7 +165,7 @@ import { FileUpload } from "@/components/ui/FileUpload"
 2. Uploading — progress bar with percentage (uses XHR for upload progress tracking)
 3. Has file — filename chip with View (opens presigned URL in new tab) and Remove buttons
 
-**View flow:** calls `GET /api/files/presign?key=...` → opens signed URL in new tab. No full URL is stored in the DB — only the key.
+**View flow:** calls `GET /api/v1/files/presign?key=...` → opens signed URL in new tab. No full URL is stored in the DB — only the key.
 
 ---
 
@@ -217,11 +217,11 @@ export type PoRow = {
 
 ---
 
-### `app/api/purchase-orders/[id]/route.ts`
+### `app/api/v1/purchase-orders/[id]/route.ts`
 Added a `PATCH` handler alongside the existing `PUT`:
 
 ```
-PATCH /api/purchase-orders/[id]
+PATCH /api/v1/purchase-orders/[id]
 Body: { attachment_key: string | null }
 ```
 
@@ -232,11 +232,11 @@ Body: { attachment_key: string | null }
 
 ---
 
-### `app/api/masters/vendors/route.ts`
+### `app/api/v1/masters/vendors/route.ts`
 Added `action: "bulk_from_s3"` handler:
 
 ```
-POST /api/masters/vendors
+POST /api/v1/masters/vendors
 Body: { action: "bulk_from_s3", key: "imports/vendors/file_1234.xlsx" }
 ```
 
@@ -247,7 +247,7 @@ To add this to another master route (manufacturers, SKUs, etc.), copy this handl
 ---
 
 ### `app/po-tracking/po-procurement/PoTable.tsx`
-- Added `AttachButton` inline component — a popover that renders `<FileUpload>` and calls `PATCH /api/purchase-orders/[id]` on change
+- Added `AttachButton` inline component — a popover that renders `<FileUpload>` and calls `PATCH /api/v1/purchase-orders/[id]` on change
 - Attach button is visible on POs with status: `raised`, `punched`, `partially_received`, `received`
 - Button turns green when an attachment exists
 
@@ -258,7 +258,7 @@ Extended to support `.xlsx` files:
 
 - File input now accepts both `.csv` and `.xlsx`
 - **CSV path** (unchanged): FileReader reads text client-side → `parseCSV()` → preview table → `action: "bulk"` JSON POST
-- **Excel path** (new): file uploads to S3 via `/api/upload` → key returned → `action: "bulk_from_s3"` POST → server parses via `parseS3Import`
+- **Excel path** (new): file uploads to S3 via `/api/v1/upload` → key returned → `action: "bulk_from_s3"` POST → server parses via `parseS3Import`
 - Excel files show "Excel file uploaded — ready to import" instead of a row preview (preview requires server-side parse)
 
 ---
@@ -286,13 +286,13 @@ New prefixes can be added at any time — no AWS Console changes required.
 
 1. Add `ALTER TABLE invoices ADD COLUMN attachment_key TEXT NULL;` and update `prisma/schema.prisma`
 2. Add queries to `lib/queries/s3-files.ts`: `updateInvoiceAttachment`, `getInvoiceAttachment`
-3. Add a `PATCH` handler to the invoice API route (copy the pattern from `app/api/purchase-orders/[id]/route.ts`)
+3. Add a `PATCH` handler to the invoice API route (copy the pattern from `app/api/v1/purchase-orders/[id]/route.ts`)
 4. Add `<FileUpload>` to the invoice UI component
 
 ### Add Excel import to another master route
 
 1. Add `import { parseS3Import } from "@/lib/import-s3"` to the route
-2. Copy the `action: "bulk_from_s3"` block from `app/api/masters/vendors/route.ts`
+2. Copy the `action: "bulk_from_s3"` block from `app/api/v1/masters/vendors/route.ts`
 3. Adjust the insert queries and column mapping for the entity
 
 ### Add event recording to an API route

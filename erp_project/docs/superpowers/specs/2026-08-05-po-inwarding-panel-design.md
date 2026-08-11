@@ -9,7 +9,7 @@
 FG PO Tracking lists purchase orders with a `received_qty` column, but there is no
 way to see *what* made up that number. An order showing 4,200 of 5,000 received
 gives no answer to "which invoices, which batches, when, and is anything missing a
-document". The information exists — `supplier_invoice_items` links every invoice
+document". The information exists — `invoice_items_mfg` links every invoice
 line to the order it was received against — but nothing in the UI reads it.
 
 `lib/queries/supplier-invoices.ts` already contains `selectByPoId`, written for
@@ -40,7 +40,7 @@ manual **Receive** dialog and the invoice inwarding flow in
 
 **There is no column that distinguishes a desk receipt from an invoice receipt.**
 
-Consequently, merging `supplier_invoice_items` with `history_pos` receipt rows
+Consequently, merging `invoice_items_mfg` with `history_pos` receipt rows
 would show every invoice-driven receipt **twice**. Correlating them on
 `(qty, timestamp proximity)` is a heuristic that mis-pairs whenever two receipts
 of the same quantity land on one day — silently, and in the direction that hides a
@@ -136,7 +136,7 @@ table does.
 
 Visual language follows `BomDetailPanel.tsx`: `Card` shell, `StatusBadge` /
 `STATUS_CONFIG` for the order status, mono for codes, `Badge` for `link_type`.
-The 📎 opens the invoice PDF through `/api/files/presign?key=…&view=1`, the same
+The 📎 opens the invoice PDF through `/api/v1/files/presign?key=…&view=1`, the same
 call `BomDetailPanel`'s `viewArtifact` makes.
 
 ---
@@ -145,7 +145,7 @@ call `BomDetailPanel`'s `viewArtifact` makes.
 
 | File | Change |
 |---|---|
-| `app/api/purchase-orders/[id]/inwarding/route.ts` | **new.** `withGateway` with `paramsSchema`, `access: { pageSlug: "/po-tracking", level: "viewer" }`, then `assertPoInScope(userId, poId)` before the query. |
+| `app/api/v1/purchase-orders/[id]/inwarding/route.ts` | **new.** `withGateway` with `paramsSchema`, `access: { pageSlug: "/po-tracking", level: "viewer" }`, then `assertPoInScope(userId, poId)` before the query. |
 | `app/po-tracking/po-procurement/InwardingPanel.tsx` | **new.** Read-only presentational panel. Props only — no fetching. |
 | `app/po-tracking/po-procurement/useInwardingPanel.ts` | **new.** URL sync + fetch + in-memory cache keyed by `poId`. The fetch half of `useBomDetailPanel`, without edit mode. |
 | `PoProcurementClient.tsx` | Wrap the table in the split-pane; mount `InwardingPanel`. |
@@ -183,7 +183,7 @@ place rather than being re-derived by any future consumer.
 `assertPoInScope` is **mandatory**, not optional. PO ids are sequential integers;
 `lib/po-guard.ts`'s header states the exact hole this closes — without it a user
 scoped to manufacturer 1 can read manufacturer 7's inwarding by guessing an id.
-Every existing `/api/purchase-orders/[id]/**` route calls it.
+Every existing `/api/v1/purchase-orders/[id]/**` route calls it.
 
 ## Error handling
 
@@ -200,7 +200,7 @@ Every existing `/api/purchase-orders/[id]/**` route calls it.
 No test framework exists in this repo, so verification is manual against real data.
 
 1. `npm run lint && npm run build` — both clean.
-2. Pick a PO with invoice-linked inwarding (join `supplier_invoice_items` on
+2. Pick a PO with invoice-linked inwarding (join `invoice_items_mfg` on
    `received_against_po_id`). Confirm the timeline lines match the invoice, and the
    header's Ordered/Received/Open matches the table row.
 3. Pick a PO received **only** through the manual Receive dialog. Confirm exactly
@@ -209,7 +209,7 @@ No test framework exists in this repo, so verification is manual against real da
 4. Pick a PO with both. Confirm `Σ(invoice qty) + derived = received_qty` exactly.
 5. Pick a PO with nothing received. Confirm "Nothing inwarded yet".
 6. Signed in as a user scoped to one manufacturer, request
-   `/api/purchase-orders/<other mfg's po id>/inwarding` directly. Must be `403`.
+   `/api/v1/purchase-orders/<other mfg's po id>/inwarding` directly. Must be `403`.
 7. Open a panel, copy the URL, reload. Same panel opens.
 8. Confirm the invoice 📎 opens the correct PDF, and that the bulk-select
    checkbox still works on a row whose PO number was just clicked.

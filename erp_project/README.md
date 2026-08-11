@@ -153,13 +153,13 @@ erp_project/
 - **Add Material dialog** — simple single-step form, no vendor/manufacturer steps
   - RM fields: Name\*, Make\*, INCI Name\*, Type, UOM, HSN Code, Status
   - PM fields: Name\*, Type\*, UOM, HSN Code, Status
-- Dedicated API route: `POST /api/masters/material-master`
+- Dedicated API route: `POST /api/v1/masters/material-master`
 
 ---
 
 ## API Routes
 
-### `POST /api/masters/raw-materials`
+### `POST /api/v1/masters/raw-materials`
 
 | `action` | Description |
 |---|---|
@@ -169,7 +169,7 @@ erp_project/
 | `create-full` | Full wizard submit — insert RM + upsert vendor rates + add mfg approvals (transaction) |
 | `bulk` | CSV bulk import |
 
-### `POST /api/masters/packing-materials`
+### `POST /api/v1/masters/packing-materials`
 
 | `action` | Description |
 |---|---|
@@ -179,7 +179,7 @@ erp_project/
 | `create-full` | Full wizard submit — insert PM + upsert vendor rates + mfg approvals (transaction) |
 | `bulk` | CSV bulk import |
 
-### `POST /api/masters/material-master`
+### `POST /api/v1/masters/material-master`
 
 | `action` | `material` | Description |
 |---|---|---|

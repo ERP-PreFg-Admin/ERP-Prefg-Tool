@@ -80,11 +80,11 @@ const rows = await query<Vendor>(vendors.selectPaginated, [...params])
 import { PrismaClient } from "@/app/generated/prisma"
 ```
 
-### Prisma model names ≠ actual MariaDB table names
+### Prisma model names ≠ actual table names
 
 The Prisma schema uses different model names than the actual tables the app queries. **Always check `lib/queries/*.ts` for the real table names.**
 
-| Prisma model | Actual MariaDB table |
+| Prisma model | Actual MySQL table |
 |---|---|
 | `skus` | `master_skus` |
 | `vendors` | `master_vendors` |
@@ -94,9 +94,55 @@ The Prisma schema uses different model names than the actual tables the app quer
 | `rm` | `master_rm` |
 | `pm` | `master_pm` |
 
+> `prisma/schema.prisma` still carries the **pre-rename** model names for the
+> tables below. It is schema-only and unused at runtime, so nothing breaks —
+> but don't read it as the source of truth for a table name.
+
+### The 2026-08 schema rename
+
+The database was renamed underneath the app. Every query, type and route now uses
+the right-hand column; the old names do not exist any more.
+
+| Old | New |
+|---|---|
+| `master_bom` | `master_recipe` |
+| `master_bom_mfg` | `master_recipe_mfg` |
+| `details_bom` | `details_recipe` |
+| `history_bom` | `history_recipe` |
+| `bom_artifacts` | `artifacts_recipe` |
+| `rm_mrm_fixed` / `pm_mrm_fixed` | `cost_master_rm_mfg` / `cost_master_pm_mfg` |
+| `rm_vrm_dynamic` / `pm_vrm_dynamic` | `cost_master_rm_ven` / `cost_master_pm_ven` |
+| `history_mrm` / `history_vrm` | `history_cost_mfg` / `history_cost_ven` |
+| `supplier_invoices` / `supplier_invoice_items` | `invoice_mfg` / `invoice_items_mfg` |
+| `sku_details` | `details_sku` |
+
+**Columns moved too, but only some.** `bom_id` became `recipe_id` on
+`purchase_orders`, `details_recipe`, `history_recipe`, `master_recipe_mfg` and
+`artifacts_recipe`. These four deliberately **kept** their old names — a blanket
+`bom` → `recipe` replace breaks them:
+
+```
+master_recipe.bom_code        master_skus.active_bom_id
+details_sku.curr_bom_id       details_cost_ext_fixed.bom_detail_id
+```
+
+**`BOM` is still the module code.** `approvals.module` stores `'BOM'` and
+`'BOM_BULK'` for existing rows, so `MODULE_HANDLERS`, `MODULE_LABEL`,
+`MODULE_COLOR` and `entityLabelSql` are all keyed on `BOM`. Only the *label*
+users read became "Recipe". Renaming the code needs a matching
+`UPDATE approvals SET module = …` or those rows stop resolving to a handler.
+
+> ⚠️ **`bom_misc` was never renamed** — it still carries its old name *and* its
+> old `bom_id` column, and that is now deliberate. Every SELECT on it must
+> therefore alias `bom_id AS recipe_id`, because all the TS row types and every
+> caller key on `recipe_id`. `query<T>`/`timedQuery<T>` are unchecked casts, so a
+> bare `bom_id` compiles, type-checks, lints — and then reads back `undefined`,
+> which silently zeroed JW/Shrink/Shipper/Wastage on Agreed Final Costing and in
+> the PO rate quote.
+
 ### ENUM columns
 
-Status columns are `ENUM` in MariaDB. Inserting an unknown value **silently fails** (or errors in strict mode) and rolls back the transaction. When adding a new status value (e.g. `in_review`, `draft`) you must:
+Status columns are `ENUM` in MySQL. Inserting an unknown value **silently fails** (or errors in strict mode) and rolls back the transaction. When adding a new status value (e.g. `in_review`, `draft`) you must:
 
 1. `ALTER TABLE <table> MODIFY COLUMN status ENUM('active', 'inactive', 'in_review', 'draft') DEFAULT 'active';`
 2. Update the matching enum in `prisma/schema.prisma` to stay in sync.
@@ -124,7 +170,7 @@ Edits to master records go through a structured approval workflow instead of wri
 
 ### Reference implementation
 
-`app/api/masters/skus/route.ts` → `update` action is the canonical pattern to copy.
+`app/api/v1/masters/skus/route.ts` → `update` action is the canonical pattern to copy.
 
 ```ts
 // Approval submission pattern (copy this exactly)
@@ -160,21 +206,22 @@ try {
 | Module code | Entity | Tables touched by applyAndArchive |
 |---|---|---|
 | `SKU` | SKU master | `master_skus` (audit trail: `history_masters_edits`, module=`SKU` — not `sku_history`, which is legacy/unused) |
-| `RM_RATE` | RM × Mfg rate | `rm_mrm_fixed` + `history_mrm` |
-| `PM_RATE` | PM × Mfg rate | `pm_mrm_fixed` + `history_mrm` |
-| `RM_VRM` | RM × Vendor rate | `rm_vrm_dynamic` + `history_vrm` |
-| `PM_VRM` | PM × Vendor rate | `pm_vrm_dynamic` + `history_vrm` |
+| `RM_RATE` | RM × Mfg rate | `cost_master_rm_mfg` + `history_cost_mfg` |
+| `PM_RATE` | PM × Mfg rate | `cost_master_pm_mfg` + `history_cost_mfg` |
+| `RM_VRM` | RM × Vendor rate | `cost_master_rm_ven` + `history_cost_ven` |
+| `PM_VRM` | PM × Vendor rate | `cost_master_pm_ven` + `history_cost_ven` |
 | `RM_MAT` | RM base record | `master_rm` |
 | `PM_MAT` | PM base record | `master_pm` |
 | `VENDOR` | Vendor master | `master_vendors` + `details_vendor` |
 | `MFG` | Manufacturer master | `master_mfgs` + `details_mfg` |
 | `PO` | Purchase Order (impromptu) | `purchase_orders` — status → `raised`; triggers email send on approval |
-| `BOM` | BOM / Recipe master | `master_bom` + `details_bom` (+ `history_bom` snapshot) |
-| `*_BULK` | One approval per uploaded CSV file | `PO_BULK`, `VENDOR_BULK`, `MFG_BULK`, `RM_BULK`, `PM_BULK`, `RM_VRM_BULK`, `RM_RATE_BULK`, `PM_VRM_BULK`, `PM_RATE_BULK`, `BOM_BULK` — the file is staged in S3 and inserted row-by-row in `applyAndArchive` on approval |
+| `BOM` | Recipe master (module code stays `BOM`) | `master_recipe` + `details_recipe` (+ `history_recipe` snapshot) |
+| `MFG_MISC` | Per-SKU JW / Shrink Wrap / Shipper / Wastage % | `bom_misc`. **New lines are INSERTed straight away as `in_review`** rather than staged — there is no prior row to lock. Safe because every costing query filters `status = 'active'`, so an `in_review` row prices nothing. Approve flips it to the submitted status (default `active`); reject sets `rejected`. |
+| `*_BULK` | One approval per uploaded CSV file | `PO_BULK`, `VENDOR_BULK`, `MFG_BULK`, `RM_BULK`, `PM_BULK`, `RM_VRM_BULK`, `RM_RATE_BULK`, `PM_VRM_BULK`, `PM_RATE_BULK`, `BOM_BULK`, `MFG_MISC_BULK` — the file is staged in S3 and inserted row-by-row in `applyAndArchive` on approval. `entity_id` is the uploader's user id, except `MFG_MISC_BULK` which passes the **manufacturer** (`stageBulkUploadApproval`'s optional `entityId`), since the handler needs it to resolve each row's `sku_code` |
 
 **Bulk uploads split by row kind.** `lib/master-routes/edit-match.ts` matches a CSV row to an existing record by **exact business-code match** (`code`, `rm_code`, `pm_code`); no code ⇒ new record. New-record rows go into the one `*_BULK` approval; rows recognised as edits are submitted **immediately as their own single-entity approval** (`RM_MAT`, `MFG`, …) so they get a real field-level diff and lock the entity to `in_review`.
 
-**Master edits require `remarks`.** SKU, vendor, manufacturer and material-master update schemas carry `remarks: z.string().trim().min(1)`, archived to `history_masters_edits.remarks`. Rate edits archive `remarks` + `changed_by` to `history_vrm` / `history_mrm`.
+**Master edits require `remarks`.** SKU, vendor, manufacturer and material-master update schemas carry `remarks: z.string().trim().min(1)`, archived to `history_masters_edits.remarks`. Rate edits archive `remarks` + `changed_by` to `history_cost_ven` / `history_cost_mfg`.
 
 **Invoice inwarding** (`/po-tracking/po-inwarding` → Add Invoice) does **not** go through the approval flow — it commits directly through `lib/invoice-inward.ts`. See `docs/po-inwarding.md`.
 
@@ -191,9 +238,26 @@ export interface ModuleHandler {
 }
 ```
 
-To add a new module: add one object to `MODULE_HANDLERS` in that file. The route handler at `app/api/approvals/[id]/route.ts` picks it up automatically.
+To add a new module: add one object to `MODULE_HANDLERS` in that file. The route handler at `app/api/v1/approvals/[id]/route.ts` picks it up automatically.
 
 **Transaction rule:** Both methods receive an already-open `PoolConnection`. They must **not** call `beginTransaction`, `commit`, or `rollback` — that is the route handler's responsibility.
+
+---
+
+## Shared Table Primitives
+
+Built during the 2026-08 work; prefer these over hand-rolling a table.
+
+| Component | Use |
+|---|---|
+| `components/masters/DataTable.tsx` | The masters table: sortable headers + body generated from one `ColumnDef[]`, so the two can't drift. Exports `useTableSort` and the `ColumnDef` / `AnyRow` types. Used by Material Master and both Cost Masters. |
+| `components/ui/empty-state.tsx` | Two shapes, both live: `EmptyState` (copy only — caller owns the row) and `TableEmpty` (whole `<TableRow>` + optional action). |
+| `components/ui/scroll-fade.tsx` | Scroll container that keeps the scrollbar hidden but draws an edge fade + chevron while there is more content — the scrollbar is otherwise the only "there is more" cue. |
+| `components/ui/sortable-table-head.tsx` | `SortableTableHead` / `StaticTableHead`. `overflow-hidden` on the head is load-bearing: under `table-layout: fixed` a long label otherwise paints over its neighbour. |
+
+`DataTable` sets a computed `min-width` (declared column widths + 140px per
+flexible column). Without it, `table-fixed` + `w-full` squeezes columns toward
+zero on zoom instead of letting the container scroll.
 
 ---
 
@@ -226,7 +290,7 @@ Dialogs for entities that go through the approval flow must handle three states:
 |---|---|---|
 | Normal | `active` / `inactive` / etc. | Fields editable, button says "Submit for Approval" |
 | Locked | `in_review` | Blue banner shown, all fields disabled, Save button hidden |
-| Rejected | `rejected` | Amber banner with rejection reason (fetched from `/api/approvals/entity?module=X&entity_id=Y`), fields editable only by original submitter |
+| Rejected | `rejected` | Amber banner with rejection reason (fetched from `/api/v1/approvals/entity?module=X&entity_id=Y`), fields editable only by original submitter |
 
 Reference implementations: `app/masters/vendors/EditVendorDialog.tsx`, `app/masters/manufacturers/EditMfgDialog.tsx`.
 
@@ -253,20 +317,20 @@ This eliminates `any` type noise and gives full IntelliSense on `conn.execute`, 
 | `lib/queries/activity.ts` | `activity_log` insert + the `/admin > Activity` UNION feed (with `session_history`) |
 | `lib/queries/approvals.ts` | Approval workflow — insert, select, hasPending |
 | `lib/queries/auth.ts` | Authentication — sessions, session history |
-| `lib/queries/bom.ts` | BOM master — BOM, bom_details, bom_misc |
+| `lib/queries/recipe.ts` | Recipe master — `master_recipe`, `details_recipe`, `artifacts_recipe` (was `bom.ts`) |
 | `lib/queries/entity-emails.ts` | Mail recipients per vendor / mfg / **warehouse** |
 | `lib/queries/entity-scope.ts` | `user_entity_scope` + the admin picker's entity lists |
 | `lib/queries/history.ts` | Generic per-module audit trail — `history_masters_edits` |
 | `lib/queries/manufacturers.ts` | Manufacturer master — master_mfgs + details_mfg |
 | `lib/queries/manufacturing.ts` | MFG Cost Manager — lines, misc costs, costing inputs |
-| `lib/queries/packing-materials.ts` | PM master — master_pm, pm_mrm_fixed, pm_vrm_dynamic |
+| `lib/queries/packing-materials.ts` | PM master — master_pm, cost_master_pm_mfg, cost_master_pm_ven |
 | `lib/queries/permissions.ts` | Page access — page_permissions, user_page_permissions |
 | `lib/queries/purchase-orders.ts` | Purchase orders — full CRUD, split, receive, email, PDF, bulk CSV, scope predicates |
-| `lib/queries/raw-materials.ts` | RM master — master_rm, rm_mrm_fixed, rm_vrm_dynamic |
+| `lib/queries/raw-materials.ts` | RM master — master_rm, cost_master_rm_mfg, cost_master_rm_ven |
 | `lib/queries/s3-files.ts` | S3 attachment operations — attachment_key on purchase_orders |
-| `lib/queries/sku-details.ts` | `sku_details` — fill weight, current BOM |
+| `lib/queries/sku-details.ts` | **Not** the `details_sku` table — reads `mcaff_dwh.All_Product_Name_MRP_Mapping` via `queryDwh` (`lib/db-sku.ts`). Filename is historical. |
 | `lib/queries/skus.ts` | SKU master — master_skus, sku_history |
-| `lib/queries/supplier-invoices.ts` | `supplier_invoices` + `supplier_invoice_items` |
+| `lib/queries/supplier-invoices.ts` | `invoice_mfg` + `invoice_items_mfg` — list/detail/export, scoped by mfg + destination |
 | `lib/queries/users.ts` | User administration — `users` + `user_roles` (the only writes to `users`) |
 | `lib/queries/vendors.ts` | Vendor master — master_vendors + details_vendor |
 
@@ -278,10 +342,10 @@ This eliminates `any` type noise and gives full IntelliSense on `conn.execute`, 
 |-----------|---------|
 | `app/admin/` | Admin panel — Users · Permissions · Data Access · Activity. Guarded once in `layout.tsx`; `authority.ts` mirrors `resolveAccess` for display |
 | `app/approvals/` | Approval queue — list, review, approve/reject. Grouped into New / Edits / Bulk Uploads per module; `approval-card/` holds the card + per-shape diff renderers |
-| `app/masters/` | All master data pages (SKU, RM, PM, BOM, Vendor, Mfg) |
+| `app/masters/` | All master data pages (SKU, RM, PM, **Recipe**, Vendor, Mfg). Recipe lives at `recipe-master/` and the slug is `/masters/recipe-master` — renamed from `bom-master`, with the matching `page_permissions` row migrated. |
 | `app/manufacturing/` | MFG Cost Manager — `[mfgId]` has 7 tabs (SKUs, Misc. Cost, Approved Procurement Rates, Agreed Rates, Agreed Final Costing, + 2 placeholders) |
 | `app/inventory/` | Inventory tracking |
-| `app/po-tracking/` | Purchase order tracking — incl. `po-inwarding/` (goods receipt + Add Invoice) |
+| `app/po-tracking/` | Purchase order tracking — `po-procurement/` (FG POs), `po-inwarding/` (goods receipt + Add Invoice), and `invoices/` (every supplier invoice with its lines; shares `InvoiceGroupTable` with the inwarding desk's history dialog) |
 | `app/finance/` | Finance module |
 | `app/sales-crm/` | Sales CRM |
 | `app/hr-payroll/` | HR & Payroll |
@@ -293,27 +357,41 @@ This eliminates `any` type noise and gives full IntelliSense on `conn.execute`, 
 
 ## API Routes
 
+**Everything lives under `/api/v1/`** as of 2026-08-07 — except two routes that
+external systems point at by URL and therefore could not move:
+
+| Stays unversioned | Why |
+|---|---|
+| `/api/auth/[...nextauth]` | the redirect URI registered in Google Cloud Console |
+| `/api/health` | the ALB target-group health-check path (`deploy/setup-commands.md`) |
+
+A new major version is a sibling directory (`app/api/v2/...`), not a rewrite of
+v1. **Outbound** URLs are not ours to version: `lib/nanonets/endpoints.ts` calls
+Nanonets' own `/api/v2/`, and a repo-wide find-replace on `"/api/"` once rewrote
+it to `/api/v1/v2/` — a 404 that compiled, linted and type-checked.
+`tests/unit/nanonets-endpoints.test.ts` now pins it.
+
 | Route | Purpose |
 |-------|---------|
-| `app/api/masters/skus/` | SKU CRUD + export |
-| `app/api/masters/raw-materials/` | RM CRUD + export |
-| `app/api/masters/packing-materials/` | PM CRUD + export |
-| `app/api/masters/material-master/` | Combined RM/PM view + export |
-| `app/api/masters/vendors/` | Vendor CRUD + export |
-| `app/api/masters/manufacturers/` | Manufacturer CRUD + export |
-| `app/api/masters/bom-master/` | BOM CRUD + export (no approval flow) |
-| `app/api/approvals/route.ts` | List pending approvals |
-| `app/api/approvals/[id]/route.ts` | Approve / reject handler |
-| `app/api/approvals/entity/route.ts` | GET rejection info for edit dialogs |
-| `app/api/admin/users/route.ts` | User administration — POST create, PATCH update (no DELETE; deactivate instead) |
-| `app/api/admin/permissions/route.ts` | Role page grants — GET / POST / DELETE (DELETE = "inherit") |
-| `app/api/admin/user-permissions/route.ts` | Per-user page permission overrides |
-| `app/api/admin/entity-scope/route.ts` | PUT — replaces one `(user, entity_type)` data-scope set |
-| `app/api/purchase-orders/invoice/parse/route.ts` | Multipart PDF → Nanonets extraction (50–70 s; `maxDuration = 300`) |
-| `app/api/purchase-orders/invoice/route.ts` | GET invoice history · POST commit (NDJSON step stream, always HTTP 200) |
-| `app/api/purchase-orders/invoice/[id]/route.ts` | One invoice + its lines + the POs each resolved to |
-| `app/api/purchase-orders/open-for-receive/route.ts` | Open POs for the per-line Reference PO picker |
-| `app/api/files/preview/route.ts` | Server-side parse of a bulk-upload CSV/Excel → `{ headers, rows }` for the approval CSV preview |
+| `app/api/v1/masters/skus/` | SKU CRUD + export |
+| `app/api/v1/masters/raw-materials/` | RM CRUD + export |
+| `app/api/v1/masters/packing-materials/` | PM CRUD + export |
+| `app/api/v1/masters/material-master/` | Combined RM/PM view + export |
+| `app/api/v1/masters/vendors/` | Vendor CRUD + export |
+| `app/api/v1/masters/manufacturers/` | Manufacturer CRUD + export |
+| `app/api/v1/masters/recipe-master/` | Recipe CRUD + export — **does** use the approval flow (module code `BOM`) |
+| `app/api/v1/approvals/route.ts` | List pending approvals |
+| `app/api/v1/approvals/[id]/route.ts` | Approve / reject handler |
+| `app/api/v1/approvals/entity/route.ts` | GET rejection info for edit dialogs |
+| `app/api/v1/admin/users/route.ts` | User administration — POST create, PATCH update (no DELETE; deactivate instead) |
+| `app/api/v1/admin/permissions/route.ts` | Role page grants — GET / POST / DELETE (DELETE = "inherit") |
+| `app/api/v1/admin/user-permissions/route.ts` | Per-user page permission overrides |
+| `app/api/v1/admin/entity-scope/route.ts` | PUT — replaces one `(user, entity_type)` data-scope set |
+| `app/api/v1/purchase-orders/invoice/parse/route.ts` | Multipart PDF → Nanonets extraction (50–70 s; `maxDuration = 300`) |
+| `app/api/v1/purchase-orders/invoice/route.ts` | GET invoice history · POST commit (NDJSON step stream, always HTTP 200) |
+| `app/api/v1/purchase-orders/invoice/[id]/route.ts` | One invoice + its lines + the POs each resolved to |
+| `app/api/v1/purchase-orders/open-for-receive/route.ts` | Open POs for the per-line Reference PO picker |
+| `app/api/v1/files/preview/route.ts` | Server-side parse of a bulk-upload CSV/Excel → `{ headers, rows }` for the approval CSV preview |
 | `app/api/auth/[...nextauth]/route.ts` | NextAuth — Google OAuth |
 
 **All routes go through `withGateway`** (`lib/gateway/with-gateway.ts`): session → `access: { pageSlug, level }` → Zod → handler, error shape `{ error, code, details?, requestId }`, plus an `activity_log` row on every non-GET. Throw `ApiError(status, code, message)` for user-facing failures.
@@ -333,7 +411,7 @@ This eliminates `any` type noise and gives full IntelliSense on `conn.execute`, 
 | `lib/pages.ts` | Canonical permission-controlled page slugs — the admin grid, sidebar locks and breadcrumbs all read this |
 | `lib/roles.ts` | The declared role taxonomy: `developer`, `admin`, and `{rm,pm,production,cost}_{head,lead,executive}`. Nothing branches on a role name — a role's only power is its `page_permissions` rows |
 | `lib/scope.ts` | Per-user entity scope. **Absence of rows = UNRESTRICTED.** `scopeClause`/`scopeParams` need `query()` (array expansion), `assertInScope` for anything addressed by id |
-| `lib/po-guard.ts` | `assertPoInScope` — required by every `/api/purchase-orders/[id]/**` route |
+| `lib/po-guard.ts` | `assertPoInScope` — required by every `/api/v1/purchase-orders/[id]/**` route |
 | `lib/admin-guards.ts` | `assertNotSelfLockout` / `assertNotSelfScope` — no UI recovery path exists for either |
 | `lib/gateway/with-gateway.ts` | The route wrapper (auth, access, Zod, logging, `activity_log`) |
 | `lib/invoice-inward.ts` | Supplier invoice → inward POs: S3 → DB → Uniware → email, ordered least-reversible-last |
@@ -342,8 +420,8 @@ This eliminates `any` type noise and gives full IntelliSense on `conn.execute`, 
 | `lib/queries/` | SQL strings grouped by domain (see table above) |
 | `lib/approvals/module-handlers.ts` | Strategy pattern — approval logic per module |
 | `lib/master-routes/edit-match.ts` | "Is this CSV row an edit?" — exact business-code match only |
-| `app/api/approvals/[id]/route.ts` | Approve / reject handler (uses MODULE_HANDLERS) |
-| `app/api/approvals/entity/route.ts` | GET rejection info for edit dialogs |
+| `app/api/v1/approvals/[id]/route.ts` | Approve / reject handler (uses MODULE_HANDLERS) |
+| `app/api/v1/approvals/entity/route.ts` | GET rejection info for edit dialogs |
 | `types/masters.ts` | Row types for all master entities (Sku, Mfg, Vendor, RM, PM, BOM) |
 | `docs/architecture.md` | Full architecture, data-flow diagrams, directory map |
 | `docs/admin-and-data-scoping.md` | Admin panel, role taxonomy, per-user entity scope, activity trail |

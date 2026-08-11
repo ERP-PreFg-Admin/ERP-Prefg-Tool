@@ -61,3 +61,8 @@ logs/*
 !/scripts/_check-*.ts
 !/scripts/seed-permissions.ts
 !/scripts/test-connection.js
+
+# Extracted invoice text and parsed output, written by the invoice-parser checks
+# in tests/. These are real supplier documents carrying rates and quantities —
+# committing them puts customer pricing in git history permanently.
+/.invoice-samples/

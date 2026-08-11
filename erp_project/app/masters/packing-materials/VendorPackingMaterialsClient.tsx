@@ -24,16 +24,16 @@ const vrmStatusBadge = (row: AnyRow) => <StatusBadge status={row.status as strin
 function buildVendorColumns(vendors: Vendor[]): ColumnDef[] {
   const nameByVendorId = new Map(vendors.map((v) => [v.vendor_id, v.name]))
   return [
-  { key: "pm_code",        label: "PM Code",        sortAs: "text", width: "100px", className: "font-mono text-xs font-medium" },
+  { key: "pm_code",        label: "PM Code",        sortAs: "text", width: "120px", className: "font-mono text-xs font-medium" },
   { key: "name",           label: "Name",           sortAs: "text", className: "font-medium", render: (r) => <TruncatedCell value={r.name} label="Name" /> },
   { key: "type",           label: "Type",           sortAs: "text", width: "100px" },
   { key: "vendor_code",    label: "Vendor",         sortAs: "text", render: (r) => nameByVendorId.get(r.vendor_id as number) ?? (r.vendor_code as string | null) ?? "—" },
-  { key: "curr_rate",      label: "Current Rate",   sortAs: "num",  width: "100px", render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
-  { key: "moq",            label: "MOQ",            sortAs: "num",  width: "80px", render: (r) => r.moq != null ? String(Math.round(Number(r.moq))) : "—" },
-  { key: "uom",            label: "UOM",            sortAs: "text", width: "70px", className: "uppercase text-xs text-muted-foreground" },
+  { key: "curr_rate",      label: "Current Rate",   sortAs: "num",  width: "145px", render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
+  { key: "moq",            label: "MOQ",            sortAs: "num",  width: "90px", render: (r) => r.moq != null ? String(Math.round(Number(r.moq))) : "—" },
+  { key: "uom",            label: "UOM",            sortAs: "text", width: "90px", className: "uppercase text-xs text-muted-foreground" },
   { key: "status",         label: "Status",         sortAs: "text", width: "100px", render: vrmStatusBadge },
-  { key: "effective_from", label: "Effective From", sortAs: "date", width: "110px", render: (r) => fmtDate(r.effective_from) },
-  { key: "effective_to",   label: "Effective To",   sortAs: "date", width: "110px", render: (r) => fmtDate(r.effective_to) },
+  { key: "effective_from", label: "Effective From", sortAs: "date", width: "155px", render: (r) => fmtDate(r.effective_from) },
+  { key: "effective_to",   label: "Effective To",   sortAs: "date", width: "155px", optional: true, render: (r) => fmtDate(r.effective_to) },
   ]
 }
 

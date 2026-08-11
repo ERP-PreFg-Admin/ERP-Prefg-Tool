@@ -1,5 +1,12 @@
 # API Reference
 
+> **All routes are under `/api/v1/`** since 2026-08-07. Two are deliberately
+> unversioned because external systems address them by URL:
+> `/api/auth/[...nextauth]` (the Google Cloud Console redirect URI) and
+> `/api/health` (the ALB health-check path). A future major version is a
+> sibling `app/api/v2/` directory, not a rewrite of v1.
+
+
 > **Related docs:** [Authentication & Permissions](./authentication-and-permissions.md) · [Masters Module](./masters-module.md) · [Architecture Evolution](./architecture-evolution.md)
 
 ## Design Pattern (Current Implementation)
@@ -13,17 +20,17 @@ All mutation endpoints follow this pattern:
 
 > **`withGateway()` + Zod is now the standard**, not a plan. Every route is wrapped by `lib/gateway/with-gateway.ts`, which resolves the session, enforces an `access: { pageSlug, level }` rule, validates the body/params with Zod, stamps a request context, logs the request, and writes the `activity_log` row for every non-GET. Error shape on this layer is `{ error, code, details?, requestId }`; auth/access failures return `401`/`403` automatically, schema failures `400`. Throw `ApiError(status, code, message)` for anything that should reach the user.
 >
-> **Entity scope is not part of `access`.** A route that addresses one record by id must additionally call `assertInScope(scope, "mfg" | "vendor" | "warehouse", id)` — or `assertPoInScope(userId, poId)` for purchase orders. Ids are sequential integers, so a scoped user could otherwise reach another manufacturer's record by guessing. Routes carrying a scope guard today: every `/api/purchase-orders/**`, every `/api/manufacturing/**`, and the vendor/manufacturer/RM/PM export and history routes. See [Admin Panel & Data Scoping](./admin-and-data-scoping.md).
+> **Entity scope is not part of `access`.** A route that addresses one record by id must additionally call `assertInScope(scope, "mfg" | "vendor" | "warehouse", id)` — or `assertPoInScope(userId, poId)` for purchase orders. Ids are sequential integers, so a scoped user could otherwise reach another manufacturer's record by guessing. Routes carrying a scope guard today: every `/api/v1/purchase-orders/**`, every `/api/v1/manufacturing/**`, and the vendor/manufacturer/RM/PM export and history routes. See [Admin Panel & Data Scoping](./admin-and-data-scoping.md).
 >
-> **Master edits require `remarks`.** SKU, vendor, manufacturer and material-master update schemas all carry `remarks: z.string().trim().min(1)` — the reason is archived to `history_masters_edits.remarks` and shown in the record's history dialog and on the approval card. Rate edits archive `remarks` + `changed_by` to `history_vrm` / `history_mrm`.
+> **Master edits require `remarks`.** SKU, vendor, manufacturer and material-master update schemas all carry `remarks: z.string().trim().min(1)` — the reason is archived to `history_masters_edits.remarks` and shown in the record's history dialog and on the approval card. Rate edits archive `remarks` + `changed_by` to `history_cost_ven` / `history_cost_mfg`.
 
 ---
 
 ## Masters Endpoints
 
-### `POST /api/masters/skus`
+### `POST /api/v1/masters/skus`
 
-**File:** `app/api/masters/skus/route.ts`
+**File:** `app/api/v1/masters/skus/route.ts`
 
 #### action: `"create"` — Create a single SKU
 
@@ -80,9 +87,9 @@ Duplicate `sku_code` values are skipped (counted in `skipped`), not errored.
 
 ---
 
-### `POST /api/masters/vendors`
+### `POST /api/v1/masters/vendors`
 
-**File:** `app/api/masters/vendors/route.ts`
+**File:** `app/api/v1/masters/vendors/route.ts`
 
 #### action: `"create"` — Create a single vendor
 
@@ -157,14 +164,14 @@ Process: Transaction — UPDATE `master_vendors`, then UPDATE `vendor_details`.
 
 ---
 
-### `GET /api/masters/vendors/history`
+### `GET /api/v1/masters/vendors/history`
 
-**File:** `app/api/masters/vendors/history/route.ts`
+**File:** `app/api/v1/masters/vendors/history/route.ts`
 
 Full audit trail (create/edit + approve/reject resolution) for one vendor from `history_masters_edits`, newest first. Backs the "Edit History" dialog on the vendors table.
 
 ```
-GET /api/masters/vendors/history?vendor_id=12
+GET /api/v1/masters/vendors/history?vendor_id=12
 ```
 
 ```json
@@ -177,9 +184,9 @@ GET /api/masters/vendors/history?vendor_id=12
 
 ---
 
-### `POST /api/masters/manufacturers`
+### `POST /api/v1/masters/manufacturers`
 
-**File:** `app/api/masters/manufacturers/route.ts`
+**File:** `app/api/v1/masters/manufacturers/route.ts`
 
 #### action: `"create"`
 
@@ -239,14 +246,14 @@ Process: Transaction — UPDATE `master_mfgs`, then UPDATE `mfg_details`.
 
 ---
 
-### `GET /api/masters/manufacturers/history`
+### `GET /api/v1/masters/manufacturers/history`
 
-**File:** `app/api/masters/manufacturers/history/route.ts`
+**File:** `app/api/v1/masters/manufacturers/history/route.ts`
 
-Same shape as `GET /api/masters/vendors/history`, keyed by `mfg_id`.
+Same shape as `GET /api/v1/masters/vendors/history`, keyed by `mfg_id`.
 
 ```
-GET /api/masters/manufacturers/history?mfg_id=5
+GET /api/v1/masters/manufacturers/history?mfg_id=5
 ```
 
 ```json
@@ -259,9 +266,9 @@ GET /api/masters/manufacturers/history?mfg_id=5
 
 ---
 
-### `POST /api/masters/raw-materials`
+### `POST /api/v1/masters/raw-materials`
 
-**File:** `app/api/masters/raw-materials/route.ts`
+**File:** `app/api/v1/masters/raw-materials/route.ts`
 
 This is the most complex master route with five actions.
 
@@ -354,8 +361,8 @@ This is the primary create path. Runs in a **single transaction**.
 
 Process:
 1. INSERT into `master_rm`
-2. For each vendor: if a rate already exists → archive old row to `vrm_history` + `history_vrm`, then UPDATE `rm_vrm_dynamic`; otherwise INSERT new row
-3. For each manufacturer: if a rate already exists → archive old row to `history_mrm`, then UPDATE `rm_mrm_fixed`; otherwise INSERT new row
+2. For each vendor: if a rate already exists → archive old row to `vrm_history` + `history_cost_ven`, then UPDATE `cost_master_rm_ven`; otherwise INSERT new row
+3. For each manufacturer: if a rate already exists → archive old row to `history_cost_mfg`, then UPDATE `cost_master_rm_mfg`; otherwise INSERT new row
 
 ```json
 // Response 200
@@ -416,15 +423,15 @@ At least one of `vendors` or `manufacturers` must be non-empty. Each entry is up
 
 ---
 
-### `GET /api/masters/raw-materials/mrm-history` · `GET /api/masters/raw-materials/vrm-history`
+### `GET /api/v1/masters/raw-materials/mrm-history` · `GET /api/v1/masters/raw-materials/vrm-history`
 
-**Files:** `app/api/masters/raw-materials/mrm-history/route.ts`, `.../vrm-history/route.ts`
+**Files:** `app/api/v1/masters/raw-materials/mrm-history/route.ts`, `.../vrm-history/route.ts`
 
-Full rate-change history for one RM×Manufacturer (`history_mrm`) or RM×Vendor (`history_vrm`) pair, newest first. Backs the "Rate History" dialog on the RM Rate Master.
+Full rate-change history for one RM×Manufacturer (`history_cost_mfg`) or RM×Vendor (`history_cost_ven`) pair, newest first. Backs the "Rate History" dialog on the RM Rate Master.
 
 ```
-GET /api/masters/raw-materials/mrm-history?rm_id=1&mfg_id=2
-GET /api/masters/raw-materials/vrm-history?rm_id=1&vendor_id=2
+GET /api/v1/masters/raw-materials/mrm-history?rm_id=1&mfg_id=2
+GET /api/v1/masters/raw-materials/vrm-history?rm_id=1&vendor_id=2
 ```
 
 ```json
@@ -437,11 +444,11 @@ GET /api/masters/raw-materials/vrm-history?rm_id=1&vendor_id=2
 
 ---
 
-### `POST /api/masters/raw-materials/mrm-bulk` · `POST /api/masters/raw-materials/vrm-bulk`
+### `POST /api/v1/masters/raw-materials/mrm-bulk` · `POST /api/v1/masters/raw-materials/vrm-bulk`
 
-**Files:** `app/api/masters/raw-materials/mrm-bulk/route.ts`, `.../vrm-bulk/route.ts`
+**Files:** `app/api/v1/masters/raw-materials/mrm-bulk/route.ts`, `.../vrm-bulk/route.ts`
 
-Bulk CSV upload for RM × Manufacturer rates (`mrm-bulk`, module `RM_RATE_BULK`) and RM × Vendor rates (`vrm-bulk`, module `RM_VRM_BULK`). Separate endpoints from `POST /api/masters/raw-materials` so `CsvImportDialog`'s fixed `"bulk"` / `"check_duplicates"` action names don't collide with that route's own (unrelated) base-material bulk upload.
+Bulk CSV upload for RM × Manufacturer rates (`mrm-bulk`, module `RM_RATE_BULK`) and RM × Vendor rates (`vrm-bulk`, module `RM_VRM_BULK`). Separate endpoints from `POST /api/v1/masters/raw-materials` so `CsvImportDialog`'s fixed `"bulk"` / `"check_duplicates"` action names don't collide with that route's own (unrelated) base-material bulk upload.
 
 #### action: `"check_duplicates"` — CSV preview-time validation
 
@@ -474,9 +481,9 @@ Process: uploads rows as CSV to S3 (`imports/rm-mrm-bulk/YYYY-MM/...` or `import
 
 ---
 
-### `POST /api/masters/packing-materials`
+### `POST /api/v1/masters/packing-materials`
 
-**File:** `app/api/masters/packing-materials/route.ts`
+**File:** `app/api/v1/masters/packing-materials/route.ts`
 
 #### action: `"check-PM"` — Duplicate check before wizard
 
@@ -533,8 +540,8 @@ Runs in a **single transaction**.
 
 Process:
 1. INSERT into `master_pm`
-2. For each vendor: if a rate already exists → archive old row to `history_vrm` (via `archiveVendorRate`), then UPDATE `pm_vrm_dynamic`; otherwise INSERT new row
-3. For each manufacturer: if a rate already exists → archive old row to `history_mrm`, then UPDATE `pm_mrm_fixed`; otherwise INSERT new row
+2. For each vendor: if a rate already exists → archive old row to `history_cost_ven` (via `archiveVendorRate`), then UPDATE `cost_master_pm_ven`; otherwise INSERT new row
+3. For each manufacturer: if a rate already exists → archive old row to `history_cost_mfg`, then UPDATE `cost_master_pm_mfg`; otherwise INSERT new row
 
 ```json
 {
@@ -612,15 +619,15 @@ If `pm_id` is omitted, falls back to looking up the PM by `name + type` (same as
 
 ---
 
-### `GET /api/masters/packing-materials/mrm-history` · `GET /api/masters/packing-materials/vrm-history`
+### `GET /api/v1/masters/packing-materials/mrm-history` · `GET /api/v1/masters/packing-materials/vrm-history`
 
-**Files:** `app/api/masters/packing-materials/mrm-history/route.ts`, `.../vrm-history/route.ts`
+**Files:** `app/api/v1/masters/packing-materials/mrm-history/route.ts`, `.../vrm-history/route.ts`
 
 Same shape as the RM history endpoints above, keyed by `pm_id` instead of `rm_id`.
 
 ```
-GET /api/masters/packing-materials/mrm-history?pm_id=1&mfg_id=2
-GET /api/masters/packing-materials/vrm-history?pm_id=1&vendor_id=2
+GET /api/v1/masters/packing-materials/mrm-history?pm_id=1&mfg_id=2
+GET /api/v1/masters/packing-materials/vrm-history?pm_id=1&vendor_id=2
 ```
 
 ```json
@@ -633,9 +640,9 @@ GET /api/masters/packing-materials/vrm-history?pm_id=1&vendor_id=2
 
 ---
 
-### `POST /api/masters/packing-materials/mrm-bulk` · `POST /api/masters/packing-materials/vrm-bulk`
+### `POST /api/v1/masters/packing-materials/mrm-bulk` · `POST /api/v1/masters/packing-materials/vrm-bulk`
 
-**Files:** `app/api/masters/packing-materials/mrm-bulk/route.ts`, `.../vrm-bulk/route.ts`
+**Files:** `app/api/v1/masters/packing-materials/mrm-bulk/route.ts`, `.../vrm-bulk/route.ts`
 
 Same `"check_duplicates"` / `"bulk"` action pair and staged-approval behaviour as the RM bulk rate endpoints above (modules `PM_RATE_BULK` / `PM_VRM_BULK`), keyed by `pm_code` instead of `rm_code`. `mrm-bulk` does not check an `approved_vendor_code` column (PM manufacturer rates have no vendor-approval field).
 
@@ -653,9 +660,9 @@ Same `"check_duplicates"` / `"bulk"` action pair and staged-approval behaviour a
 
 ---
 
-### `POST /api/masters/material-master`
+### `POST /api/v1/masters/material-master`
 
-**File:** `app/api/masters/material-master/route.ts`
+**File:** `app/api/v1/masters/material-master/route.ts`
 
 Unified endpoint for the Material Master page. Inserts a base material record only — no vendor or manufacturer rate rows. The `material` field determines which table is written to.
 
@@ -719,11 +726,11 @@ Unified endpoint for the Material Master page. Inserts a base material record on
 
 ---
 
-### `POST /api/masters/bom-master`
+### `POST /api/v1/masters/recipe-master`
 
-**File:** `app/api/masters/bom-master/route.ts`
+**File:** `app/api/v1/masters/recipe-master/route.ts`
 
-> Rewritten (commit `449b4a0`) to go through the approval flow and support bulk CSV upload. The old `action: "create"` / `"bulk"` pair (direct insert, no approval, and a `mfg_id`/`sku_code` shape that didn't match the real `master_bom`/`details_bom` schema) no longer exists. Uses `withGateway` — see the note in [Design Pattern](#design-pattern-current-implementation).
+> Rewritten (commit `449b4a0`) to go through the approval flow and support bulk CSV upload. The old `action: "create"` / `"bulk"` pair (direct insert, no approval, and a `mfg_id`/`sku_code` shape that didn't match the real `master_recipe`/`details_recipe` schema) no longer exists. Uses `withGateway` — see the note in [Design Pattern](#design-pattern-current-implementation).
 
 Backs the BOM creation wizard (`BomCreationWizard.tsx`). Five actions:
 
@@ -735,12 +742,12 @@ Backs the BOM creation wizard (`BomCreationWizard.tsx`). Five actions:
 
 ```json
 // Response 200
-{ "hasActive": true, "bom_id": 31, "bom_code": "BOM001", "bom_count": 2 }
+{ "hasActive": true, "recipe_id": 31, "bom_code": "BOM001", "bom_count": 2 }
 ```
 
 #### action: `"create-full"` — Single atomic submit (manual entry or CSV step)
 
-Handles both `"new-version"` and `"update-existing"` modes. Runs in a **transaction**: inserts/locks the `master_bom` header (status → `in_review`) and raises one `BOM` approval encoding the full RM/PM line diff plus any staged artifact add/remove as `approval_items`. `details_bom` and `bom_artifacts` are only written when the approval is approved (see `bomHandler.applyAndArchive` in `lib/approvals/module-handlers.ts`).
+Handles both `"new-version"` and `"update-existing"` modes. Runs in a **transaction**: inserts/locks the `master_recipe` header (status → `in_review`) and raises one `BOM` approval encoding the full RM/PM line diff plus any staged artifact add/remove as `approval_items`. `details_recipe` and `artifacts_recipe` are only written when the approval is approved (see `bomHandler.applyAndArchive` in `lib/approvals/module-handlers.ts`).
 
 ```json
 {
@@ -757,11 +764,11 @@ Handles both `"new-version"` and `"update-existing"` modes. Runs in a **transact
 }
 ```
 
-For `"update-existing"`, pass `bom_id` instead of `bom_code`/`effective_from`; the diff is computed against the BOM's current lines instead of "nothing".
+For `"update-existing"`, pass `recipe_id` instead of `bom_code`/`effective_from`; the diff is computed against the BOM's current lines instead of "nothing".
 
 ```json
 // Response 200
-{ "ok": true, "bom_id": 31, "approval_id": 57 }
+{ "ok": true, "recipe_id": 31, "approval_id": 57 }
 
 // 400 — sku_id mismatch on update-existing
 { "error": "This BOM does not belong to the selected SKU." }
@@ -775,7 +782,7 @@ For `"update-existing"`, pass `bom_id` instead of `bom_code`/`effective_from`; t
 Used by the Edit BOM dialog. Blocked only while an approval is already pending for this BOM. Setting `status: "active"` also discontinues any other active BOM for the same SKU (same invariant `bomHandler.applyAndArchive` enforces on approval).
 
 ```json
-{ "action": "update-status", "bom_id": 31, "status": "active" }
+{ "action": "update-status", "recipe_id": 31, "status": "active" }
 ```
 
 ```json
@@ -805,7 +812,7 @@ Reused by `CsvImportDialog` before the bulk submit is allowed. Re-runs the same 
 { "action": "bulk", "rows": [...] }
 ```
 
-Process: uploads the rows as a CSV to S3 (`imports/bom-bulk/YYYY-MM/...`) and stages ONE `BOM_BULK` approval referencing that file. Nothing is inserted into `master_bom`/`details_bom` here — the real per-SKU grouping, validation, and insert happens in `BOM_BULK`'s `applyAndArchive` once an admin approves.
+Process: uploads the rows as a CSV to S3 (`imports/bom-bulk/YYYY-MM/...`) and stages ONE `BOM_BULK` approval referencing that file. Nothing is inserted into `master_recipe`/`details_recipe` here — the real per-SKU grouping, validation, and insert happens in `BOM_BULK`'s `applyAndArchive` once an admin approves.
 
 ```json
 // Response 200
@@ -816,13 +823,13 @@ Process: uploads the rows as a CSV to S3 (`imports/bom-bulk/YYYY-MM/...`) and st
 
 ## Purchase Orders
 
-All PO routes are under `app/api/purchase-orders/`.
+All PO routes are under `app/api/v1/purchase-orders/`.
 
 ---
 
-### `GET /api/purchase-orders`
+### `GET /api/v1/purchase-orders`
 
-**File:** `app/api/purchase-orders/route.ts`
+**File:** `app/api/v1/purchase-orders/route.ts`
 
 Returns all purchase orders joined with manufacturer name, SKU name, and email.
 
@@ -841,9 +848,9 @@ Returns all purchase orders joined with manufacturer name, SKU name, and email.
 
 ---
 
-### `POST /api/purchase-orders`
+### `POST /api/v1/purchase-orders`
 
-**File:** `app/api/purchase-orders/route.ts`
+**File:** `app/api/v1/purchase-orders/route.ts`
 
 Handles three modes via the body's `action` or `po_type` field.
 
@@ -911,7 +918,7 @@ Process: inserts PO as `draft`, creates an `approvals` record with `approval_ite
 | Field | Required | Notes |
 |-------|----------|-------|
 | `action` | Yes | `"bulk_csv"` |
-| `key` | Yes | S3 object key returned by `POST /api/upload` |
+| `key` | Yes | S3 object key returned by `POST /api/v1/upload` |
 | `filename` | Yes | Original filename (shown in the approval diff) |
 
 Process: saves the S3 key + filename as `approval_items` under module `PO_BULK`. When an approver approves the record, the server fetches the file, parses each row, and inserts POs directly as `raised`. No individual PO approval records are created.
@@ -935,9 +942,9 @@ Process: saves the S3 key + filename as `approval_items` under module `PO_BULK`.
 
 ---
 
-### `PATCH /api/purchase-orders/[id]`
+### `PATCH /api/v1/purchase-orders/[id]`
 
-**File:** `app/api/purchase-orders/[id]/route.ts`
+**File:** `app/api/v1/purchase-orders/[id]/route.ts`
 
 Update the S3 attachment key on a PO. If a previous key exists it is deleted from S3 before the new one is saved.
 
@@ -955,9 +962,9 @@ Update the S3 attachment key on a PO. If a previous key exists it is deleted fro
 
 ---
 
-### `POST /api/purchase-orders/[id]/split`
+### `POST /api/v1/purchase-orders/[id]/split`
 
-**File:** `app/api/purchase-orders/[id]/split/route.ts`
+**File:** `app/api/v1/purchase-orders/[id]/split/route.ts`
 
 > Reworked (commit `3ae9bc5`). Now uses `withGateway` (see [Design Pattern](#design-pattern-current-implementation)); only 1 split row is required (previously 2), the parent's `qty`/`total_amount` is now reduced by the split total instead of `received_qty` being credited, and the response no longer includes `split_type`.
 
@@ -1001,9 +1008,9 @@ Child PO statuses mirror the parent: `draft` parent → `draft` children; any ot
 
 ---
 
-### `POST /api/purchase-orders/[id]/receive`
+### `POST /api/v1/purchase-orders/[id]/receive`
 
-**File:** `app/api/purchase-orders/[id]/receive/route.ts` (new)
+**File:** `app/api/v1/purchase-orders/[id]/receive/route.ts` (new)
 
 Record a manual goods receipt against a PO. Credits `qty` to `received_qty` and auto-marks the PO `received` once the remainder falls within tolerance (`min(100, 10% of qty)` — same rule the old Split flow used). Receivable statuses: `raised`, `punched`, `partially_received`. Row-locks the PO for the duration of the transaction so two concurrent receipts on the same PO serialize instead of racing on a stale `received_qty`.
 
@@ -1029,23 +1036,23 @@ Record a manual goods receipt against a PO. Credits `qty` to `received_qty` and 
 
 ---
 
-### `GET /api/purchase-orders/[id]/preview-pdf`
+### `GET /api/v1/purchase-orders/[id]/preview-pdf`
 
 Streams the generated PO PDF inline so the user can review it in a new browser tab before sending the email. No DB changes.
 
 ```
-GET /api/purchase-orders/42/preview-pdf
+GET /api/v1/purchase-orders/42/preview-pdf
 ```
 
 **Response:** `Content-Type: application/pdf` byte stream.
 
 ---
 
-### `POST /api/purchase-orders/[id]/cancel`
+### `POST /api/v1/purchase-orders/[id]/cancel`
 
-**File:** `app/api/purchase-orders/[id]/cancel/route.ts`
+**File:** `app/api/v1/purchase-orders/[id]/cancel/route.ts`
 
-> Changed: now uses `withGateway`, accepts an optional `reason`, and **no longer sends an email**. Notifying the manufacturer is a separate, explicit step — select the (now-cancelled) PO in the PO Procurement table's checkbox selection and use "Review & Send Mail" (`POST /api/purchase-orders/send-mail`).
+> Changed: now uses `withGateway`, accepts an optional `reason`, and **no longer sends an email**. Notifying the manufacturer is a separate, explicit step — select the (now-cancelled) PO in the PO Procurement table's checkbox selection and use "Review & Send Mail" (`POST /api/v1/purchase-orders/send-mail`).
 
 Fully cancel a PO — distinct from Short Close, which accepts partial fulfillment as final. Cancellable statuses: `raised`, `punched`, `partially_received`.
 
@@ -1068,9 +1075,9 @@ Fully cancel a PO — distinct from Short Close, which accepts partial fulfillme
 
 ---
 
-### `POST /api/purchase-orders/send-mail`
+### `POST /api/v1/purchase-orders/send-mail`
 
-**File:** `app/api/purchase-orders/send-mail/route.ts` (new — replaces the removed `POST /api/purchase-orders/[id]/send-email`)
+**File:** `app/api/v1/purchase-orders/send-mail/route.ts` (new — replaces the removed `POST /api/v1/purchase-orders/[id]/send-email`)
 
 Consolidated notification send from the PO Procurement table's checkbox selection: pick any set of POs (any status, any manufacturer), group them by manufacturer, and send **one email per manufacturer** (`sendMfgSelectionEmail` in `lib/mailer.ts`) listing all the selected POs for that manufacturer. Not gated by approval and does not mutate any PO's status — it only notifies; status changes (raise/split/cancel) already happened through their own flows before this step.
 
@@ -1094,14 +1101,14 @@ Note: the endpoint always returns `200` with `ok: true` — check each entry's `
 
 ---
 
-### `GET /api/purchase-orders/export`
+### `GET /api/v1/purchase-orders/export`
 
-**File:** `app/api/purchase-orders/export/route.ts` (new)
+**File:** `app/api/v1/purchase-orders/export/route.ts` (new)
 
 Exports every PO matching the PO Procurement page's current filters/search/sort as CSV or Excel — same `WHERE` clause and columns as `PoTable.tsx`, just unpaginated.
 
 ```
-GET /api/purchase-orders/export?format=csv&status=raised&mfgCode=MFG003&sortBy=date&sortDir=desc
+GET /api/v1/purchase-orders/export?format=csv&status=raised&mfgCode=MFG003&sortBy=date&sortDir=desc
 ```
 
 | Query param | Required | Notes |
@@ -1126,14 +1133,14 @@ GET /api/purchase-orders/export?format=csv&status=raised&mfgCode=MFG003&sortBy=d
 
 ---
 
-### `GET /api/purchase-orders/history`
+### `GET /api/v1/purchase-orders/history`
 
-**File:** `app/api/purchase-orders/history/route.ts` (new)
+**File:** `app/api/v1/purchase-orders/history/route.ts` (new)
 
 Returns the `history_pos` audit trail for one PO — every create/update the PO bulk CSV flow recorded against it — newest first. Shown from `PoTable`'s Actions menu via `PoHistoryDialog.tsx`.
 
 ```
-GET /api/purchase-orders/history?po_id=42
+GET /api/v1/purchase-orders/history?po_id=42
 ```
 
 ```json
@@ -1146,14 +1153,14 @@ GET /api/purchase-orders/history?po_id=42
 
 ---
 
-### `GET /api/purchase-orders/mfg-skus`
+### `GET /api/v1/purchase-orders/mfg-skus`
 
-**File:** `app/api/purchase-orders/mfg-skus/route.ts` (new)
+**File:** `app/api/v1/purchase-orders/mfg-skus/route.ts` (new)
 
 Active SKUs one manufacturer currently produces — populates the "Add PO" dialog's SKU rows once a manufacturer is picked (`AddPODialog.tsx`).
 
 ```
-GET /api/purchase-orders/mfg-skus?mfg_id=3
+GET /api/v1/purchase-orders/mfg-skus?mfg_id=3
 ```
 
 ```json
@@ -1165,9 +1172,9 @@ GET /api/purchase-orders/mfg-skus?mfg_id=3
 
 ## Manufacturing Endpoints
 
-### `POST /api/manufacturing/misc-costs`
+### `POST /api/v1/manufacturing/misc-costs`
 
-**File:** `app/api/manufacturing/misc-costs/route.ts`
+**File:** `app/api/v1/manufacturing/misc-costs/route.ts`
 
 Create, update, or bulk-import a `bom_misc` line — a manufacturer's per-SKU Job Work / Shrink Wrap / Shipper / Wastage cost. No approval flow.
 
@@ -1176,7 +1183,7 @@ Create, update, or bulk-import a `bom_misc` line — a manufacturer's per-SKU Jo
 ```json
 {
   "action": "create-misc",
-  "bom_id": 31,
+  "recipe_id": 31,
   "mfg_id": 3,
   "type": "job_work",
   "cost": 12.5,
@@ -1210,7 +1217,7 @@ Create, update, or bulk-import a `bom_misc` line — a manufacturer's per-SKU Jo
 Requires a `mfg_id` query param — every `bom_misc` row belongs to one manufacturer, which the page already knows, so it's passed once instead of per row.
 
 ```
-POST /api/manufacturing/misc-costs?mfg_id=3
+POST /api/v1/manufacturing/misc-costs?mfg_id=3
 ```
 ```json
 { "action": "bulk", "rows": [ { "sku_code": "SKU001", "type": "job_work", "cost": "12.5", "effective_from": "2026-01-01", "effective_till": "", "status": "active" } ] }
@@ -1230,18 +1237,18 @@ Each row is resolved to a `bom_misc` line via `sku_code` + `mfg_id`; rows with a
 
 ### Cost-master export endpoints
 
-**Files:** `app/api/manufacturing/[mfgId]/agreed-rates/export/route.ts`, `.../approved-rates/export/route.ts`, `.../approved-rates/history/export/route.ts`, `.../misc-costs/export/route.ts`, `.../final-costing/export/route.ts`, `.../final-costing/detailed-export/route.ts`, `.../lines/export/route.ts`
+**Files:** `app/api/v1/manufacturing/[mfgId]/agreed-rates/export/route.ts`, `.../approved-rates/export/route.ts`, `.../approved-rates/history/export/route.ts`, `.../misc-costs/export/route.ts`, `.../final-costing/export/route.ts`, `.../final-costing/detailed-export/route.ts`, `.../lines/export/route.ts`
 
 Export the manufacturer cost-master tabs (Agreed Rates, Approved Procurement Rates, Approved Rates history, Misc. Costs, Agreed Final Costing, manufacturing lines) as CSV or Excel — same rows/queries as the corresponding client component, so the export always matches what's on screen.
 
 ```
-GET /api/manufacturing/3/agreed-rates/export?mode=rm&format=csv
-GET /api/manufacturing/3/approved-rates/export?mode=pm&format=xlsx
-GET /api/manufacturing/3/approved-rates/history/export?mode=rm&format=csv
-GET /api/manufacturing/3/misc-costs/export?format=xlsx
-GET /api/manufacturing/3/final-costing/export?format=csv
-GET /api/manufacturing/3/final-costing/detailed-export?format=xlsx
-GET /api/manufacturing/3/lines/export?format=csv
+GET /api/v1/manufacturing/3/agreed-rates/export?mode=rm&format=csv
+GET /api/v1/manufacturing/3/approved-rates/export?mode=pm&format=xlsx
+GET /api/v1/manufacturing/3/approved-rates/history/export?mode=rm&format=csv
+GET /api/v1/manufacturing/3/misc-costs/export?format=xlsx
+GET /api/v1/manufacturing/3/final-costing/export?format=csv
+GET /api/v1/manufacturing/3/final-costing/detailed-export?format=xlsx
+GET /api/v1/manufacturing/3/lines/export?format=csv
 ```
 
 | Query param | Required | Notes |
@@ -1259,14 +1266,14 @@ GET /api/manufacturing/3/lines/export?format=csv
 
 ## Utility Endpoints
 
-### `GET /api/google-sheet`
+### `GET /api/v1/google-sheet`
 
-**File:** `app/api/google-sheet/route.ts`
+**File:** `app/api/v1/google-sheet/route.ts`
 
 Fetches a publicly shared Google Sheet as CSV and returns it as an array of objects.
 
 ```
-GET /api/google-sheet?url=https://docs.google.com/spreadsheets/d/SHEET_ID/edit#gid=0
+GET /api/v1/google-sheet?url=https://docs.google.com/spreadsheets/d/SHEET_ID/edit#gid=0
 ```
 
 | Query param | Required | Description |
@@ -1304,7 +1311,7 @@ Gated on the **`/admin` page slug** (`viewer` to read, `editor` to write) rather
 
 Reads for the admin screens happen **server-side** in each tab's `page.tsx` (like masters pages). These routes are mutations, plus the two permission reads the grid needs.
 
-### `POST /api/admin/users`
+### `POST /api/v1/admin/users`
 
 Create a user. Inserts `users` + one `user_roles` row per role in one transaction.
 
@@ -1322,7 +1329,7 @@ Create a user. Inserts `users` + one `user_roles` row per role in one transactio
 - **Nothing is emailed.** The row *is* the whitelist — `lib/auth.ts`' `signIn` callback matches on `email` + `status`, so the person can sign in with Google as soon as it exists. The email is lowercased on insert because `signIn` looks it up verbatim.
 - `roles` is validated with `z.enum(ROLE_KEYS)` from `lib/roles.ts` and de-duplicated. Free text is rejected: the old version let a typo in the dialog create a permanent phantom role.
 
-### `PATCH /api/admin/users`
+### `PATCH /api/v1/admin/users`
 
 Update `name` / `status` and replace the user's roles wholesale. `404` if the id doesn't exist.
 
@@ -1330,9 +1337,9 @@ Update `name` / `status` and replace the user's roles wholesale. `404` if the id
 { "id": 31, "name": "Asha Rao", "status": "inactive", "roles": ["rm_lead", "cost_executive"] }
 ```
 
-**There is deliberately no `DELETE`** — `users.id` is referenced by `approvals`, `sessions`, `session_history`, `master_*` and `supplier_invoices`. Deactivation is `status = 'inactive'`, which `signIn` already refuses.
+**There is deliberately no `DELETE`** — `users.id` is referenced by `approvals`, `sessions`, `session_history`, `master_*` and `invoice_mfg`. Deactivation is `status = 'inactive'`, which `signIn` already refuses.
 
-### `GET /api/admin/permissions`
+### `GET /api/v1/admin/permissions`
 
 Returns all role-page permission entries.
 
@@ -1344,7 +1351,7 @@ Returns all role-page permission entries.
 ]
 ```
 
-### `POST /api/admin/permissions`
+### `POST /api/v1/admin/permissions`
 
 Upsert a role-page grant. Uses `ON DUPLICATE KEY UPDATE` — safe to call multiple times. `role` must be a key from `lib/roles.ts` (it used to be free text that this route didn't even lowercase, so a POST could create a row no user string would ever match, silently granting nothing).
 
@@ -1359,7 +1366,7 @@ Upsert a role-page grant. Uses `ON DUPLICATE KEY UPDATE` — safe to call multip
 { "error": "That change would remove your own access to Administration. Ask another admin to make it.", "code": "self_lockout", ... }
 ```
 
-### `DELETE /api/admin/permissions`
+### `DELETE /api/v1/admin/permissions`
 
 Removes the grant so the slug **inherits from its parent** again. This is what the admin UI's "Inherit" option sends — an explicit `access_level: 'none'` row would instead *stop* the parent walk, which is a different and stronger statement.
 
@@ -1371,7 +1378,7 @@ Removes the grant so the slug **inherits from its parent** again. This is what t
 { "ok": true }
 ```
 
-### `GET /api/admin/user-permissions?user_id=<id>`
+### `GET /api/v1/admin/user-permissions?user_id=<id>`
 
 Returns user-specific permission overrides. Omitting `user_id` returns all overrides.
 
@@ -1382,7 +1389,7 @@ Returns user-specific permission overrides. Omitting `user_id` returns all overr
 ]
 ```
 
-### `POST /api/admin/user-permissions`
+### `POST /api/v1/admin/user-permissions`
 
 Upsert a user-specific permission override.
 
@@ -1394,7 +1401,7 @@ Upsert a user-specific permission override.
 { "id": 3, "user_id": 12, "page_slug": "/finance", "access_level": "editor" }
 ```
 
-### `DELETE /api/admin/user-permissions`
+### `DELETE /api/v1/admin/user-permissions`
 
 Remove a user-specific override (restoring role-based access for that page).
 
@@ -1406,7 +1413,7 @@ Remove a user-specific override (restoring role-based access for that page).
 { "ok": true }
 ```
 
-### `PUT /api/admin/entity-scope`
+### `PUT /api/v1/admin/entity-scope`
 
 Replaces **one** `(user_id, entity_type)` scope set in a transaction. The other two entity types are untouched, so the UI can save one section at a time.
 
@@ -1432,7 +1439,7 @@ Replaces **one** `(user_id, entity_type)` scope set in a transaction. The other 
 
 Full flow documented in [PO Inwarding](./po-inwarding.md).
 
-### `POST /api/purchase-orders/invoice/parse`
+### `POST /api/v1/purchase-orders/invoice/parse`
 
 Multipart (`file`) → parse a supplier-invoice PDF with Nanonets and return the fields for review. Nothing is stored: the PDF is not written to S3 here, so an abandoned review leaves no orphaned object.
 
@@ -1443,7 +1450,7 @@ Multipart (`file`) → parse a supplier-invoice PDF with Nanonets and return the
 
 `400` empty / non-PDF / over the 10 MB cap · `422 unparseable` when nothing usable came back · `502 parse_failed` on an extractor error. `runtime = "nodejs"`, `maxDuration = 300` — extraction measures **50–70 s** on a one-page invoice.
 
-### `POST /api/purchase-orders/invoice`
+### `POST /api/v1/purchase-orders/invoice`
 
 Multipart (`file` = the PDF, `payload` = the reviewed invoice as JSON, validated with `invoiceInwardSchema`). Commits the whole sequence and answers with **newline-delimited JSON step events** (`application/x-ndjson`) rather than one body:
 
@@ -1457,19 +1464,19 @@ Multipart (`file` = the PDF, `payload` = the reviewed invoice as JSON, validated
 
 **The status is always `200` once streaming starts** — headers are on the wire before a later step can fail, so failure travels as an event (`outcome.ok = false`, `outcome.failedStep`), not a status code. Pre-flight failures (`400 sku_not_found`, `400 sku_not_active`, duplicate `(mfg_id, invoice_no)`) are also delivered as the terminal event.
 
-### `GET /api/purchase-orders/invoice`
+### `GET /api/v1/purchase-orders/invoice`
 
 Invoice history list. `?limit` (clamped 1–100, default 25) `&offset`. Returns `{ invoices, total, limit, offset }`.
 
-### `GET /api/purchase-orders/invoice/[id]`
+### `GET /api/v1/purchase-orders/invoice/[id]`
 
 One invoice: header, its line items, and the POs each line resolved to — both the inward PO it raised and the order it was received against. `404` if unknown.
 
-### `GET /api/purchase-orders/open-for-receive?mfg_id=`
+### `GET /api/v1/purchase-orders/open-for-receive?mfg_id=`
 
 Open POs (`raised` / `partially_received`) for one manufacturer, for the Add Invoice dialog's per-line **Reference PO** picker. Entity-scope checked. An unparseable/missing `mfg_id` returns `{ pos: [] }` rather than a `400` — the dialog calls it before a manufacturer has been picked.
 
-### `GET /api/files/preview?key=`
+### `GET /api/v1/files/preview?key=`
 
 Parses a bulk-upload CSV/Excel file **server-side** (the same `parseS3Import` the bulk-approval import uses) and returns `{ headers, rows }`, so approvers see the file as a table instead of a raw download. Rejects keys containing `..`.
 

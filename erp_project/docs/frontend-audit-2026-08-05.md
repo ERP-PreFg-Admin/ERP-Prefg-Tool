@@ -48,13 +48,13 @@ In a data-heavy ERP the top-bar search is the highest-affordance element on scre
 
 That is not what the code does:
 
-- `app/api/masters/bom-master/route.ts:133` — checks `approvalsSql.hasPending` for `"BOM"`
-- `app/api/masters/bom-master/route.ts:157` — inserts a `BOM` approval record
+- `app/api/v1/masters/recipe-master/route.ts:133` — checks `approvalsSql.hasPending` for `"BOM"`
+- `app/api/v1/masters/recipe-master/route.ts:157` — inserts a `BOM` approval record
 - `lib/approvals/module-handlers.ts:51-52` — registers `BOM` and `BOM_BULK` handlers
 
 Someone editing a recipe will believe the change is live while it's actually sitting in the approvals queue.
 
-The same stale claim is in **`CLAUDE.md`** (API Routes table: *"bom-master/ — BOM CRUD + export (no approval flow)"*), which contradicts its own Registered Modules table two sections earlier. Agents read that file, so it needs fixing too.
+The same stale claim is in **`CLAUDE.md`** (API Routes table: *"recipe-master/ — BOM CRUD + export (no approval flow)"*), which contradicts its own Registered Modules table two sections earlier. Agents read that file, so it needs fixing too.
 
 **Fix:** correct both. BOM goes through approval like everything else.
 
@@ -156,7 +156,7 @@ Desktop-only is a legitimate choice for an internal tool — but right now it re
 
 ### 10. Breadcrumbs don't exist
 
-`components/TopBar.tsx:16` is a single flat `<span>` showing the leaf label from `PAGE_LABELS`. On `/manufacturing/5` or `/masters/bom-master/history` there's no path back up. `docs/frontend-patterns.md` describes breadcrumbs reading `lib/pages.ts`; only a leaf lookup is implemented.
+`components/TopBar.tsx:16` is a single flat `<span>` showing the leaf label from `PAGE_LABELS`. On `/manufacturing/5` or `/masters/recipe-master/history` there's no path back up. `docs/frontend-patterns.md` describes breadcrumbs reading `lib/pages.ts`; only a leaf lookup is implemented.
 
 ---
 
@@ -208,9 +208,9 @@ Each call site independently re-implements: the loading flag, `res.json()`, erro
 
 ### 15. The RM/PM typing migration is half done
 
-`app/api/masters/packing-materials/pm-handler.ts` is **fully typed** — `PmCreateBody`, `PmCheckDuplicateBody`, `PmCreateFullBody`, `PmAddRatesBody`, `PmBulkBody`, `PmS3BulkBody`.
+`app/api/v1/masters/packing-materials/pm-handler.ts` is **fully typed** — `PmCreateBody`, `PmCheckDuplicateBody`, `PmCreateFullBody`, `PmAddRatesBody`, `PmBulkBody`, `PmS3BulkBody`.
 
-Its mirror `app/api/masters/raw-materials/rm-handler.ts` has **`body: any` on all 10 exported functions** — lines `36, 94, 109, 134, 146, 163, 194, 269, 355, 393` — and **24 `any` total**. It is the only outlier in the entire `app/api` tree; every other file has 1–3.
+Its mirror `app/api/v1/masters/raw-materials/rm-handler.ts` has **`body: any` on all 10 exported functions** — lines `36, 94, 109, 134, 146, 163, 194, 269, 355, 393` — and **24 `any` total**. It is the only outlier in the entire `app/api` tree; every other file has 1–3.
 
 `lib/validation/raw-materials.ts` already defines 14 Zod objects, so the types exist — the handler just widens them away at the boundary.
 
@@ -259,7 +259,7 @@ No importer anywhere in the repo — `components/TopBar.tsx` is what `ClientLayo
 ### 18. Docs drift — both files agents are told to trust
 
 - **`docs/frontend-patterns.md:158`** documents `components/ui/icon-action-button.tsx` as a shared primitive. **The file does not exist.**
-- **`CLAUDE.md`** API Routes table claims bom-master has "no approval flow" — contradicted by its own Registered Modules table and by the code (see finding #2).
+- **`CLAUDE.md`** API Routes table claims recipe-master has "no approval flow" — contradicted by its own Registered Modules table and by the code (see finding #2).
 
 **Fix:** remove the `icon-action-button` row (or build the component — several rate tables would use it); correct the BOM row.
 

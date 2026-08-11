@@ -13,14 +13,14 @@ Today the ERP is a **synchronous monolith**:
 
 - One Next.js 16 app, one MariaDB (AWS RDS), accessed via raw `mysql2` in `lib/db.ts`.
 - Every side-effect runs **inline** inside the HTTP request: a masters insert, its audit trail, any future approval/notification logic all happen in one blocking transaction.
-- Cross-cutting concerns (auth, validation, rate limiting, logging, error shape) are **copy-pasted per route** (`app/api/masters/*`, `app/api/admin/*`). There is no Zod, no request ID, no central error format.
+- Cross-cutting concerns (auth, validation, rate limiting, logging, error shape) are **copy-pasted per route** (`app/api/v1/masters/*`, `app/api/v1/admin/*`). There is no Zod, no request ID, no central error format.
 
 > **Already addressed (June–July 2026):**
 > - The approval handler now uses a **Strategy pattern** — per-module logic lives in `lib/approvals/module-handlers.ts`; the route is a thin dispatcher. Adding a new module requires one new entry there, not a route edit.
 > - `lib/constants.ts` provides typed `STATUS` and `APPROVAL_STATUS` constants eliminating raw string literals.
 > - **Winston structured logger** (`lib/logger.ts`) is deployed and adopted across all API routes (masters, approvals, PO). Every log line includes `requestId`, `module`, `userId`, and relevant domain fields. Console transport uses a human-readable pretty format; file transports write JSON to `logs/app-*.log` and `logs/error-*.log` with daily rotation.
 > - **S3 event pipeline** (`lib/events.ts` → `lib/s3.ts`) records `raw-events`, `processed-events`, and `failed-events` to a dedicated S3 bucket for all master and PO operations.
-> - **API Gateway (Part A) — Step 1 & pilot done (2026-07-01):** `lib/gateway/with-gateway.ts` + `lib/gateway/errors.ts` ship the `withGateway` wrapper described in §4.2 (auth, opt-in RBAC via `resolveAccess()`, Zod validation, structured logging via `lib/logger.ts`, uniform `{error, code, requestId}` error shape). It intentionally skips rate limiting and the `middleware.ts` request-ID change for now — request IDs still come from `lib/request-context.ts`'s `createRequestContext()`, reused as-is rather than duplicated. `app/api/masters/skus/route.ts` is the first (and so far only) route migrated, proving the pattern with zero behavior change; validation schemas live in `lib/validation/skus.ts`. Every other route (vendors, manufacturers, raw-materials, packing-materials, material-master, purchase-orders, approvals, admin) is still on the old manual-validation pattern — see the updated §6 rollout.
+> - **API Gateway (Part A) — Step 1 & pilot done (2026-07-01):** `lib/gateway/with-gateway.ts` + `lib/gateway/errors.ts` ship the `withGateway` wrapper described in §4.2 (auth, opt-in RBAC via `resolveAccess()`, Zod validation, structured logging via `lib/logger.ts`, uniform `{error, code, requestId}` error shape). It intentionally skips rate limiting and the `middleware.ts` request-ID change for now — request IDs still come from `lib/request-context.ts`'s `createRequestContext()`, reused as-is rather than duplicated. `app/api/v1/masters/skus/route.ts` is the first (and so far only) route migrated, proving the pattern with zero behavior change; validation schemas live in `lib/validation/skus.ts`. Every other route (vendors, manufacturers, raw-materials, packing-materials, material-master, purchase-orders, approvals, admin) is still on the old manual-validation pattern — see the updated §6 rollout.
 > - Remaining gaps: rolling `withGateway` out to the rest of the routes, rate limiting, centralised request IDs in `middleware.ts`, and all of Part B (event bus) are still open.
 
 This is fine at today's size but creates two concrete problems as modules grow:
@@ -297,7 +297,7 @@ These map directly to tables that already exist:
 
 ### 5.4 Service + event pattern
 
-`lib/services/skus.ts` — business logic extracted from `app/api/masters/skus/route.ts`:
+`lib/services/skus.ts` — business logic extracted from `app/api/v1/masters/skus/route.ts`:
 
 ```ts
 import { execute } from "@/lib/db";
@@ -322,7 +322,7 @@ export async function createSku(input: { skuCode: string; name: string; brand?: 
 The route becomes a thin binding:
 
 ```ts
-// app/api/masters/skus/route.ts
+// app/api/v1/masters/skus/route.ts
 import { withGateway } from "@/lib/gateway/with-gateway";
 import { skuCreateSchema } from "@/lib/validation/masters";
 import { createSku } from "@/lib/services/skus";
@@ -353,7 +353,7 @@ That's the moment you get retries, durability, and true background processing. W
 No big-bang. Each step is shippable on its own.
 
 - **Step 1 — Gateway scaffolding. ✅ Done (2026-07-01).** Added `lib/gateway/with-gateway.ts`, `lib/gateway/errors.ts`, and `lib/validation/skus.ts` (per-domain, not a shared `masters.ts`). Skipped the `middleware.ts` request-ID change — reused the existing `createRequestContext()` from `lib/request-context.ts` instead.
-- **Step 2 — Migrate one route. ✅ Done (2026-07-01), partial.** Converted `app/api/masters/skus/route.ts` to `withGateway`. Business logic stayed inline inside the route's `handler` callback rather than being extracted to a `lib/services/skus.ts` — the pilot deliberately touched only the route file. Behaviour confirmed identical (create/bulk/update/bulk_from_s3, same status codes, same approval-flow transaction handling). `lib/services/*` extraction remains a follow-up if/when a route's handler grows unwieldy.
+- **Step 2 — Migrate one route. ✅ Done (2026-07-01), partial.** Converted `app/api/v1/masters/skus/route.ts` to `withGateway`. Business logic stayed inline inside the route's `handler` callback rather than being extracted to a `lib/services/skus.ts` — the pilot deliberately touched only the route file. Behaviour confirmed identical (create/bulk/update/bulk_from_s3, same status codes, same approval-flow transaction handling). `lib/services/*` extraction remains a follow-up if/when a route's handler grows unwieldy.
 - **Step 3 — Event bus + audit handler.** Add `lib/events/*`, emit `sku.created`, write an audit row in the handler. Verify the row appears and the response is unaffected if the handler throws.
 - **Step 4 — Roll the pattern across masters.** vendors, raw-materials, packing-materials, manufacturers — one PR each, reusing the now-proven pattern.
 - **Step 5 — Approvals via events.** Wire `approval.raised` into the `approvals`/`approval_items` tables for masters edits that need sign-off.

@@ -87,7 +87,7 @@ Everything else is granted from `/admin > Permissions`. A role with no rows for 
 
 ### Layer 2 — User-specific overrides (`user_page_permissions`)
 
-A per-user entry for a `page_slug` overrides the role-based access **at that slug level**. Managed via `/api/admin/user-permissions`. Useful for granting a single user elevated or restricted access without changing their role.
+A per-user entry for a `page_slug` overrides the role-based access **at that slug level**. Managed via `/api/v1/admin/user-permissions`. Useful for granting a single user elevated or restricted access without changing their role.
 
 > **The order that surprises people:** `resolveAccess` walks the slug up its parents and checks **override then role at each level** before moving up. So a role grant on `/masters/vendors` beats an override on `/masters` — depth wins before layer does. `app/admin/authority.ts` mirrors this walk for display; any change to `resolveAccess` belongs there too.
 
@@ -160,10 +160,10 @@ All of these are gated on the `/admin` page slug (`viewer` to read, `editor` to 
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/admin/users` | POST · PATCH | Create / update a user and replace their roles. No DELETE — deactivate with `status = 'inactive'`. |
-| `/api/admin/permissions` | GET · POST · DELETE | Role-page grants. `DELETE` clears the row so the slug inherits from its parent again. |
-| `/api/admin/user-permissions` | GET · POST · DELETE | Per-user overrides (`?user_id=` filters the GET) |
-| `/api/admin/entity-scope` | PUT | Replaces one `(user, entity_type)` scope set. `entity_ids: null` (or `[]`) clears it, which means **unrestricted**. |
+| `/api/v1/admin/users` | POST · PATCH | Create / update a user and replace their roles. No DELETE — deactivate with `status = 'inactive'`. |
+| `/api/v1/admin/permissions` | GET · POST · DELETE | Role-page grants. `DELETE` clears the row so the slug inherits from its parent again. |
+| `/api/v1/admin/user-permissions` | GET · POST · DELETE | Per-user overrides (`?user_id=` filters the GET) |
+| `/api/v1/admin/entity-scope` | PUT | Replaces one `(user, entity_type)` scope set. `entity_ids: null` (or `[]`) clears it, which means **unrestricted**. |
 
 Both permission-writing routes and the entity-scope route call the guards in `lib/admin-guards.ts` so an admin cannot lock themselves out of `/admin`, or change their own data scope, from the UI.
 

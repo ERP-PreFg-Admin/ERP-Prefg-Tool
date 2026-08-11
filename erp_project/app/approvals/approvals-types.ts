@@ -63,6 +63,8 @@ export const MODULE_LABEL: Record<string, string> = {
   // which are what users read, become Recipe.
   BOM: "Recipe",
   BOM_BULK: "Bulk Recipe Upload",
+  MFG_MISC: "Misc. Cost (MFG)",
+  MFG_MISC_BULK: "Bulk Misc. Cost Upload",
 }
 
 /** Modules whose approval_items store {s3_key, filename, row_count} for a
@@ -75,6 +77,7 @@ export const BULK_MODULES = new Set([
   // absence here made an approval of one render a field diff over those three
   // internal keys instead of the CSV file card.
   "RM_VRM_BULK", "RM_RATE_BULK", "PM_VRM_BULK", "PM_RATE_BULK",
+  "MFG_MISC_BULK",
 ])
 
 /** Maps a *_BULK module code to the base module it belongs to, so bulk
@@ -92,6 +95,7 @@ const BULK_GROUP_KEY: Record<string, string> = {
   RM_RATE_BULK: "RM_RATE",
   PM_VRM_BULK:  "PM_VRM",
   PM_RATE_BULK: "PM_RATE",
+  MFG_MISC_BULK: "MFG_MISC",
 }
 
 export function groupKeyFor(module: string) {
@@ -128,6 +132,10 @@ export const MODULE_COLOR: Record<string, string> = {
   RM_RATE_BULK: "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/30 dark:text-purple-400 dark:border-purple-900/40",
   PM_VRM_BULK:  "bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/30 dark:text-teal-400 dark:border-teal-900/40",
   PM_RATE_BULK: "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-900/40",
+  // Misc. costs sit alongside the manufacturer's agreed rates, so they borrow
+  // MFG's amber — and the bulk borrows the single, as every other pair does.
+  MFG_MISC:      "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-900/40",
+  MFG_MISC_BULK: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-900/40",
 }
 
 /** Fallback swatch for a module with no entry above — kept alongside

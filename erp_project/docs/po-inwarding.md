@@ -13,9 +13,9 @@ On top of that sits **Add Invoice** — upload a supplier's invoice PDF, have it
 ```mermaid
 sequenceDiagram
     participant U as User (Add Invoice dialog)
-    participant P as /api/purchase-orders/invoice/parse
+    participant P as /api/v1/purchase-orders/invoice/parse
     participant N as Nanonets
-    participant C as /api/purchase-orders/invoice (POST)
+    participant C as /api/v1/purchase-orders/invoice (POST)
     participant S3 as S3
     participant DB as MySQL
     participant UW as Uniware
@@ -50,7 +50,7 @@ The cost is row locks held across the Uniware call for a second or two. Acceptab
 
 ### Progress is streamed, not returned
 
-`POST /api/purchase-orders/invoice` answers with `application/x-ndjson` — one JSON object per line — so the dialog can report each stage as it lands:
+`POST /api/v1/purchase-orders/invoice` answers with `application/x-ndjson` — one JSON object per line — so the dialog can report each stage as it lands:
 
 ```
 {"step":"s3","status":"ok"}
@@ -116,7 +116,7 @@ A supplier writes "REVE PHARMA", "Guwahati" and "Mcaf407"; the masters hold a ma
 
 ### Per-line "Reference PO" and the FIFO match
 
-Every line points at an existing open PO (`raised` or `partially_received`) for that manufacturer, fetched on demand from `GET /api/purchase-orders/open-for-receive?mfg_id=`. That's fetched on demand rather than shipped with the page because the manufacturer isn't known until the invoice has been parsed, and every open PO for every manufacturer would be most of the PO table. **Which** PO is decided by the FIFO match below, not by the user.
+Every line points at an existing open PO (`raised` or `partially_received`) for that manufacturer, fetched on demand from `GET /api/v1/purchase-orders/open-for-receive?mfg_id=`. That's fetched on demand rather than shipped with the page because the manufacturer isn't known until the invoice has been parsed, and every open PO for every manufacturer would be most of the PO table. **Which** PO is decided by the FIFO match below, not by the user.
 
 When a line references a PO, it **still raises its own inward PO** *and* books a goods receipt against the referenced one — so the line carries two PO links (see `link_type` below).
 
@@ -125,7 +125,7 @@ When a line references a PO, it **still raises its own inward PO** *and* books a
 The references are chosen by `allocateFifo` (`invoice-form.ts`), not by hand:
 
 - Open POs are bucketed by SKU and consumed **oldest `purchase_orders.date` first** — the raise date, not `expected_on`. `openForReceiveByMfg` sorts the same way so the picker never contradicts the allocator.
-- A line whose quantity no single PO covers is **split into one row per PO consumed**. The payload and `supplier_invoice_items` carry exactly one reference PO per line, so an allocation *is* a line — no nested `allocations[]`, no schema change. `Row.line_key` ties the splits back to the printed line, and `allocateFifo` merges on it before re-allocating, which is what makes re-matching idempotent.
+- A line whose quantity no single PO covers is **split into one row per PO consumed**. The payload and `invoice_items_mfg` carry exactly one reference PO per line, so an allocation *is* a line — no nested `allocations[]`, no schema change. `Row.line_key` ties the splits back to the printed line, and `allocateFifo` merges on it before re-allocating, which is what makes re-matching idempotent.
 - `amount` / `total_amount` are pro-rated by quantity share across a split, last chunk taking the rounding remainder so the invoice total doesn't drift. Per-unit fields (`rate`, `mrp`, `discount`, `gst_percent`) are copied, never divided.
 - A PO's remaining quantity is tracked across the **whole invoice**, so two lines for the same SKU can't both claim it.
 - A quantity the open POs can't cover stays as a row with **no** reference PO, plus a shortage message. That one leftover row is what blocks submit — "not enough POs" and "reference PO missing" are deliberately the same mechanism, not two.
@@ -136,28 +136,28 @@ It runs when the open-PO list arrives (the same moment `changeMfg` invalidates e
 
 The **one** exception is a genuine ambiguity the data can't resolve: **a SKU with more than one live BOM**. This is a fast-moving system where `effective_till` is often left unset, so an `active` BOM and the `discontinued` one it superseded stay producible together through a transition (the same rule `bomSql.selectSkusWithMultipleLiveBoms` encodes: `status IN ('active','discontinued') AND effective_from <= CURDATE()`, ignoring the unreliable `effective_till`). FIFO cannot tell those POs apart and the desk can, so those lines — and only those — get a picker, **filtered to that SKU's own POs**, captioned `2 BOM versions live — pick the right PO`.
 
-`purchase_orders.bom_id` is now stamped at creation (see below), but **`live_bom_count` stays the trigger**. Switching it to "these POs carry different `bom_id`s" would read 0 distinct ids across a set of legacy NULLs and quietly stop asking, in exactly the case where the versions are indistinguishable and the question most needs asking.
+`purchase_orders.recipe_id` is now stamped at creation (see below), but **`live_bom_count` stays the trigger**. Switching it to "these POs carry different `recipe_id`s" would read 0 distinct ids across a set of legacy NULLs and quietly stop asking, in exactly the case where the versions are indistinguishable and the question most needs asking.
 
-The **BOM Code** column prefers the PO's own stamped `bom_id` and falls back to the SKU's live BOM(s), comma-joined when there is more than one. `openForReceiveByMfg` carries `bom_code` and `live_bom_count` together, so the client needs no second round trip to decide which cells get a picker.
+The **BOM Code** column prefers the PO's own stamped `recipe_id` and falls back to the SKU's live BOM(s), comma-joined when there is more than one. `openForReceiveByMfg` carries `bom_code` and `live_bom_count` together, so the client needs no second round trip to decide which cells get a picker.
 
-### `purchase_orders.bom_id` — stamped at creation
+### `purchase_orders.recipe_id` — stamped at creation
 
 The column had existed since the schema was written and no INSERT had ever populated it. Every PO creation path now does (`lib/queries/purchase-orders.ts`, `BOM_ID_FOR_LINE`).
 
 **Why stamp instead of resolving at read time:** `master_skus.active_bom_id` moves when a new version goes live, so reading through it makes every historical PO claim the *current* recipe. Freezing the value at creation is the only thing that lets two open POs for one SKU be told apart after a version change.
 
-**Which BOM:** the manufacturer's own live production line for that SKU — the same `(mfg, sku) → bom_id` mapping `/api/purchase-orders/quote-rate` already prices the PO from, so a row's `bom_id` and its `unit_price` cannot describe different recipes. Live follows `manufacturingSql.selectLiveLinesByMfg` (`active` or `discontinued`, since a discontinued line can still be raised against); `active` sorts first so a new PO takes the current recipe during a transition.
+**Which BOM:** the manufacturer's own live production line for that SKU — the same `(mfg, sku) → recipe_id` mapping `/api/v1/purchase-orders/quote-rate` already prices the PO from, so a row's `recipe_id` and its `unit_price` cannot describe different recipes. Live follows `manufacturingSql.selectLiveLinesByMfg` (`active` or `discontinued`, since a discontinued line can still be raised against); `active` sorts first so a new PO takes the current recipe during a transition.
 
-| Path | `bom_id` |
+| Path | `recipe_id` |
 |---|---|
 | `insert` (impromptu draft), `insertNormal`, `insertBulkPo`, `insertInward` | Resolved from the live line |
 | `insertSplit` | **Inherited from the parent** — a split divides one order, it doesn't raise a new one, so a child must not pick up a version the parent never had |
-| `insertInwardReceived` | **Inherited from the order being settled** (via `receivePo`'s new `bom_id`) — goods made months ago under the previous recipe must not be stamped with today's |
+| `insertInwardReceived` | **Inherited from the order being settled** (via `receivePo`'s new `recipe_id`) — goods made months ago under the previous recipe must not be stamped with today's |
 | `updateDraft` | Re-resolved — this is the one edit that can change the SKU or manufacturer, either of which would leave the stamped BOM describing an order that no longer exists |
 
 Both inherited paths `COALESCE` to the live-line resolver, because parents raised before this existed carry NULL. Anything with no live line resolves to NULL, which is what the column held before — nothing regresses.
 
-`bom_id` is the **last column** on every insert, so its resolver params append to the existing array rather than being threaded into the middle of it, where a miscount would silently shift every following value by one.
+`recipe_id` is the **last column** on every insert, so its resolver params append to the existing array rather than being threaded into the middle of it, where a miscount would silently shift every following value by one.
 
 ### Saying what matched
 
@@ -175,12 +175,12 @@ The dialog used to report only problems, which left "nothing is wrong" and "noth
 
 | Table | Rows |
 |-------|------|
-| `supplier_invoices` | One header per invoice. `UNIQUE (mfg_id, invoice_no)` — re-submitting the same invoice is a DB error rather than a second round of credited `received_qty`. Keyed on both columns because two manufacturers can each legitimately issue "INV-001". |
-| `supplier_invoice_items` | One row per invoice line, carrying both the printed value (`parsed_sku_code`) and the mapped one (`sku_code`) |
+| `invoice_mfg` | One header per invoice. `UNIQUE (mfg_id, invoice_no)` — re-submitting the same invoice is a DB error rather than a second round of credited `received_qty`. Keyed on both columns because two manufacturers can each legitimately issue "INV-001". |
+| `invoice_items_mfg` | One row per invoice line, carrying both the printed value (`parsed_sku_code`) and the mapped one (`sku_code`) |
 | `purchase_orders` | One inward PO per line, `po_type = 'inward'`, numbered `<BRAND>-INW-<YYYYMM>-<NNN>`. `expected_on` is the **invoice's own date** (backdated on purpose: the goods have already shipped) |
 | `history_pos` | The audit row each receipt writes, via `lib/po-receive.ts` |
 
-`supplier_invoice_items` holds two PO links, because a line can relate to two orders:
+`invoice_items_mfg` holds two PO links, because a line can relate to two orders:
 
 | Column | Meaning |
 |--------|---------|
@@ -213,7 +213,7 @@ Before any transaction opens, `resolveBrands` validates every mapped SKU — an 
 
 ## Uniware (Unicommerce) Mirror — `lib/uniware.ts`
 
-Our model is **one PO per SKU**; Uniware's mirror is **one PO carrying every SKU on the invoice**. That code is stamped onto every inward PO row (`purchase_orders.uniware_po_code`) as well as the invoice header (`supplier_invoices.uniware_po_code`), so the PO list — the hottest query on that table — doesn't grow a join.
+Our model is **one PO per SKU**; Uniware's mirror is **one PO carrying every SKU on the invoice**. That code is stamped onto every inward PO row (`purchase_orders.uniware_po_code`) as well as the invoice header (`invoice_mfg.uniware_po_code`), so the PO list — the hottest query on that table — doesn't grow a join.
 
 | Call | Purpose |
 |------|---------|
@@ -253,11 +253,11 @@ Deliberately not `sendMfgSelectionEmail`: that one reports PO status *to the man
 
 | Endpoint | Purpose |
 |----------|---------|
-| `POST /api/purchase-orders/invoice/parse` | Multipart PDF → `{ ok, parsed }`. `422 unparseable` when nothing usable came back (wrong file, unreadable scan) rather than an empty success the user has to diagnose from a blank form. `10 MB` cap, PDF only. |
-| `POST /api/purchase-orders/invoice` | Multipart (`file` + JSON `payload`) → NDJSON step stream. Validated with `invoiceInwardSchema`; no `schema` on the gateway because it's multipart. |
-| `GET /api/purchase-orders/invoice` | Invoice history list, `?limit` (clamped 1–100) `&offset` |
-| `GET /api/purchase-orders/invoice/[id]` | One invoice: header, items, and the POs each line resolved to |
-| `GET /api/purchase-orders/open-for-receive?mfg_id=` | Open POs for the per-line Reference PO picker. Entity-scope checked. |
+| `POST /api/v1/purchase-orders/invoice/parse` | Multipart PDF → `{ ok, parsed }`. `422 unparseable` when nothing usable came back (wrong file, unreadable scan) rather than an empty success the user has to diagnose from a blank form. `10 MB` cap, PDF only. |
+| `POST /api/v1/purchase-orders/invoice` | Multipart (`file` + JSON `payload`) → NDJSON step stream. Validated with `invoiceInwardSchema`; no `schema` on the gateway because it's multipart. |
+| `GET /api/v1/purchase-orders/invoice` | Invoice history list, `?limit` (clamped 1–100) `&offset` |
+| `GET /api/v1/purchase-orders/invoice/[id]` | One invoice: header, items, and the POs each line resolved to |
+| `GET /api/v1/purchase-orders/open-for-receive?mfg_id=` | Open POs for the per-line Reference PO picker. Entity-scope checked. |
 
 ## Files
 

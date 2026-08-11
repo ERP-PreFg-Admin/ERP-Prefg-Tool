@@ -10,21 +10,20 @@ export type MfgTab =
   | "common_rms" | "vendor_ing_mapping"
 
 const TABS: { key: MfgTab; label: string }[] = [
-  { key: "active",             label: "SKUs" },
+  { key: "active",             label: "SKU Manager" },
   { key: "misc_cost",          label: "Misc. Cost" },
-  { key: "rm_vendor",          label: "Approved Procurement Rates" },
-  { key: "agreed_rates",       label: "Agreed Rates" },
+  { key: "rm_vendor",          label: "Approved Vendor Rates" },
+  { key: "agreed_rates",       label: "Agreed Mfg Rates" },
   { key: "final_costing",      label: "Agreed Final Costing" },
   { key: "common_rms",         label: "Common RMs" },
   { key: "vendor_ing_mapping", label: "Vendor Ing Mapping" },
 ]
 
 export default function TabBar({
-  mfgId, currentTab, statusCounts,
+  mfgId, currentTab,
 }: {
   mfgId: number
   currentTab: MfgTab
-  statusCounts: Record<string, number>
 }) {
   const router = useRouter()
 
@@ -38,11 +37,6 @@ export default function TabBar({
             onClick={() => router.push(`/manufacturing/${mfgId}?tab=${tab.key}`)}
           >
             {tab.label}
-            {tab.key === "active" && (
-              <span className="opacity-70">
-                {" "}({statusCounts.active ?? 0} active / {statusCounts.discontinued ?? 0} discontinued / {statusCounts.inactive ?? 0} inactive)
-              </span>
-            )}
           </TabsTrigger>
         ))}
       </TabsList>

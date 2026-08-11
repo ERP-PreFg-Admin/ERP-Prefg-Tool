@@ -7,8 +7,31 @@ import { matchMfg, matchSku, matchWarehouse, toDateInputValue } from "@/lib/invo
 import type { OpenPoOption, ParsedInvoice } from "@/types/invoice"
 import type { MfgOption, SkuOption, WarehouseOption } from "../po-procurement/po-types"
 
-/** Matches /api/v1/upload's own cap and the parse route's. */
+/**
+ * The invoice upload ceiling — the single source for the number AND the wording.
+ *
+ * It must stay in step with `client_max_body_size` in
+ * /etc/nginx/conf.d/00-erp-limits.conf (written by deploy/user-data.sh). When
+ * they disagreed — 10 MB here, nginx's 1 MB default there — the browser happily
+ * uploaded a scanned invoice that nginx then refused with its own HTML error
+ * page. Nothing in the app could read that page, so the dialog showed a bare
+ * "Invoice parsing failed" and a proxy limit looked like a parser bug.
+ */
 export const MAX_BYTES = 10 * 1024 * 1024
+export const MAX_MB = MAX_BYTES / 1024 / 1024
+
+/**
+ * The one place the "too large" wording lives, so the dropzone hint, the
+ * picker's guard and the upload boundary can't drift apart. Returns null when
+ * the file is fine.
+ */
+export function tooLargeMessage(file: File): string | null {
+  if (file.size <= MAX_BYTES) return null
+  // One decimal, so a 10.4 MB file isn't reported as "10 MB" against a 10 MB cap.
+  const mb = (file.size / 1024 / 1024).toFixed(1)
+  return `This invoice is ${mb} MB. Please upload a file up to ${MAX_MB} MB — scanned invoices ` +
+    `usually shrink a lot if you scan in black and white or at a lower DPI.`
+}
 
 /** Everything is a string while the user is typing; coercion happens at submit. */
 const s = (v: unknown) => (v == null ? "" : String(v))
@@ -369,11 +392,28 @@ export function collectProblems(
   return out
 }
 
-/** Line total, falling back to rate x qty when the invoice printed only a rate. */
+/**
+ * Sum of the lines, compared against the printed invoice total to warn about drift.
+ *
+ * `total_amount` is already tax-inclusive, so it is used as printed. Everything else
+ * on the row (`amount`, or rate x qty when the invoice printed only a rate) is
+ * PRE-tax, and most of our suppliers apply GST once in the footer rather than per
+ * row — so summing those raw understated the invoice by exactly the tax and showed a
+ * permanent "18,819.12 under the invoice total" on every such document. Grossing the
+ * pre-tax fallback up by the row's own rate fixes it; a row with no `gst_percent`
+ * gets a multiplier of 1.0 and is unchanged from today.
+ *
+ * Display only. `toInwardPayload` deliberately does NOT do this — that value is
+ * persisted to invoice_items_mfg, and a derived figure there is fabricated money.
+ */
 export function sumLineItems(rows: Row[]): number {
   return rows.reduce((sum, r) => {
-    const explicit = Number(r.total_amount) || Number(r.amount)
-    return sum + (explicit || (Number(r.rate) || 0) * (Number(r.qty) || 0))
+    const inclusive = Number(r.total_amount)
+    if(inclusive) return sum + inclusive
+
+    const preTax = Number(r.amount) || (Number(r.rate) || 0) * (Number(r.qty) || 0)
+
+    return sum + preTax * ( 1 + (Number(r.gst_percent) || 0) / 100)
   }, 0)
 }
 

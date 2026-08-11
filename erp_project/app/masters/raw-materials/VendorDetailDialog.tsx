@@ -110,6 +110,9 @@ export function VendorDetailDialog({
       ]}
       columns={columns}
       rows={vendorRows}
+      exportEndpoint="/api/v1/masters/raw-materials/export"
+      exportLabel="RM by Vendor"
+      exportParams={{ view: "vendor", search: String(row?.rm_code ?? "") }}
       rowKey={(_, i) => i}
       emptyMessage="No vendor records found for this material."
       summary={

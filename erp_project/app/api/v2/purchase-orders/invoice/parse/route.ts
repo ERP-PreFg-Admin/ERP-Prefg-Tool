@@ -1,18 +1,21 @@
 // POST /api/v2/purchase-orders/invoice/parse
-// Parse an invoice PDF with Nanonets, using a per-manufacturer extraction
-// strategy when the seller is recognised.
+// Parse an invoice PDF — from its own text layer where we can read it, and via
+// Nanonets where we can't.
 //
 // What v2 adds over v1:
-//   - the seller's GSTIN is read from the PDF's own text layer before the
-//     Nanonets call (~200ms), so a manufacturer-specific strategy can shape the
-//     schema descriptions and rules that call is made with
+//   - the PDF's text layer is read locally first (~100ms, free). On the current
+//     samples that answers 10 of 15 invoices with no metered call at all. It
+//     refuses rather than guessing, and every refusal falls through to Nanonets.
+//   - the seller's GSTIN is read from that same text, so a manufacturer-specific
+//     strategy can shape the Nanonets call when one is needed
 //   - the response carries `detected`, letting the dialog pre-select the
 //     manufacturer from an exact GSTIN match rather than fuzzy-matching the
-//     extracted `from` string
+//     extracted `from` string, and `source`, naming which path answered
 //
-// v1 stays live as the escape hatch: identical request/response contract, base
-// extraction only, no detection. If a strategy misbehaves in production, point
-// the client back at v1 and extraction returns to base behaviour with no deploy.
+// v1 stays live as the escape hatch: identical request/response contract, always
+// Nanonets, no local parse and no detection. If the local parser misreads
+// something in production, point the client back at v1 and every invoice goes
+// back through the metered path with no deploy.
 //
 // The PDF is posted straight from the browser as multipart and never touches
 // S3 here — nothing is stored until the user commits the invoice by clicking
@@ -27,6 +30,7 @@ export const maxDuration = 300
 import { NextResponse } from "next/server"
 import { parseInvoice, strategyFor, configFor } from "@/lib/nanonets"
 import { detectFromPdf } from "@/lib/invoice-detect"
+import { parseLocallyVerbose } from "@/lib/invoice-local"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { makeEventId, recordRawEvent, recordProcessedEvent, recordFailedEvent } from "@/lib/events"
@@ -63,34 +67,34 @@ export const POST = withGateway({
     const buffer = Buffer.from(await file.arrayBuffer())
 
     try {
-      // Detection never throws. A scan with no text layer yields no GSTINs, no
-      // strategy and the base config — which is exactly what v1 would have done.
-      const { gstins, mfg } = await detectFromPdf(buffer)
-      const strategy = strategyFor(gstins)
-
-      // Logged unconditionally: without it a misfiring strategy is invisible,
-      // because the call still succeeds and only the field values are wrong.
+      const { text, gstins, mfg, sellerGstins } = await detectFromPdf(buffer)
+      const strategy = strategyFor(sellerGstins)
+      const local = parseLocallyVerbose(text)
+      const source = local.ok ? `local:${local.layout}` : "nanonets"
       logger.info({
         ...ctx,
         eventId,
         filename,
+        source,
+        localRejectedBecause: local.ok ? null : local.reason,
         strategy: strategy?.label ?? "base",
         detectedMfg: mfg?.code ?? null,
         gstinsFound: gstins.length,
-        message: "Extraction strategy resolved",
+        sellerGstinsFound: sellerGstins.length,
+        message: "Extraction path resolved",
       })
 
-      const parsed = await parseInvoice(buffer, filename, configFor(strategy))
+      const parsed = local.ok
+        ? local.parsed
+        : await parseInvoice(buffer, filename, configFor(strategy))
 
       recordProcessedEvent("PO_INVOICE_PARSE", eventId, {
         filename,
         invoiceNumber: parsed.invoice_number,
         lineItems: parsed.line_items.length,
+        source,
         strategy: strategy?.label ?? "base",
       })
-      // A document that parses to nothing usable is a failure the user can act
-      // on (wrong file, unreadable scan) — not an empty success they'd have to
-      // diagnose from a blank form.
       if (parsed.line_items.length === 0 && !parsed.invoice_number) {
         throw new ApiError(
           422,
@@ -98,10 +102,7 @@ export const POST = withGateway({
           "No invoice fields could be read from this PDF. Check it's the right file, then retry — or fill the form in manually."
         )
       }
-      // `detected` is null whenever the PDF had no text layer, carried no
-      // recognised GSTIN, or the lookup failed — the dialog falls back to
-      // matchMfg on the extracted `from` in that case.
-      return NextResponse.json({ ok: true, parsed, detected: mfg })
+      return NextResponse.json({ ok: true, parsed, detected: mfg, source })
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err
       const message = err instanceof Error ? err.message : String(err)

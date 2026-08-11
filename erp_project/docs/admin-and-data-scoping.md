@@ -6,9 +6,9 @@
 
 | Tab | Route | Answers | Writes |
 |-----|-------|---------|--------|
-| **Users** | `/admin` | Accounts and roles | `POST`/`PATCH /api/admin/users` → `users` + `user_roles` |
-| **Permissions** | `/admin/permissions` | Which screens | `/api/admin/permissions` (role) · `/api/admin/user-permissions` (per user) |
-| **Data Access** | `/admin/data-access` | Which rows | `PUT /api/admin/entity-scope` → `user_entity_scope` |
+| **Users** | `/admin` | Accounts and roles | `POST`/`PATCH /api/v1/admin/users` → `users` + `user_roles` |
+| **Permissions** | `/admin/permissions` | Which screens | `/api/v1/admin/permissions` (role) · `/api/v1/admin/user-permissions` (per user) |
+| **Data Access** | `/admin/data-access` | Which rows | `PUT /api/v1/admin/entity-scope` → `user_entity_scope` |
 | **Activity** | `/admin/activity` | What happened | read-only (`activity_log` ∪ `session_history`) |
 
 Every tab reads server-side (`page.tsx` → `lib/queries/*`), the same way masters pages do; the API routes are mutations only. Access is guarded **once**, in `app/admin/layout.tsx`.
@@ -129,7 +129,7 @@ CREATE TABLE user_entity_scope (
 
 No FK on `entity_id` — it points at three different tables depending on `entity_type`, so the constraint can't be expressed. A stale row after a deleted manufacturer is harmless: it grants access to nothing.
 
-**Warehouses are the awkward dimension.** They're stored here by `master_warehouse.id`, but `purchase_orders.destination` and `supplier_invoices.destination` are unindexed `VARCHAR` copies of `master_warehouse.name` with no FK (the only join anywhere is `ON wh.name = po.destination`). `lib/scope.ts` therefore resolves warehouse ids to **names** once per request, and all warehouse predicates compare names.
+**Warehouses are the awkward dimension.** They're stored here by `master_warehouse.id`, but `purchase_orders.destination` and `invoice_mfg.destination` are unindexed `VARCHAR` copies of `master_warehouse.name` with no FK (the only join anywhere is `ON wh.name = po.destination`). `lib/scope.ts` therefore resolves warehouse ids to **names** once per request, and all warehouse predicates compare names.
 
 ### Using `lib/scope.ts`
 
@@ -164,7 +164,7 @@ Why the three differ:
 - `execute()` uses prepared statements and does **not** expand array params, and an id arriving from a URL or request body needs a hard 403 rather than an empty result — hence `assertInScope`.
 - `lib/cached-reference-data.ts` uses `unstable_cache` with no user in the key, so it cannot filter internally — hence `filterByScope`.
 
-`lib/po-guard.ts`' `assertPoInScope(userId, poId)` exists separately to avoid an import cycle (`lib/queries/purchase-orders.ts` imports `scopeParams`, so `lib/scope.ts` must not import the query file back). **Every `/api/purchase-orders/[id]/**` route needs it:** the PO list is filtered in SQL, but ids are sequential integers — without the guard, a user scoped to manufacturer 1 can still read, receive, cancel, split, mail or PDF-export manufacturer 7's PO by guessing its id.
+`lib/po-guard.ts`' `assertPoInScope(userId, poId)` exists separately to avoid an import cycle (`lib/queries/purchase-orders.ts` imports `scopeParams`, so `lib/scope.ts` must not import the query file back). **Every `/api/v1/purchase-orders/[id]/**` route needs it:** the PO list is filtered in SQL, but ids are sequential integers — without the guard, a user scoped to manufacturer 1 can still read, receive, cancel, split, mail or PDF-export manufacturer 7's PO by guessing its id.
 
 The sidebar drops out-of-scope manufacturers **entirely** rather than locking them — a lock icon would still disclose the name.
 
@@ -173,7 +173,7 @@ The sidebar drops out-of-scope manufacturers **entirely** rather than locking th
 Don't assume a screen is scoped because `lib/scope.ts` exists — grep for the call. Known gaps:
 
 - **The approvals queue** — `approvalsSql.listPending` stores only module + `entity_id`, and bulk modules store `entity_id = user_id`.
-- **BOM master** — no `mfg_id`; linkage is via `master_bom_mfg`.
+- **BOM master** — no `mfg_id`; linkage is via `master_recipe_mfg`.
 - **The supplier-invoice list.**
 
 `scripts/_check-entity-scope.ts` exercises the helpers and the scoped queries.
@@ -202,12 +202,12 @@ The feed (`lib/queries/activity.ts`) is a `UNION ALL` of `activity_log` (API mut
 | | |
 |---|---|
 | Reads | `usersSql.selectAll` — users with roles rolled up (`GROUP_CONCAT`) and last successful login (`MAX(session_history.event_at)` where `event = 'login'`) |
-| Writes | `POST /api/admin/users` (create) · `PATCH /api/admin/users` (update). Roles are replaced wholesale inside one transaction. |
+| Writes | `POST /api/v1/admin/users` (create) · `PATCH /api/v1/admin/users` (update). Roles are replaced wholesale inside one transaction. |
 | Roles offered | `lib/roles.ts`, validated with `z.enum(ROLE_KEYS)` — not free text |
 
 - **Creating a user emails nothing.** The row *is* the whitelist: `lib/auth.ts`' `signIn` callback looks the person up by `email` + `status`, so they can sign in with Google the moment the row exists. The email is lowercased on insert because `signIn` looks it up verbatim — a stray capital would silently lock the person out.
 - **Email is only editable on create.** Changing it would orphan the person's Google login while leaving all their audit rows attached to the old identity.
-- **There is deliberately no DELETE.** `users.id` is referenced by `approvals`, `sessions`, `session_history`, `master_*` and `supplier_invoices`. Deactivation is `status = 'inactive'`, which `signIn` already refuses.
+- **There is deliberately no DELETE.** `users.id` is referenced by `approvals`, `sessions`, `session_history`, `master_*` and `invoice_mfg`. Deactivation is `status = 'inactive'`, which `signIn` already refuses.
 - `users.email` is `UNIQUE`, surfaced as a `409 duplicate` the dialog can show rather than a generic 500.
 - **A user with no roles is the quiet failure the table exists to surface** — the account signs in fine and then reaches nothing. It renders as a warning, not an empty cell. The layout header counts the same two silent failures for the whole section: users with no roles, and roles with no grants.
 
@@ -227,6 +227,6 @@ The feed (`lib/queries/activity.ts`) is a `UNION ALL` of `activity_log` (API mut
 | `lib/queries/activity.ts` | `activity_log` insert + the UNION feed |
 | `app/admin/authority.ts` | Display-side mirror of `resolveAccess` (effect + provenance + visual language) |
 | `app/admin/**` | The four tabs (server `page.tsx` + client component each) |
-| `app/api/admin/{users,permissions,user-permissions,entity-scope}/route.ts` | The mutations |
+| `app/api/v1/admin/{users,permissions,user-permissions,entity-scope}/route.ts` | The mutations |
 | `prisma/add_user_entity_scope.sql`, `add_activity_log.sql`, `migrate_role_taxonomy.sql` | Migrations |
 | `scripts/_check-admin-panel.ts`, `_check-admin-authority.ts`, `_check-role-taxonomy.ts`, `_check-entity-scope.ts` | Verification scripts |

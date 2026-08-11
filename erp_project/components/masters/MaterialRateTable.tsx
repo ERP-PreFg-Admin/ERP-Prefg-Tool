@@ -48,6 +48,8 @@ import { DownloadButton } from "@/components/masters/DownloadButton"
 import { cn } from "@/lib/utils"
 import type { MasterField } from "@/components/masters/field-config"
 import type { Vendor, Mfg } from "@/types/masters"
+import { minTableWidth } from "@/components/masters/table-width"
+import { isMissingValue, MISSING_CELL_CLASS } from "@/components/masters/missing-value"
 
 /* ────────────────────────── Column config ──────────────────────────────────
  * A view = an ordered list of ColumnDef. Header + body are generated from the
@@ -64,6 +66,9 @@ export type ColumnDef = {
   width?: string
   className?: string
   render?: (row: AnyRow) => ReactNode
+  /** Blank is a legitimate value here, so don't flag it as missing data —
+   *  e.g. an "Effective To" that is empty because the rate is open-ended. */
+  optional?: boolean
 }
 
 // ── Shared cell helpers reused by both RM and PM column configs ────────────
@@ -540,8 +545,14 @@ export function MaterialRateTable({
           {/* table-layout:fixed + per-column widths cap narrow/fixed-format
               columns; free-text columns (no width) share what's left and
               truncate via TruncatedCell instead of forcing the whole table
-              to overflow the viewport. */}
-          <Table className="[&_th]:whitespace-nowrap table-fixed">
+              to overflow the viewport.
+              Headers are exempt from that: they wrap to a second line rather
+              than clip, because several declared widths are narrower than
+              their own label once the sort chevron is subtracted. */}
+          <Table
+            className="table-fixed [&_th]:align-top"
+            style={{ minWidth: minTableWidth(columns, !!actionColumn) }}
+          >
             <TableHeader>
               <TableRow>
                 {columns.map((col) => (
@@ -572,16 +583,25 @@ export function MaterialRateTable({
               ) : (
                 sorted.map((row, index) => (
                   <TableRow key={index}>
-                    {columns.map((col) => (
-                      <TableCell
-                        key={col.key}
-                        className={cn("overflow-hidden text-ellipsis", col.className ?? "text-muted-foreground")}
-                      >
-                        {col.render
-                          ? col.render(row)
-                          : ((row[col.key] as ReactNode) ?? "—")}
-                      </TableCell>
-                    ))}
+                    {columns.map((col) => {
+                      const missing = !col.optional && isMissingValue(row[col.key])
+                      return (
+                        <TableCell
+                          key={col.key}
+                          title={missing ? `${col.label} is not filled in` : undefined}
+                          className={cn(
+                            "overflow-hidden text-ellipsis",
+                            col.className ?? "text-muted-foreground",
+                            // Last so the amber wins over the column's own text colour.
+                            missing && MISSING_CELL_CLASS
+                          )}
+                        >
+                          {col.render
+                            ? col.render(row)
+                            : ((row[col.key] as ReactNode) ?? "—")}
+                        </TableCell>
+                      )
+                    })}
                     {actionColumn && (
                       <TableCell>{actionColumn(row)}</TableCell>
                     )}
