@@ -26,11 +26,11 @@ import {
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
-import type { OpenPoOption } from "@/types/invoice"
+import type { OpenPoOption, ParsedCharge } from "@/types/invoice"
 import type { MfgOption, SkuOption, WarehouseOption } from "../po-procurement/po-types"
 import {
   EMPTY_FORM, MAX_MB, tooLargeMessage, allocateFifo, collectProblems, emptyRow, formFromParsed,
-  matchSummary, rowsFromParsed, sumLineItems, toInwardPayload,
+  matchSummary, rowsFromParsed, sumLineItems, sumCharges, goodsGstPercent, toInwardPayload,
   type InvoiceForm, type Row, type Shortage,
 } from "./invoice-form"
 import { commitInvoice, fetchOpenPos, parseInvoiceFile, type InwardStep } from "./invoice-api"
@@ -82,6 +82,9 @@ export default function AddInvoiceDialog({
   const [form, setForm]   = useState<InvoiceForm>(EMPTY_FORM)
   const [rows, setRows]   = useState<Row[]>([])
   const [extra, setExtra] = useState<Record<string, string>>({})
+  const [charges, setCharges] = useState<ParsedCharge[]>([])
+  /** Whether the rows' GST came off the page or was worked out from the total. */
+  const [gstDerived, setGstDerived] = useState(false)
   const [openPos, setOpenPos] = useState<OpenPoOption[]>([])
   /** SKUs the open POs couldn't cover, from the last FIFO match. */
   const [shortages, setShortages] = useState<Shortage[]>([])
@@ -112,7 +115,7 @@ export default function AddInvoiceDialog({
     // every reviewed invoice leaks its full size for the life of the tab.
     setPdfUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return "" })
     setFile(null)
-    setForm(EMPTY_FORM); setRows([]); setExtra({}); setOpenPos([]); setShortages([])
+    setForm(EMPTY_FORM); setRows([]); setExtra({}); setCharges([]); setGstDerived(false); setOpenPos([]); setShortages([])
     committedRef.current = false
     split.reset()
   }
@@ -132,7 +135,7 @@ export default function AddInvoiceDialog({
     // submitting" and flush the draft straight back after clearDraft() — the
     // next Add Invoice would then offer to resume an invoice already filed.
     if (!committedRef.current && phase === "review" && file) {
-      void saveDraft({ fileName: file.name, file, form, rows, extra })
+      void saveDraft({ fileName: file.name, file, form, rows, extra, charges, gstDerived })
     }
     reset()
     onClose()
@@ -146,6 +149,8 @@ export default function AddInvoiceDialog({
     setForm(d.form)
     setRows(d.rows)
     setExtra(d.extra)
+    setCharges(d.charges ?? [])
+    setGstDerived(d.gstDerived === true)
     setDraft(null)
     setPhase("review")
   }
@@ -179,10 +184,10 @@ export default function AddInvoiceDialog({
   useEffect(() => {
     if (phase !== "review" || !file || submitting) return
     const t = setTimeout(() => {
-      void saveDraft({ fileName: file.name, file, form, rows, extra })
+      void saveDraft({ fileName: file.name, file, form, rows, extra, charges, gstDerived })
     }, 800)
     return () => clearTimeout(t)
-  }, [phase, file, form, rows, extra, submitting])
+  }, [phase, file, form, rows, extra, charges, gstDerived, submitting])
 
   // rows, mirrored for applyFifo. An effect rather than assigning during render,
   // so a concurrent re-render can't publish a value the commit then discards.
@@ -266,6 +271,8 @@ export default function AddInvoiceDialog({
       setForm(next)
       setRows(rowsFromParsed(parsed, skuOptions))
       setExtra(parsed.extra ?? {})
+      setCharges(parsed.charges ?? [])
+      setGstDerived(parsed.gst_derived === true)
       setPhase("review")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invoice parsing failed.")
@@ -279,6 +286,12 @@ export default function AddInvoiceDialog({
     [form, rows, poById, shortages]
   )
   const lineSum  = useMemo(() => sumLineItems(rows), [rows])
+  // Freight and the like are inside the invoice total but outside line_items,
+  // so they have to be added back before the sum-vs-total check means anything.
+  const chargeSum = useMemo(
+    () => sumCharges(charges, goodsGstPercent(rows)),
+    [charges, rows]
+  )
   const matched  = useMemo(() => matchSummary(form, rows, shortages), [form, rows, shortages])
   const receiveCount = useMemo(() => rows.filter((r) => r.reference_po_id).length, [rows])
 
@@ -496,11 +509,15 @@ export default function AddInvoiceDialog({
                   mfgOptions={mfgOptions}
                   warehouseOptions={warehouseOptions}
                   lineSum={lineSum}
+                  charges={charges}
+                  setCharges={setCharges}
+                  chargeSum={chargeSum}
                   extra={extra}
                   setExtra={setExtra}
                 />
 
                 <InvoiceLineItems
+                  gstDerived={gstDerived}
                   rows={rows}
                   setRow={(i, field, value) =>
                     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)))}
@@ -547,9 +564,13 @@ export default function AddInvoiceDialog({
                   </span>
                   {/* Chips, not one joined sentence — six problems ran together
                       into a wall nobody read to the end of. */}
-                  {problems.map((p) => (
+                  {/* Keyed by position, not by the sentence: two line items for
+                      the same SKU are legitimate on one invoice and can produce
+                      the same problem text twice, which React rejects as a
+                      duplicate key. */}
+                  {problems.map((p, i) => (
                     <span
-                      key={p}
+                      key={`${i}-${p}`}
                       className="rounded border border-amber-400/60 bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
                     >
                       {p}

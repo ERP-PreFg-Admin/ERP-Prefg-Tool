@@ -241,3 +241,39 @@ test("matchSummary reports a partial SKU match honestly", () => {
   assert.equal(s.skuTotal, 2)
   assert.equal(s.allocated, 0)
 })
+
+test("the same SKU on several lines yields ONE shortage sentence, totalled", () => {
+  // Reported from the browser as a React duplicate-key warning: an invoice with
+  // MCaf298_WB on two lines of 2,640, nothing open to cover it, produced the
+  // byte-identical sentence twice — and AddInvoiceDialog keyed the list by that
+  // sentence. Two lines of one SKU is normal on a real invoice.
+  const { rows, shortages } = allocateFifo([line("A", 2640), line("A", 2640)], [])
+  assert.equal(shortages.length, 2, "allocateFifo still reports per row")
+
+  const problems = collectProblems(form(), rows, poMap(), shortages)
+  const shortLines = problems.filter((p) => p.includes("are on open POs"))
+
+  assert.equal(shortLines.length, 1, "but the user is told once, per SKU")
+  assert.equal(new Set(problems).size, problems.length, "no two problems may be identical")
+  assert.ok(
+    shortLines[0].includes("0 of 5280"),
+    `expected the two lines totalled, got: ${shortLines[0]}`
+  )
+})
+
+test("a partly-covered SKU across two lines totals both sides", () => {
+  // 1,000 available against 2 x 2,640 needed: the first line takes it all, the
+  // second gets nothing. One sentence, both sides summed.
+  const { rows, shortages } = allocateFifo(
+    [line("A", 2640), line("A", 2640)],
+    [po(1, "A", 1000, "2026-01-01")]
+  )
+  const problems = collectProblems(form(), rows, poMap(po(1, "A", 1000, "2026-01-01")), shortages)
+  const shortLines = problems.filter((p) => p.includes("are on open POs"))
+
+  assert.equal(shortLines.length, 1)
+  assert.ok(
+    shortLines[0].includes("1000 of 5280") && shortLines[0].includes("4280 short"),
+    `expected totals across both lines, got: ${shortLines[0]}`
+  )
+})

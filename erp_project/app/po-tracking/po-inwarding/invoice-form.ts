@@ -4,7 +4,7 @@
 // exercised) without rendering anything.
 
 import { matchMfg, matchSku, matchWarehouse, toDateInputValue } from "@/lib/invoice-mapping"
-import type { OpenPoOption, ParsedInvoice } from "@/types/invoice"
+import type { OpenPoOption, ParsedCharge, ParsedInvoice } from "@/types/invoice"
 import type { MfgOption, SkuOption, WarehouseOption } from "../po-procurement/po-types"
 
 /**
@@ -362,7 +362,24 @@ export function collectProblems(
   const badQty = rows.filter((r) => !(Number(r.qty) > 0)).length
   if (badQty > 0) out.push(`${badQty} line item${badQty > 1 ? "s have" : " has"} an invalid quantity.`)
 
+  // Totalled per SKU, not reported per row. allocateFifo raises one shortage per
+  // row, and one invoice legitimately carries the same SKU on several lines — so
+  // two lines of 2,640 with nothing to cover them produced the identical
+  // sentence twice, which says no more than once and read as a rendering bug.
+  // Summed, it also answers the question actually being asked: how much of this
+  // SKU is uncovered altogether.
+  const bySku = new Map<string, { sku_code: string; needed: number; available: number }>()
   for (const sh of shortages) {
+    const key = norm(sh.sku_code)
+    const agg = bySku.get(key)
+    if (agg) {
+      agg.needed = roundTo(agg.needed + sh.needed, 3)
+      agg.available = roundTo(agg.available + sh.available, 3)
+    } else {
+      bySku.set(key, { sku_code: sh.sku_code, needed: sh.needed, available: sh.available })
+    }
+  }
+  for (const sh of bySku.values()) {
     out.push(`Only ${sh.available} of ${sh.needed} ${sh.sku_code} are on open POs — ${roundTo(sh.needed - sh.available, 3)} short.`)
   }
 
@@ -406,15 +423,56 @@ export function collectProblems(
  * Display only. `toInwardPayload` deliberately does NOT do this — that value is
  * persisted to invoice_items_mfg, and a derived figure there is fabricated money.
  */
-export function sumLineItems(rows: Row[]): number {
-  return rows.reduce((sum, r) => {
-    const inclusive = Number(r.total_amount)
-    if(inclusive) return sum + inclusive
+/**
+ * The GST rate the goods rows carry, for grossing up a charge that doesn't
+ * state its own. Takes the most common rate rather than the first, so one
+ * mis-read row doesn't set the rate for the whole invoice.
+ */
+export function goodsGstPercent(rows: Row[]): number {
+  const counts = new Map<number, number>()
+  for (const r of rows) {
+    const g = Number(r.gst_percent)
+    if (Number.isFinite(g) && g > 0) counts.set(g, (counts.get(g) ?? 0) + 1)
+  }
+  let best = 0
+  let bestCount = 0
+  for (const [rate, n] of counts) if (n > bestCount) { best = rate; bestCount = n }
+  return best
+}
 
-    const preTax = Number(r.amount) || (Number(r.rate) || 0) * (Number(r.qty) || 0)
-
-    return sum + preTax * ( 1 + (Number(r.gst_percent) || 0) / 100)
+/**
+ * Charges grossed up the same way sumLineItems grosses the goods, so the two
+ * can be added and compared against the invoice's own (post-tax) total.
+ * Freight is taxed like anything else — Kain's ₹7,000 carries ₹1,260 of GST.
+ */
+export function sumCharges(charges: ParsedCharge[], fallbackGst: number): number {
+  return charges.reduce((sum, c) => {
+    const gst = c.gst_percent ?? fallbackGst
+    return sum + c.amount * (1 + (Number(gst) || 0) / 100)
   }, 0)
+}
+
+/**
+ * One row's value including GST.
+ *
+ * The Line Total column and sumLineItems both read this, so the figure shown
+ * against a row and the figure compared to the invoice total cannot drift
+ * apart — which they could when each computed its own.
+ *
+ * Prefers a tax-inclusive total when the invoice printed one; otherwise applies
+ * the row's GST to its amount, falling back to qty x rate only when the amount
+ * itself is missing.
+ */
+export function lineTotal(r: Row): number {
+  const inclusive = Number(r.total_amount)
+  if (inclusive) return inclusive
+
+  const preTax = Number(r.amount) || (Number(r.rate) || 0) * (Number(r.qty) || 0)
+  return preTax * (1 + (Number(r.gst_percent) || 0) / 100)
+}
+
+export function sumLineItems(rows: Row[]): number {
+  return rows.reduce((sum, r) => sum + lineTotal(r), 0)
 }
 
 /**

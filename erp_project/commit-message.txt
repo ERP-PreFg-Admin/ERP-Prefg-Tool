@@ -1,0 +1,67 @@
+feat: optimize invoice extraction, costing approvals, and masters tables
+
+Invoice extraction
+------------------
+Read the PDF's existing text layer before calling Nanonets. unpdf was already
+extracting the text to identify the seller GSTIN, but the remaining invoice text
+was being discarded. Local parsing now handles supported invoice layouts before
+falling back to Nanonets.
+
+lib/invoice-local/ adds local parsers for Tally, Cheryl, and Jainam layouts.
+Tally parsing is column-based so additional suppliers with the same layout do
+not require new code.
+
+Local results are accepted only when qty x rate = amount for every row and the
+GST/total validation passes. Invalid or uncertain parses fall through to
+Nanonets. v1 remains contract-compatible with a single switch in invoice-api.ts
+to restore the metered path if required.
+
+Buyer vs seller GSTIN
+---------------------
+Fixed lookupMfgByGstin and strategyFor selecting the first matching GSTIN.
+lib/gstin.ts now filters PEP's own registrations by PAN so the buyer GSTIN is
+not incorrectly treated as the supplier GSTIN.
+
+Invoice upload limit
+--------------------
+Increased the Nginx invoice upload limit to support larger PDF invoices.
+Upload limits are kept in a dedicated conf.d file so certbot renewals do not
+overwrite them.
+
+The client now rejects oversized files before upload.
+
+Misc costs
+----------
+Job Work, Shrink Wrap, Shipper, and RM-PM Wastage now go through the same
+approval gate as RM/PM rates instead of writing directly to bom_misc.
+
+Costing queries only use active records, preventing in_review prices from
+affecting Total Costing.
+
+Agreed Final Costing
+--------------------
+Standardized comparison table columns through ag-columns.tsx so labels,
+widths, and cell rendering are consistent across all four tables.
+
+Masters tables
+--------------
+- Improved missing-value handling with optional columns such as Effective To.
+- Added CSV and Excel exports to comparison dialogs.
+- Fixed column widths, header wrapping, and table scrolling.
+- Moved minTableWidth to shared table-width.ts.
+- Renamed MFG Cost Manager tabs while keeping existing tab keys unchanged.
+
+Production
+----------
+Fixed the production collation for prisma/fix_master_skr_skus to
+utf8mb4_0900_ai_ci, resolving join failures on PO tracking and manufacturer
+pages.
+
+Updated deployment flow to run deploy/redeploy-app from SSM before restarting
+the application so required environment variables such as NANONET_API_KEY are
+available.
+
+Verification
+------------
+TypeScript clean, 141/141 tests passing, lint passes with 0 errors, and
+production build passes.

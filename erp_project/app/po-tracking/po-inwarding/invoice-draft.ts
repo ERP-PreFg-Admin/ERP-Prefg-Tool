@@ -14,6 +14,7 @@
 // take the invoice flow down with it.
 
 import type { InvoiceForm, Row } from "./invoice-form"
+import type { ParsedCharge } from "@/types/invoice"
 
 const DB_NAME  = "erp-invoice-draft"
 const DB_VER   = 1
@@ -28,6 +29,10 @@ export type InvoiceDraft = {
   form:     InvoiceForm
   rows:     Row[]
   extra:    Record<string, string>
+  /** Optional: drafts saved before charges were modelled have none. */
+  charges?: ParsedCharge[]
+  /** Optional for the same reason — an older draft simply won't mark the column. */
+  gstDerived?: boolean
 }
 
 function openDb(): Promise<IDBDatabase> {

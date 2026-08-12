@@ -31,6 +31,7 @@ import { NextResponse } from "next/server"
 import { parseInvoice, strategyFor, configFor } from "@/lib/nanonets"
 import { detectFromPdf } from "@/lib/invoice-detect"
 import { parseLocallyVerbose } from "@/lib/invoice-local"
+import { parseCharges } from "@/lib/invoice-local/charges"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { makeEventId, recordRawEvent, recordProcessedEvent, recordFailedEvent } from "@/lib/events"
@@ -88,10 +89,25 @@ export const POST = withGateway({
         ? local.parsed
         : await parseInvoice(buffer, filename, configFor(strategy))
 
+      // Charges are read off the TEXT LAYER, not off whichever parser answered.
+      //
+      // Kain is exactly why: its freight row ("Freight Charges - Direct
+      // 7,000.00", SAC 996511) is perfectly readable, but the invoice falls back
+      // to Nanonets for an unrelated reason — one goods row bills fewer units
+      // than it ships — and the metered extractor doesn't model charges at all.
+      // Reading them here means the only supplier that has freight isn't also
+      // the only one that never sees it.
+      //
+      // The text is already in hand from detectFromPdf, so this costs nothing.
+      // A scanned PDF has no text and yields no charges, which is correct: there
+      // is nothing to read.
+      if (!parsed.charges?.length) parsed.charges = parseCharges(text)
+
       recordProcessedEvent("PO_INVOICE_PARSE", eventId, {
         filename,
         invoiceNumber: parsed.invoice_number,
         lineItems: parsed.line_items.length,
+        charges: parsed.charges?.length ?? 0,
         source,
         strategy: strategy?.label ?? "base",
       })

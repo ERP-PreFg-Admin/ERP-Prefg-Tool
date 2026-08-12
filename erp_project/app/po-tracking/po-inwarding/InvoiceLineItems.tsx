@@ -7,7 +7,7 @@ import { TableEmpty } from "@/components/ui/empty-state"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { cn } from "@/lib/utils"
 import { SectionHead } from "./InvoiceFields"
-import { bomBySku, poOptionsFor, type Row } from "./invoice-form"
+import { bomBySku, lineTotal, poOptionsFor, type Row } from "./invoice-form"
 import type { OpenPoOption } from "@/types/invoice"
 import type { SkuOption } from "../po-procurement/po-types"
 
@@ -16,17 +16,22 @@ const cellCls =
 /** Highlights a cell the user still has to deal with. */
 const warnCls = "border-amber-400 bg-amber-50 dark:bg-amber-950/30"
 
-/** The plain numeric columns, which differ only by which field they bind to.
- *
- *  `mrp` and `discount` are deliberately absent: they're still parsed from the
- *  invoice, still submitted, and still written to invoice_items_mfg (and
- *  mrp still reaches Uniware as maxRetailPrice — see lib/invoice-inward.ts).
- *  They're just not editable here. Add them back to this list to restore both
- *  the header cells and the inputs. */
-const NUMERIC_FIELDS = ["rate", "gst_percent", "amount", "total_amount"] as const
+/** Money as shown in the read-only columns. Two decimals always, so a column of
+ *  figures lines up on the point. */
+const money = (v: string | number | null | undefined) => {
+  const n = Number(v)
+  return Number.isFinite(n) && v !== "" && v != null
+    ? n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : "—"
+}
+
+/* `mrp` and `discount` have no column here: they're still parsed from the
+ * invoice, still submitted, and still written to invoice_items_mfg (and mrp
+ * still reaches Uniware as maxRetailPrice — see lib/invoice-inward.ts). They're
+ * just not shown or edited on this screen. */
 
 export function InvoiceLineItems({
-  rows, setRow, addRow, removeRow, rematch, skuOptions, openPos, mfgId,
+  rows, setRow, addRow, removeRow, rematch, skuOptions, openPos, mfgId, gstDerived,
 }: {
   rows: Row[]
   setRow: (i: number, field: keyof Row, value: string) => void
@@ -38,6 +43,9 @@ export function InvoiceLineItems({
   skuOptions: SkuOption[]
   openPos: OpenPoOption[]
   mfgId: string
+  /** The GST rate was worked out from the invoice total rather than printed per
+   *  line — see the column header. */
+  gstDerived: boolean
 }) {
   const poById = useMemo(() => new Map(openPos.map((p) => [String(p.id), p])), [openPos])
   const bomInfo = useMemo(() => bomBySku(openPos), [openPos])
@@ -81,9 +89,24 @@ export function InvoiceLineItems({
               <th className="min-w-24">HSN</th>
               <th className="min-w-24">Qty *</th>
               <th className="min-w-24">Rate</th>
-              <th className="min-w-20">GST %</th>
-              <th className="min-w-28">Amount</th>
-              <th className="min-w-28">Line Total</th>
+              {/* Amount → GST → Line Total, in the order the arithmetic runs, so
+                  the row reads left to right as the calculation it performs. */}
+              <th className="min-w-28 text-right">Amount</th>
+              <th className="min-w-20 text-right">
+                {gstDerived ? (
+                  // Marked on the column, not on every cell: the rate was worked
+                  // out once for the whole invoice, so saying it 200 times would
+                  // be noise. The dotted rule is the annotation convention for
+                  // "inferred" — it reads as a footnote, not an error.
+                  <span
+                    className="cursor-help underline decoration-dotted decoration-from-font underline-offset-4"
+                    title="Not printed on each line. Worked out from the invoice's own total, which states the tax once."
+                  >
+                    GST %
+                  </span>
+                ) : "GST %"}
+              </th>
+              <th className="min-w-28 text-right">Line Total</th>
               <th className="w-8" />
             </tr>
           </thead>
@@ -203,16 +226,32 @@ export function InvoiceLineItems({
                   />
                 </td>
 
-                {NUMERIC_FIELDS.map((field) => (
-                  <td key={field}>
-                    <input
-                      type="number"
-                      className={cn(cellCls, "text-right")}
-                      value={r[field]}
-                      onChange={(e) => setRow(i, field, e.target.value)}
-                    />
-                  </td>
-                ))}
+                <td>
+                  <input
+                    type="number"
+                    className={cn(cellCls, "text-right")}
+                    value={r.rate}
+                    onChange={(e) => setRow(i, "rate", e.target.value)}
+                  />
+                </td>
+
+                {/* Amount, GST % and Line Total are read-only.
+                    Amount is what the invoice charges for the line — not qty x
+                    rate, which does not always equal it (Kain bills fewer units
+                    than it ships). GST is read from the invoice, or derived from
+                    its own total when stated once in the footer. Line Total is
+                    the two multiplied. Making them editable invited someone to
+                    "fix" a figure the document is the authority on; qty and rate
+                    stay editable because those are what gets received. */}
+                <td className="px-1.5 py-2 text-right font-mono tabular-nums text-[11px]">
+                  {money(r.amount)}
+                </td>
+                <td className="px-1.5 py-2 text-right font-mono tabular-nums text-[11px] text-muted-foreground">
+                  {r.gst_percent === "" || r.gst_percent == null ? "—" : `${Number(r.gst_percent)}%`}
+                </td>
+                <td className="px-1.5 py-2 text-right font-mono tabular-nums text-[11px] font-medium">
+                  {money(lineTotal(r))}
+                </td>
 
                 <td>
                   <button

@@ -21,6 +21,24 @@ export type ParsedLineItem = {
   total_amount: number | null
 }
 
+/** A non-goods charge line — freight, packing, insurance. Has an amount and an
+ *  SAC but no quantity or rate, so it is never a line item. */
+export type ParsedCharge = {
+  label:       string
+  amount:      number
+  /** Read from the invoice's own HSN/SAC tax summary when that names this
+   *  charge's SAC; null otherwise, and the dialog falls back to the goods rate. */
+  gst_percent: number | null
+  /** SAC printed on the charge line — 996511 is goods transport. */
+  sac:         string | null
+  /** The invoice's tax summary states the same taxable value for this SAC, so
+   *  the amount is confirmed by a second place on the document rather than by a
+   *  single line the parser happened to read. */
+  verified:    boolean
+  /** Tax the summary attributes to this SAC, for display beside the amount. */
+  tax_amount:  number | null
+}
+
 export type ParsedInvoice = {
   date:             string | null
   invoice_number:   string | null
@@ -43,6 +61,14 @@ export type ParsedInvoice = {
   purchase_order:   string | null
   total_amount:     number | null
   line_items:       ParsedLineItem[]
+  /** Freight/packing/insurance. Inside total_amount but outside line_items, so
+   *  the review screen's sum-vs-total check needs them. Absent from the metered
+   *  extractor's output, hence optional. */
+  charges?:         ParsedCharge[]
+  /** True when the rows' gst_percent was worked out from the invoice total
+   *  rather than printed per line. The review screen says so, because otherwise
+   *  someone checking a row against the PDF hunts for a rate that isn't there. */
+  gst_derived?:     boolean
   /** Anything the extractor returned that isn't one of the fields above. Shown
    *  in the dialog's "Other parsed fields" section so nothing is silently lost. */
   extra:            Record<string, string>

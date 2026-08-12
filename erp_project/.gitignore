@@ -48,21 +48,13 @@ node_modules
 logs/*
 
 #Invoices
-/Invoices
+/Invoices/
 
 # Scripts for my personal development
 /scripts/*
 
-# ...except the ones that guard production logic or set up a fresh schema. These
-# must be in the repo: they are run by `npm run test:checks` / `npm run db:seed`,
-# and an ignored verification script only ever protects the machine that wrote it.
-# (Two _check-* files were already stranded untracked before this exception —
-# see docs/qa-audit-2026-08.md #12.)
 !/scripts/_check-*.ts
 !/scripts/seed-permissions.ts
 !/scripts/test-connection.js
 
-# Extracted invoice text and parsed output, written by the invoice-parser checks
-# in tests/. These are real supplier documents carrying rates and quantities —
-# committing them puts customer pricing in git history permanently.
 /.invoice-samples/
