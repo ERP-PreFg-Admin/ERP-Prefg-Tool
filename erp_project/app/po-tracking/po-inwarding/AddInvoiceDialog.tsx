@@ -33,7 +33,7 @@ import {
   matchSummary, rowsFromParsed, sumLineItems, sumCharges, goodsGstPercent, toInwardPayload,
   type InvoiceForm, type Row, type Shortage,
 } from "./invoice-form"
-import { commitInvoice, fetchOpenPos, parseInvoiceFile, type InwardStep } from "./invoice-api"
+import { commitInvoice, fetchOpenPos, InvoiceApiError, parseInvoiceFile, type InwardStep } from "./invoice-api"
 import { clearDraft, loadDraft, saveDraft, savedAgo, type InvoiceDraft } from "./invoice-draft"
 import { InvoiceFields } from "./InvoiceFields"
 import { InvoiceLineItems } from "./InvoiceLineItems"
@@ -71,6 +71,7 @@ export default function AddInvoiceDialog({
   const [phase, setPhase]   = useState<Phase>("pick")
   const [error, setError]   = useState("")
   const [elapsed, setElapsed] = useState(0)
+  const [retryAfter , setRetryAfter] = useState(0)
   /** "" when idle; otherwise which step of submit is running, for the button. */
   /** "" when idle; otherwise the step currently running, for the button label. */
   const [submitStep, setSubmitStep] = useState<"" | InwardStep>("")
@@ -163,7 +164,11 @@ export default function AddInvoiceDialog({
   // Elapsed counter — a minute of "Parsing…" with no moving number reads as a hang.
   useEffect(() => {
     if (phase !== "parsing") return
-    const t = setInterval(() => setElapsed((n) => n + 1), 1000)
+    const t = setInterval(() => {
+      setElapsed((n) => n + 1)
+      setRetryAfter((n) => (n > 0 ? n - 1 : 0))
+    } , 1000)
+
     return () => clearInterval(t)
   }, [phase])
 
@@ -258,6 +263,7 @@ export default function AddInvoiceDialog({
     setPhase("parsing")
     setError("")
     setElapsed(0)
+    setRetryAfter(0)
     try {
       const { parsed, detected } = await parseInvoiceFile(target)
       // Every value here is a suggestion; the review step exists to override it.
@@ -276,6 +282,7 @@ export default function AddInvoiceDialog({
       setPhase("review")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invoice parsing failed.")
+      if(err instanceof InvoiceApiError) setRetryAfter(err.retryAfterSec)
     }
   }
 
@@ -428,8 +435,8 @@ export default function AddInvoiceDialog({
                   <Button variant="outline" onClick={() => { setError(""); setPhase("pick") }}>
                     Choose another file
                   </Button>
-                  <Button onClick={() => { if (file) void runParse(file) }} disabled={!file}>
-                    <RotateCw className="h-3.5 w-3.5" /> Retry parsing
+                  <Button onClick={() => { if (file) void runParse(file) }} disabled={!file || retryAfter > 0}>
+                    <RotateCw className="h-3.5 w-3.5" /> {retryAfter > 0 ? `Retry in ${retryAfter}s` : "Retry Parsing"}
                   </Button>
                 </div>
               </>

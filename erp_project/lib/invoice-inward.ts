@@ -46,6 +46,9 @@ import { ApiError } from "@/lib/gateway/errors"
 import logger from "@/lib/logger"
 import type { InvoiceInward } from "@/lib/validation/purchase-orders"
 import { monthIST, todayIST } from "@/lib/date"
+import { brandCode } from "./constants"
+import { panOf } from "./gstin"
+import { warehouse } from "./queries/warehouse"
 
 export const INWARD_STEPS = ["s3", "po", "uniware", "email"] as const
 export type InwardStep = (typeof INWARD_STEPS)[number]
@@ -70,9 +73,6 @@ export type InwardOutcome = {
   failedStep?: InwardStep
 }
 
-// Same mapping the single-PO route uses, so an inward PO number is recognisable
-// alongside the ones procurement raises.
-const BRAND_CODES: Record<string, string> = { mcaffeine: "MCAFF", hyphen: "HYP" }
 
 const numOrNull = (v: unknown) =>
   v == null || v === "" || Number.isNaN(Number(v)) ? null : Number(v)
@@ -106,7 +106,7 @@ async function resolveBrands(
       )
     }
     const raw = rows[0].brand?.trim() || sku.split("-")[0]
-    brandBySku.set(sku, (BRAND_CODES[raw.toLowerCase()] ?? raw).toUpperCase())
+    brandBySku.set(sku, brandCode(raw))
   }
   return brandBySku
 }
@@ -264,7 +264,33 @@ export async function runInwardInvoice(
 
   const mfgRows = await query<{ code: string; name: string }>(manufacturersSql.selectById, [Number(mfg_id)])
   const mfgCode = mfgRows[0]?.code ?? ""
-
+  let facility:string | undefined
+  // Which of our entities was billed. Also selects that entity's point of contact
+  // at the destination warehouse for the notification below — a site can have a
+  // different POC for Pep than for Kreative.
+  let legalEntityCode: string | undefined
+  if(uniwareEnabled()) {
+    const pan = body.buyer_gstin?.trim() ? panOf(body.buyer_gstin.trim()) : null
+    if(!pan) {
+      throw new ApiError(
+        400 , "buyer_gstin_missing" ,
+        "This invoice has no buyer GSTIN, so there is no way to tell which of our entities was " +
+        "billed. Fill it in on the review screen and try again."
+      )
+    }
+    const whRows = await query<{facility_code : string | null; entity_code : string}> (
+        warehouse.facilityByDestinationAndPan , [destination , pan]
+    )
+    facility = whRows[0]?.facility_code?.trim() || undefined
+    legalEntityCode = whRows[0]?.entity_code
+    if(!facility) {
+      throw new ApiError(
+        400, "warehouse_facility_missing",
+        `'${destination}' has no active Uniware facility for the entity billed on this invoice ` +
+        `(PAN ${pan}). Set it on /masters/warehouses — otherwise this PO would land in the wrong facility.`
+      )
+    }
+  }
   // ── 1. S3 ─────────────────────────────────────────────────────────────────
   await emit({ step: "s3", status: "start" })
   let attachmentKey = ""
@@ -334,6 +360,7 @@ export async function runInwardInvoice(
       // ONE Uniware PO carrying every SKU — unlike our side, where the model is
       // one PO per SKU.
       const res = await createPurchaseOrder({
+        facility : facility,
         vendorCode: UNIWARE_VENDOR_CODE || mfgCode,
         currencyCode: body.currency || "INR",
         // Almost always omitted here: expectedOn is the invoice date, which is
@@ -403,7 +430,10 @@ export async function runInwardInvoice(
     const sent = await sendInwardInvoiceEmail({
       mfgId: Number(mfg_id),
       destination,
+      facility,
+      legalEntityCode,
       invoiceNo: invoice_no,
+       
       invoiceDate: body.invoice_date?.trim() || null,
       // Null when the mirror was skipped — quoting a reference the
       // manufacturer can't look up is worse than omitting the line.

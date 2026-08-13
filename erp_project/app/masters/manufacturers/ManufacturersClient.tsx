@@ -41,6 +41,7 @@ import { Button } from "@/components/ui/button"
 import { EditMfgDialog } from "./EditMfgDialog"
 import { ManufacturerDocumentsDialog } from "./ManufacturerDocumentsDialog"
 import { EntityHistoryDialog } from "@/components/masters/EntityHistoryDialog"
+import { useEditGuard } from "@/components/AccessContext"
 // Common fields shared by the Add dialog and the CSV import.
 // `code` is auto-generated server-side on single-record create AND on a
 // bulk-CSV new-record row (MFG-<serial>-<XX>) — it's never collected from
@@ -97,6 +98,7 @@ export default function ManufacturersClient({
   // router.refresh() re-runs the server page with current URL — keeps page + filters.
   const refresh = () => router.refresh()
   const [editMfg, setEditMfg] = useState<Mfg | null>(null)
+  const guard = useEditGuard()
   const [docsMfg, setDocsMfg] = useState<Mfg | null>(null)
   const [historyMfgId, setHistoryMfgId] = useState<number | null>(null)
 
@@ -202,7 +204,7 @@ export default function ManufacturersClient({
                         <Button
                           size="icon"
                           variant="ghost"
-                          onClick={() => setEditMfg(row)}
+                          onClick={() => { if (guard("edit a manufacturer")) setEditMfg(row) }}
                           disabled={row.status === "in_review"}
                           title={row.status === "in_review" ? "Pending approval — cannot edit" : "Edit"}
                         >

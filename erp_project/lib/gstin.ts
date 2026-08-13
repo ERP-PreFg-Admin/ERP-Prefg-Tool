@@ -17,6 +17,20 @@ export function findGstins(text: string): string[] {
   return [...new Set(text.match(GSTIN_PATTERN) ?? [])]
 }
 
+/**
+ * Is this string, on its own, shaped like a GSTIN?
+ *
+ * Anchored and deliberately NOT built from GSTIN_PATTERN: that one carries the
+ * `g` flag for findGstins, and a /g regex keeps `lastIndex` between calls, so
+ * reusing it here would return alternating true/false for the same input.
+ *
+ * Shape only — there is no checksum validation, so a transposed character still
+ * passes. Pair it with a PAN comparison against the entity the value is filed
+ * under (see the warehouse route) to catch a valid GSTIN in the wrong slot.
+ */
+const GSTIN_SHAPE = /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/
+export const isGstinShape = (s: string) => GSTIN_SHAPE.test(s.trim().toUpperCase())
+
 /** The PAN embedded in a GSTIN. The same legal entity registered in another state
  *  differs only in the leading two characters, so this is the identity to compare. */
 export const panOf = (gstin: string) => gstin.slice(2, 12)

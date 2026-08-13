@@ -81,9 +81,22 @@ export async function fetchPoData(poId: number): Promise<PoEmailData | null> {
 export async function resolveRecipients(
   entityType: "mfg" | "vendor" | "warehouse",
   entityCode: string,
-  primaryEmail: string | null = null
+  primaryEmail: string | null = null,
+  /**
+   * Which legal entity's mail this is, for warehouses only — a site's point of
+   * contact can differ for Pep vs Kreative. Recipients are then the shared
+   * addresses PLUS that entity's, never the entity's alone.
+   *
+   * Omit it and only the shared addresses are used, which is the right fallback
+   * when the entity can't be determined: a general warehouse inbox is a safer
+   * place for a notification to land than nowhere.
+   */
+  legalEntityCode: string | null = null
 ): Promise<string[]> {
-  const rows = await query<{ email: string }>(entityEmails.selectByEntity, [entityType, entityCode])
+  const rows =
+    entityType === "warehouse"
+      ? await query<{ email: string }>(entityEmails.selectByWarehouseForEntity, [entityCode, legalEntityCode])
+      : await query<{ email: string }>(entityEmails.selectByEntity, [entityType, entityCode])
   const seen = new Set<string>()
   const recipients: string[] = []
   for (const raw of [primaryEmail, ...rows.map((r) => r.email)]) {
@@ -340,6 +353,14 @@ export type InwardInvoiceMail = {
    * entity_type 'warehouse' with this exact name as the code.
    */
   destination: string
+  facility: string | undefined
+  /**
+   * The legal entity billed on this invoice (master_entity.code), resolved from
+   * buyer_gstin in lib/invoice-inward.ts. Selects that entity's point of contact
+   * at the warehouse on top of the shared addresses. Undefined only when Uniware
+   * is unconfigured, in which case the shared addresses alone are used.
+   */
+  legalEntityCode: string | undefined
   invoiceNo: string
   /** Invoice date as entered on the review form (YYYY-MM-DD). */
   invoiceDate: string | null
@@ -362,7 +383,7 @@ export type InwardInvoiceMail = {
  * which is already committed by the time this runs.
  */
 export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<boolean> {
-  const { mfgId, destination, invoiceNo, invoiceDate, uniwarePoCode, invoicePdf, items, senderName } = mail
+  const { mfgId, destination, facility, legalEntityCode, invoiceNo, invoiceDate, uniwarePoCode, invoicePdf, items, senderName } = mail
 
   // Only for the subject line — the manufacturer is not a recipient here.
   const mfgRows = await query<{ code: string; name: string }>(
@@ -375,10 +396,11 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
     return false
   }
 
-  const recipients = await resolveRecipients("warehouse", destination)
+  // Shared warehouse addresses plus this legal entity's own point of contact.
+  const recipients = await resolveRecipients("warehouse", destination, null, legalEntityCode ?? null)
   if (recipients.length === 0) {
     logger.warn({
-      ...ctx, mfgId, destination,
+      ...ctx, mfgId, destination, legalEntityCode,
       message: "sendInwardInvoiceEmail: warehouse has no email on file, skipping",
     })
     return false
@@ -399,7 +421,7 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
   // mail rather than blocking it.
   if (uniwarePoCode) {
     try {
-      const poPdf = await fetchPurchaseOrderPdf(uniwarePoCode)
+      const poPdf = await fetchPurchaseOrderPdf(uniwarePoCode ,facility)
       // Codes carry slashes (GM/2627/PO/2006) — not a filename.
       const safeCode = uniwarePoCode.replace(/[^a-zA-Z0-9._-]/g, "-")
       attachments.push({ filename: `Uniware-PO-${safeCode}.pdf`, content: poPdf })

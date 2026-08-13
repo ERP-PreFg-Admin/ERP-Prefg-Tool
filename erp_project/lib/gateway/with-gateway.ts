@@ -8,6 +8,7 @@ import { activitySql } from "@/lib/queries/activity"
 import { createRequestContext } from "@/lib/request-context"
 import logger from "@/lib/logger"
 import { ApiError, toErrorResponse } from "./errors"
+import { acquire , type RateLimitRule } from "./rate-limit"
 
 type AccessRule = { pageSlug: string; level: Exclude<AccessLevel, "none"> }
 
@@ -50,6 +51,7 @@ export function withGateway<TBody = unknown, TParams = Record<string, string>>(o
     session: Session
     ctx: ReturnType<typeof createRequestContext>
   }) => Promise<Response>
+    rateLimit? : RateLimitRule
 }) {
   return async (req: NextRequest, routeCtx?: { params: Promise<Record<string, string>> }) => {
     const started = Date.now()
@@ -64,8 +66,45 @@ export function withGateway<TBody = unknown, TParams = Record<string, string>>(o
         const roles = session.user.roles ?? []
         const level = await resolveAccess(ctx.userId, roles, opts.access.pageSlug)
         const ok = opts.access.level === "viewer" ? level !== "none" : level === "editor"
-        if (!ok) throw new ApiError(403, "forbidden", "Insufficient access")
+        // Worded for the person who hit it, not for the log: this message is
+        // surfaced verbatim by every client call site (`data.error`), and
+        // "Insufficient access" left them with nothing to do about it.
+        if (!ok) {
+          throw new ApiError(
+            403,
+            "forbidden",
+            "Access denied — you have view-only access to this page. Ask an admin for editor access to make changes."
+          )
+        }
       }
+
+      let release = () => {}
+      if (opts.rateLimit) {
+        const verdict = acquire(ctx.path, ctx.userId, opts.rateLimit)
+        if (!verdict.ok) {
+          logger.warn({
+            ...ctx, reason: verdict.reason, limit: verdict.limit, observed: verdict.observed,
+            message: "Rate limit refused request",
+          })
+          throw new ApiError(
+            429, "rate_limited", "Too many requests — try again shortly.", undefined,
+            {
+              "Retry-After": String(verdict.retryAfterSec),
+              "X-RateLimit-Limit": String(opts.rateLimit.limit),
+              "X-RateLimit-Remaining": "0",
+            }
+          )
+        }
+        if (verdict.wouldBlock) {
+          logger.warn({
+            ...ctx, would_block: true, reason: verdict.wouldBlock.reason,
+            limit: verdict.wouldBlock.limit, observed: verdict.wouldBlock.observed,
+            message: "Rate limit WOULD have refused this request (shadow mode)",
+          })
+        }
+        release = verdict.release
+      }
+
 
       let params = {} as TParams
       if (opts.paramsSchema) {
@@ -87,7 +126,12 @@ export function withGateway<TBody = unknown, TParams = Record<string, string>>(o
         body = parsed.data
       }
 
-      const res = await opts.handler({ req, body, params, session, ctx })
+      let res: Response
+      try {
+        res = await opts.handler({ req, body, params, session, ctx })
+      } finally {
+        release()
+      }
       logger.info({ ...ctx, ms: Date.now() - started, ok: true, message: "Request completed" })
       logActivity(req, ctx, res.status, Date.now() - started)
       return res

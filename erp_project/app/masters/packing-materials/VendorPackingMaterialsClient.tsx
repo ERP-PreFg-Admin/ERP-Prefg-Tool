@@ -18,6 +18,7 @@ import { PmRateTable, fmtDate } from "./PmRateTable"
 import { VendorPMDetailDialog } from "./VendorPMDetailDialog"
 import { EditPmVendorRateDialog } from "./EditPmVendorRateDialog"
 import { RateHistoryDialog } from "@/components/masters/RateHistoryDialog"
+import { useEditGuard } from "@/components/AccessContext"
 
 const vrmStatusBadge = (row: AnyRow) => <StatusBadge status={row.status as string | null} />
 
@@ -69,6 +70,7 @@ export default function VendorPackingMaterialsClient({
   currentEffectiveFrom: string
 }) {
   const [selectedRow, setSelectedRow] = useState<PMVendor | null>(null)
+  const guard = useEditGuard()
   const [editRow, setEditRow] = useState<PMVendor | null>(null)
   const [historyRow, setHistoryRow] = useState<PMVendor | null>(null)
 
@@ -103,7 +105,7 @@ export default function VendorPackingMaterialsClient({
               <Button
                 size="icon"
                 variant="ghost"
-                onClick={() => setEditRow(typedRow)}
+                onClick={() => { if (guard("edit a PM rate")) setEditRow(typedRow) }}
                 disabled={isLocked}
                 title={isLocked ? "Pending approval — cannot edit" : "Edit rate"}
               >

@@ -106,7 +106,7 @@ export const POST = withGateway({
 
     // ── update (approval flow) ───────────────────────────────────────────────────
     if (body.action === "update") {
-      const { id, category, subcategory, sku_type, mrp, status, remarks } = body
+      const { id, category, subcategory, sku_type, filling, filling_uom, mrp, status, remarks } = body
 
       const eventId = makeEventId("SKU_UPDATE", "update", id)
       const logCtx = { ...ctx, eventId, module: "SKU_UPDATE" }
@@ -146,6 +146,8 @@ export const POST = withGateway({
           category: category?.trim() || "",
           subcategory: subcategory?.trim() || "",
           sku_type: sku_type?.trim() || "",
+          filling: filling != null && filling !== "" ? String(filling) : "",
+          filling_uom: filling_uom?.trim() || "",
           mrp: mrp != null && mrp !== "" ? String(mrp) : "",
           status: status || "active",
         }

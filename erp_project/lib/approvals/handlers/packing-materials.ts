@@ -6,6 +6,7 @@ import { packingMaterials as pmSql } from "@/lib/queries/packing-materials"
 import { vendors as vendorSql } from "@/lib/queries/vendors"
 import { manufacturers as mfgSql } from "@/lib/queries/manufacturers"
 import { approvalsSql } from "@/lib/queries/approvals"
+import { todayIST } from "@/lib/date"
 import { parseS3Import } from "@/lib/import-s3"
 import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
 import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
@@ -298,7 +299,7 @@ export const pmVrmBulkHandler: ModuleHandler = {
         const currRate = Number(row.curr_rate)
         const moq = Number(row.moq)
         if (!pmCode || !vendorCode || !Number.isFinite(currRate) || currRate <= 0
-          || !Number.isFinite(moq) || moq <= 0 || !row.effective_from?.trim()) {
+          || !Number.isFinite(moq) || moq <= 0) {
           skipped++; continue
         }
 
@@ -314,7 +315,11 @@ export const pmVrmBulkHandler: ModuleHandler = {
           pm.id, vendor.id, vendorCode,
           roundToTwoDecimals(currRate), roundToWholeNumber(moq),
           row.uom?.trim() || null, STATUS.ACTIVE,
-          row.effective_from.trim(), row.effective_to?.trim() || null,
+          // Optional: a blank date means the rate applies from now. Rows staged
+
+          // before the upload-time stamp was added can still arrive blank.
+
+          row.effective_from?.trim() || todayIST(), row.effective_to?.trim() || null,
         ])
         inserted++
       }
@@ -344,7 +349,7 @@ export const pmRateBulkHandler: ModuleHandler = {
         const pmCode = row.pm_code?.trim()
         const mfgCode = row.mfg_code?.trim()
         const currRate = Number(row.curr_rate)
-        if (!pmCode || !mfgCode || !Number.isFinite(currRate) || currRate <= 0 || !row.effective_from?.trim()) {
+        if (!pmCode || !mfgCode || !Number.isFinite(currRate) || currRate <= 0) {
           skipped++; continue
         }
 
@@ -359,7 +364,10 @@ export const pmRateBulkHandler: ModuleHandler = {
         await conn.execute(pmSql.insertMfgRate, [
           pm.id, mfg.id, mfgCode,
           roundToTwoDecimals(currRate), row.uom?.trim() || null,
-          STATUS.ACTIVE, row.effective_from.trim(),
+          STATUS.ACTIVE,
+          // Optional: a blank date means the rate applies from now. Rows staged
+          // before the upload-time stamp was added can still arrive blank.
+          row.effective_from?.trim() || todayIST(),
         ])
         inserted++
       }

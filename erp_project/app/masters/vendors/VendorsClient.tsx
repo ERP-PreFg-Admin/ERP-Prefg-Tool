@@ -53,6 +53,7 @@ import { EditVendorDialog } from "./EditVendorDialog"
 import { AddVendorDialog } from "./AddVendorDialog"
 import { VendorDocumentsDialog } from "./VendorDocumentsDialog"
 import { EntityHistoryDialog } from "@/components/masters/EntityHistoryDialog"
+import { useEditGuard } from "@/components/AccessContext"
 // Common fields shared by the CSV importer.
 // `code` is auto-generated server-side on single-record create AND on a
 // bulk-CSV new-record row — never collected from the user directly. In the
@@ -105,6 +106,7 @@ export default function VendorsClient({
 }) {
   const { navigate, router } = useUrlFilters()
   const [editVendor, setEditVendor] = useState<Vendor | null>(null)
+  const guard = useEditGuard()
   const [docsVendor, setDocsVendor] = useState<Vendor | null>(null)
   const [historyVendorId, setHistoryVendorId] = useState<number | null>(null)
 
@@ -243,7 +245,7 @@ export default function VendorsClient({
                         <Button
                           size="icon"
                           variant="ghost"
-                          onClick={() => setEditVendor(row)}
+                          onClick={() => { if (guard("edit a vendor")) setEditVendor(row) }}
                           disabled={row.status === "in_review"}
                           title={row.status === "in_review" ? "Pending approval — cannot edit" : "Edit"}
                         >

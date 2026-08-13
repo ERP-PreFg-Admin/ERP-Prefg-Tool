@@ -18,6 +18,7 @@ import { PmRateTable, fmtDate } from "./PmRateTable"
 import { MfgPMDetailDialog } from "./MfgPMDetailDialog"
 import { EditPmMfgRateDialog } from "./EditPmMfgRateDialog"
 import { RateHistoryDialog } from "@/components/masters/RateHistoryDialog"
+import { useEditGuard } from "@/components/AccessContext"
 
 // For PM the rate status is stored directly as `status` (pmm.status).
 const rateStatusBadge = (row: AnyRow) => <StatusBadge status={row.status as string | null} />
@@ -69,6 +70,7 @@ export default function ManufacturerPackingMaterialsClient({
   currentMfgEffectiveFrom: string
 }) {
   const [selectedRow, setSelectedRow] = useState<PMByMfg | null>(null)
+  const guard = useEditGuard()
   const [editRow, setEditRow] = useState<PMByMfg | null>(null)
   const [historyRow, setHistoryRow] = useState<PMByMfg | null>(null)
 
@@ -103,7 +105,7 @@ export default function ManufacturerPackingMaterialsClient({
               <Button
                 size="icon"
                 variant="ghost"
-                onClick={() => setEditRow(typedRow)}
+                onClick={() => { if (guard("edit a PM rate")) setEditRow(typedRow) }}
                 disabled={isLocked}
                 title={isLocked ? "Pending approval — cannot edit" : "Edit rate"}
               >

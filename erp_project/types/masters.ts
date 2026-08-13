@@ -53,6 +53,21 @@ export type Sku = {
   bom_code?: string | null
 }
 
+/**
+ * Per-SKU rollup of the gaps that stop Agreed Final Costing from producing a
+ * number — skus.selectCostingGapsBySkuIds. Only SKUs with an active recipe
+ * carrying active lines get a row, so an absent entry is itself a reason.
+ */
+export type CostingGap = {
+  sku_id: number
+  /** Manufacturers this SKU's recipe is mapped to. 0 ⇒ the rate counts below are meaningless. */
+  mfg_count: number
+  rm_line_count: number
+  pm_line_count: number
+  rm_lines_without_rate: number
+  pm_lines_without_rate: number
+}
+
 /** Shape shared by both variant-listing queries in lib/queries/skus.ts. */
 export type SkuVariantRow = {
   id: number
@@ -118,6 +133,123 @@ export type Vendor = {
   cancelled_cheque_key: string | null
   pan_card_key:         string | null
   misc_document_key:    string | null
+}
+
+/** `master_warehouse` table — one row per physical LOCATION. Used by
+ *  app/masters/warehouses. Mirrors WAREHOUSE_COLUMNS in lib/queries/warehouse.ts.
+ *
+ *  `name` is a de-facto foreign key with nothing enforcing it: it is copied by
+ *  value into purchase_orders.destination, invoice_mfg.destination and
+ *  entity_emails.entity_code (entity_type='warehouse'), and lib/scope.ts resolves
+ *  warehouse scope to names rather than ids. Immutable after create.
+ *
+ *  Not to be confused with WarehouseOption in
+ *  app/po-tracking/po-procurement/po-types.ts, which is the PO dropdown's shape. */
+export type Warehouse = {
+  id: number
+  /** Stable short code, e.g. "GGN". NOT a join key yet — POs, invoices and mail
+   *  routing all still reference `name`. Safe to edit for that reason. */
+  code: string | null
+  name: string
+  /** The city. Held the state until 2026-08-13; `state` carries that now. This is
+   *  what the PO destination dropdown renders, so changes here are user-visible. */
+  location: string | null
+  state: string | null
+  /** One of ZONE_OPTIONS in components/masters/field-config.ts — a region
+   *  (North/South/West/North East/East), not a state. */
+  zone: string | null
+  /** master_warehouse_type — "MWH" (Mother Warehouse: Gurgaon, Mumbai) or "CWH"
+   *  (Child Warehouse, fed from a mother). Not "Central". */
+  type: string
+  /** Who to call at the site. One team serves both entities' goods. */
+  contact_person: string | null
+  contact_phone: string | null
+  /** The facility OPERATOR's GST registration — relevant when the site is a 3PL.
+   *  NOT ours: WarehouseEntity.gstin holds our entity's registration. */
+  site_gstin: string | null
+  /** "active" | "inactive" | "in_review" | "rejected" — the approval flow needs
+   *  all four. Use STATUS from lib/constants.ts, not literals. */
+  status: string
+  created_by: number | null
+  created_at: Date | null
+  updated_at: Date | null
+}
+
+/** `details_warehouse_entity` table — one row per (location, legal entity),
+ *  holding that entity's Unicommerce facility, GST registration and addresses
+ *  for the site. Two rows per location: every warehouse operates under both Pep
+ *  and Kreative with a DIFFERENT facility code.
+ *
+ *  Keyed by entity, not brand — Fein and mCaffeine are both Pep and share a
+ *  facility, so Fein needs no row of its own. */
+export type WarehouseEntity = {
+  id: number
+  warehouse_id: number
+  entity_id: number
+  /** Joined from master_entity — "PEP" | "KREATIVE". */
+  entity_code: string
+  /** Joined from master_entity.legal_name. */
+  entity_name: string
+  /** Sent as the Facility header on the Uniware PO create — see authHeaders() in
+   *  lib/uniware.ts. Null means this entity cannot inward here, and
+   *  lib/invoice-inward.ts fails fast rather than falling back to the env var. */
+  facility_code: string | null
+  /** "MWH" | "CWH" for THIS entity, overriding the location's. Null = use
+   *  Warehouse.type. */
+  type: string | null
+  /** The registration WE bill under here. Its PAN must match this row's entity,
+   *  which the route enforces — a valid GSTIN in the wrong entity's slot is
+   *  otherwise invisible, since both are ours and isOurs() accepts either. */
+  bill_to_gstin: string | null
+  bill_to_name: string | null
+  /** Free text, kept as the verbatim record of what the paperwork says. No
+   *  structured counterpart — it is a head-office address nobody filters on. */
+  bill_to_address: string | null
+  ship_to_name: string | null
+  /** Structured ship-to. Per entity because at Mumbai the two entities ship to
+   *  different physical sites (Bhiwandi vs Kalyan). Authoritative for where goods
+   *  physically go; Warehouse.location/.state are the site LABEL. */
+  ship_to_line1: string | null
+  ship_to_line2: string | null
+  ship_to_city: string | null
+  ship_to_state: string | null
+  /** 6 digits, stored as CHAR(6) so a leading zero survives. */
+  ship_to_pincode: string | null
+  /** The CONSIGNEE registration — one of OUR PANs, but NOT necessarily this row's
+   *  entity. Pep operates most sites, so Kreative's Kolkata/Bengaluru/Ahmedabad/
+   *  Nagpur/Guwahati rows ship under Pep's registration for that state. Validating
+   *  this against the row's own entity would reject correct data. */
+  ship_to_gstin: string | null
+  /** The verbatim block, kept alongside the structured columns above. */
+  ship_to_address: string | null
+  /** "active" | "inactive" — a location can be live for one entity and not the
+   *  other. The facility resolver filters on it. */
+  status: string
+  /** Free note, e.g. "Activity started 22.04.2026". */
+  remarks: string | null
+  created_at: Date | null
+  updated_at: Date | null
+}
+
+/** `master_entity` table — OUR own legal entities, not a counterparty's. Two
+ *  rows: PEP and KREATIVE.
+ *
+ *  `pan` overlaps OUR_PANS in lib/gstin.ts, which stays the source of truth for
+ *  invoice detection: it covers 9 registrations across 4 PANs and is deliberately
+ *  broader than this table. Do not rewire isOurs() off these rows.
+ *
+ *  The brand → entity direction is a constant instead (entityForBrand in
+ *  lib/constants.ts) — three brands fixed by company structure need no table. */
+export type Entity = {
+  id: number
+  /** Short internal code, UPPERCASE — "PEP" | "KREATIVE". Matches the values
+   *  entityForBrand() returns, and that comparison happens in TypeScript, where
+   *  it is case-sensitive even though the column's collation is not. */
+  code: string
+  legal_name: string
+  pan: string | null
+  status: string | null
+  created_at: Date | null
 }
 
 /** `rm` table — Raw Materials. Used by app/masters/raw-materials.

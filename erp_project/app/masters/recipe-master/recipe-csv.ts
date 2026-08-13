@@ -5,6 +5,7 @@
  */
 
 import type { RecipeLineRow, RecipeMaterialOption } from "./RecipeLineEditorGrid"
+import { parseCsvRows, normalizeCell, isBlankRow } from "@/lib/csv"
 
 export const CSV_HEADER = ["mtrl_type", "mtrl_code", "amount", "uom"]
 
@@ -22,10 +23,12 @@ export function parseBomCsv(
   rmMaterials: RecipeMaterialOption[],
   pmMaterials: RecipeMaterialOption[]
 ): { rows: RecipeLineRow[]; errors: string[] } {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0)
+  // Quote-aware: a material name containing a comma used to shift every later
+  // column, and a wrapped cell used to become a row of its own. See lib/csv.ts.
+  const lines = parseCsvRows(text).filter((r) => !isBlankRow(r))
   if (lines.length === 0) return { rows: [], errors: ["The file is empty."] }
 
-  const header = lines[0].split(",").map((h) => h.trim().toLowerCase())
+  const header = lines[0].map((h) => normalizeCell(h).toLowerCase())
   const missingCols = CSV_HEADER.filter((c) => !header.includes(c))
   if (missingCols.length > 0) {
     return { rows: [], errors: [`Missing required column(s): ${missingCols.join(", ")}.`] }
@@ -37,7 +40,7 @@ export function parseBomCsv(
 
   lines.slice(1).forEach((line, i) => {
     const rowNum = i + 2 // account for header + 1-index
-    const cells = line.split(",").map((c) => c.trim())
+    const cells = line.map(normalizeCell)
     const mtrlType = cells[colIndex.mtrl_type]?.toLowerCase()
     const mtrlCode = cells[colIndex.mtrl_code]
     const amountRaw = cells[colIndex.amount]

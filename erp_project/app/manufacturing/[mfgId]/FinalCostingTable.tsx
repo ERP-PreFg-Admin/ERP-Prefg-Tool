@@ -12,29 +12,18 @@ import type { FinalCostingRow } from "@/types/masters"
 import {
   CostingHeadRow, CostingCells, ScenarioLabelRow, bestTotalIndex, COSTING_COL_COUNT,
 } from "./costing-columns"
+import { rateGapReasons } from "./costing-gaps"
 
 // Why a costing is incomplete, named precisely rather than guessed.
 //
 // This used to say "possibly missing: RM cost" for every zero, which sent people
 // to the rate master — but the usual cause is the SKU having no fill weight.
-// Fill weight is a MULTIPLICAND in the RM formula ((amount x filling x rate) /
-// 100000), so a null there zeroes the whole line even when every agreed rate is
-// present. The two are fixed in different places by different people, so the
-// message has to distinguish them.
+// The precise reasons now live in costing-gaps.ts, shared with the SKUs tab;
+// only the vague fallback below is specific to this table (it needs the
+// computed costs, which the SKUs tab doesn't have).
 function incompleteReasons(r: FinalCostingRow): string {
-  const reasons: string[] = []
+  const reasons = rateGapReasons(r)
 
-  if (!r.filling && r.rm_line_count > 0) {
-    reasons.push("SKU has no fill weight — every RM line reads 0 until it is set")
-  }
-  if (r.rm_lines_without_rate > 0) {
-    reasons.push(
-      `${r.rm_lines_without_rate} of ${r.rm_line_count} RM line${r.rm_line_count === 1 ? "" : "s"} has no agreed rate for this manufacturer`
-    )
-  }
-  if (r.pm_lines_without_rate > 0) {
-    reasons.push(`${r.pm_lines_without_rate} PM line(s) have no agreed rate for this manufacturer`)
-  }
   // Only fall back to the vague forms when the precise ones found nothing.
   if (reasons.length === 0) {
     if (r.rm_cost <= 0) reasons.push("RM cost")

@@ -22,7 +22,7 @@ export const PM_VRM_BULK_FIELDS: MasterField[] = [
   },
   { key: "uom", label: "UOM", placeholder: "e.g. pcs", sample: "pcs" },
   {
-    key: "effective_from", label: "Effective From", required: true, placeholder: "YYYY-MM-DD", sample: "2026-01-01",
+    key: "effective_from", label: "Effective From", placeholder: "YYYY-MM-DD", sample: "2026-01-01",
     validate: validateDateStr,
   },
   {

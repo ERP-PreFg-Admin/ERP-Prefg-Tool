@@ -26,6 +26,8 @@ import {
   normalizeHeader,
 } from "./field-config"
 import { monthIST } from "@/lib/date"
+import { normalizeCell } from "@/lib/csv"
+import { useEditGuard } from "@/components/AccessContext"
 
 export function CsvImportDialog({
   entityLabel,
@@ -69,6 +71,7 @@ export function CsvImportDialog({
 
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
+  const guard = useEditGuard()
   const [rows, setRows] = useState<ParsedRow[]>([])
   const [filename, setFilename] = useState("")
   const [error, setError] = useState("")
@@ -94,6 +97,10 @@ export function CsvImportDialog({
   const optionalKeys = cols.filter((f) => !f.required).map((f) => f.key)
 
   function openDialog() {
+    // A bulk upload writes the same records the Add dialog does, so it gates the
+    // same way. Guarded here rather than at each call site — this one component
+    // is the bulk-upload button on every masters page.
+    if (!guard("upload a CSV")) return
     setRows([])
     setFilename("")
     setError("")
@@ -171,8 +178,10 @@ export function CsvImportDialog({
     let headers: string[] = []
     const rawRows: Record<string, string>[] = []
     ws.eachRow((row, rowNumber) => {
+      // normalizeCell, not trim: an Excel cell can hold newlines (alt+enter, or
+      // wrapped text pasted in), and those must not survive into a value.
       const values = (row.values as (string | number | null)[]).slice(1).map((v) =>
-        v == null ? "" : String(v).trim()
+        v == null ? "" : normalizeCell(String(v))
       )
       if (rowNumber === 1) {
         headers = values.map(normalizeHeader)

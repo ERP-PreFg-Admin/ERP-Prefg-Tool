@@ -42,3 +42,48 @@ export const APPROVAL_STATUS_VARIANT: Record<ApprovalStatus, "success" | "destru
   [APPROVAL_STATUS.REJECTED]: "destructive",
   [APPROVAL_STATUS.PENDING]:  "warning",
 }
+
+/**
+ * Brand codes used for PO prefixes and their legal entities.
+ * Keys are normalized forms of master_skus.brand, which may vary
+ * in case or formatting (e.g. "mCaffeine", "MCAFFEINE", "m-caffeine").
+ * Centralizes mappings previously duplicated across PO/invoice handlers.
+ */
+const BRANDS : Record<string , {code: string , entity : string}> = {
+  mcaffeine: {
+    code: "MCAFF" , 
+    entity: "PEP"
+  },
+  fein: {
+    code: "FEIN",
+    entity: "PEP",
+  },
+  hyphen: {
+    code:"HYP" , 
+    entity: "KREATIVE"
+  }
+}
+
+const brandKey = (brand: string) => brand.toLowerCase().replace(/[^a-z0-9]/g , "")
+/**
+ * Short code used as the PO number prefix.
+ * Unmapped brands retain their upper-cased name for PO stability.
+ */
+/**
+ * Legal entity code for this brand, or null if unmapped.
+ * Do not guess missing mappings; DWH brands may be added before this is updated.
+ * Uniware routing uses the invoice's buyer_gstin instead.
+ */
+
+export function brandCode(raw:string):string {
+  return (BRANDS[brandKey(raw)]?.code ?? raw).toUpperCase()
+}
+
+export function entityForBrand(brand: string | null | undefined) : string | null {
+  if(!brand) return null
+  return BRANDS[brandKey(brand)]?.entity ?? null;
+}
+
+
+
+

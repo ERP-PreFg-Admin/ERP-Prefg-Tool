@@ -17,6 +17,7 @@ import type { MfgLineOption, MiscCostLine, MiscCostType } from "@/types/masters"
 import { fmtDate, fmtMoney } from "../mfg-utils"
 import MiscCostDialog from "./MiscCostDialog"
 import { MISC_COST_BULK_CSV_FIELDS } from "./misc-cost-bulk-fields"
+import { useEditGuard } from "@/components/AccessContext"
 
 const TYPE_LABEL: Record<MiscCostType, string> = {
   jw: "Job Work",
@@ -39,6 +40,7 @@ export default function MiscCostClient({
 }) {
   const router = useRouter()
   const [search, setSearch] = useState("")
+  const guard = useEditGuard()
   const [dialogTarget, setDialogTarget] = useState<MiscCostLine | null | "new">(null)
 
   const filteredRows = useMemo(() => {
@@ -83,7 +85,7 @@ export default function MiscCostClient({
           className="sm:max-w-xs"
         />
         <button
-          onClick={() => setDialogTarget("new")}
+          onClick={() => { if (guard("add a misc cost")) setDialogTarget("new") }}
           className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors sm:ml-auto"
         >
           <Plus className="h-3.5 w-3.5" /> Add Cost / Wastage %
@@ -112,7 +114,7 @@ export default function MiscCostClient({
                     colSpan={9}
                     action={
                       rows.length === 0 ? (
-                        <Button variant="outline" size="sm" onClick={() => setDialogTarget("new")}>
+                        <Button variant="outline" size="sm" onClick={() => { if (guard("add a misc cost")) setDialogTarget("new") }}>
                           <Plus /> Add Cost / Wastage %
                         </Button>
                       ) : (
@@ -152,7 +154,7 @@ export default function MiscCostClient({
                             here instead of letting someone fill in the dialog
                             first. */}
                         <button
-                          onClick={() => setDialogTarget(r)}
+                          onClick={() => { if (guard("edit a misc cost")) setDialogTarget(r) }}
                           disabled={r.status === "in_review"}
                           title={r.status === "in_review" ? "Awaiting approval — cannot be edited until approved or rejected" : undefined}
                           className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"

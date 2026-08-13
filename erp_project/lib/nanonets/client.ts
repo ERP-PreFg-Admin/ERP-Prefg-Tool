@@ -15,12 +15,15 @@
  * built for that: no default fetch timeouts, and a UI that says so.
  */
 
-import { NANONET_API_KEY } from "@/lib/env"
+import { NANONET_API_KEY , NANONETS_DAILY_CALLS , NANONETS_MONTHLY_CALLS} from "@/lib/env"
 import { NANONETS_HOST, NANONETS_UPLOAD_PATH, NANONETS_EXTRACT_PATH } from "./endpoints"
 import logger from "@/lib/logger"
 import type { ParsedInvoice, ParsedLineItem } from "@/types/invoice"
 import { KNOWN_KEYS, LINE_KEYS, NUMERIC_LINE_KEYS } from "./schema"
 import { extractionConfig, type ExtractionConfig } from "./builder"
+import { nanonetsSql } from "../queries/nanonets"
+import { execute, query } from "../db"
+import { ApiError } from "../gateway/errors"
 
 // Host + paths live in ./endpoints so a credential-free unit test can pin them
 // — see that file for why /api/v2/ is fragile.
@@ -97,6 +100,53 @@ export function normalizeParsedInvoice(content: Record<string, unknown>): Parsed
   }
 }
 
+/** Seconds until the next UTC midnight — when the daily allowance resets. */
+function secondsToUtcMidnight() : number {
+  const now = new Date()
+  const midNight = Date.UTC(now.getUTCFullYear() , now.getUTCMonth() , now.getUTCDate() + 1)
+
+  return Math.max(1 , Math.ceil((midNight - now.getTime()) / 1000))
+}
+
+
+async function assertQuota() : Promise<void> {
+
+  if(NANONETS_MONTHLY_CALLS <= 0) return 
+
+  const [todayRows , monthRows] = await Promise.all([
+    query<{ calls:number }>(nanonetsSql.selectToday),
+    query<{ calls: number}>(nanonetsSql.selectMonthToal),
+  ])
+  const today = Number(todayRows[0]?.calls ?? 0)
+  const month = Number(monthRows[0]?.calls ?? 0)
+
+  if(month >= NANONETS_MONTHLY_CALLS) {
+    logger.error({
+      module: "NANONETS", message: "Monthly extraction quota exhausted",
+      month, quota: NANONETS_MONTHLY_CALLS,
+    })
+    throw new ApiError(
+        429, "quota_exhausted",
+        "The monthly invoice-extraction allowance is used up. Fill the invoice in manually, " +
+        "or ask an admin to raise the Nanonets quota."
+    )
+  }
+
+  if(NANONETS_DAILY_CALLS > 0 && today >= NANONETS_DAILY_CALLS) {
+    logger.warn({module: "NANONETS" , message:"Daily extraction budget ehausted." ,
+      today , dailycap : NANONETS_DAILY_CALLS, 
+    })
+    throw new ApiError(
+      429, "quota_exhausted",
+      "Today's invoice-extraction budget is used up — it resets at midnight UTC. " +
+      "Fill this invoice in manually, or retry tomorrow.",
+      undefined,
+      { "Retry-After": String(secondsToUtcMidnight()) }
+    )
+  }
+}
+
+
 /**
  * Upload a PDF to Nanonets and extract it against the built config.
  *
@@ -113,6 +163,7 @@ export async function parseInvoice(
   config?: ExtractionConfig
 ): Promise<ParsedInvoice> {
   if (!NANONET_API_KEY) throw new Error("NANONET_API_KEY is not configured")
+  await assertQuota()
   const auth = { Authorization: `Bearer ${NANONET_API_KEY}` }
   const started = Date.now()
   
@@ -136,6 +187,10 @@ export async function parseInvoice(
   if (!extract.ok) {
     throw new Error(`Nanonets extraction failed (${extract.status}): ${(await extract.text()).slice(0, 500)}`)
   }
+
+  execute(nanonetsSql.increament).catch((e) => {
+    logger.warn({module:"NANONETS" , error: e?.message , message: "nanonets_usage increment failed"})
+  })
 
   const res = await extract.json()
   const content = res?.result?.content

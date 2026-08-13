@@ -96,3 +96,13 @@ export const UNIWARE_VENDOR_CODE = process.env.UNIWARE_VENDOR_CODE ?? "Test_Vend
 // correctness, not the feature using it.
 
 export const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
+
+
+// ── Nanonets quota ───────────────────────────────────────────────────────────
+// The monthly call allowance from the Nanonets billing page. 0 (the default)
+// disables the guard entirely, so this ships before the number is known.
+export const NANONETS_MONTHLY_CALLS = Number(process.env.NANONETS_MONTHLY_CALLS ?? 0)
+
+// A 20-working-day month at full tilt. Deriving the daily cap rather than
+// configuring it means one runaway day can burn at most ~5% of the month.
+export const NANONETS_DAILY_CALLS = Math.floor(NANONETS_MONTHLY_CALLS / 20)

@@ -108,8 +108,8 @@ export async function getToken(): Promise<UniwareToken> {
 }
 
 /** Headers every Uniware REST call needs. */
-function authHeaders(token: UniwareToken) {
-  return { Authorization: `Bearer ${token.accessToken}`, Facility: UNIWARE_FACILITY }
+function authHeaders(token: UniwareToken, facility?: string) {
+  return { Authorization: `Bearer ${token.accessToken}`, Facility: facility || UNIWARE_FACILITY }
 }
 
 // ── Purchase orders ──────────────────────────────────────────────────────────
@@ -125,6 +125,7 @@ export type UniwarePoItem = {
 }
 
 export type UniwarePoInput = {
+  facility? : string
   /**
    * Omit to let Uniware assign a code from the facility's own series — that's
    * the number the manufacturer recognises (e.g. GM/2627/PO/2006), and it comes
@@ -170,6 +171,43 @@ export function futureDeliveryDate(d: string | Date | null | undefined): string 
 const numOrUndef = (v: unknown) =>
   v == null || v === "" || Number.isNaN(Number(v)) ? undefined : Number(v)
 
+/**
+ * Collapse repeated itemSKUs into one line each.
+ *
+ * Uniware allows a SKU once per PO and rejects the second occurrence with
+ * "Item type <SKU> already added to purchase order". Our side splits freely: the
+ * invoice FIFO allocator turns one invoice line covered by two open POs into two
+ * rows of the same SKU, and two invoice lines can carry that SKU as well — so
+ * three rows of one SKU reach here from a single ordinary invoice.
+ *
+ * Quantities sum. The unit price is weighted by quantity so the PO's total value
+ * still equals the invoice's, rather than whichever row happened to come first;
+ * with the usual case of one price across the rows, that is exactly that price.
+ * Rounded to 2dp, the precision money is quoted at anyway.
+ */
+export function mergeItemsBySku(items: UniwarePoItem[]): UniwarePoItem[] {
+  const bySku = new Map<string, UniwarePoItem & { _value: number }>()
+  for (const it of items) {
+    const qty = Number(it.quantity)
+    const price = Number(it.unitPrice ?? 0)
+    const seen = bySku.get(it.itemSKU)
+    if (!seen) {
+      bySku.set(it.itemSKU, { ...it, quantity: qty, _value: qty * price })
+      continue
+    }
+    seen.quantity += qty
+    seen._value += qty * price
+    // Keep the first non-null for the descriptive fields — they describe the
+    // SKU, not the split, so they are the same on every row in practice.
+    seen.maxRetailPrice ??= it.maxRetailPrice
+    seen.taxTypeCode ??= it.taxTypeCode
+  }
+  return [...bySku.values()].map(({ _value, ...it }) => ({
+    ...it,
+    unitPrice: it.quantity > 0 ? Math.round((_value / it.quantity) * 100) / 100 : it.unitPrice,
+  }))
+}
+
 /** Shape a create payload. Only documented fields are sent — Uniware rejects unknown keys. */
 export function buildPurchaseOrder(po: UniwarePoInput) {
   if (!po.vendorCode) throw new Error("vendorCode is required")
@@ -179,6 +217,9 @@ export function buildPurchaseOrder(po: UniwarePoInput) {
     if (!(Number(it.quantity) > 0)) throw new Error(`items[${i}].quantity must be > 0`)
     if (it.unitPrice == null) throw new Error(`items[${i}].unitPrice is required`)
   })
+
+  // After validation, so a bad row is still reported against its own index.
+  const items = mergeItemsBySku(po.items)
 
   const payload = {
     purchaseOrderCode: po.purchaseOrderCode,
@@ -190,7 +231,7 @@ export function buildPurchaseOrder(po: UniwarePoInput) {
     deliveryDate: iso(po.deliveryDate),
     logisticChargesDivisionMethod: po.logisticChargesDivisionMethod ?? undefined,
     logisticCharges: numOrUndef(po.logisticCharges),
-    purchaseOrderItems: po.items.map((it) => ({
+    purchaseOrderItems: items.map((it) => ({
       itemSKU: it.itemSKU,
       quantity: Number(it.quantity),
       unitPrice: Number(it.unitPrice),
@@ -220,7 +261,7 @@ export async function createPurchaseOrder(po: UniwarePoInput): Promise<{ purchas
 
   const res = await fetch(`${BASE}/services/rest/v1/purchase/purchaseOrder/create`, {
     method: "POST",
-    headers: { ...authHeaders(token), "Content-Type": "application/json" },
+    headers: { ...authHeaders(token , po.facility), "Content-Type": "application/json" },
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   })
@@ -267,12 +308,12 @@ export async function createPurchaseOrder(po: UniwarePoInput): Promise<{ purchas
  * response is checked for the PDF magic bytes: a login redirect must never be
  * attached to an email as though it were the document.
  */
-export async function fetchPurchaseOrderPdf(code: string): Promise<Buffer> {
+export async function fetchPurchaseOrderPdf(code: string , facility? : string): Promise<Buffer> {
   const token = await getToken()
   const url = `${BASE}/po/show?code=${encodeURIComponent(code)}&legacy=1`
 
   const res = await fetch(url, {
-    headers: authHeaders(token),
+    headers: authHeaders(token , facility),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   })
   const buf = Buffer.from(await res.arrayBuffer())

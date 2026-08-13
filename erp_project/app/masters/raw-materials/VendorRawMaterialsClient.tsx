@@ -18,6 +18,7 @@ import { RmRateTable, fmtDate } from "./RmRateTable"
 import { VendorDetailDialog } from "./VendorDetailDialog"
 import { EditRmVendorRateDialog } from "./EditRmVendorRateDialog"
 import { RateHistoryDialog } from "@/components/masters/RateHistoryDialog"
+import { useEditGuard } from "@/components/AccessContext"
 
 const vrmStatusBadge = (row: AnyRow) => <StatusBadge status={row.vrm_status as string | null} />
 
@@ -76,6 +77,7 @@ export default function VendorRawMaterialsClient({
   currentEffectiveFrom: string
 }) {
   const [selectedRow, setSelectedRow] = useState<RM | null>(null)
+  const guard = useEditGuard()
   const [editRow, setEditRow] = useState<RM | null>(null)
   const [historyRow, setHistoryRow] = useState<RM | null>(null)
 
@@ -112,7 +114,7 @@ export default function VendorRawMaterialsClient({
               <Button
                 size="icon"
                 variant="ghost"
-                onClick={() => setEditRow(typedRow)}
+                onClick={() => { if (guard("edit an RM rate")) setEditRow(typedRow) }}
                 disabled={isLocked}
                 title={isLocked ? "Pending approval — cannot edit" : "Edit rate"}
               >

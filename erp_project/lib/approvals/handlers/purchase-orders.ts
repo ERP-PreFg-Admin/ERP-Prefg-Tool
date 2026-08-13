@@ -21,6 +21,7 @@ import { skus as skusSql } from "@/lib/queries/skus"
 import { parseS3Import } from "@/lib/import-s3"
 import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import { type ModuleHandler, s3KeyOf } from "./types"
+import { brandCode } from "@/lib/constants"
 
 export const poHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
@@ -31,13 +32,7 @@ export const poHandler: ModuleHandler = {
   },
 }
 
-// Same brand-code mapping used by the single-PO "normal" create path
-// (app/api/v1/purchase-orders/route.ts) — kept in sync so bulk-created and
-// directly-created PO numbers share one scheme.
-const BRAND_CODES: Record<string, string> = {
-  mcaffeine: "MCAFF",
-  hyphen: "HYP",
-}
+
 
 const VALID_STATUSES = ["draft", "raised", "punched", "short_closed", "partially_received", "received", "cancelled"]
 
@@ -112,7 +107,7 @@ export const poBulkHandler: ModuleHandler = {
           const destination = row.destination?.trim() || null
 
           const rawBrand = sku.brand?.trim() || skuCode.split("-")[0]
-          const brand = (BRAND_CODES[rawBrand.toLowerCase()] ?? rawBrand).toUpperCase()
+          const brand = brandCode(rawBrand)
           const year = new Date().getFullYear()
           const month = String(new Date().getMonth() + 1).padStart(2, "0")
           const poPrefix = `${brand}-PO-${year}${month}`

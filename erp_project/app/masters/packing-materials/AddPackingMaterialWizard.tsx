@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils"
 import type { Vendor, Mfg } from "@/types/masters"
 import { useToast } from "@/components/ui/toast"
 import { Select } from "@/components/ui/select"
+import { useEditGuard } from "@/components/AccessContext"
 
 // Existing PM material — the wizard only connects vendors/manufacturers to
 // one of these; creating a brand-new material happens on the Material
@@ -72,6 +73,7 @@ export function AddPackingMaterialWizard({
 }) {
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
+  const guard = useEditGuard()
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -318,7 +320,7 @@ export function AddPackingMaterialWizard({
 
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>
+      <Button size="sm" onClick={() => { if (guard("add a packing material")) setOpen(true) }}>
         <Plus className="h-4 w-4 mr-1.5" />
         Add Rates
       </Button>

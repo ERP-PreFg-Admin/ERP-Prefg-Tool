@@ -40,11 +40,12 @@ export default async function EntityEmailsPage({
 
   const scope = await getUserScope(userId)
 
-  const [result, allVendorOptions, allMfgOptions, allWarehouseOptions] = await Promise.all([
+  const [result, allVendorOptions, allMfgOptions, allWarehouseOptions, legalEntityOptions] = await Promise.all([
     paginate<{
       id: number
       entity_type: string
       entity_code: string
+      legal_entity_code: string | null
       email: string
       purpose: string | null
       created_at: string | null
@@ -59,13 +60,21 @@ export default async function EntityEmailsPage({
     timedQuery<{ id: number; code: string; name: string }>(entityEmails.vendorOptions, [], { label: "entityEmails.vendorOptions" }),
     timedQuery<{ id: number; code: string; name: string }>(entityEmails.mfgOptions, [], { label: "entityEmails.mfgOptions" }),
     timedQuery<{ id: number; code: string; name: string }>(entityEmails.warehouseOptions, [], { label: "entityEmails.warehouseOptions" }),
+    timedQuery<{ code: string; legal_name: string }>(entityEmails.legalEntityOptions, [], { label: "entityEmails.legalEntityOptions" }),
   ])
 
   // These three were ungated full lists of every vendor, manufacturer and
-  // warehouse. warehouseOptions aliases `name AS code`, so it scopes on name.
+  // warehouse.
+  //
+  // The warehouse one scopes on `code`, not `name`: warehouseOptions selects
+  // `name AS code, location AS name`, so the output column `name` holds the
+  // LOCATION and `code` holds the warehouse name that scope.warehouseNames
+  // contains. Scoping on "name" compared locations against warehouse names and
+  // matched nothing — dormant only because no user has warehouse scope rows yet,
+  // so filterByScope short-circuits on null and returns everything.
   const vendorOptions = filterByScope(allVendorOptions, "id", scope.vendorIds)
   const mfgOptions = filterByScope(allMfgOptions, "id", scope.mfgIds)
-  const warehouseOptions = filterByScope(allWarehouseOptions, "name", scope.warehouseNames)
+  const warehouseOptions = filterByScope(allWarehouseOptions, "code", scope.warehouseNames)
 
   return (
     <div className="p-6">
@@ -85,6 +94,7 @@ export default async function EntityEmailsPage({
         vendorOptions={vendorOptions}
         mfgOptions={mfgOptions}
         warehouseOptions={warehouseOptions}
+        legalEntityOptions={legalEntityOptions}
         canEdit={canEdit}
       />
     </div>

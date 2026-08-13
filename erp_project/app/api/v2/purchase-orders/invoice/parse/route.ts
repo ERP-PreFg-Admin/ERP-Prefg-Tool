@@ -43,6 +43,7 @@ export const POST = withGateway({
   // No `schema` — this endpoint takes multipart/form-data, and withGateway's
   // Zod step would consume the body as JSON.
   access: { pageSlug: "/po-tracking", level: "editor" },
+  rateLimit: { limit: 12, windowMs: 10 * 60_000, concurrency: 2, instanceConcurrency: 6 },
   handler: async ({ req, ctx }) => {
     const form = await req.formData().catch(() => null)
     const file = form?.get("file")

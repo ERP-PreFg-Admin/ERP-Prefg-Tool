@@ -7,12 +7,21 @@ import { monthIST } from "@/lib/date"
 import { tooLargeMessage } from "./invoice-form"
 
 /** Thrown with the server's own message so the dialog can show something actionable. */
-export class InvoiceApiError extends Error {}
+export class InvoiceApiError extends Error {
+  constructor(message: string , public retryAfterSec = 0) {
+    super(message)
+  }
+}
 
 
 async function messageFrom(res: Response, fallback: string): Promise<string> {
   const data = await res.json().catch(() => ({}))
   return data?.error ?? fallback
+}
+
+function retryAfterFrom(res: Response): number {
+  const raw = Number(res.headers.get("Retry-After"))
+  return Number.isFinite(raw) && raw > 0 ? Math.ceil(raw) : 0
 }
 
 /**
@@ -44,7 +53,7 @@ export async function parseInvoiceFile(
   // production, changing this one URL back to /api/v1/ restores the old
   // behaviour without a code change anywhere else.
   const res = await fetch("/api/v2/purchase-orders/invoice/parse", { method: "POST", body: form })
-  if (!res.ok) throw new InvoiceApiError(await messageFrom(res, "Invoice parsing failed."))
+  if (!res.ok) throw new InvoiceApiError(await messageFrom(res, "Invoice parsing failed.") , retryAfterFrom(res))
 
   const data = await res.json()
   return {

@@ -47,12 +47,16 @@ import { EntityHistoryDialog } from "@/components/masters/EntityHistoryDialog"
 import type { MasterField } from "@/components/masters/field-config"
 import AddMaterialDialog from "./AddMaterialDialog"
 import EditMaterialDialog from "./EditMaterialDialog"
+import { useEditGuard } from "@/components/AccessContext"
 
 const RM_CSV_FIELDS: MasterField[] = [
   { key: "rm_code",   label: "RM Code",   aliases: ["code"], placeholder: "e.g. RM-001",  sample: "RM-001" },
   { key: "name",      label: "Name",      required: true,    placeholder: "Material name", sample: "Glycerin" },
-  { key: "make",      label: "Make",      required: true,     placeholder: "Make",          sample: "Brand X" },
-  { key: "type",      label: "Type",      required: true,      placeholder: "Type",          sample: "Liquid" },
+  { key: "make",      label: "Make",                          placeholder: "Make",          sample: "Brand X" },
+  // Optional: suppliers routinely leave Type blank on a bulk sheet, and it is
+  // optional in materialMasterCreateRmSchema — requiring it here only failed
+  // rows the API would have accepted.
+  { key: "type",      label: "Type",                           placeholder: "Type",          sample: "Liquid" },
   { key: "uom",       label: "UOM",                           placeholder: "e.g. kg",       sample: "kg" },
   { key: "hsn_code",  label: "HSN Code",  placeholder: "e.g. 33081000", sample: "33081000" },
   { key: "inci_name", label: "INCI Name", placeholder: "e.g. Glycerin", sample: "Glycerin" },
@@ -131,6 +135,7 @@ export default function MaterialMasterClient({
 
   // Edit dialog state — which row is being edited (null = closed).
   const [editRow, setEditRow] = useState<AnyRow | null>(null)
+  const guard = useEditGuard()
   // History dialog state — which row's edit history is being viewed (null = closed).
   const [historyRow, setHistoryRow] = useState<AnyRow | null>(null)
 
@@ -343,7 +348,7 @@ export default function MaterialMasterClient({
                       <Button
                         size="icon"
                         variant="ghost"
-                        onClick={() => setEditRow(row)}
+                        onClick={() => { if (guard("edit a material")) setEditRow(row) }}
                         disabled={row.status === "in_review"}
                         title={row.status === "in_review" ? "Pending approval — cannot edit" : "Edit"}
                       >

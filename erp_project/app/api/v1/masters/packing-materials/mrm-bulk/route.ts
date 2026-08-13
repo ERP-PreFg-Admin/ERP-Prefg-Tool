@@ -143,7 +143,11 @@ export const POST = withGateway({
           continue
         }
 
-        createRows.push(raw)
+        // Stamp the upload date now, not on approval: the staged CSV can sit in
+        // the queue for days, and the rate is meant to start applying from the
+        // day it was entered. It also shows the approver the date they are
+        // agreeing to.
+        createRows.push({ ...raw, effective_from: raw.effective_from?.trim() || today })
       }
 
       let batchApprovalId: number | null = null

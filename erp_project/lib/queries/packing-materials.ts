@@ -356,8 +356,14 @@ export const packingMaterials = {
   `,
 
   /** Check if a PM already exists by name + type. Parameters: [name, type] */
+  /**
+   * `<=>` not `=`: type became optional, and `type = NULL` is never true in
+   * SQL — so two PMs with the same name and a blank type would both be created
+   * and the duplicate check would silently pass. The NULL-safe operator treats
+   * two blanks as equal, which is what "same material" means here.
+   */
   checkDuplicate: `
-    SELECT id, pm_code FROM master_pm WHERE name = ? AND type = ? LIMIT 1
+    SELECT id, pm_code FROM master_pm WHERE name = ? AND type <=> ? LIMIT 1
   `,
 
   /** Total PM count — used to auto-generate the next pm_code (PM<serial>). */

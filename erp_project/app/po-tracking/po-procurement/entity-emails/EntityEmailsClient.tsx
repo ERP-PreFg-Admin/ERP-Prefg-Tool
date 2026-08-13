@@ -14,6 +14,7 @@ import { MasterToolbar, MasterToolbarActions } from "@/components/masters/Master
 import { Button } from "@/components/ui/button"
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import { Card, CardContent } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 import { Select } from "@/components/ui/select"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -26,6 +27,8 @@ type EntityEmailRow = {
   id: number
   entity_type: string
   entity_code: string
+  /** master_entity.code, warehouse rows only. NULL = serves every entity. */
+  legal_entity_code: string | null
   email: string
   purpose: string | null
   created_at: string | null
@@ -41,6 +44,7 @@ export default function EntityEmailsClient({
   vendorOptions,
   mfgOptions,
   warehouseOptions,
+  legalEntityOptions,
   canEdit,
 }: {
   rows: EntityEmailRow[]
@@ -52,6 +56,7 @@ export default function EntityEmailsClient({
   vendorOptions: EntityOption[]
   mfgOptions: EntityOption[]
   warehouseOptions: EntityOption[]
+  legalEntityOptions: { code: string; legal_name: string }[]
   canEdit: boolean
 }) {
   const { navigate, router } = useUrlFilters()
@@ -101,6 +106,7 @@ export default function EntityEmailsClient({
               <TableRow>
                 <TableHead>Type</TableHead>
                 <TableHead>Code</TableHead>
+                <TableHead>Legal Entity</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Purpose</TableHead>
               </TableRow>
@@ -108,7 +114,7 @@ export default function EntityEmailsClient({
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground py-8 text-sm">
+                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8 text-sm">
                     No entity emails found.
                   </TableCell>
                 </TableRow>
@@ -117,6 +123,18 @@ export default function EntityEmailsClient({
                   <TableRow key={r.id}>
                     <TableCell className="capitalize">{r.entity_type}</TableCell>
                     <TableCell className="font-mono">{r.entity_code}</TableCell>
+                    <TableCell>
+                      {/* "All" rather than an em dash: a blank here means the row
+                          serves every entity, which is a real value, not missing
+                          data. Only meaningful for warehouses. */}
+                      {r.entity_type !== "warehouse" ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : r.legal_entity_code ? (
+                        <Badge variant="secondary">{r.legal_entity_code}</Badge>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">All entities</span>
+                      )}
+                    </TableCell>
                     <TableCell>{r.email}</TableCell>
                     <TableCell>{r.purpose ?? "—"}</TableCell>
                   </TableRow>
@@ -134,6 +152,7 @@ export default function EntityEmailsClient({
         vendorOptions={vendorOptions}
         mfgOptions={mfgOptions}
         warehouseOptions={warehouseOptions}
+        legalEntityOptions={legalEntityOptions}
         onSaved={() => { setShowAdd(false); router.refresh() }}
       />
     </>

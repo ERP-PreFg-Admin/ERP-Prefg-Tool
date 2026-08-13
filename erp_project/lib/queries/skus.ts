@@ -157,6 +157,42 @@ export const skus = {
     ORDER BY sku_code ASC
   `,
 
+  /**
+   * Why a SKU can't be costed yet — the same gaps the Agreed Final Costing tab
+   * flags per manufacturer, rolled up per SKU for the master list.
+   *
+   * A line is counted as "without rate" when it lacks an active agreed rate for
+   * at least one mapped manufacturer, so the count matches what someone would
+   * see if they opened each of that SKU's manufacturers in turn. COUNT(DISTINCT
+   * db.id) is load-bearing: the mfg join multiplies every line by the number of
+   * manufacturers, and a plain SUM would report 8 RM lines as 24.
+   *
+   * With no manufacturer mapped, mbm.mfg_id is NULL and every rate join misses —
+   * so mfg_count = 0 means the caller must report "not mapped" and ignore the
+   * rate counts (see SkusClient.costingReasonsFor).
+   *
+   * Keyed on master_recipe.sku_id, NOT master_skus.active_bom_id: costing works
+   * off whichever recipe is mapped to the manufacturer, so a SKU whose
+   * active_bom_id is unset still gets costed — and would otherwise show a clean
+   * row here while the costing tab flags it.
+   * Params: [skuIds] — needs query(), not execute(), for IN (?) expansion.
+   */
+  selectCostingGapsBySkuIds: `
+    SELECT b.sku_id AS sku_id,
+      COUNT(DISTINCT mbm.mfg_id)                                                             AS mfg_count,
+      COUNT(DISTINCT CASE WHEN db.mtrl_type = 'rm' THEN db.id END)                           AS rm_line_count,
+      COUNT(DISTINCT CASE WHEN db.mtrl_type = 'pm' THEN db.id END)                           AS pm_line_count,
+      COUNT(DISTINCT CASE WHEN db.mtrl_type = 'rm' AND rmm.curr_rate IS NULL THEN db.id END) AS rm_lines_without_rate,
+      COUNT(DISTINCT CASE WHEN db.mtrl_type = 'pm' AND pmm.curr_rate IS NULL THEN db.id END) AS pm_lines_without_rate
+    FROM master_recipe b
+    LEFT JOIN details_recipe db ON db.recipe_id = b.id AND db.status = 'active'
+    LEFT JOIN master_recipe_mfg mbm ON mbm.recipe_id = b.id AND mbm.status IN ('active', 'discontinued')
+    LEFT JOIN cost_master_rm_mfg rmm ON rmm.rm_id = db.mtrl_id AND rmm.mfg_id = mbm.mfg_id AND rmm.status = 'active' AND db.mtrl_type = 'rm'
+    LEFT JOIN cost_master_pm_mfg pmm ON pmm.pm_id = db.mtrl_id AND pmm.mfg_id = mbm.mfg_id AND pmm.status = 'active' AND db.mtrl_type = 'pm'
+    WHERE b.sku_id IN (?) AND b.status IN ('active', 'discontinued')
+    GROUP BY b.sku_id
+  `,
+
   // ============ DISTINCT-VALUE LOOKUPS (filter dropdowns) ============
 
   selectDistinctBrands: `
@@ -194,9 +230,10 @@ export const skus = {
    * Update editable SKU fields (sku_code is immutable).
    * Parameters: [name, brand, category, subcategory, sku_type, mrp, status, id]
    */
+  /** Parameters: [name, brand, category, subcategory, sku_type, filling, filling_uom, mrp, status, id] */
   updateSku: `
     UPDATE master_skus
-    SET name = ?, brand = ?, category = ?, subcategory = ?, sku_type = ?, mrp = ?, status = ?
+    SET name = ?, brand = ?, category = ?, subcategory = ?, sku_type = ?, filling = ?, filling_uom = ?, mrp = ?, status = ?
     WHERE id = ?
   `,
 

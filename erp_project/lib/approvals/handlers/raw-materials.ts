@@ -6,6 +6,7 @@ import { rawMaterials as rmSql } from "@/lib/queries/raw-materials"
 import { vendors as vendorSql } from "@/lib/queries/vendors"
 import { manufacturers as mfgSql } from "@/lib/queries/manufacturers"
 import { approvalsSql } from "@/lib/queries/approvals"
+import { todayIST } from "@/lib/date"
 import { parseS3Import } from "@/lib/import-s3"
 import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
 import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
@@ -309,7 +310,7 @@ export const rmVrmBulkHandler: ModuleHandler = {
         const currRate = Number(row.curr_rate)
         const moq = Number(row.moq)
         if (!rmCode || !vendorCode || !Number.isFinite(currRate) || currRate <= 0
-          || !Number.isFinite(moq) || moq <= 0 || !row.effective_from?.trim()) {
+          || !Number.isFinite(moq) || moq <= 0) {
           skipped++; continue
         }
 
@@ -331,7 +332,11 @@ export const rmVrmBulkHandler: ModuleHandler = {
           rm.id, vendor.id, vendorCode,
           roundToTwoDecimals(currRate), roundToWholeNumber(moq),
           row.uom?.trim() || null,
-          row.effective_from.trim(), row.effective_to?.trim() || null,
+          // Optional: a blank date means the rate applies from now. Rows staged
+
+          // before the upload-time stamp was added can still arrive blank.
+
+          row.effective_from?.trim() || todayIST(), row.effective_to?.trim() || null,
           STATUS.ACTIVE, mfgId,
         ])
         inserted++
@@ -362,7 +367,7 @@ export const rmRateBulkHandler: ModuleHandler = {
         const rmCode = row.rm_code?.trim()
         const mfgCode = row.mfg_code?.trim()
         const currRate = Number(row.curr_rate)
-        if (!rmCode || !mfgCode || !Number.isFinite(currRate) || currRate <= 0 || !row.effective_from?.trim()) {
+        if (!rmCode || !mfgCode || !Number.isFinite(currRate) || currRate <= 0) {
           skipped++; continue
         }
 
@@ -385,7 +390,11 @@ export const rmRateBulkHandler: ModuleHandler = {
           rm.id, mfg.id, mfgCode,
           roundToTwoDecimals(currRate), row.uom?.trim() || null,
           approvedVendorId, approvedVendorCode,
-          row.effective_from.trim(), STATUS.ACTIVE,
+          // Optional: a blank date means the rate applies from now. Rows staged
+
+          // before the upload-time stamp was added can still arrive blank.
+
+          row.effective_from?.trim() || todayIST(), STATUS.ACTIVE,
         ])
         inserted++
       }

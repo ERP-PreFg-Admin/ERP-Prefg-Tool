@@ -13,6 +13,7 @@ import { useToast } from "@/components/ui/toast"
 import type { MfgLine, MfgLineStatus } from "@/types/masters"
 import { fmtDate } from "../mfg-utils"
 import LineDialog, { type RecipeOption } from "./LineDialog"
+import { useEditGuard } from "@/components/AccessContext"
 
 type LiveBomInfo = { bomCodes: string; bomIds: number[] }
 
@@ -40,15 +41,19 @@ export default function ManufacturingLinesClient({
   rows,
   bomOptions,
   liveBomsBySkuCode,
+  costingWarnings,
 }: {
   mfgId: number
   rows: MfgLine[]
   bomOptions: RecipeOption[]
   liveBomsBySkuCode?: Map<string, LiveBomInfo>
+  /** recipe_id → why Agreed Final Costing can't price this line, from costing-gaps.ts. */
+  costingWarnings?: Map<number, string[]>
 }) {
   const router = useRouter()
   const { toast } = useToast()
   const [search, setSearch] = useState("")
+  const guard = useEditGuard()
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [dialogTarget, setDialogTarget] = useState<MfgLine | null | "new">(null)
   const [pausingBomId, setPausingBomId] = useState<number | null>(null)
@@ -122,7 +127,7 @@ export default function ManufacturingLinesClient({
             label="Manufacturing Lines"
           />
           <button
-            onClick={() => setDialogTarget("new")}
+            onClick={() => { if (guard("add a line")) setDialogTarget("new") }}
             className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
           >
             <Plus className="h-3.5 w-3.5" /> Add SKUs
@@ -158,13 +163,21 @@ export default function ManufacturingLinesClient({
                     const liveBoms = r.sku_code ? liveBomsBySkuCode?.get(r.sku_code) : undefined
                     const isOlderLiveBom =
                       !!liveBoms && liveBoms.bomIds.length > 1 && r.recipe_id !== liveBoms.bomIds[liveBoms.bomIds.length - 1]
+                    // One icon carries both kinds of problem — two amber badges
+                    // on the same cell read as two severities when they aren't.
+                    const warnings = [
+                      ...(liveBoms
+                        ? [`Multiple Recipes are currently live for this SKU (${liveBoms.bomCodes}) — production can happen on any of them until the older one is paused.`]
+                        : []),
+                      ...(costingWarnings?.get(r.recipe_id) ?? []),
+                    ]
                     return (
                     <TableRow key={r.id}>
                       <TableCell className="font-mono">
                         <div className="flex items-center gap-1.5">
-                          {liveBoms && (
+                          {warnings.length > 0 && (
                             <span
-                              title={`Multiple Recipes are currently live for this SKU (${liveBoms.bomCodes}) — production can happen on any of them until the older one is paused.`}
+                              title={warnings.join("\n")}
                               className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 cursor-help"
                             >
                               <AlertTriangle className="h-2.5 w-2.5" />
@@ -199,7 +212,7 @@ export default function ManufacturingLinesClient({
                       <TableCell className="whitespace-nowrap">{fmtFilling(r.filling, r.filling_uom)}</TableCell>
                       <TableCell className="text-right">
                         <button
-                          onClick={() => setDialogTarget(r)}
+                          onClick={() => { if (guard("edit a line")) setDialogTarget(r) }}
                           className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent transition-colors"
                         >
                           <Pencil className="h-3 w-3" /> Edit

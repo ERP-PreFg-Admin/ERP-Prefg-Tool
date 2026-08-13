@@ -460,11 +460,17 @@ model entity_emails {
   id          Int                       @id @default(autoincrement())
   entity_type entity_emails_entity_type
   entity_code String                    @db.VarChar(50)
+  /// master_entity.code. NULL = applies to every legal entity. Warehouse rows
+  /// only — a warehouse's point of contact can differ for Pep vs Kreative, while
+  /// vendors and manufacturers deal with us as one company. Recipients are the
+  /// UNION of the NULL rows and the matching entity's rows; see
+  /// prisma/add_entity_email_legal_entity.sql.
+  legal_entity_code String?             @db.VarChar(50)
   email       String                    @db.VarChar(255)
   purpose     String?                   @db.VarChar(100)
   created_at  DateTime?                 @default(now()) @db.Timestamp(0)
 
-  @@index([entity_type, entity_code], map: "idx_entity_emails_lookup")
+  @@index([entity_type, entity_code, legal_entity_code], map: "idx_entity_emails_lookup")
 }
 
 model history_bom {
@@ -721,13 +727,99 @@ model master_vendors {
   @@index([added_by], map: "fk_vendors_added_by")
 }
 
+/// Physical warehouse locations — one row per site. The per-legal-entity
+/// facility code, GSTIN and addresses live in details_warehouse_entity, because
+/// every location operates under both Pep and Kreative.
+///
+/// `name` is a de-facto foreign key with nothing enforcing it: it is copied by
+/// value into purchase_orders.destination, invoice_mfg.destination and
+/// entity_emails.entity_code, and lib/scope.ts resolves warehouse scope to
+/// names, not ids. Immutable after create — see prisma/add_warehouse_master.sql.
 model master_warehouse {
+  id             Int                     @id @default(autoincrement())
+  /// Stable short code. NOT yet a join key — POs, invoices and mail still
+  /// reference `name`. See prisma/add_warehouse_address_fields.sql.
+  code           String?                 @unique(map: "uq_warehouse_code") @db.VarChar(20)
+  name           String                  @unique(map: "uq_warehouse_name") @db.VarChar(100)
+  location       String                  @db.VarChar(150)
+  zone           String                  @db.VarChar(50)
+  state          String?                 @db.VarChar(50)
+  type           master_warehouse_type
+  contact_person String?                 @db.VarChar(120)
+  contact_phone  String?                 @db.VarChar(20)
+  /// The facility OPERATOR's registration (3PL) — not ours. Ours is
+  /// details_warehouse_entity.gstin, one per legal entity.
+  site_gstin     String?                 @db.VarChar(15)
+  status         master_warehouse_status @default(active)
+  created_by     Int?
+  created_at     DateTime?               @default(now()) @db.Timestamp(0)
+  updated_at     DateTime?               @db.DateTime(0)
+
+  details_warehouse_entity details_warehouse_entity[]
+}
+
+/// Our own legal entities. Only 2 of the 4 PANs in lib/gstin.ts OUR_PANS are
+/// identified so far — that set stays authoritative for invoice detection.
+///
+/// `code` is UPPERCASE by convention: entityForBrand() in lib/constants.ts
+/// returns it and the comparison happens in TypeScript, which is case-sensitive
+/// even where a _ci collation would forgive it.
+model master_entity {
   id         Int                   @id @default(autoincrement())
-  name       String                @db.VarChar(100)
-  location   String                @db.VarChar(150)
-  zone       String                @db.VarChar(50)
-  type       master_warehouse_type
+  code       String                @unique(map: "uq_master_entity_code") @db.VarChar(50)
+  legal_name String                @unique(map: "uq_master_entity_legal_name") @db.VarChar(150)
+  pan        String?               @unique(map: "uq_master_entity_pan") @db.VarChar(10)
+  status     master_entity_status? @default(active)
   created_at DateTime?             @default(now()) @db.Timestamp(0)
+
+  details_warehouse_entity details_warehouse_entity[]
+}
+
+/// One row per (location, legal entity): that entity's Unicommerce facility, GST
+/// registration and addresses for the site. Keyed by entity, not brand — Fein
+/// and mCaffeine are both Pep and share a facility.
+model details_warehouse_entity {
+  id              Int                             @id @default(autoincrement())
+  warehouse_id    Int
+  entity_id       Int
+  facility_code   String?                         @db.VarChar(50)
+  /// Overrides master_warehouse.type for this entity; NULL means use the
+  /// location's. Additive rather than a move, because master_warehouse.type is
+  /// NOT NULL and is what warehouseOptions selects for the PO destination
+  /// dropdown.
+  type            master_warehouse_type?
+  /// The registration WE bill under for this site. Its PAN must match this row's
+  /// entity — unlike ship_to_gstin.
+  bill_to_gstin   String?                         @db.VarChar(15)
+  bill_to_name    String?                         @db.VarChar(200)
+  bill_to_address String?                         @db.Text
+  ship_to_name    String?                         @db.VarChar(200)
+  /// Structured ship-to. Per entity because at Mumbai the two entities ship to
+  /// different physical sites. ship_to_address is kept alongside as the verbatim
+  /// record; these columns are for the parts worth querying.
+  ship_to_line1   String?                         @db.VarChar(200)
+  ship_to_line2   String?                         @db.VarChar(200)
+  ship_to_city    String?                         @db.VarChar(100)
+  ship_to_state   String?                         @db.VarChar(50)
+  /// CHAR(6), not an integer — a leading zero would be lost.
+  ship_to_pincode String?                         @db.Char(6)
+  /// The CONSIGNEE registration. One of OUR_PANS (lib/gstin.ts) but not
+  /// necessarily this row's entity: Pep operates most sites, so Kreative rows
+  /// usually ship under Pep's registration for that state. Do not validate this
+  /// against the row's own entity.
+  ship_to_gstin   String?                         @db.VarChar(15)
+  ship_to_address String?                         @db.Text
+  status          details_warehouse_entity_status @default(active)
+  remarks         String?                         @db.VarChar(255)
+  created_at      DateTime                        @default(now()) @db.DateTime(0)
+  updated_at      DateTime?                       @db.DateTime(0)
+
+  master_warehouse master_warehouse @relation(fields: [warehouse_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_dwe_warehouse")
+  master_entity    master_entity    @relation(fields: [entity_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_dwe_entity")
+
+  @@unique([warehouse_id, entity_id], map: "uq_warehouse_entity")
+  @@index([entity_id], map: "fk_dwe_entity")
+  @@index([ship_to_pincode], map: "idx_dwe_pincode")
 }
 
 model pm_mrm_fixed {
@@ -818,6 +910,12 @@ model rm_vrm_dynamic {
   @@index([vendor_id], map: "vendor_id")
   @@index([status, effective_from], map: "idx_rm_vrm_status_eff")
   @@index([status, curr_rate], map: "idx_rm_vrm_status_rate")
+}
+
+
+model nanonets_usage {
+  day   DateTime @id @db.Date
+  calls Int      @default(0)
 }
 
 enum approvals_status {
@@ -957,9 +1055,28 @@ enum master_bom_status {
   rejected
 }
 
+/// MWH = Mother Warehouse (GGN MW, Mumbai) — the two that receive from
+/// manufacturers. CWH = Child Warehouse — regional sites fed from a mother.
 enum master_warehouse_type {
   CWH
   MWH
+}
+
+enum master_warehouse_status {
+  active
+  inactive
+  in_review
+  rejected
+}
+
+enum details_warehouse_entity_status {
+  active
+  inactive
+}
+
+enum master_entity_status {
+  active
+  inactive
 }
 
 enum details_sku_filling_uom {

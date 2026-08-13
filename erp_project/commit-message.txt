@@ -1,67 +1,64 @@
-feat: optimize invoice extraction, costing approvals, and masters tables
+feat(warehouses): add master with per-entity facility routing
 
-Invoice extraction
-------------------
-Read the PDF's existing text layer before calling Nanonets. unpdf was already
-extracting the text to identify the seller GSTIN, but the remaining invoice text
-was being discarded. Local parsing now handles supported invoice layouts before
-falling back to Nanonets.
+Every location operates under both Pep Technologies and Kreative
+Beauty with a different Unicommerce facility, GSTINs and ship-to
+address, which master_warehouse could not express — so every inward
+PO landed in whatever UNIWARE_FACILITY pointed at, regardless of
+destination or who was billed.
 
-lib/invoice-local/ adds local parsers for Tally, Cheryl, and Jainam layouts.
-Tally parsing is column-based so additional suppliers with the same layout do
-not require new code.
+- details_warehouse_entity holds one row per (location, entity)
+- Uniware Facility header now resolves from destination + the
+  invoice's buyer_gstin PAN, and throws rather than falling back to
+  the env var, which defaults to TEST_FACILITY
+- bill_to_gstin's PAN must match its entity; ship_to_gstin need not
+  — Pep operates most sites, so Kreative rows consign under Pep
+- entity_emails.legal_entity_code lets a warehouse POC differ per
+  entity; recipients are the shared rows UNION the entity's
+- three identical BRAND_CODES maps collapse into BRANDS in
+  lib/constants, which also adds the missing Fein
+- fix: entity-emails scoped warehouses on the location, not the name
 
-Local results are accepted only when qty x rate = amount for every row and the
-GST/total validation passes. Invalid or uncertain parses fall through to
-Nanonets. v1 remains contract-compatible with a single switch in invoice-api.ts
-to restore the metered path if required.
+Migrations run in order and are NOT re-runnable:
+  add_warehouse_master → backfill_warehouse_data →
+  add_warehouse_address_fields → add_entity_email_legal_entity →
+  add_warehouse_entity_gst_split
 
-Buyer vs seller GSTIN
----------------------
-Fixed lookupMfgByGstin and strategyFor selecting the first matching GSTIN.
-lib/gstin.ts now filters PEP's own registrations by PAN so the buyer GSTIN is
-not incorrectly treated as the supplier GSTIN.
+lib/invoice-inward.ts must not deploy ahead of them: it throws
+warehouse_facility_missing once details_warehouse_entity is expected.
 
-Invoice upload limit
---------------------
-Increased the Nginx invoice upload limit to support larger PDF invoices.
-Upload limits are kept in a dedicated conf.d file so certbot renewals do not
-overwrite them.
+master_warehouse.name remains the join key for
+purchase_orders.destination, inv
+entity_emails.entity_code. master_warehouse.code is added as the
+eventual replacement but nothing reads it yet.
 
-The client now rejects oversized files before upload.
+fix(bulk-upload): parse CSV to RFC 4180, and stop requiring fields the API doesn't
 
-Misc costs
-----------
-Job Work, Shrink Wrap, Shipper, and RM-PM Wastage now go through the same
-approval gate as RM/PM rates instead of writing directly to bom_misc.
+A sheet whose INCI column wrapped across lines inside one cell imported as
+several broken records — each continuation line became a row holding only a
+name, rejected as "Missing required: name, make, type".
 
-Costing queries only use active records, preventing in_review prices from
-affecting Total Costing.
+CSV parsing. Three parsers split on "\n" then "," before considering quotes;
+RFC 4180 allows both inside a quoted cell. New lib/csv.ts scans character by
+character, and handles "" escapes, CRLF, Excel's UTF-8 BOM (which became part of
+the first header, so rm_code stopped matching) and a missing trailing newline.
+Wired into every import path: import-s3.ts (all *_BULK approvals + the approval
+preview), field-config.ts parseCSV, the client Excel path, and recipe-csv.ts.
+Wrapped lines join with a single space. Also fixes a bug not yet hit: a value
+like "Ceramide AP, NP" shifted every later column one place left.
 
-Agreed Final Costing
---------------------
-Standardized comparison table columns through ag-columns.tsx so labels,
-widths, and cell rendering are consistent across all four tables.
+Optional type and make. Each was required in one layer and optional in the other,
+in opposite directions, so a sheet either failed a preview the API would have
+accepted or passed the preview and failed at the API. Both now optional on both
+sides. checkDuplicate compared `type = ?`, never true against NULL — two PMs with
+the same name and blank type would both have been created with the check
+silently passing. Now `<=>`.
 
-Masters tables
---------------
-- Improved missing-value handling with optional columns such as Effective To.
-- Added CSV and Excel exports to comparison dialogs.
-- Fixed column widths, header wrapping, and table scrolling.
-- Moved minTableWidth to shared table-width.ts.
-- Renamed MFG Cost Manager tabs while keeping existing tab keys unchanged.
+Optional effective_from on the four cost masters, defaulting to the upload date.
+The columns are NOT NULL and every rate query filters `effective_from <= today`,
+so a null is rejected outright and a missing date makes the rate invisible to
+costing and PO quoting. Stamped at upload, not approval: a staged CSV can sit in
+the queue for days. Three bugs surfaced doing it — pm-handler inserted null into
+a NOT NULL column, material-utils used `?? today` which a blank cell ("") passes
+straight through, and the *_BULK handlers silently skipped dateless rows.
 
-Production
-----------
-Fixed the production collation for prisma/fix_master_skr_skus to
-utf8mb4_0900_ai_ci, resolving join failures on PO tracking and manufacturer
-pages.
-
-Updated deployment flow to run deploy/redeploy-app from SSM before restarting
-the application so required environment variables such as NANONET_API_KEY are
-available.
-
-Verification
-------------
-TypeScript clean, 141/141 tests passing, lint passes with 0 errors, and
-production build passes.
+Recipe's effective_from stays required — a version start date, not a cost master.

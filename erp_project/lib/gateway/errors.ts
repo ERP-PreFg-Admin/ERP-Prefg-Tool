@@ -5,7 +5,8 @@ export class ApiError extends Error {
     public status: number,
     public code: string,
     message: string,
-    public details?: unknown
+    public details?: unknown,
+    public headers?: Record<string , string>
   ) {
     super(message)
   }
@@ -15,7 +16,7 @@ export function toErrorResponse(err: unknown, requestId: string) {
   if (err instanceof ApiError) {
     return NextResponse.json(
       { error: err.message, code: err.code, details: err.details, requestId },
-      { status: err.status }
+      { status: err.status , headers : err.headers }
     )
   }
   return NextResponse.json(

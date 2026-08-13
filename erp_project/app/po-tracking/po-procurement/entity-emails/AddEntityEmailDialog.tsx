@@ -25,7 +25,7 @@ type EmailRow = { email: string; purpose: string }
 const emptyRow = (): EmailRow => ({ email: "", purpose: "" })
 
 export default function AddEntityEmailDialog({
-  open, onClose, onSaved, vendorOptions, mfgOptions, warehouseOptions,
+  open, onClose, onSaved, vendorOptions, mfgOptions, warehouseOptions, legalEntityOptions,
 }: {
   open: boolean
   onClose: () => void
@@ -33,9 +33,13 @@ export default function AddEntityEmailDialog({
   vendorOptions: EntityOption[]
   mfgOptions: EntityOption[]
   warehouseOptions: EntityOption[]
+  /** Our own legal entities, for the warehouse-only entity selector. */
+  legalEntityOptions: { code: string; legal_name: string }[]
 }) {
   const [entityType, setEntityType] = useState<EntityType>("mfg")
   const [entityCode, setEntityCode] = useState("")
+  /** "" means every legal entity — the pre-existing behaviour of every row. */
+  const [legalEntityCode, setLegalEntityCode] = useState("")
   const [rows, setRows] = useState<EmailRow[]>([emptyRow()])
   const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError] = useState("")
@@ -45,6 +49,7 @@ export default function AddEntityEmailDialog({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- resets form state each time the dialog is opened
     setEntityType("mfg")
     setEntityCode("")
+    setLegalEntityCode("")
     setRows([emptyRow()])
     setApiError("")
   }, [open])
@@ -78,6 +83,8 @@ export default function AddEntityEmailDialog({
         body: JSON.stringify({
           entity_type: entityType,
           entity_code: entityCode,
+          // Omitted rather than "" for non-warehouse types, which the schema rejects.
+          legal_entity_code: entityType === "warehouse" ? legalEntityCode || undefined : undefined,
           emails: filled.map((r) => ({ email: r.email.trim(), purpose: r.purpose.trim() || undefined })),
         }),
       })
@@ -104,7 +111,13 @@ export default function AddEntityEmailDialog({
               <Label htmlFor="ee-type">Entity Type</Label>
               <Select
                 id="ee-type" value={entityType} className="w-full"
-                onChange={(e) => { setEntityType(e.target.value as EntityType); setEntityCode("") }}
+                // Clear the legal entity too: it is warehouse-only, and the API
+                // rejects it on the other types.
+                onChange={(e) => {
+                  setEntityType(e.target.value as EntityType)
+                  setEntityCode("")
+                  setLegalEntityCode("")
+                }}
               >
                 <option value="mfg">Manufacturer</option>
                 <option value="vendor">Vendor</option>
@@ -121,6 +134,32 @@ export default function AddEntityEmailDialog({
               </Select>
             </div>
           </div>
+
+          {/* Warehouses only. Every location operates under both Pep and
+              Kreative, and the point of contact at the site is not necessarily
+              the same person for both. Vendors and manufacturers deal with us as
+              one company, so the selector would be meaningless there. */}
+          {entityType === "warehouse" && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="ee-legal-entity">Legal Entity</Label>
+              <Select
+                id="ee-legal-entity"
+                value={legalEntityCode}
+                className="w-full"
+                onChange={(e) => setLegalEntityCode(e.target.value)}
+              >
+                <option value="">All entities (shared contact)</option>
+                {legalEntityOptions.map((o) => (
+                  <option key={o.code} value={o.code}>{o.legal_name} ({o.code})</option>
+                ))}
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {legalEntityCode
+                  ? `Added on top of any shared contacts — a ${legalEntityCode} invoice notifies both.`
+                  : "Notified for every entity's goods. Pick an entity only for a contact specific to it."}
+              </p>
+            </div>
+          )}
 
           <div className="grid gap-2">
             <Label>Emails</Label>

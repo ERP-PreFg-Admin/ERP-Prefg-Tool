@@ -25,6 +25,8 @@ export const skuUpdateSchema = z.object({
   category: z.string().optional(),
   subcategory: z.string().optional(),
   sku_type: z.string().optional(),
+  filling: z.union([z.number(), z.string()]).optional(),
+  filling_uom: z.string().optional(),
   mrp: z.union([z.number(), z.string()]).optional(),
   status: z.string().optional(),
   /** Mandatory reason for this edit — archived to history_masters_edits.remarks. */

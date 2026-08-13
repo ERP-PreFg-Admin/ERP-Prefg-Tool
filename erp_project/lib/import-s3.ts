@@ -1,5 +1,6 @@
 import { getFileBuffer } from "@/lib/s3"
 import ExcelJS from "exceljs"
+import { parseCsvObjects, normalizeCell } from "@/lib/csv"
 
 export type ImportRow = Record<string, string>
 
@@ -23,34 +24,9 @@ export async function parseS3Import(key: string): Promise<ImportRow[]> {
 }
 
 function parseCsvBuffer(buffer: Buffer): ImportRow[] {
-  const text  = buffer.toString("utf-8")
-  const lines = text.split(/\r?\n/).filter((l) => l.trim())
-  if (lines.length < 2) return []
-
-  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase())
-  const rows: ImportRow[] = []
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = splitCsvLine(lines[i])
-    if (values.every((v) => !v.trim())) continue
-    const row: ImportRow = {}
-    headers.forEach((h, idx) => { row[h] = (values[idx] ?? "").trim() })
-    rows.push(row)
-  }
-  return rows
-}
-
-function splitCsvLine(line: string): string[] {
-  const result: string[] = []
-  let current = ""
-  let inQuotes = false
-  for (const ch of line) {
-    if (ch === '"') { inQuotes = !inQuotes }
-    else if (ch === "," && !inQuotes) { result.push(current); current = "" }
-    else { current += ch }
-  }
-  result.push(current)
-  return result
+  // Splitting on newlines before considering quotes broke every cell that
+  // wrapped across lines into a row of its own — see lib/csv.ts.
+  return parseCsvObjects(buffer.toString("utf-8"))
 }
 
 async function parseXlsxBuffer(buffer: Buffer): Promise<ImportRow[]> {
@@ -65,8 +41,10 @@ async function parseXlsxBuffer(buffer: Buffer): Promise<ImportRow[]> {
   let headers: string[] = []
 
   ws.eachRow((row, rowNumber) => {
+    // normalizeCell, not trim: an Excel cell can hold newlines too (alt+enter,
+    // or text wrapped when pasted), and those must not survive into a name.
     const values = (row.values as (string | number | null)[]).slice(1).map((v) =>
-      v == null ? "" : String(v).trim()
+      v == null ? "" : normalizeCell(String(v))
     )
     if (rowNumber === 1) {
       headers = values.map((h) => h.toLowerCase())

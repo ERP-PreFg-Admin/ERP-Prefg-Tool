@@ -8,20 +8,31 @@ import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/toast"
 import { InReviewBanner, RejectionBanner, type RejectionInfo } from "@/components/masters/ApprovalBanners"
 import { RemarksField, EDIT_REMARK_PRESETS } from "@/components/masters/RemarksField"
+import { ManagedFuzzyField } from "@/components/masters/ManagedFuzzyField"
 import { Select } from "@/components/ui/select"
 import type { Sku } from "@/types/masters"
 
+/** Every filling_uom present in master_skus today — plain varchar(20), no DB enum. */
+const FILLING_UOMS = ["ml", "g", "pairs", "units"]
+
 /**
- * Scoped SKU edit dialog — only Status, SKU Type, Category, Sub-Category and
- * MRP go through the approval flow here. Name/Brand are intentionally left
+ * Scoped SKU edit dialog — only Status, SKU Type, Category, Sub-Category,
+ * Filling and MRP go through the approval flow here. Name/Brand are intentionally left
  * out of this dialog (read-only elsewhere) per product decision.
  */
 export function EditSkuDialog({
   sku,
+  skuTypes,
+  categories,
+  subcategories,
   onSuccess,
   onClose,
 }: {
   sku: Sku | null
+  /** Distinct existing values — server-cached in lib/cached-reference-data.ts. */
+  skuTypes: string[]
+  categories: string[]
+  subcategories: string[]
   onSuccess: () => void
   onClose: () => void
 }) {
@@ -30,6 +41,8 @@ export function EditSkuDialog({
     sku_type: sku?.sku_type ?? "",
     category: sku?.category ?? "",
     subcategory: sku?.subcategory ?? "",
+    filling: sku?.filling != null ? String(sku.filling) : "",
+    filling_uom: sku?.filling_uom ?? "",
     mrp: sku?.mrp != null ? String(sku.mrp) : "",
     status: sku?.status ?? "active",
     remarks: "",
@@ -48,6 +61,8 @@ export function EditSkuDialog({
         sku_type: sku.sku_type ?? "",
         category: sku.category ?? "",
         subcategory: sku.subcategory ?? "",
+        filling: sku.filling != null ? String(sku.filling) : "",
+        filling_uom: sku.filling_uom ?? "",
         mrp: sku.mrp != null ? String(sku.mrp) : "",
         status: sku.status ?? "active",
         remarks: "",
@@ -123,10 +138,17 @@ export function EditSkuDialog({
 
           {/* Row 1: SKU Type | Status */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1">
-              <Label>SKU Type</Label>
-              <Input value={form.sku_type} onChange={(e) => set("sku_type", e.target.value)} disabled={isInReview || !canEdit} />
-            </div>
+            <ManagedFuzzyField
+              id="sku-type"
+              label="SKU Type"
+              required={false}
+              options={skuTypes}
+              value={form.sku_type}
+              onChange={(v) => set("sku_type", v)}
+              placeholder="Select SKU type…"
+              newPlaceholder="New SKU type"
+              disabled={isInReview || !canEdit}
+            />
             <div className="grid gap-1">
               <Label>Status</Label>
               <Select
@@ -146,21 +168,60 @@ export function EditSkuDialog({
 
           {/* Row 2: Category | Sub-Category */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1">
-              <Label>Category</Label>
-              <Input value={form.category} onChange={(e) => set("category", e.target.value)} disabled={isInReview || !canEdit} />
-            </div>
-            <div className="grid gap-1">
-              <Label>Sub-Category</Label>
-              <Input value={form.subcategory} onChange={(e) => set("subcategory", e.target.value)} disabled={isInReview || !canEdit} />
-            </div>
+            <ManagedFuzzyField
+              id="sku-category"
+              label="Category"
+              required={false}
+              options={categories}
+              value={form.category}
+              onChange={(v) => set("category", v)}
+              placeholder="Select category…"
+              newPlaceholder="New category"
+              disabled={isInReview || !canEdit}
+            />
+            <ManagedFuzzyField
+              id="sku-subcategory"
+              label="Sub-Category"
+              required={false}
+              options={subcategories}
+              value={form.subcategory}
+              onChange={(v) => set("subcategory", v)}
+              placeholder="Select sub-category…"
+              newPlaceholder="New sub-category"
+              disabled={isInReview || !canEdit}
+            />
+
           </div>
 
-          {/* Row 3: MRP */}
+          {/* Row 3: MRP | Filling (value + UOM) */}
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1">
               <Label>MRP (₹)</Label>
               <Input type="number" min={0} value={form.mrp} onChange={(e) => set("mrp", e.target.value)} disabled={isInReview || !canEdit} />
+            </div>
+            <div className="grid gap-1">
+              <Label>Filling</Label>
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  className="flex-1"
+                  value={form.filling}
+                  onChange={(e) => set("filling", e.target.value)}
+                  disabled={isInReview || !canEdit}
+                />
+                <Select
+                  value={form.filling_uom}
+                  onChange={(e) => set("filling_uom", e.target.value)}
+                  disabled={isInReview || !canEdit}
+                  className="h-9 w-24 rounded-lg border border-input bg-background px-3 text-sm disabled:opacity-50"
+                >
+                  <option value="">UOM</option>
+                  {FILLING_UOMS.map((u) => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </Select>
+              </div>
             </div>
           </div>
 

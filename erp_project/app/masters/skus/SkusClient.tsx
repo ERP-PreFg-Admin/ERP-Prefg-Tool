@@ -40,7 +40,8 @@ import { EntityHistoryDialog } from "@/components/masters/EntityHistoryDialog"
 import { EmptyState } from "@/components/ui/empty-state"
 import { EditSkuDialog } from "./EditSkuDialog"
 import { SkuVariantsDialog } from "./SkuVariantsDialog"
-import type { Sku } from "@/types/masters"
+import type { Sku, CostingGap } from "@/types/masters"
+import { useEditGuard } from "@/components/AccessContext"
 
 /** Fields whose absence is surfaced via the row-level "incomplete data" flag. */
 function missingFieldsFor(row: Sku): string[] {
@@ -54,8 +55,42 @@ function missingFieldsFor(row: Sku): string[] {
   return missing
 }
 
+/**
+ * Why this SKU can't be costed — the same reasons the Agreed Final Costing tab
+ * shows per manufacturer (app/manufacturing/[mfgId]/FinalCostingTable.tsx),
+ * rolled up across every manufacturer the recipe is mapped to.
+ *
+ * Fill weight gets its own line even though "Filling" is already in the missing
+ * -fields list: it is a MULTIPLICAND in the RM formula, so its absence zeroes
+ * every RM line rather than leaving one blank cell — a different severity, and
+ * usually a different person fixes it than the one chasing the rate masters.
+ */
+function costingReasonsFor(row: Sku, gap: CostingGap | undefined): string[] {
+  if (!gap) return []                                // no recipe at all — the Recipe column already says so
+  if (gap.rm_line_count + gap.pm_line_count === 0) return ["Recipe has no active lines — nothing to cost"]
+
+  const reasons: string[] = []
+  if (gap.rm_line_count > 0 && row.filling == null) {
+    reasons.push("No fill weight — every RM line costs 0 until it is set")
+  }
+  if (gap.mfg_count === 0) {
+    // With no manufacturer mapped there is no rate to look up, so the
+    // without-rate counts below would flag every line and mean nothing.
+    reasons.push("Recipe not mapped to any manufacturer")
+    return reasons
+  }
+  if (gap.rm_lines_without_rate > 0) {
+    reasons.push(`${gap.rm_lines_without_rate} of ${gap.rm_line_count} RM line${gap.rm_line_count === 1 ? "" : "s"} have no agreed rate`)
+  }
+  if (gap.pm_lines_without_rate > 0) {
+    reasons.push(`${gap.pm_lines_without_rate} of ${gap.pm_line_count} PM line${gap.pm_line_count === 1 ? "" : "s"} have no agreed rate`)
+  }
+  return reasons
+}
+
 export default function SkusClient({
   rows,
+  costingGaps,
   total,
   page,
   pageSize,
@@ -72,6 +107,8 @@ export default function SkusClient({
   subcategories,
 }: {
   rows: Sku[]
+  /** Costing gaps for the SKUs on this page only — see skus.selectCostingGapsBySkuIds. */
+  costingGaps: CostingGap[]
   total: number
   page: number
   pageSize: number
@@ -90,12 +127,15 @@ export default function SkusClient({
   const { navigate, router } = useUrlFilters()
   const refresh = () => router.refresh()
 
+  const gapBySkuId = new Map(costingGaps.map((g) => [g.sku_id, g]))
+
   // Filter panel open/close.
   const filterPanel = useFilterPanel()
 
   // Draft filter state — controls only update these locally; the actual
   // server refetch fires only when "Apply" is clicked.
   const [draftStatus, setDraftStatus]           = useState(currentStatus)
+  const guard = useEditGuard()
   const [draftBrand, setDraftBrand]             = useState(currentBrand)
   const [draftSkuType, setDraftSkuType]         = useState(currentSkuType)
   const [draftCategory, setDraftCategory]       = useState(currentCategory)
@@ -275,17 +315,23 @@ export default function SkusClient({
               ) : (
                 rows.map((row) => {
                   const missing = missingFieldsFor(row)
+                  const costingReasons = costingReasonsFor(row, gapBySkuId.get(row.id))
                   const hasVariants = (row.variant_count ?? 0) > 1 && row.brand && row.base_sku_sno != null
                   return (
                     <TableRow key={row.id}>
                       <TableCell className="font-mono text-xs font-medium">
                         <div className="flex items-center gap-1.5">
                           {row.sku_code}
-                          {missing.length > 0 && (
+                          {(missing.length > 0 || costingReasons.length > 0) && (
                             <span className="group relative inline-flex items-center">
                               <AlertTriangle className="h-3.5 w-3.5 cursor-help text-amber-500" />
-                              <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-1 hidden w-56 -translate-x-1/2 rounded-md border border-border bg-popover p-2 text-[11px] leading-relaxed text-foreground shadow-md group-hover:block">
-                                Missing: {missing.join(", ")}
+                              <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-1 hidden w-64 -translate-x-1/2 space-y-1 rounded-md border border-border bg-popover p-2 text-left text-[11px] leading-relaxed text-foreground shadow-md group-hover:block">
+                                {missing.length > 0 && <span className="block">Missing: {missing.join(", ")}</span>}
+                                {costingReasons.map((reason) => (
+                                  <span key={reason} className="block text-amber-700 dark:text-amber-400">
+                                    {reason}
+                                  </span>
+                                ))}
                               </span>
                             </span>
                           )}
@@ -320,7 +366,7 @@ export default function SkusClient({
                           <Button
                             size="icon"
                             variant="ghost"
-                            onClick={() => setEditSku(row)}
+                            onClick={() => { if (guard("edit a SKU")) setEditSku(row) }}
                             disabled={row.status === "in_review"}
                             title={row.status === "in_review" ? "Pending approval — cannot edit" : "Edit"}
                           >
@@ -359,6 +405,9 @@ export default function SkusClient({
 
       <EditSkuDialog
         sku={editSku}
+        skuTypes={skuTypes}
+        categories={categories}
+        subcategories={subcategories}
         onSuccess={refresh}
         onClose={() => setEditSku(null)}
       />

@@ -2,6 +2,8 @@
 // every master-data page. Declare a list of MasterField once per entity and
 // pass it to <AddRecordDialog> and <CsvImportDialog>.
 
+import { parseCsvRows, normalizeCell, isBlankRow } from "@/lib/csv"
+
 export type FieldType = "text" | "number" | "select"
 
 export type FieldOption = { value: string; label: string }
@@ -77,8 +79,6 @@ const ZONE_LOOKUP = new Map(ZONE_OPTIONS.map((o) => [o.value.toLowerCase(), o.va
 export function normalizeZone(raw: string): string | null {
   return ZONE_LOOKUP.get(raw.trim().toLowerCase()) ?? null
 }
-
-const unquote = (s: string) => s.trim().replace(/^"|"$/g, "")
 
 /**
  * Normalizes a CSV/Excel header (or a field key/alias/label) to a comparable
@@ -172,23 +172,21 @@ export function buildRows(rawRows: Record<string, string>[], fields: MasterField
 
 /** Parse CSV text into rows keyed by field. Invalid rows carry `_error` and/or `_remarks`. */
 export function parseCSV(text: string, fields: MasterField[]): ParsedRow[] {
-  const lines = text.trim().split(/\r?\n/)
-  if (lines.length < 2) {
+  // Read through lib/csv.ts rather than splitting on "\n" then ",". A cell may
+  // legally contain both: an INCI list wrapped across lines used to become one
+  // broken row per line ("Missing required: name, make, type"), and a value
+  // like "Ceramide AP, NP" shifted every later column one place left.
+  const rows = parseCsvRows(text).filter((r) => !isBlankRow(r))
+  if (rows.length < 2) {
     throw new Error("CSV must have a header row and at least one data row")
   }
-  const headers = lines[0].split(",").map((h) => normalizeHeader(unquote(h)))
 
-  const rawRows: Record<string, string>[] = lines
-    .slice(1)
-    .filter((line) => line.trim())
-    .map((line) => {
-      const values = line.split(",").map(unquote)
-      const raw: Record<string, string> = {}
-      headers.forEach((h, i) => {
-        raw[h] = values[i] ?? ""
-      })
-      return raw
-    })
+  const headers = rows[0].map((h) => normalizeHeader(normalizeCell(h)))
+  const rawRows = rows.slice(1).map((cells) => {
+    const raw: Record<string, string> = {}
+    headers.forEach((h, i) => { raw[h] = normalizeCell(cells[i] ?? "") })
+    return raw
+  })
 
   return buildRows(rawRows, fields)
 }

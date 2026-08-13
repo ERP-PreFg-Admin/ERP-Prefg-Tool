@@ -18,7 +18,7 @@ type RmBaseRow = {
   [key: string]: unknown
 }
 type PmBaseRow = {
-  id: number; pm_code: string; name: string; type: string; uom: string | null
+  id: number; pm_code: string; name: string; type: string | null; uom: string | null
   status: string; hsn_code: string | null; pantone_color: string | null
   [key: string]: unknown
 }
@@ -35,7 +35,11 @@ export const POST = withGateway({
 
     if (body.material === "rm") {
       const name = body.name.trim()
-      const make = body.make.trim()
+      // "" here, null in the column. checkDuplicate compares
+      // LOWER(IFNULL(make,'')), so a null param would stop matching rows that
+      // already have no make; but master_rm.make is nullable, and storing ""
+      // would make absent spellable two ways.
+      const make = body.make?.trim() ?? ""
       const inci_name = body.inci_name.trim()
       const { type, uom, hsn_code } = body
 
@@ -56,7 +60,7 @@ export const POST = withGateway({
         const [rmResult] = await conn.execute(rawMaterials.insert, [
           rmCode,
           name,
-          make,
+          make || null,
           type?.trim() || null,
           uom?.trim() || null,
           "in_review",
@@ -99,7 +103,8 @@ export const POST = withGateway({
     // material === "pm"
     if(body.material === "pm") {
       const name = body.name.trim()
-      const type = body.type.trim()
+      // Optional now: master_pm.type is nullable, so mirror the RM path above.
+      const type = body.type?.trim() || null
       const { uom, hsn_code } = body
 
       const eventId = makeEventId("PM", "create")
@@ -141,7 +146,9 @@ export const POST = withGateway({
         const newFields: [string, string][] = [
           ["pm_code", pmCode],
           ["name", name],
-          ["type", type],
+          // "" not null — approval_items stores field values as strings, and the
+          // RM branch above records a blank type the same way.
+          ["type", type ?? ""],
           ["uom", uom?.trim() || ""],
           ["hsn_code", hsn_code?.trim() || ""],
           ["pantone_color", pantone_color ?? ""],
@@ -189,7 +196,11 @@ export const PUT = withGateway({
 
     if (body.material === "rm") {
       const name = body.name.trim()
-      const make = body.make.trim()
+      // "" here, null in the column. checkDuplicate compares
+      // LOWER(IFNULL(make,'')), so a null param would stop matching rows that
+      // already have no make; but master_rm.make is nullable, and storing ""
+      // would make absent spellable two ways.
+      const make = body.make?.trim() ?? ""
       const inci_name = body.inci_name.trim()
       const { type, uom, status, hsn_code } = body
 
@@ -222,7 +233,7 @@ export const PUT = withGateway({
       recordRawEvent("RM_UPDATE", eventId, { id, name })
       const proposed: Record<string, string | null> = {
         name,
-        make,
+        make: make || null,
         inci_name,
         type: type?.trim() || null,
         uom: uom?.trim() || null,
@@ -271,7 +282,8 @@ export const PUT = withGateway({
     // material === "pm"
     if (body.material === "pm") {
       const name = body.name.trim()
-      const type = body.type.trim()
+      // Optional now: master_pm.type is nullable, so mirror the RM path above.
+      const type = body.type?.trim() || null
       const { uom, status, hsn_code } = body
 
       const eventId = makeEventId("PM_UPDATE", "update", id)

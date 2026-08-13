@@ -40,6 +40,7 @@ const NAV: NavItem[] = [
       { label: "RM Cost Master",     href: "/masters/raw-materials" },
       { label: "PM Cost Master", href: "/masters/packing-materials" },
       {label: "Recipe Master" , href: "/masters/recipe-master"},
+      { label: "Warehouses",         href: "/masters/warehouses" },
     ],
   },
   {

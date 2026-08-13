@@ -13,7 +13,7 @@ export const entityEmails = {
    * code/email/purpose. Params: [type, type, like, like, like, like, LIMIT, OFFSET]
    */
   selectPaginated: `
-    SELECT id, entity_type, entity_code, email, purpose, created_at
+    SELECT id, entity_type, entity_code, legal_entity_code, email, purpose, created_at
     FROM entity_emails
     WHERE (? IS NULL OR entity_type = ?)
       AND (? IS NULL OR entity_code LIKE ? OR email LIKE ? OR purpose LIKE ?)
@@ -29,15 +29,44 @@ export const entityEmails = {
       AND (? IS NULL OR entity_code LIKE ? OR email LIKE ? OR purpose LIKE ?)
   `,
 
+  /** Params: [entity_type, entity_code, legal_entity_code, email, purpose].
+   *  legal_entity_code is NULL for vendor/mfg and for a warehouse address that
+   *  serves every entity. */
   insert: `
-    INSERT INTO entity_emails (entity_type, entity_code, email, purpose)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO entity_emails (entity_type, entity_code, legal_entity_code, email, purpose)
+    VALUES (?, ?, ?, ?, ?)
   `,
 
-  /** All emails on file for one entity (e.g. a manufacturer's PO recipients). Params: [entity_type, entity_code] */
+  /** All emails on file for one entity (e.g. a manufacturer's PO recipients).
+   *  Ignores legal_entity_code — correct for vendor/mfg, which never set it. For
+   *  a warehouse use selectByWarehouseForEntity instead, or an entity's POC is
+   *  mailed another entity's paperwork.
+   *  Params: [entity_type, entity_code] */
   selectByEntity: `
     SELECT email FROM entity_emails
     WHERE entity_type = ? AND entity_code = ?
+  `,
+
+  /**
+   * A warehouse's recipients for one legal entity: the shared addresses plus that
+   * entity's own. The UNION is deliberate — a general warehouse inbox keeps
+   * receiving everything and the entity's POC is added on top, rather than the
+   * POC silently replacing it.
+   *
+   * Pass null for legalEntityCode and only the shared rows come back, which is
+   * what happens when the entity can't be resolved from an invoice.
+   * Params: [entity_code, legal_entity_code]
+   */
+  selectByWarehouseForEntity: `
+    SELECT email FROM entity_emails
+    WHERE entity_type = 'warehouse'
+      AND entity_code = ?
+      AND (legal_entity_code IS NULL OR legal_entity_code = ?)
+  `,
+
+  /** The legal entities, for the entity-email form's selector. */
+  legalEntityOptions: `
+    SELECT code, legal_name FROM master_entity WHERE status = 'active' ORDER BY code ASC
   `,
 
   /** Lightweight code/name list for the "vendor" entity type dropdown. */

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/toast"
 import { FormField } from "@/components/masters/FormField"
 import { ManagedFuzzyField } from "@/components/masters/ManagedFuzzyField"
+import { useEditGuard } from "@/components/AccessContext"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,7 @@ export default function AddMaterialDialog({
   const { toast } = useToast()
   // Dialog open/close state.
   const [open, setOpen] = useState(false)
+  const guard = useEditGuard()
 
   // Loading and error state for the submit button.
   const [loading, setLoading] = useState(false)
@@ -262,7 +264,7 @@ export default function AddMaterialDialog({
   return (
     <>
       {/* Trigger button — sits in the toolbar */}
-      <Button size="sm" onClick={() => setOpen(true)}>
+      <Button size="sm" onClick={() => { if (guard("add a material")) setOpen(true) }}>
         <Plus className="h-4 w-4 mr-1" />
         Add {label}
       </Button>

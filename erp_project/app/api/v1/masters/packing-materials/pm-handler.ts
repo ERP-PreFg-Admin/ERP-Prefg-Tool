@@ -91,6 +91,12 @@ export async function pmCreate(body: PmCreateBody, userId: number, ctx: object):
     return NextResponse.json({ error: "name is required" }, { status: 400 })
   }
   const name = body.name.trim()
+  // Effective From is optional on the form and in the CSV. The rate columns are
+  // NOT NULL, and every costing query filters `effective_from <= today` — a null
+  // would be rejected by the column, and a rate dated later than today would be
+  // silently invisible. Blank therefore means "applies from the day it was
+  // entered", which is what leaving it empty is meant to say.
+  const today = todayIST()
 
   const eventId = makeEventId("PM", "create")
   const hasVendorRate = !!body.vendor_code?.trim()
@@ -120,7 +126,7 @@ export async function pmCreate(body: PmCreateBody, userId: number, ctx: object):
           body.moq ? roundToWholeNumber(body.moq) : null,
           body.rate_uom?.trim() || null,
           body.rate_status || "active",
-          body.effective_from?.trim() || null,
+          body.effective_from?.trim() || today,
           body.effective_to?.trim() || null,
         ])
         logger.info({ ...logCtx, message: "Vendor rate tab: rate inserted", pmId, vendor_code: body.vendor_code?.trim() })
@@ -131,7 +137,7 @@ export async function pmCreate(body: PmCreateBody, userId: number, ctx: object):
           body.curr_rate ? roundToTwoDecimals(body.curr_rate) : null,
           body.rate_uom?.trim() || null,
           body.rate_status || "active",
-          body.effective_from?.trim() || null,
+          body.effective_from?.trim() || today,
         ])
         logger.info({ ...logCtx, message: "Manufacturer tab: rate inserted", pmId, mfg_code: body.mfg_code?.trim() })
       }

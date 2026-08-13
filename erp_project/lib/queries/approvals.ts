@@ -111,6 +111,15 @@ export const entityLabelSql: Record<string, string> = {
     SELECT code, name, NULL AS secondary_code, NULL AS secondary_name
     FROM master_mfgs WHERE id = ? LIMIT 1
   `,
+  // `name` is the identity here, not a code — master_warehouse has no code column
+  // and the name is what POs, invoices and mail routing all key on. No join to
+  // details_warehouse_entity: the per-entity facility codes show up in the field
+  // diff as `facility_code:PEP` etc., and joining two child rows onto one header
+  // would cost a join on every approvals-queue render for one extra label.
+  WAREHOUSE: `
+    SELECT name AS code, location AS name, state AS secondary_code, type AS secondary_name
+    FROM master_warehouse WHERE id = ? LIMIT 1
+  `,
 }
 
 export const approvalsSql = {

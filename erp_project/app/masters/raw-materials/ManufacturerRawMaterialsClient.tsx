@@ -18,6 +18,7 @@ import { RmRateTable, fmtDate } from "./RmRateTable"
 import { MfgDetailDialog } from "./MfgDetailDialog"
 import { EditRmMfgRateDialog } from "./EditRmMfgRateDialog"
 import { RateHistoryDialog } from "@/components/masters/RateHistoryDialog"
+import { useEditGuard } from "@/components/AccessContext"
 
 // Renders the rate-row status (rmm.status), not the base RM status.
 const rateStatusBadge = (row: AnyRow) => <StatusBadge status={row.rate_status as string | null} />
@@ -72,6 +73,7 @@ export default function ManufacturerRawMaterialsClient({
   currentMfgEffectiveFrom: string
 }) {
   const [selectedRow, setSelectedRow] = useState<RMByMfg | null>(null)
+  const guard = useEditGuard()
   const [editRow, setEditRow] = useState<RMByMfg | null>(null)
   const [historyRow, setHistoryRow] = useState<RMByMfg | null>(null)
 
@@ -106,7 +108,7 @@ export default function ManufacturerRawMaterialsClient({
               <Button
                 size="icon"
                 variant="ghost"
-                onClick={() => setEditRow(typedRow)}
+                onClick={() => { if (guard("edit an RM rate")) setEditRow(typedRow) }}
                 disabled={isLocked}
                 title={isLocked ? "Pending approval — cannot edit" : "Edit rate"}
               >

@@ -23,7 +23,7 @@ import {
   getSkuDistinctSubcategories,
 } from "@/lib/cached-reference-data"
 import { fuzzyRank } from "@/lib/fuzzy-search"
-import type { Sku } from "@/types/masters"
+import type { Sku, CostingGap } from "@/types/masters"
 import SkusClient from "./SkusClient"
 
 export default async function SkusPage({
@@ -102,6 +102,13 @@ export default async function SkusPage({
     total = Number(countRows[0]?.total ?? 0)
   }
 
+  // ── Costing gaps (same reasons the Agreed Final Costing tab shows) ─────────
+  // Only for the SKUs on this page, so the cost is one aggregate per page load.
+  const skuIds = rows.map((r) => r.id)
+  const costingGaps = skuIds.length
+    ? await timedQuery<CostingGap>(skuSql.selectCostingGapsBySkuIds, [skuIds], { label: "selectCostingGapsBySkuIds" })
+    : []
+
   // ── Resolve active_bom_id -> bom_code for the SKUs on this page ────────────
   const bomIds = [...new Set(rows.map((r) => r.active_bom_id).filter((id): id is number => id != null))]
   if (bomIds.length > 0) {
@@ -120,6 +127,7 @@ export default async function SkusPage({
       </div>
       <SkusClient
         rows={rows}
+        costingGaps={costingGaps}
         total={total}
         page={page}
         pageSize={size}

@@ -35,6 +35,7 @@ export const PAGES: readonly PageEntry[] = [
   { slug: "/masters/raw-materials",       label: "RM Cost Master",       section: "Masters" },
   { slug: "/masters/packing-materials",   label: "PM Cost Master",       section: "Masters" },
   { slug: "/masters/recipe-master",          label: "Recipe Master",        section: "Masters" },
+  { slug: "/masters/warehouses",          label: "Warehouses",           section: "Masters" },
 
   { slug: "/manufacturing", label: "MFG Cost Manager", section: "Production" },
   { slug: "/po-tracking",                    label: "PO Tracking (all)", section: "Production" },

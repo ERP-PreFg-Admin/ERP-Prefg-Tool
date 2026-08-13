@@ -109,6 +109,10 @@ export const POST = withGateway({
     // reflect this change on next load.
     if (approval.module === "RM_RATE") revalidateTag("ref:mfg-rm-rates", "max")
     if (approval.module === "PM_RATE") revalidateTag("ref:mfg-pm-rates", "max")
+    // getPoDropdownOptions caches the warehouse list (lib/cached-reference-data.ts),
+    // so without this an approved warehouse is missing from the PO destination
+    // dropdown — and a deactivated one still offered — until the timer expires.
+    if (approval.module === "WAREHOUSE") revalidateTag("ref:po-options", "max")
 
     recordProcessedEvent("APPROVAL", eventId, {
       approvalId, module: approval.module, entityId: approval.entity_id, approverId, action,

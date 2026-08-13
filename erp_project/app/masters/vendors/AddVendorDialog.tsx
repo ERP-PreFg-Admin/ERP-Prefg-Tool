@@ -16,6 +16,7 @@ import { useToast } from "@/components/ui/toast"
 import { ZONE_OPTIONS } from "@/components/masters/field-config"
 import { FormField } from "@/components/masters/FormField"
 import { cn } from "@/lib/utils"
+import { useEditGuard } from "@/components/AccessContext"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ type Step = "details" | "documents"
 export function AddVendorDialog({ onSuccess }: { onSuccess?: () => void }) {
   const { toast } = useToast()
   const [open, setOpen]               = useState(false)
+  const guard = useEditGuard()
   const [step, setStep]               = useState<Step>("details")
   const [form, setForm]               = useState<Record<string, string>>({ type: "rm" })
   const [pendingFiles, setPendingFiles] = useState<Record<DocKey, File | null>>(EMPTY_DOCS)
@@ -70,6 +72,7 @@ export function AddVendorDialog({ onSuccess }: { onSuccess?: () => void }) {
   const sessionFolder = useRef("")
 
   function openDialog() {
+    if (!guard("add a vendor")) return
     sessionFolder.current = `vendors/tmp/${crypto.randomUUID()}`
     setStep("details")
     setForm({ type: "rm" })

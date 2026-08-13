@@ -14,6 +14,7 @@ import type {
   FinalCostingRow, FinalCostingComparisonRow, MfgLine, MfgLineOption, MfgMonthlyPoRow,
   MiscCostLine, MiscCostType,
 } from "@/types/masters"
+import { rateGapReasons, missingMiscReasons } from "./costing-gaps"
 import TabBar, { type MfgTab } from "./TabBar"
 import ManufacturingLinesClient from "./ManufacturingLinesClient"
 import MiscCostClient from "./MiscCostClient"
@@ -121,22 +122,51 @@ export default async function ManufacturerDetailPage({
 }
 
 async function LineStatusTabContent({ mfgId }: { mfgId: number }) {
-  const [lineRows, bomOptions, liveBomRows] = await Promise.all([
+  const [lineRows, bomOptions, liveBomRows, materialCostRows, miscCostRows] = await Promise.all([
     timedQuery<MfgLine>(manufacturingSql.selectLinesByMfg, [mfgId, null, null], { label: "manufacturing.selectLinesByMfg" }),
     timedQuery<{ id: number; bom_code: string; sku_code: string | null; sku_name: string | null }>(manufacturingSql.bomOptionsForMfg, [mfgId], { label: "manufacturing.bomOptionsForMfg" }),
     timedQuery<{ sku_id: number; sku_code: string | null; live_bom_count: number; bom_ids: string; bom_codes: string }>(recipeSql.selectSkusWithMultipleLiveBomsByMfg, [mfgId], { label: "bom.selectSkusWithMultipleLiveBomsByMfg" }),
+    // Same two queries the Agreed Final Costing tab runs — the warning shown
+    // there is only actionable here, on the line it belongs to.
+    timedQuery<{
+      recipe_id: number; filling: string | null; rm_line_count: number
+      rm_lines_without_rate: number; pm_lines_without_rate: number
+    }>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId], { label: "manufacturing.selectMaterialCostByMfg (lines)" }),
+    timedQuery<{ recipe_id: number; type: MiscCostType; cost: string }>(manufacturingSql.selectMiscCostsByMfg, [mfgId], { label: "manufacturing.selectMiscCostsByMfg (lines)" }),
   ])
   const liveBomsBySkuCode = new Map(
     liveBomRows
       .filter((r) => r.sku_code)
       .map((r) => [r.sku_code as string, { bomCodes: r.bom_codes, bomIds: r.bom_ids.split(",").map(Number) }])
   )
+
+  const miscByBom = new Map<number, Partial<Record<MiscCostType, number>>>()
+  for (const r of miscCostRows) {
+    miscByBom.set(r.recipe_id, { ...miscByBom.get(r.recipe_id), [r.type]: Number(r.cost) })
+  }
+  // Reasons are resolved here rather than in the client: they are pure strings,
+  // so the gap shapes never have to cross the wire.
+  const costingWarnings = new Map<number, string[]>()
+  for (const r of materialCostRows) {
+    const reasons = [
+      ...rateGapReasons({
+        filling: r.filling == null ? null : Number(r.filling),
+        rm_line_count: Number(r.rm_line_count ?? 0),
+        rm_lines_without_rate: Number(r.rm_lines_without_rate ?? 0),
+        pm_lines_without_rate: Number(r.pm_lines_without_rate ?? 0),
+      }),
+      ...missingMiscReasons(miscByBom.get(r.recipe_id) ?? {}),
+    ]
+    if (reasons.length > 0) costingWarnings.set(r.recipe_id, reasons)
+  }
+
   return (
     <ManufacturingLinesClient
       mfgId={mfgId}
       rows={lineRows}
       bomOptions={bomOptions}
       liveBomsBySkuCode={liveBomsBySkuCode}
+      costingWarnings={costingWarnings}
     />
   )
 }

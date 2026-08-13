@@ -280,7 +280,7 @@ export async function applyVendorRateApproval(
     ["curr_rate", existing.curr_rate, v.curr_rate],
     ["moq", existing.moq, v.moq],
     ["uom", existing.uom, v.rate_uom],
-    ["effective_from", existing.effective_from, v.effective_from ?? today],
+    ["effective_from", existing.effective_from, v.effective_from || today],
     // mfg_id only exists on cost_master_rm_ven (informational vendor→manufacturer
     // tag) — cost_master_pm_ven has no such column, so skip it for PM_VRM.
     ...(moduleVrm === "RM_VRM" ? [["mfg_id", existing.mfg_id, v.mfg_id] as [string, unknown, unknown]] : []),
@@ -323,7 +323,7 @@ export async function applyMfgRateApproval(
   const diff = ([
     ["curr_rate", existing.curr_rate, m.curr_rate],
     ["uom", existing.uom, m.rate_uom],
-    ["effective_from", existing.effective_from, m.effective_from ?? today],
+    ["effective_from", existing.effective_from, m.effective_from || today],
   ] as [string, unknown, unknown][]).filter(([, o, n]) => String(o ?? "") !== String(n ?? ""))
   if (diff.length === 0) return null
 
