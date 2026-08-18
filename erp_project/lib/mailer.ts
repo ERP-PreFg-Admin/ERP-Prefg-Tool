@@ -32,29 +32,49 @@ import crypto from "crypto"
 // Credentials are passed explicitly to mirror lib/s3.ts. When the EC2 instance
 // role takes over (see instance-role-migration.md) both drop this block together
 // and the SDK resolves via IMDS.
-const sesTransport = nodemailer.createTransport({
-  SES: {
-    sesClient: new SESv2Client({
-      region: AWS_REGION,
-      credentials: {
-        accessKeyId:     AWS_ACCESS_KEY_ID,
-        secretAccessKey: AWS_SECRET_ACCESS_KEY,
-      },
-    }),
-    SendEmailCommand,
-  },
-})
+//
+// Built lazily on first send, NOT at module load — same reason lib/s3.ts defers
+// its client. The AWS SDK throws synchronously when `region` is empty, and this
+// module is imported by routes that never send mail (e.g. preview-pdf, which
+// only wants fetchPoData). At module scope that throw happened during Next's
+// build-time page-data collection, where no AWS env vars are set:
+//
+//   Error: Region is missing
+//   > Build error occurred
+//   Failed to collect page data for /api/v1/purchase-orders/[id]/preview-pdf
+//
+// Deferring it means a missing mail env var breaks sending mail, not building
+// the app or serving routes that merely import this file.
+let _transporter: nodemailer.Transporter | undefined
 
-const gmailTransport = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: GMAIL_USER,
-    pass: GMAIL_APP_PASSWORD,
-  },
-  secure: true,
-})
+function getTransporter(): nodemailer.Transporter {
+  if (_transporter) return _transporter
 
-const transporter = MAIL_PROVIDER === "ses" ? sesTransport : gmailTransport
+  _transporter =
+    MAIL_PROVIDER === "ses"
+      ? nodemailer.createTransport({
+          SES: {
+            sesClient: new SESv2Client({
+              region: AWS_REGION,
+              credentials: {
+                accessKeyId:     AWS_ACCESS_KEY_ID,
+                secretAccessKey: AWS_SECRET_ACCESS_KEY,
+              },
+            }),
+            SendEmailCommand,
+          },
+        })
+      : nodemailer.createTransport({
+          service: "gmail",
+          auth: {
+            user: GMAIL_USER,
+            pass: GMAIL_APP_PASSWORD,
+          },
+          secure: true,
+        })
+
+  return _transporter
+}
 
 /** From header. Gmail can only send as the authenticated mailbox; SES sends as
  *  the address the IAM ses:FromAddress condition pins. */
@@ -340,7 +360,7 @@ export async function sendMfgSelectionEmail(
   })
 
   try {
-    await transporter.sendMail({
+    await getTransporter().sendMail({
       ...sesOptions,
       from: fromHeader,
       to: to.join(", "),
@@ -505,7 +525,7 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
   })
 
   try {
-    await transporter.sendMail({
+    await getTransporter().sendMail({
       ...sesOptions,
       from: fromHeader,
       to: to.join(", "),
