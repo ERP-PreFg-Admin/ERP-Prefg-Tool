@@ -86,7 +86,7 @@ export const GET = withGateway({
         lineRows, materialCostRows, miscCostRows, lineDetailRows,
         minMaxRmRows, minMaxPmRows, approvedRmRows, approvedPmRows,
       ] = await Promise.all([
-        query<MfgLine>(manufacturingSql.selectLiveLinesByMfg, [mfgId]),
+        query<MfgLine>(manufacturingSql.selectLiveLinesByMfg, [mfgId, ...scopeParams(scope.brandIds)]),
         query<MaterialCostRow>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId]),
         query<MiscCostRow>(manufacturingSql.selectMiscCostsByMfg, [mfgId]),
         query<RecipeLineDetailRow>(manufacturingSql.selectBomLineDetailByMfg, [mfgId, mfgId, mfgId]),

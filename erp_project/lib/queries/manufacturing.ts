@@ -38,11 +38,17 @@ const SKU_FILLING = `COALESCE(NULLIF(sk.filling, 0), NULLIF(ds.filling, 0))`
 export const manufacturingSql = {
   /**
    * All lines for one manufacturer, optionally filtered by status.
-   * Params: [mfg_id, status, status]  (status is null to disable the filter)
+   * Params: [mfg_id, status, status, brandScope×2]
+   *   (status is null to disable the filter)
+   *
+   * Brand reaches a line through master_recipe -> master_skus, a join LINES_SELECT
+   * already has. A line whose recipe has no sku_id gets brand_id NULL and stays
+   * visible, matching the rule everywhere else.
    */
   selectLinesByMfg: `
     ${LINES_SELECT}
     WHERE l.mfg_id = ? AND (? IS NULL OR l.status = ?)
+      AND (? IS NULL OR sk.brand_id IS NULL OR sk.brand_id IN (?))
     ORDER BY sk.sku_code ASC
   `,
 
@@ -51,11 +57,12 @@ export const manufacturingSql = {
    * 'discontinued' (discontinued lines can still consume existing ingredient
    * stock and still be raised against; only 'inactive' is excluded). Used
    * everywhere PO-raising eligibility or Agreed Final Costing needs to know
-   * which lines are currently producible. Params: [mfg_id]
+   * which lines are currently producible. Params: [mfg_id, brandScope×2]
    */
   selectLiveLinesByMfg: `
     ${LINES_SELECT}
     WHERE l.mfg_id = ? AND l.status IN ('active', 'discontinued')
+      AND (? IS NULL OR sk.brand_id IS NULL OR sk.brand_id IN (?))
     ORDER BY sk.sku_code ASC
   `,
 
@@ -255,11 +262,20 @@ export const manufacturingSql = {
   /** SKU + orderable recipes for one manufacturer — feeds the Add PO dialog's
    *  SKU/Recipe picker. Params: [mfg_id] */
   selectOrderableBomsForMfg: `
-    SELECT sk.sku_code, sk.name AS sku_name, b.id AS recipe_id, b.bom_code, b.status AS bom_status
+    SELECT sk.sku_code, sk.name AS sku_name, b.id AS recipe_id, b.bom_code, b.status AS bom_status,
+           ent.code AS entity_code
     FROM master_recipe_mfg mbm
     INNER JOIN master_recipe b  ON b.id  = mbm.recipe_id
     INNER JOIN master_skus   sk ON sk.id = b.sku_id
+    -- Which of OUR legal entities sells this SKU. LEFT, so an unattributed SKU
+    -- still lists — the Add PO dialog reads NULL as "don't narrow the destination
+    -- dropdown" rather than as "no warehouses".
+    LEFT  JOIN master_brand  br  ON br.id  = sk.brand_id
+    LEFT  JOIN master_entity ent ON ent.id = br.entity_id
     WHERE mbm.mfg_id = ? AND mbm.status IN ('active', 'discontinued') AND sk.status = 'active'
+      -- Otherwise another brand's SKU names appear in the PO dialog's picker, and
+      -- selecting one only fails later at assertSkuCodeInBrandScope.
+      AND (? IS NULL OR sk.brand_id IS NULL OR sk.brand_id IN (?))
     ORDER BY sk.sku_code ASC, (b.status = 'active') DESC, b.bom_code ASC
   `,
 

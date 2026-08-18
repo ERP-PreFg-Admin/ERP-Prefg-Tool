@@ -86,10 +86,13 @@ assert.equal(toDateInputValue("not a date"), "", "unrecognised input opens the f
 assert.equal(toDateInputValue(null), "")
 
 // ── Fuzzy mapping ────────────────────────────────────────────────────────────
+// entity_code is on the type for the PO dialogs' destination narrowing; the
+// matchers below never read it, so these carry the two real values and a null to
+// keep the fixture honest about all three cases.
 const SKUS: SkuOption[] = [
-  { id: 1, sku_code: "MCAF407", name: "Caramel Eclairs Coffee Body Scrub 175gm", status: "active" },
-  { id: 2, sku_code: "MCAF396", name: "Guava Tini De-Tan Body Wash 300ml",       status: "active" },
-  { id: 3, sku_code: "HYP101",  name: "Hyphen Sunscreen 50gm",                   status: "active" },
+  { id: 1, sku_code: "MCAF407", name: "Caramel Eclairs Coffee Body Scrub 175gm", status: "active", entity_code: "PEP" },
+  { id: 2, sku_code: "MCAF396", name: "Guava Tini De-Tan Body Wash 300ml",       status: "active", entity_code: "PEP" },
+  { id: 3, sku_code: "HYP101",  name: "Hyphen Sunscreen 50gm",                   status: "active", entity_code: "KREATIVE" },
 ]
 
 // Case differs and the invoice code is otherwise identical — must still land.
@@ -107,9 +110,13 @@ assert.equal(
   "exact match short-circuits Fuse"
 )
 
+// One row per (site, entity) now, which is why Bhiwandi appears twice. matchWarehouse
+// matches on `name`, so a two-entity site has two candidates with identical names —
+// deliberately kept here, since that is exactly what the live query returns.
 const WAREHOUSES: WarehouseOption[] = [
-  { id: 1, name: "Bhiwandi MWH", location: "Bhiwandi", zone: "West", type: "MWH" },
-  { id: 2, name: "Guwahati CWH", location: "Guwahati", zone: "East", type: "CWH" },
+  { id: 1, name: "Bhiwandi MWH", location: "Bhiwandi", zone: "West", type: "MWH", entity_code: "PEP",      facility_code: "BHW_PEP" },
+  { id: 1, name: "Bhiwandi MWH", location: "Bhiwandi", zone: "West", type: "MWH", entity_code: "KREATIVE", facility_code: "BHW_KRE" },
+  { id: 2, name: "Guwahati CWH", location: "Guwahati", zone: "East", type: "CWH", entity_code: "PEP",      facility_code: "GHY_PEP" },
 ]
 assert.equal(matchWarehouse("Guwahati", WAREHOUSES)?.name, "Guwahati CWH")
 // Unrecognised destinations fall back to the Mother Warehouse, never to null:

@@ -12,6 +12,9 @@
 import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
 import { redirect } from "next/navigation"
+import { getPoDropdownOptions } from "@/lib/cached-reference-data"
+import { getViewScope } from "@/lib/brand-view"
+import { filterByScope } from "@/lib/scope"
 import InvoicesClient from "./InvoicesClient"
 
 export default async function InvoicesPage() {
@@ -20,6 +23,18 @@ export default async function InvoicesPage() {
   const userId = parseInt(session.user.id)
   const access = await resolveAccess(userId, session.user.roles, "/po-tracking/invoices")
   if (access === "none") redirect("/auth/unauthorized")
+
+  // Options for the filter row. getPoDropdownOptions is an unstable_cache with
+  // no user component, so it can't scope internally — post-filter, same as the
+  // PO Procurement page does.
+  const scope = await getViewScope(userId)
+  const { mfgs, warehouses } = await getPoDropdownOptions()
+  const mfgOptions = filterByScope(mfgs, "id", scope.mfgIds)
+  // A site is one row per legal entity, but `destination` stores only the site
+  // name — so the dropdown is the distinct names, not the warehouse rows.
+  const destinations = [
+    ...new Set(filterByScope(warehouses, "name", scope.warehouseNames).map((w) => w.name)),
+  ].sort()
 
   return (
     <div className="p-6">
@@ -30,7 +45,7 @@ export default async function InvoicesPage() {
           the purchase orders each line was booked to.
         </p>
       </div>
-      <InvoicesClient />
+      <InvoicesClient mfgOptions={mfgOptions} destinations={destinations} />
     </div>
   )
 }

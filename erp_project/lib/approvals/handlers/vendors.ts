@@ -121,8 +121,11 @@ export async function resolveVendorBulkRows(
       continue
     }
 
+    // Zone is deliberately absent: it is optional on the bulk upload (the CSV
+    // field config agrees), and details_vendor.zone is nullable. Type and
+    // registered name stay required — a vendor with no type prices nothing.
     const type = row.type?.trim()
-    if (!type || !row.registered_name?.trim() || !row.zone?.trim()) {
+    if (!type || !row.registered_name?.trim()) {
       resolved.push({ action: "skip", row }); continue
     }
     const dup = await findDuplicateBankingField(conn, vendorSql, {

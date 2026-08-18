@@ -47,6 +47,7 @@ export default async function EntityEmailsPage({
       entity_code: string
       legal_entity_code: string | null
       email: string
+      recipient_type: string
       purpose: string | null
       created_at: string | null
     }>(
@@ -81,7 +82,8 @@ export default async function EntityEmailsPage({
       <div className="mb-5">
         <h1 className="text-2xl font-bold tracking-tight">Emails</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Vendor, manufacturer and warehouse contact emails, by purpose
+          Vendor, manufacturer and warehouse contact emails, plus the colleagues
+          copied on them — by purpose
         </p>
       </div>
       <EntityEmailsClient

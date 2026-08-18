@@ -1,5 +1,18 @@
 "use client"
 
+/**
+ * Edit one warehouse AS ONE LEGAL ENTITY.
+ *
+ * Scoped to the entity whose table row was clicked. It used to render an
+ * EntitySection per master_entity row and submit every block, so editing a Pep
+ * warehouse put Kreative's facility code, GSTINs and addresses on screen — and
+ * re-submitted them. Only the one block is sent now; the route diffs only the
+ * blocks it receives, so the other entity's row is untouched.
+ *
+ * The location fields (city, zone, type, contact, site GSTIN) are shared: they
+ * describe the place, so editing them from either entity's row changes both.
+ */
+
 import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -37,54 +50,51 @@ const FIELDS: FormFieldConfig[] = [
   { key: "status",         label: "Status",         required: true,  colSpan: 1, isSelect: true, options: STATUS_OPTIONS, noBlankOption: true },
 ]
 
-/** Turn the stored child rows into per-entity form state, blank where absent. */
-function formsFromRows(entities: Entity[], rows: WarehouseEntity[]): Record<string, EntityForm> {
-  return Object.fromEntries(
-    entities.map((entity) => {
-      const row = rows.find((r) => r.entity_code === entity.code)
-      return [
-        entity.code,
-        row
-          ? {
-              facility_code: row.facility_code ?? "",
-              type: row.type ?? "",
-              bill_to_gstin: row.bill_to_gstin ?? "",
-              bill_to_name: row.bill_to_name ?? "",
-              bill_to_address: row.bill_to_address ?? "",
-              ship_to_gstin: row.ship_to_gstin ?? "",
-              ship_to_name: row.ship_to_name ?? "",
-              remarks: row.remarks ?? "",
-              ship_to_line1: row.ship_to_line1 ?? "",
-              ship_to_line2: row.ship_to_line2 ?? "",
-              ship_to_city: row.ship_to_city ?? "",
-              ship_to_state: row.ship_to_state ?? "",
-              // CHAR(6) pads, so a legacy short value comes back with trailing
-              // spaces — trim or the form shows a phantom change on every open.
-              ship_to_pincode: (row.ship_to_pincode ?? "").trim(),
-              ship_to_address: row.ship_to_address ?? "",
-            }
-          : emptyEntityForm(),
-      ]
-    })
-  )
+/** Turn the stored child row into form state, blank when the pair has no row. */
+function formFromRow(row: WarehouseEntity | null): EntityForm {
+  if (!row) return emptyEntityForm()
+  return {
+    facility_code: row.facility_code ?? "",
+    type: row.type ?? "",
+    bill_to_gstin: row.bill_to_gstin ?? "",
+    bill_to_name: row.bill_to_name ?? "",
+    bill_to_address: row.bill_to_address ?? "",
+    ship_to_gstin: row.ship_to_gstin ?? "",
+    ship_to_name: row.ship_to_name ?? "",
+    remarks: row.remarks ?? "",
+    ship_to_line1: row.ship_to_line1 ?? "",
+    ship_to_line2: row.ship_to_line2 ?? "",
+    ship_to_city: row.ship_to_city ?? "",
+    ship_to_state: row.ship_to_state ?? "",
+    // CHAR(6) pads, so a legacy short value comes back with trailing spaces —
+    // trim or the form shows a phantom change on every open.
+    ship_to_pincode: (row.ship_to_pincode ?? "").trim(),
+    ship_to_address: row.ship_to_address ?? "",
+  }
 }
 
 export function EditWarehouseDialog({
   warehouse,
-  entities,
-  entityRows,
+  entity,
+  entityRow,
+  ourPans,
   onSuccess,
   onClose,
 }: {
   warehouse: Warehouse | null
-  entities: Entity[]
-  entityRows: WarehouseEntity[]
+  /** The legal entity being edited. The other one is not passed in, so it cannot
+   *  be rendered or submitted by accident. */
+  entity: Entity | null
+  entityRow: WarehouseEntity | null
+  /** Every entity's PAN — a ship-to GSTIN must be one of ours, though not
+   *  necessarily this entity's, so it cannot be derived from `entity`. */
+  ourPans: string[]
   onSuccess: () => void
   onClose: () => void
 }) {
   const { toast } = useToast()
   const [form, setForm] = useState<Record<string, string>>({})
-  const [entityForms, setEntityForms] = useState<Record<string, EntityForm>>({})
+  const [entityForm, setEntityForm] = useState<EntityForm>(emptyEntityForm())
   const [remarks, setRemarks] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -105,7 +115,7 @@ export function EditWarehouseDialog({
       site_gstin: warehouse.site_gstin ?? "",
       status: warehouse.status === "active" || warehouse.status === "inactive" ? warehouse.status : "active",
     })
-    setEntityForms(formsFromRows(entities, entityRows))
+    setEntityForm(formFromRow(entityRow))
     setRemarks("")
     setError(null)
     setRejection(null)
@@ -119,9 +129,9 @@ export function EditWarehouseDialog({
         })
         .catch(() => {})
     }
-  }, [warehouse, entities, entityRows])
+  }, [warehouse, entityRow])
 
-  if (!warehouse) return null
+  if (!warehouse || !entity) return null
 
   const isInReview = warehouse.status === "in_review"
   const isRejected = warehouse.status === "rejected"
@@ -129,10 +139,6 @@ export function EditWarehouseDialog({
     !isRejected || currentUserId === null || rejection === null || currentUserId === rejection.raised_by
   const locked = isInReview || !canEdit
   const remarksMissing = !remarks.trim()
-
-  /** Every entity's PAN — a ship-to GSTIN must be one of ours, though not
-   *  necessarily the entity whose section it sits in. */
-  const ourPans = entities.map((e) => e.pan).filter((p): p is string => Boolean(p))
 
   const set = (key: string, value: string) => setForm((f) => ({ ...f, [key]: value }))
 
@@ -156,11 +162,13 @@ export function EditWarehouseDialog({
           contact_phone: form.contact_phone || undefined,
           site_gstin: form.site_gstin?.toUpperCase() || undefined,
           status: form.status,
-          // Every block is sent, not just the touched ones: clearing a facility
-          // code is a change, and an omitted block would read as "unchanged".
-          entities: entities.map((e) =>
-            entityPayloadAlways(e.code, entityForms[e.code] ?? emptyEntityForm())
-          ),
+          // ONLY this entity's block. Every field of it is sent even when blank —
+          // clearing a facility code is a change, and an omitted key would read as
+          // "unchanged". The route diffs only the blocks it receives, so the other
+          // entity's row is left alone.
+          // `entity!` like `warehouse!` above: handleSave is a hoisted function
+          // declaration, so TS drops the narrowing from the early return.
+          entities: [entityPayloadAlways(entity!.code, entityForm)],
           remarks: remarks.trim(),
         }),
       })
@@ -192,7 +200,9 @@ export function EditWarehouseDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Edit Warehouse — {warehouse.name}</DialogTitle>
+          <DialogTitle>
+            Edit Warehouse — {warehouse.name} · {entity.code}
+          </DialogTitle>
         </DialogHeader>
 
         {isInReview && <InReviewBanner entityLabel="warehouse" />}
@@ -222,16 +232,20 @@ export function EditWarehouseDialog({
           ))}
         </div>
 
-        {entities.map((entity) => (
-          <EntitySection
-            key={entity.code}
-            entity={entity}
-            value={entityForms[entity.code] ?? emptyEntityForm()}
-            onChange={(next) => setEntityForms((f) => ({ ...f, [entity.code]: next }))}
-            disabled={locked}
-            ourPans={ourPans}
-          />
-        ))}
+        <EntitySection
+          entity={entity}
+          value={entityForm}
+          onChange={setEntityForm}
+          disabled={locked}
+          ourPans={ourPans}
+        />
+
+        <p className="text-xs text-muted-foreground">
+          Editing {warehouse.name} under {entity.legal_name} only. The other legal
+          entity&apos;s facility, GSTINs and addresses are a separate record —
+          edit them from their own row. Note the location fields above are shared
+          by both.
+        </p>
 
         {!locked && (
           <RemarksField

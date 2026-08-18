@@ -11,7 +11,7 @@ import { skus as skusSql } from "@/lib/queries/skus"
 import { manufacturers as mfgsSql } from "@/lib/queries/manufacturers"
 import { deleteFile } from "@/lib/s3"
 import { withGateway } from "@/lib/gateway/with-gateway"
-import { assertPoInScope } from "@/lib/po-guard"
+import { assertPoInScope, assertDestinationServesEntity } from "@/lib/po-guard"
 import { poIdParamSchema } from "@/lib/validation/purchase-order-detail"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
@@ -51,6 +51,12 @@ export const PUT = withGateway({
       { status: 400 }
     )
   }
+
+  // The destination has to belong to this SKU's legal entity. Guarded on the edit
+  // path as well as on create: this is the same Impromptu dialog re-opened, and
+  // changing the SKU can leave a destination behind that the new SKU's entity
+  // doesn't operate — which is exactly the pairing the create guard refuses.
+  await assertDestinationServesEntity(sku_code, destination)
 
   // Verify PO exists and is draft
   const poRows = await query<any>(purchaseOrdersSql.selectForEdit, [poId])

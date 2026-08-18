@@ -40,18 +40,18 @@ import { query } from "@/lib/db"
 import { entityScopeSql } from "@/lib/queries/entity-scope"
 import { ApiError } from "@/lib/gateway/errors"
 
-export type EntityType = "mfg" | "vendor" | "warehouse"
+export type EntityType = "mfg" | "vendor" | "warehouse" | "brand"
 
 export type UserScope = {
-  /** null = unrestricted. Never an empty array. */
   mfgIds: number[] | null
   vendorIds: number[] | null
   /** Resolved from master_warehouse.id, because `destination` stores the name. */
   warehouseNames: string[] | null
+  brandIds: number[] | null 
 }
 
 /** Everyone-sees-everything. Used for unauthenticated/system paths. */
-export const UNRESTRICTED: UserScope = { mfgIds: null, vendorIds: null, warehouseNames: null }
+export const UNRESTRICTED: UserScope = { mfgIds: null, vendorIds: null, warehouseNames: null , brandIds : null}
 
 /**
  * One DB round trip per request, deduped by React's `cache()` across the whole
@@ -84,7 +84,7 @@ export const getUserScope = cache(async (userId: number): Promise<UserScope> => 
     warehouseNames = names.length > 0 ? names.map((r) => r.name) : [""]
   }
 
-  return { mfgIds, vendorIds, warehouseNames }
+  return { mfgIds, vendorIds, warehouseNames , brandIds: idsFor("brand")}
 })
 
 /**
@@ -110,20 +110,27 @@ export function scopeParams(ids: (number | string)[] | null): unknown[] {
   return ids && ids.length > 0 ? [1, ids] : [null, [0]]
 }
 
+const ALLOWED : Record<EntityType , (s:UserScope) => (number | string)[] | null> = {
+  mfg: (s) => s.mfgIds,
+  vendor : (s) => s.vendorIds,
+  warehouse: (s) => s.warehouseNames,
+  brand: (s) => s.brandIds,
+}
 /** True when this entity is visible to the user. Unrestricted always passes. */
 export function inScope(scope: UserScope, type: EntityType, id: number | string | null | undefined): boolean {
   if (id == null) return true
-  if (type === "warehouse") {
-    return scope.warehouseNames === null || scope.warehouseNames.includes(String(id))
-  }
-  const allowed = type === "mfg" ? scope.mfgIds : scope.vendorIds
-  return allowed === null || allowed.includes(Number(id))
+  const allowed = ALLOWED[type](scope)
+  if(allowed === null ) return true
+  const wanted = String(id)
+  return allowed.some((a) => String(a) ===  wanted)
+  // return allowed === null || allowed.includes(Number(id))
 }
 
 const LABEL: Record<EntityType, string> = {
   mfg: "manufacturer",
   vendor: "vendor",
   warehouse: "warehouse",
+  brand: "brand", 
 }
 
 /**

@@ -10,7 +10,8 @@ import { parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
 import { purchaseOrdersSql, buildFilterParams, buildStatusCountParams } from "@/lib/queries/purchase-orders"
 import { getPoDropdownOptions } from "@/lib/cached-reference-data"
-import { getUserScope, filterByScope } from "@/lib/scope"
+import { filterByScope } from "@/lib/scope"
+import { getViewScope } from "@/lib/brand-view"
 import { fetchChildrenByParent } from "@/lib/po-children"
 import type { PoRow } from "../po-procurement/po-types"
 import PoProcurementClient from "../po-procurement/PoProcurementClient"
@@ -42,6 +43,10 @@ export default async function PoInwardingPage({
   const dateTo          = String(sp.dateTo      ?? "")
   const skuFilter       = String(sp.sku         ?? "")
   const destFilter      = String(sp.destination ?? "")
+  // The (site, entity) destination filter travels as two params: a location is
+  // one master_warehouse row but two destinations, and purchase_orders.destination
+  // stores only the shared site name. See destFilterValue in po-utils.ts.
+  const destEntity      = String(sp.destEntity ?? "")
 
   // "all" is an explicit opt-out of the default open-only filter, so it has to
   // travel in the URL as a value rather than as an absent param.
@@ -53,9 +58,9 @@ export default async function PoInwardingPage({
   const status      = statusFilter === "all" || isInwardTab ? null : statusFilter || null
   const poTypeParam = isInwardTab ? "inward" : poType || null
 
-  const scope = await getUserScope(userId)
-  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poTypeParam, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, false, scope)
-  const statusCountParams = buildStatusCountParams(search || null, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, false, scope)
+  const scope = await getViewScope(userId)
+  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poTypeParam, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, false, scope, destEntity || null)
+  const statusCountParams = buildStatusCountParams(search || null, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, false, scope, destEntity || null)
 
   const pageStart = performance.now()
   console.log(`[AUDIT] PO Inwarding load - page=${page}, size=${size}, search=${search || "none"}, status=${status ?? "all"}, sortBy=${sortBy}, sortDir=${sortDir}`)
@@ -129,6 +134,7 @@ export default async function PoInwardingPage({
         currentDateTo={dateTo}
         currentSku={skuFilter}
         currentDestination={destFilter}
+        currentDestEntity={destEntity}
         statusCounts={statusCounts}
         summary={summary}
         skuOptions={skus}

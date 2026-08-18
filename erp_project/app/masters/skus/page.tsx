@@ -14,6 +14,8 @@ import { redirect } from "next/navigation"
 import { parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
 import { query } from "@/lib/db"
+import { scopeParams } from "@/lib/scope"
+import { getViewScope } from "@/lib/brand-view"
 import { skus as skuSql } from "@/lib/queries/skus"
 import { bom as recipeSql } from "@/lib/queries/recipe"
 import {
@@ -37,6 +39,12 @@ export default async function SkusPage({
   const userId = parseInt(session.user.id)
   const access = await resolveAccess(userId, session.user.roles, "/masters/skus")
   if (access === "none") redirect("/auth/unauthorized")
+
+  // Brand scope. This page was previously unscoped — page access alone decided
+  // what you saw. scopeParams(brandIds) is [null, [0]] for an unrestricted user,
+  // so the predicate short-circuits and results are unchanged for everyone who
+  // holds no brand grant.
+  const scope = await getViewScope(userId)
 
   // ── Read URL params ────────────────────────────────────────────────────────
   const sp              = await searchParams
@@ -79,7 +87,9 @@ export default async function SkusPage({
     // relevance against the search term, then slice the requested page in memory.
     const allMatching = await timedQuery<Sku>(
       skuSql.selectAllFiltered,
-      [null, null, null, null, status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory, missingBom],
+      // brand scope sits immediately after the four `like`s, matching where the
+      // predicate was inserted in the WHERE clause — these arrays are positional.
+      [null, null, null, null, ...scopeParams(scope.brandIds), status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory, missingBom],
       { label: "selectAllFiltered" }
     )
     const ranked = fuzzyRank(allMatching, search, ["sku_code", "name", "brand"])
@@ -89,12 +99,12 @@ export default async function SkusPage({
     const [dbRows, countRows] = await Promise.all([
       timedQuery<Sku>(
         skuSql.selectPaginated,
-        [like, like, like, like, status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory, missingBom, size, offset],
+        [like, like, like, like, ...scopeParams(scope.brandIds), status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory, missingBom, size, offset],
         { label: "selectPaginated" }
       ),
       timedQuery<{ total: number }>(
         skuSql.countAll,
-        [like, like, like, like, status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory, missingBom],
+        [like, like, like, like, ...scopeParams(scope.brandIds), status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory, missingBom],
         { label: "countAll" }
       ),
     ])

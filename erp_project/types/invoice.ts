@@ -111,6 +111,9 @@ export type InvoiceHistoryHeader = {
   eway_bill_no:    string | null
   vehicle_no:      string | null
   attachment_key:  string | null
+  /** The PO Unicommerce minted for this invoice — one there, one per SKU here.
+   *  Null when the mirror was skipped (Uniware not configured). */
+  uniware_po_code: string | null
   created_at:      string
   mfg_code:        string
   mfg_name:        string

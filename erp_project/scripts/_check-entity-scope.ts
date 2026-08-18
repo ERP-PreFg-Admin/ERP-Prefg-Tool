@@ -23,9 +23,38 @@ import { packingMaterials } from "../lib/queries/packing-materials"
 import { manufacturingSql } from "../lib/queries/manufacturing"
 
 /** Strips the scope predicates so the same query can be run truly unfiltered. */
+/**
+ * Strip every per-user scope predicate, so the same query can be run unscoped and
+ * the two counts compared.
+ *
+ * Three shapes, because the predicates were hand-written at different times:
+ *   AND (? IS NULL OR <subquery>) IN (?))       — the EXISTS/derived form
+ *   AND (? IS NULL OR col IN (?))               — mfg / warehouse
+ *   AND (? IS NULL OR col IS NULL OR col IN (?)) — brand, which lets NULL through
+ *
+ * The third was missing for as long as brand scope existed, so the brand clause
+ * survived into the "bare" query and left two placeholders unbound. Use
+ * assertStripped below rather than trusting these patterns by eye.
+ */
 function withoutScope(sql: string): string {
   return sql.replace(/AND \(\? IS NULL OR [^)]*\) IN \(\?\)\)/g, "")
+            .replace(/AND \(\? IS NULL OR [\w.]+ IS NULL OR [\w.]+ IN \(\?\)\)/g, "")
             .replace(/AND \(\? IS NULL OR [\w.]+ +IN \(\?\)\)/g, "")
+}
+
+/**
+ * The regexes above are the weak link: a new scope predicate written in a shape
+ * none of them match leaves its placeholders behind, and the failure is a syntax
+ * error in an unrelated part of the query. Assert the placeholder count actually
+ * dropped by the number of scope params instead of hoping.
+ */
+function assertStripped(sql: string, scopeParamCount: number, label: string) {
+  const count = (t: string) => (t.match(/\?/g) ?? []).length
+  assert.equal(
+    count(sql) - count(withoutScope(sql)),
+    scopeParamCount,
+    `withoutScope did not strip every scope predicate from ${label} — add its shape to the regexes`
+  )
 }
 
 function countOf(rows: { total: number }[]): number {
@@ -34,7 +63,7 @@ function countOf(rows: { total: number }[]): number {
 
 async function main() {
   const scoped = (ids: number[] | null): UserScope => ({
-    mfgIds: ids, vendorIds: ids, warehouseNames: null,
+    mfgIds: ids, vendorIds: ids, warehouseNames: null,  brandIds: null
   })
 
   // ── 1. Unrestricted is a no-op, per query ─────────────────────────────────
@@ -42,7 +71,12 @@ async function main() {
 
   const mfgFp = manufacturers.filterParams(null, UNRESTRICTED)
   const mfgScoped = countOf(await query<{ total: number }>(manufacturers.countAll, mfgFp))
-  const mfgBare = countOf(await query<{ total: number }>(withoutScope(manufacturers.countAll), mfgFp.slice(0, 3)))
+  // NOT a prefix slice: manufacturers puts its scope pair in the MIDDLE of the
+  // array (search×3, scope×2, status×2), so dropping the tail also drops the status
+  // filter and leaves two placeholders unbound. Vendors and POs happen to put scope
+  // last, which is why a slice works for them and hid this for so long.
+  const mfgBare = countOf(await query<{ total: number }>(
+    withoutScope(manufacturers.countAll), [...mfgFp.slice(0, 3), ...mfgFp.slice(5)]))
   assert.equal(mfgScoped, mfgBare, "manufacturers.countAll unchanged by unrestricted scope")
   console.log(`  manufacturers: ${mfgScoped} == ${mfgBare}`)
 
@@ -52,9 +86,11 @@ async function main() {
   assert.equal(venScoped, venBare, "vendors.countAll unchanged by unrestricted scope")
   console.log(`  vendors: ${venScoped} == ${venBare}`)
 
+  // 6 scope placeholders on the PO query (mfg, warehouse, brand — 2 each).
+  assertStripped(purchaseOrdersSql.countPaginated, 6, "purchaseOrdersSql.countPaginated")
   const poFp = buildFilterParams(null, null, null, null, null, null, null, null, false, UNRESTRICTED)
   const poScoped = countOf(await query<{ total: number }>(purchaseOrdersSql.countPaginated, poFp))
-  const poBare = countOf(await query<{ total: number }>(withoutScope(purchaseOrdersSql.countPaginated), poFp.slice(0, 23)))
+  const poBare = countOf(await query<{ total: number }>(withoutScope(purchaseOrdersSql.countPaginated), poFp.slice(0, 25)))
   assert.equal(poScoped, poBare, "PO countPaginated unchanged by unrestricted scope")
   console.log(`  purchase orders: ${poScoped} == ${poBare}`)
 
@@ -173,9 +209,11 @@ async function main() {
   console.log("\n  inScope() behaviour ok")
 
   // ── 6. Param-count guards, so a WHERE and its builder can't drift ─────────
-  assert.equal(buildFilterParams(null, null, null, null, null, null, null, null, false, UNRESTRICTED).length, 27)
-  assert.equal(buildStatusCountParams(null, null, null, null, null, null, null, false, UNRESTRICTED).length, 23)
-  assert.equal(manufacturers.filterParams(null, UNRESTRICTED).length, 5)
+  // 25 filter params + 6 scope. Both grew by 2 when the destination filter gained
+  // its entity half — a location is one master_warehouse row but two destinations.
+  assert.equal(buildFilterParams(null, null, null, null, null, null, null, null, false, UNRESTRICTED).length, 31)
+  assert.equal(buildStatusCountParams(null, null, null, null, null, null, null, false, UNRESTRICTED).length, 27)
+  assert.equal(manufacturers.filterParams(null, UNRESTRICTED).length, 7)
   assert.equal(vendors.filterParams(null, null, null, UNRESTRICTED).length, 9)
   assert.deepEqual(scopeParams(null), [null, [0]], "unrestricted params are inert")
   assert.deepEqual(scopeParams([7]), [1, [7]], "restricted params carry the list")

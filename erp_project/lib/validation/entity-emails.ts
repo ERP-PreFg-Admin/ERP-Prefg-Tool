@@ -4,7 +4,12 @@ export const entityEmailCreateSchema = z
   .object({
     // 'warehouse' is keyed by master_warehouse.name, which is what
     // purchase_orders.destination stores — see resolveRecipients in lib/mailer.ts.
-    entity_type: z.enum(["vendor", "mfg", "warehouse"]),
+    // 'employee' is a person to loop in rather than an entity to write to —
+    // ours or an outside party (3PL, CHA, consultant), so the address is typed,
+    // not picked from `users`. entity_code is then the warehouse name or
+    // manufacturer code they are attached to, or '*' for every manufacturer.
+    // The route checks that code against the right table.
+    entity_type: z.enum(["vendor", "mfg", "warehouse", "employee"]),
     entity_code: z.string().trim().min(1),
     /**
      * master_entity.code — which of OUR legal entities these addresses serve.
@@ -20,6 +25,9 @@ export const entityEmailCreateSchema = z
       .array(
         z.object({
           email: z.string().trim().email(),
+          /** Which header the address goes in. Absent = 'to', the column's
+           *  default and how every row behaved before this existed. */
+          recipient_type: z.enum(["to", "cc"]).default("to"),
           purpose: z.string().trim().optional(),
         })
       )

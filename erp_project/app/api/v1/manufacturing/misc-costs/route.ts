@@ -29,6 +29,7 @@ import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
 import { getUserScope, assertInScope } from "@/lib/scope"
+import { assertRecipeInBrandScope } from "@/lib/brand-guard"
 import { STATUS } from "@/lib/constants"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
@@ -43,10 +44,18 @@ export const POST = withGateway({
     const scope = await getUserScope(Number(session.user.id))
     if (body.action === "create-misc") {
       assertInScope(scope, "mfg", body.mfg_id)
+      // A misc cost is per (recipe, mfg), so it is a write against the recipe's
+      // brand as well as the manufacturer.
+      await assertRecipeInBrandScope(Number(session.user.id), body.recipe_id, scope)
     } else if (body.action === "update-misc") {
-      const owner = await query<{ mfg_id: number }>(manufacturingSql.selectMiscLineById, [body.id])
+      const owner = await query<{ mfg_id: number; recipe_id: number }>(manufacturingSql.selectMiscLineById, [body.id])
       if (owner.length === 0) throw new ApiError(404, "not_found", "Misc. cost line not found")
       assertInScope(scope, "mfg", owner[0].mfg_id)
+      // `recipe_id`, not `bom_id`: bom_misc kept its pre-rename column name, and
+      // selectMiscLineById aliases `bom_id AS recipe_id` for exactly this reason.
+      // Reading bom_id here would be undefined — and query<T> is an unchecked
+      // cast, so nothing would have flagged it.
+      await assertRecipeInBrandScope(Number(session.user.id), owner[0].recipe_id, scope)
     } else {
       // "bulk": the branch below validates this param itself, so only assert a
       // well-formed value here — a missing one must still return 400, not 403.

@@ -75,7 +75,11 @@ const VENDOR_CSV_FIELDS: MasterField[] = [
   },
   { key: "registered_name", label: "Registered Name", required: true, requiredForCreateOnly: true, placeholder: "Legal registered name", sample: "Acme Pvt Ltd" },
   { key: "location",        label: "Location",        placeholder: "e.g. Mumbai",           sample: "Mumbai" },
-  { key: "zone",            label: "Zone",            required: true, requiredForCreateOnly: true, type: "select", options: ZONE_OPTIONS, sample: "West",
+  // Optional on the bulk upload: a vendor can be onboarded before its zone is
+  // decided. Still validated when present — a wrong zone is worse than none,
+  // since the vendor list filters on it. field-config.ts only runs `validate`
+  // on a non-empty cell, so a blank one passes.
+  { key: "zone",            label: "Zone",            type: "select", options: ZONE_OPTIONS, sample: "West",
     validate: (raw) => (normalizeZone(raw) ? null : `Must be one of: ${ZONE_OPTIONS.map((o) => o.value).join(", ")}`),
     parse: (raw) => normalizeZone(raw) ?? raw },
   { key: "gst_number",      label: "GST Number",      placeholder: "e.g. 27AAEPM1234C1Z5",  sample: "27AAEPM1234C1Z5" },

@@ -26,7 +26,8 @@ export const maxDuration = 300
 import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { supplierInvoicesSql, buildInvoiceParams } from "@/lib/queries/supplier-invoices"
-import { getUserScope } from "@/lib/scope"
+import { getViewScope } from "@/lib/brand-view"
+import { assertSkuCodesInBrandScope } from "@/lib/brand-guard"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { invoiceInwardSchema } from "@/lib/validation/purchase-orders"
@@ -50,8 +51,13 @@ export const GET = withGateway({
 
     // Scoped like the PO list: an invoice names a manufacturer and a
     // destination warehouse, so a user restricted to either sees only theirs.
-    const scope  = await getUserScope(Number(session.user.id))
-    const params = buildInvoiceParams(search, scope)
+    const scope  = await getViewScope(Number(session.user.id))
+    const params = buildInvoiceParams(search, scope, {
+      mfgCode:     sp.get("mfgCode")?.trim()     || null,
+      destination: sp.get("destination")?.trim() || null,
+      dateFrom:    sp.get("dateFrom")?.trim()    || null,
+      dateTo:      sp.get("dateTo")?.trim()      || null,
+    })
 
     const [invoices, countRows] = await Promise.all([
       query(supplierInvoicesSql.listInvoices, [...params, limit, offset]),
@@ -115,6 +121,13 @@ export const POST = withGateway({
         const emit = (e: StepEvent) => { send(e) }
 
         try {
+          // Inwarding CREATES POs for every line's SKU, so it is a write
+          // against those brands. Guarded before the S3 upload and the
+          // transaction, so a rejection leaves nothing to compensate.
+          await assertSkuCodesInBrandScope(
+            userId,
+            body.line_items.map((l) => String(l.sku_code ?? ""))
+          )
           const outcome = await runInwardInvoice(body, pdf, { id: userId, name: senderName }, emit)
 
           if (outcome.ok) {

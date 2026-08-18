@@ -33,12 +33,16 @@ export default async function AdminDataAccessPage({
   const sp = await searchParams
   const selectedUserId = Number(sp.user) > 0 ? Number(sp.user) : null
 
-  const [users, mfgs, vendors, warehouses, counts, assigned] = await Promise.all([
+  // Names must match the array order below exactly — Promise.all is positional,
+  // so a promise added in the middle without a name here silently shifts every
+  // later result by one. `brands` sits at index 5 because brandOptions does.
+  const [users, mfgs, vendors, warehouses, counts, brands, assigned] = await Promise.all([
     timedQuery<AdminUser>(usersSql.selectAll, [], { label: "users.selectAll" }),
     timedQuery<EntityOption>(entityScopeSql.mfgOptions, [], { label: "entityScope.mfgOptions" }),
     timedQuery<EntityOption>(entityScopeSql.vendorOptions, [], { label: "entityScope.vendorOptions" }),
     timedQuery<EntityOption>(entityScopeSql.warehouseOptions, [], { label: "entityScope.warehouseOptions" }),
     timedQuery<ScopeCount>(entityScopeSql.countsByUser, [], { label: "entityScope.countsByUser" }),
+    timedQuery<EntityOption>(entityScopeSql.brandOptions, [] , { label : "entityScope.brandOptions"}),
     selectedUserId
       ? timedQuery<{ entity_type: EntityType; entity_id: number }>(entityScopeSql.selectByUser, [selectedUserId], { label: "entityScope.selectByUser" })
       : Promise.resolve([] as { entity_type: EntityType; entity_id: number }[]),
@@ -47,7 +51,7 @@ export default async function AdminDataAccessPage({
   return (
     <DataAccessClient
       users={users.map((u) => ({ id: u.id, name: u.name, email: u.email }))}
-      options={{ mfg: mfgs, vendor: vendors, warehouse: warehouses }}
+      options={{ mfg: mfgs, vendor: vendors, warehouse: warehouses, brand: brands }}
       counts={counts}
       selectedUserId={selectedUserId}
       currentUserId={Number(session!.user.id)}

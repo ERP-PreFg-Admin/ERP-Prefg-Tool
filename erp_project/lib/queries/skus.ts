@@ -63,7 +63,10 @@ export const skus = {
    * column (SKUs sharing this row's brand + base_sku_sno) so the client can
    * decide, per row, whether the "see variants" row action should be shown
    * (variant_count > 1).
-   * Params: [like, like, like, like, status, status, brand, brand, sku_type, sku_type, category, category, subcategory, subcategory, missingBom, LIMIT, OFFSET]
+   * Params: [like×4, brandScope×2, status×2, brand×2, sku_type×2, category×2, subcategory×2, missingBom, LIMIT, OFFSET]
+   * brandScope is scopeParams(scope.brandIds) — the access boundary, keyed on
+   * brand_id. Distinct from the `brand` filter two slots later, which is the
+   * user's dropdown choice keyed on the free-text column.
    */
   selectPaginated: `
     SELECT ${SKU_COLUMNS}, master_skus.base_sku_sno, COALESCE(vg.variant_count, 1) AS variant_count
@@ -75,6 +78,12 @@ export const skus = {
       GROUP BY brand, base_sku_sno
     ) vg ON vg.brand = master_skus.brand AND vg.base_sku_sno = master_skus.base_sku_sno
     WHERE (? IS NULL OR master_skus.sku_code LIKE ? OR master_skus.name LIKE ? OR master_skus.brand LIKE ?)
+      -- Boundary FIRST, immediately after the search block, in all three of
+      -- selectPaginated / selectAllFiltered / countAll. They share one param
+      -- array, so a predicate moved in one query and not the others silently
+      -- binds every later value to the wrong column — arity still matches, so
+      -- nothing errors.
+      AND (? IS NULL OR master_skus.brand_id IS NULL OR master_skus.brand_id IN (?))
       AND (? IS NULL OR master_skus.status = ?)
       AND (? IS NULL OR master_skus.brand = ?)
       AND (? IS NULL OR master_skus.sku_type = ?)
@@ -89,7 +98,7 @@ export const skus = {
    * Fetch ALL matching SKUs for export (no LIMIT/OFFSET).
    * Same WHERE clause as selectPaginated; call countAll first to enforce the
    * row cap before running this.
-   * Params: [like, like, like, like, status, status, brand, brand, sku_type, sku_type, category, category, subcategory, subcategory, missingBom]
+   * Params: [like×4, brandScope×2, status×2, brand×2, sku_type×2, category×2, subcategory×2, missingBom]
    */
   selectAllFiltered: `
     SELECT ${SKU_COLUMNS}, master_skus.base_sku_sno, COALESCE(vg.variant_count, 1) AS variant_count
@@ -101,6 +110,12 @@ export const skus = {
       GROUP BY brand, base_sku_sno
     ) vg ON vg.brand = master_skus.brand AND vg.base_sku_sno = master_skus.base_sku_sno
     WHERE (? IS NULL OR master_skus.sku_code LIKE ? OR master_skus.name LIKE ? OR master_skus.brand LIKE ?)
+      -- Boundary FIRST, immediately after the search block, in all three of
+      -- selectPaginated / selectAllFiltered / countAll. They share one param
+      -- array, so a predicate moved in one query and not the others silently
+      -- binds every later value to the wrong column — arity still matches, so
+      -- nothing errors.
+      AND (? IS NULL OR master_skus.brand_id IS NULL OR master_skus.brand_id IN (?))
       AND (? IS NULL OR master_skus.status = ?)
       AND (? IS NULL OR master_skus.brand = ?)
       AND (? IS NULL OR master_skus.sku_type = ?)
@@ -210,12 +225,13 @@ export const skus = {
 
   /**
    * Matching COUNT for selectPaginated.
-   * Params: [like, like, like, like, status, status, brand, brand, sku_type, sku_type, category, category, subcategory, subcategory]
+   * Params: [like×4, brandScope×2, status×2, brand×2, sku_type×2, category×2, subcategory×2, missingBom]
    */
   countAll: `
     SELECT COUNT(*) AS total
     FROM master_skus
     WHERE (? IS NULL OR sku_code LIKE ? OR name LIKE ? OR brand LIKE ?)
+      AND (? IS NULL OR master_skus.brand_id IS NULL OR master_skus.brand_id IN (?))
       AND (? IS NULL OR status = ?)
       AND (? IS NULL OR brand = ?)
       AND (? IS NULL OR sku_type = ?)
@@ -281,4 +297,20 @@ export const skus = {
 
   /** Fetch SKU status + brand by sku_code — used for PO number generation. Parameters: [sku_code] */
   selectStatusAndBrandByCode: `SELECT status, brand FROM master_skus WHERE sku_code = ? LIMIT 1`,
+  /** The brand a SKU belongs to, for the write-side brand guard. NULL brand_id
+   *  means unattributed, which the guard allows.
+   *  Parameters: [sku_code] */
+  selectBrandIdByCode: `SELECT brand_id FROM master_skus WHERE sku_code = ? LIMIT 1`,
+
+  /** Same, by id — recipes and misc costs reach a SKU by id, not code.
+   *  Parameters: [id] */
+  selectBrandIdById: `SELECT brand_id FROM master_skus WHERE id = ? LIMIT 1`,
+
+  /** Brand ids for many SKU codes at once — for bulk uploads and multi-line
+   *  invoices, which would otherwise issue one query per row.
+   *  Parameters: [skuCodes] — needs query(), not execute(), for IN (?) expansion. */
+  selectBrandIdsByCodes: `
+    SELECT sku_code, brand_id FROM master_skus WHERE sku_code IN (?)
+  `,
+
 }

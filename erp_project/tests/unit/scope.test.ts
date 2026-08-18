@@ -38,6 +38,15 @@ test("scopeParams always returns exactly two params, in flag-then-list order", (
   }
 })
 
+test("a brand check never consults vendorIds", () => {
+  // The bug the ALLOWED record replaced: `type === "mfg" ? mfgIds : vendorIds`
+  // sent "brand" into the vendor arm, so a user with vendor 7 granted and no
+  // brand grant would have been judged in-scope for brand 7.
+  const scope = { mfgIds: null, vendorIds: [7], warehouseNames: null, brandIds: [3] }
+  assert.equal(inScope(scope, "brand", 7), false)
+  assert.equal(inScope(scope, "brand", 3), true)
+})
+
 test("scopeClause emits a leading AND and one placeholder per param", () => {
   const sql = scopeClause("po.mfg_id")
   assert.match(sql, /^\s*AND\b/, "must append to an existing WHERE")
@@ -47,7 +56,7 @@ test("scopeClause emits a leading AND and one placeholder per param", () => {
 
 test("UNRESTRICTED is null on every dimension", () => {
   // null means unrestricted; an empty array would mean "nothing" and is never used.
-  assert.deepEqual(UNRESTRICTED, { mfgIds: null, vendorIds: null, warehouseNames: null })
+  assert.deepEqual(UNRESTRICTED, { mfgIds: null, vendorIds: null, warehouseNames: null , brandIds: null })
 })
 
 test("inScope passes everything when the dimension is unrestricted", () => {
@@ -58,7 +67,7 @@ test("inScope passes everything when the dimension is unrestricted", () => {
 })
 
 test("inScope enforces the allow-list when restricted", () => {
-  const scope: UserScope = { mfgIds: [3, 7], vendorIds: [11], warehouseNames: ["Guwahati"] }
+  const scope: UserScope = { mfgIds: [3, 7], vendorIds: [11], warehouseNames: ["Guwahati"] , brandIds: null}
   assert.equal(inScope(scope, "mfg", 3), true)
   assert.equal(inScope(scope, "mfg", 4), false)
   assert.equal(inScope(scope, "vendor", 11), true)
@@ -68,20 +77,20 @@ test("inScope enforces the allow-list when restricted", () => {
 })
 
 test("inScope coerces string ids, because they arrive from URLs", () => {
-  const scope: UserScope = { mfgIds: [3], vendorIds: null, warehouseNames: null }
+  const scope: UserScope = { mfgIds: [3], vendorIds: null, warehouseNames: null ,  brandIds: null }
   assert.equal(inScope(scope, "mfg", "3"), true)
   assert.equal(inScope(scope, "mfg", "4"), false)
 })
 
 test("inScope passes a null id — absent is not out-of-scope", () => {
   // Plenty of older POs have no destination; those can't be out of a warehouse scope.
-  const scope: UserScope = { mfgIds: [3], vendorIds: null, warehouseNames: ["Guwahati"] }
+  const scope: UserScope = { mfgIds: [3], vendorIds: null, warehouseNames: ["Guwahati"] ,  brandIds: null }
   assert.equal(inScope(scope, "warehouse", null), true)
   assert.equal(inScope(scope, "mfg", undefined), true)
 })
 
 test("assertInScope throws 403 out_of_scope, and stays silent when allowed", () => {
-  const scope: UserScope = { mfgIds: [3], vendorIds: null, warehouseNames: null }
+  const scope: UserScope = { mfgIds: [3], vendorIds: null, warehouseNames: null ,  brandIds: null }
   assert.doesNotThrow(() => assertInScope(scope, "mfg", 3))
   assert.doesNotThrow(() => assertInScope(UNRESTRICTED, "mfg", 12345))
 

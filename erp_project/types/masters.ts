@@ -25,7 +25,13 @@ export type Sku = {
   id: number
   sku_code: string
   name: string
+  /** Free text, and the grouping key for variant families with base_sku_sno.
+   *  Display only — never use it in an access predicate; see brand_id. */
   brand: string | null
+  /** master_brand.id — the access-boundary key. NULL = unattributed, therefore
+   *  visible to every brand-scoped user. Optional because not every query
+   *  selects it. */
+  brand_id?: number | null
   category: string | null
   status: string | null
   created_at: Date | null
@@ -133,6 +139,33 @@ export type Vendor = {
   cancelled_cheque_key: string | null
   pan_card_key:         string | null
   misc_document_key:    string | null
+}
+
+/** `master_brand` table — our brands, canonicalised. Four rows: mCaffeine, Fein,
+ *  Hyphen, DND.
+ *
+ *  Exists because brand is an ACCESS BOUNDARY and `master_skus.brand` is free
+ *  text: the dev survey found `FIEN` (a transposed `Fein`) on 28 SKUs, which a
+ *  `brand = 'Fein'` predicate would have silently excluded. Scope predicates key
+ *  on `master_skus.brand_id`, never on the text column. */
+export type Brand = {
+  id: number
+  /** Normalised comparison key — lowercase, non-alphanumerics stripped. Mirrors
+   *  brandKey() in lib/constants.ts. If these two diverge the boundary and the
+   *  display value disagree, so treat this as the contract. */
+  brand_key: string
+  /** Display form, e.g. "mCaffeine". */
+  name: string
+  /** PO-number prefix. Matches what brandCode() produces, so PO numbering is
+   *  unaffected by this table's existence. */
+  po_code: string
+  /** master_entity.id. Null for DND, whose legal entity isn't identified yet —
+   *  the same "don't guess" stance entityForBrand() takes. */
+  entity_id: number | null
+  /** Joined from master_entity where selected. */
+  entity_code?: string | null
+  status: string
+  created_at: Date | null
 }
 
 /** `master_warehouse` table — one row per physical LOCATION. Used by

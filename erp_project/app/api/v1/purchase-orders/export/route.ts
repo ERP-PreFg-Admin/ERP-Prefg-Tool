@@ -34,7 +34,7 @@ import { purchaseOrdersSql, buildFilterParams } from "@/lib/queries/purchase-ord
 import { buildCsv, buildXlsx, buildExportFilename } from "@/lib/export"
 import { PO_PROCUREMENT_EXPORT_COLUMNS } from "@/lib/export-configs"
 import { withGateway } from "@/lib/gateway/with-gateway"
-import { getUserScope } from "@/lib/scope"
+import { getViewScope } from "@/lib/brand-view"
 import logger from "@/lib/logger"
 
 const ROW_LIMIT = 50_000
@@ -60,7 +60,7 @@ export const GET = withGateway({
       search || null, status || null, mfgCode || null, poType || null,
       dateFrom || null, dateTo || null, sku || null, destination || null,
       excludeInward,
-      await getUserScope(Number(session.user.id)),
+      await getViewScope(Number(session.user.id)),
     )
     // Uniware only ever mirrors inward POs, so the column is empty in an export
     // that has none. Filtered rather than kept as a second column config.

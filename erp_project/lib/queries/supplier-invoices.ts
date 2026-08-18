@@ -10,11 +10,38 @@ import { scopeParams, type UserScope } from "@/lib/scope"
 // lib/queries/purchase-orders.ts: warehouse compares against `destination`,
 // which holds a master_warehouse.name (there is no FK) — lib/scope.ts resolves
 // ids to names for exactly this reason.
-// Params: [search×3, scopeParams(mfgIds), scopeParams(warehouseNames)]
+// Brand is per LINE, not per invoice: invoice_mfg has no brand column and one
+// invoice can legitimately carry several brands' SKUs. So the test is EXISTS —
+// "does this invoice contain any line I'm allowed to see" — not an equality join,
+// which would both drop multi-brand invoices and multiply rows against the
+// GROUP BY that produces item_count / received_count.
+//
+// An invoice whose lines resolve to no brand (unmapped sku_code, or a SKU with
+// brand_id NULL) is visible, consistent with the rule everywhere else. That is
+// what the second NOT EXISTS arm does: nothing attributable means nothing to
+// exclude on.
+//
+// Params: [search×3, scopeParams(mfgIds), scopeParams(warehouseNames),
+//          scopeParams(brandIds) ×2 — the flag is read twice, once per arm,
+//          mfgCode×2, destination×2, dateFrom×2, dateTo×2]
 const INVOICE_WHERE = `
   WHERE (? IS NULL OR si.invoice_no LIKE ? OR m.name LIKE ?)
     AND (? IS NULL OR si.mfg_id      IN (?))
     AND (? IS NULL OR si.destination IN (?))
+    AND (? IS NULL OR EXISTS (
+          SELECT 1 FROM invoice_items_mfg ii
+          JOIN master_skus ms ON ms.sku_code = ii.sku_code
+          WHERE ii.invoice_id = si.id AND ms.brand_id IN (?)
+        )
+        OR NOT EXISTS (
+          SELECT 1 FROM invoice_items_mfg ii
+          JOIN master_skus ms ON ms.sku_code = ii.sku_code
+          WHERE ii.invoice_id = si.id AND ms.brand_id IS NOT NULL
+        ))
+    AND (? IS NULL OR m.code          = ?)
+    AND (? IS NULL OR si.destination  = ?)
+    AND (? IS NULL OR si.invoice_date >= ?)
+    AND (? IS NULL OR si.invoice_date <= ?)
 `
 
 // The list itself, shared by the paginated view and the export so the two can
@@ -22,7 +49,7 @@ const INVOICE_WHERE = `
 const INVOICE_LIST_BODY = `
   SELECT si.id, si.invoice_no, si.invoice_date, si.currency, si.destination,
          si.invoice_total, si.eway_bill_no, si.vehicle_no,
-         si.attachment_key, si.created_at,
+         si.attachment_key, si.uniware_po_code, si.created_at,
          m.code AS mfg_code, m.name AS mfg_name,
          u.name AS created_by_name,
          COUNT(sii.id)                   AS item_count,
@@ -152,8 +179,7 @@ export const supplierInvoicesSql = {
   /**
    * Invoice history list, newest first.
    *
-   * Parameters: [search×3, scopeParams(mfgIds), scopeParams(warehouseNames), limit, offset]
-   * — i.e. 3 + 2 + 2 + 2 = 9 values. countInvoices takes the same first 7.
+   * Parameters: buildInvoiceParams(...) (15), then limit, offset.
    */
   listInvoices: `
     ${INVOICE_LIST_BODY}
@@ -163,7 +189,7 @@ export const supplierInvoicesSql = {
   /**
    * Same list, unpaginated — the export must return every invoice the filtered
    * view would page through, not just the page on screen.
-   * Parameters: [search×3, scopeParams(mfgIds), scopeParams(warehouseNames)] (7)
+   * Parameters: buildInvoiceParams(...) (15)
    */
   listInvoicesForExport: INVOICE_LIST_BODY,
 
@@ -172,7 +198,7 @@ export const supplierInvoicesSql = {
    * invoice header — the sheet finance actually reconciles against. Both PO
    * numbers ride along: the inward PO the line raised, and the order it
    * settled.
-   * Parameters: [search×3, scopeParams(mfgIds), scopeParams(warehouseNames)] (7)
+   * Parameters: buildInvoiceParams(...) (15)
    */
   listInvoiceItemsForExport: `
     SELECT si.invoice_no, si.invoice_date, si.destination,
@@ -195,7 +221,7 @@ export const supplierInvoicesSql = {
   /**
    * Total invoices, for the pager. Must carry the SAME predicates as
    * listInvoices or the total counts rows the list can't show.
-   * Parameters: [search×3, scopeParams(mfgIds), scopeParams(warehouseNames)] (7)
+   * Parameters: buildInvoiceParams(...) (15)
    */
   countInvoices: `
     SELECT COUNT(*) AS total
@@ -232,16 +258,43 @@ export const supplierInvoicesSql = {
   `,
 }
 
+/** The user-chosen filters on /po-tracking/invoices. All optional — an absent
+ *  one is a NULL, which the `? IS NULL OR …` pairs read as "no filter". */
+export type InvoiceFilters = {
+  /** master_mfgs.code, not the id — same as the PO list's manufacturer filter. */
+  mfgCode?: string | null
+  /** invoice_mfg.destination holds a master_warehouse.name (no FK). */
+  destination?: string | null
+  dateFrom?: string | null
+  dateTo?: string | null
+}
+
 /**
- * Params for INVOICE_WHERE — the 7 values both listInvoices and countInvoices
+ * Params for INVOICE_WHERE — the 15 values both listInvoices and countInvoices
  * take before their own trailing args (listInvoices then wants limit, offset).
  * Same shape as buildFilterParams in lib/queries/purchase-orders.ts.
  */
-export function buildInvoiceParams(search: string | null, scope: UserScope): unknown[] {
+export function buildInvoiceParams(
+  search: string | null,
+  scope: UserScope,
+  f: InvoiceFilters = {},
+): unknown[] {
   const like = search ? `%${search}%` : null
+  const [brandFlag, brandIds] = scopeParams(scope.brandIds)
   return [
     like, like, like,                    // search ×3 (IS NULL check + two LIKEs)
     ...scopeParams(scope.mfgIds),        // ×2
-    ...scopeParams(scope.warehouseNames) // ×2
+    ...scopeParams(scope.warehouseNames),// ×2
+    // Brand is 3 params, not the usual 2: the flag guards the whole
+    // EXISTS-or-NOT-EXISTS group, and only the first arm takes the id list. The
+    // second arm asks "is anything attributable at all", which needs no ids.
+    brandFlag, brandIds,                 // flag + ids for the EXISTS arm
+    // Each filter is read twice: once for the IS NULL check, once for the
+    // comparison. Empty string is coerced to NULL so a cleared <select> clears
+    // the filter instead of matching a manufacturer code of "".
+    f.mfgCode     || null, f.mfgCode     || null,
+    f.destination || null, f.destination || null,
+    f.dateFrom    || null, f.dateFrom    || null,
+    f.dateTo      || null, f.dateTo      || null,
   ]
 }

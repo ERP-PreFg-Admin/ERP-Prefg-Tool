@@ -18,7 +18,7 @@ import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { withGateway } from "@/lib/gateway/with-gateway"
-import { getUserScope, assertInScope } from "@/lib/scope"
+import { getUserScope, assertInScope, scopeParams } from "@/lib/scope"
 import { mfgIdParamSchema } from "@/lib/validation/manufacturing"
 import { buildCsv, buildXlsx, buildExportFilename } from "@/lib/export"
 import { FINAL_COSTING_EXPORT_COLUMNS } from "@/lib/export-configs"
@@ -35,12 +35,15 @@ export const GET = withGateway({
     // withGateway's pageSlug is a static string ("/manufacturing"), so it can't
     // check the per-manufacturer slug the page checks. Entity scope is what
     // keeps one manufacturer's cost data out of another user's reach here.
-    assertInScope(await getUserScope(Number(session.user.id)), "mfg", mfgId)
+    // Hoisted rather than inlined because the brand params below need it too.
+    // getUserScope is cache()-wrapped, so this is still one query per request.
+    const scope = await getUserScope(Number(session.user.id))
+    assertInScope(scope, "mfg", mfgId)
     const format = req.nextUrl.searchParams.get("format") === "xlsx" ? "xlsx" : "csv"
 
     try {
       const [lineRows, materialCostRows, miscCostRows] = await Promise.all([
-        query<MfgLine>(manufacturingSql.selectLiveLinesByMfg, [mfgId]),
+        query<MfgLine>(manufacturingSql.selectLiveLinesByMfg, [mfgId, ...scopeParams(scope.brandIds)]),
         query<{
           recipe_id: number; rm_cost: string; pm_cost: string
           filling: string | null; rm_line_count: number

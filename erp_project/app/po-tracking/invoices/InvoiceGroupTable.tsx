@@ -5,13 +5,13 @@
 //
 // This is the view that makes the two PO shapes legible. Our own POs are one
 // SKU to one manufacturer; a supplier invoice is one document covering many
-// SKUs, which inwarding turns into one inward PO per line. Listing those POs
+// SKUs, which inwarding turns into one inward PO per SKU. Listing those POs
 // flat hides the document they came from — grouping restores it.
 //
-// A line can point at two POs: the inward PO it raised, and (when booked
-// against an existing order) the PO whose received_qty it credited. Both are
-// shown, because "which PO did this line go to" has two answers and picking one
-// would be misleading.
+// The invoice row carries the Uniware PO code, because Uniware holds ONE PO per
+// invoice — it belongs to the document, not to a line. Each line still shows
+// the order its receipt was credited to, which is the per-line fact: two lines
+// of the same SKU can settle two different open POs.
 //
 // Extracted from InvoiceHistoryDialog so the dialog and /po-tracking/invoices
 // render the same table rather than two that drift.
@@ -43,12 +43,17 @@ const shortDate = (v: string | null) =>
 
 export default function InvoiceGroupTable({
   search = "",
+  filterQuery = "",
   pageSize = 25,
   emptyHint,
   className,
 }: {
   /** Server-side filter on invoice_no / manufacturer name. */
   search?: string
+  /** The rest of the filters as a query string, e.g. "mfgCode=MFG01&dateTo=…".
+   *  A string rather than an object on purpose: it compares by value, so the
+   *  fetch effect below doesn't re-run on every parent render. */
+  filterQuery?: string
   pageSize?: number
   /** Shown when there are no invoices — the two hosts word this differently. */
   emptyHint?: React.ReactNode
@@ -71,13 +76,15 @@ export default function InvoiceGroupTable({
   /** Pure fetcher — holds no state, so callers can drive it from an effect
    *  without tripping react-hooks/set-state-in-effect. Throws on failure. */
   const fetchPage = useCallback(async (nextOffset: number) => {
-    const params = new URLSearchParams({ limit: String(pageSize), offset: String(nextOffset) })
+    const params = new URLSearchParams(filterQuery)
+    params.set("limit", String(pageSize))
+    params.set("offset", String(nextOffset))
     if (search.trim()) params.set("search", search.trim())
     const res = await fetch(`/api/v1/purchase-orders/invoice?${params}`)
     const data = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(data.error ?? "Couldn't load invoices.")
     return data as { invoices?: InvoiceHistoryHeader[]; total?: number }
-  }, [pageSize, search])
+  }, [pageSize, search, filterQuery])
 
   const apply = useCallback((data: { invoices?: InvoiceHistoryHeader[]; total?: number }, at: number) => {
     setError("")
@@ -86,8 +93,8 @@ export default function InvoiceGroupTable({
     setOffset(at)
   }, [])
 
-  // Loads on mount and whenever the search changes — a new search has to start
-  // at page 1, so this deliberately resets the offset rather than keeping it.
+  // Loads on mount and whenever the search or filters change — a new search has
+  // to start at page 1, so this deliberately resets the offset rather than keeping it.
   // State is only touched inside the promise callbacks, never synchronously.
   useEffect(() => {
     let cancelled = false
@@ -163,6 +170,10 @@ export default function InvoiceGroupTable({
                   than side by side. */}
               <th className="w-8" />
               <th>Invoice</th>
+              {/* The same document's identity in the other system, so it sits
+                  beside our own number rather than down in the lines: Uniware
+                  holds ONE PO per invoice, not one per line. */}
+              <th>Uniware Code</th>
               <th>Manufacturer</th>
               <th>Destination</th>
               <th className="text-right">Total</th>
@@ -173,15 +184,17 @@ export default function InvoiceGroupTable({
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={8} className="px-2 py-8 text-center text-muted-foreground">
+              <tr><td colSpan={9} className="px-2 py-8 text-center text-muted-foreground">
                 <Loader2 className="mx-auto h-4 w-4 animate-spin" />
               </td></tr>
             )}
 
             {!loading && invoices.length === 0 && (
-              <tr><td colSpan={8} className="px-2 py-8 text-center text-muted-foreground">
+              <tr><td colSpan={9} className="px-2 py-8 text-center text-muted-foreground">
                 {search.trim()
                   ? `No invoices match “${search.trim()}”.`
+                  : filterQuery
+                  ? "No invoices match these filters."
                   : emptyHint ?? "No invoices read yet."}
               </td></tr>
             )}
@@ -215,6 +228,9 @@ export default function InvoiceGroupTable({
                     <td>
                       <div className="font-medium">{inv.invoice_no}</div>
                       <div className="text-[11px] text-muted-foreground">{shortDate(inv.invoice_date)}</div>
+                    </td>
+                    <td className="whitespace-nowrap font-mono text-[11px]">
+                      {inv.uniware_po_code ?? <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="max-w-56">
                       <div className="truncate" title={inv.mfg_name}>{inv.mfg_name}</div>
@@ -252,7 +268,7 @@ export default function InvoiceGroupTable({
 
                   {isOpen && (
                     <tr className="border-t border-border bg-muted/20">
-                      <td colSpan={8} className="px-3 py-2">
+                      <td colSpan={9} className="px-3 py-2">
                         {itemsLoading && !lines ? (
                           <div className="flex items-center gap-2 py-3 text-muted-foreground">
                             <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading items…
@@ -280,7 +296,9 @@ export default function InvoiceGroupTable({
                                   <th className="text-right">Qty</th>
                                   <th className="text-right">Rate</th>
                                   <th className="text-right">Line Total</th>
-                                  <th>Inward PO</th>
+                                  {/* No Inward PO column: it repeats across the
+                                      lines of one SKU and says nothing the
+                                      Uniware code on the invoice row doesn't. */}
                                   <th>Received against</th>
                                 </tr>
                               </thead>
@@ -302,12 +320,6 @@ export default function InvoiceGroupTable({
                                     <td className="text-right tabular-nums">{qty(li.qty)}</td>
                                     <td className="text-right tabular-nums">{money(li.rate)}</td>
                                     <td className="text-right tabular-nums">{money(li.total_amount)}</td>
-                                    <td className="whitespace-nowrap">
-                                      {li.po_no ?? <span className="text-muted-foreground">—</span>}
-                                      {li.po_status && (
-                                        <span className="ml-1 text-muted-foreground">({li.po_status.replace(/_/g, " ")})</span>
-                                      )}
-                                    </td>
                                     <td className="whitespace-nowrap">
                                       {li.received_against_po_no ? (
                                         <>

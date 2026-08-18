@@ -32,7 +32,7 @@ test("a PO attachment key resolves to its PO's scope dimensions", async (t) => {
   await withRollback(async (conn) => {
     const a = await anchors(conn)
     if (!a) return t.skip("no manufacturer/SKU/user in the test schema")
-
+      
     const key = `po-attachments/qa-${process.pid}.pdf`
     const po = await makePo(conn, a, { qty: 10, destination: "QA Warehouse" })
     await conn.execute(s3FilesSql.updatePoAttachment, [key, po.id])
@@ -83,7 +83,7 @@ test("an out-of-scope owner is what blocks the read", async (t) => {
     // The two halves of assertKeyReadable's decision, applied to a real owner row.
     assert.ok(inScope(UNRESTRICTED, "mfg", owner.mfg_id), "an unscoped user reads everything, as before")
     assert.equal(
-      inScope({ mfgIds: [po.mfg_id + 1000], vendorIds: null, warehouseNames: null }, "mfg", owner.mfg_id),
+      inScope({ mfgIds: [po.mfg_id + 1000], vendorIds: null, warehouseNames: null, brandIds:null }, "mfg", owner.mfg_id),
       false,
       "a user scoped to some other manufacturer does not"
     )

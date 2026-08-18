@@ -27,7 +27,10 @@ import logger from "@/lib/logger"
 
 const putSchema = z.object({
   user_id: z.coerce.number().int().positive(),
-  entity_type: z.enum(["mfg", "vendor", "warehouse"]),
+  // Must match EntityType in lib/scope.ts, the MySQL ENUM on
+  // user_entity_scope.entity_type, and the Prisma enum. Four hand-maintained
+  // copies of one list; a value missing here 400s rather than failing to compile.
+  entity_type: z.enum(["mfg", "vendor", "warehouse", "brand"]),
   // null is the explicit "unrestricted" signal; [] is treated the same way
   // rather than as "nothing", because a scope of nothing would lock the user
   // out of every screen with no way for them to say so.

@@ -30,6 +30,7 @@
 
 import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
+import { getUserScope, scopeParams } from "@/lib/scope"
 import { skus as skuSql } from "@/lib/queries/skus"
 import { bom as bomSql } from "@/lib/queries/recipe"
 import { fuzzyRank } from "@/lib/fuzzy-search"
@@ -51,7 +52,7 @@ const tooManyRows = (total: number) =>
 
 export const GET = withGateway({
   access: { pageSlug: "/masters/skus", level: "viewer" },
-  handler: async ({ req }) => {
+  handler: async ({ req, session }) => {
   // ── Parse params ──────────────────────────────────────────────────────────
   const sp     = req.nextUrl.searchParams
   const format = sp.get("format") === "xlsx" ? "xlsx" : "csv"
@@ -66,14 +67,24 @@ export const GET = withGateway({
   // value itself is never compared, so 1 is just a truthy placeholder.
   const missingBom  = sp.get("bom") === "missing" ? 1 : null
 
+  // An export must not be a way around the boundary — this is the same brand
+  // scope the page applies, resolved once for both param paths below.
+  const scope = await getUserScope(Number(session.user.id))
+
   /**
    * Param order matches selectPaginated / selectAllFiltered / countAll:
-   * [like×4, status×2, brand×2, sku_type×2, category×2, subcategory×2, missingBom].
+   * [like×4, brandScope×2, status×2, brand×2, sku_type×2, category×2,
+   *  subcategory×2, missingBom].
    * `like` is passed as null on the search path — free text is applied by
    * fuzzyRank afterwards, exactly as the page does.
+   *
+   * brandScope sits after the likes because that is where the predicate was
+   * inserted in the WHERE clause. These arrays are positional; mysql2 binds by
+   * order, not by name.
    */
   const filterParams = (like: string | null) => [
     like, like, like, like,
+    ...scopeParams(scope.brandIds),
     status, status,
     brand, brand,
     skuType, skuType,

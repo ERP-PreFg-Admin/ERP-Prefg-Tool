@@ -26,6 +26,7 @@ import type { PoolConnection, ResultSetHeader } from "mysql2/promise"
 import { pool, query } from "@/lib/db"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
+import { assertSkuIdInBrandScope } from "@/lib/brand-guard"
 import { bomActionSchema, isRmTotalValid, RM_TOTAL_MIN, RM_TOTAL_MAX } from "@/lib/validation/recipe"
 import { bom as recipeSql, RECIPE_STATUS_IN_REVIEW } from "@/lib/queries/recipe"
 import { skus as skuSql } from "@/lib/queries/skus"
@@ -78,6 +79,10 @@ export const POST = withGateway({
     if(body.action == "create-full") {
       const eventId = makeEventId("BOM", "submit", body.sku_id)
       const logCtx = { ...ctx, eventId, module: "BOM" }
+
+      // A recipe belongs to its SKU's brand, so building one is a write against
+      // that brand.
+      await assertSkuIdInBrandScope(Number(session.user.id), body.sku_id)
       logger.info({ ...logCtx, skuId: body.sku_id, mode: body.mode, lineCount: body.rm_lines.length + body.pm_lines.length, message: "Recipe submit started" })
       recordRawEvent("BOM", eventId, { skuId: body.sku_id, mode: body.mode, lineCount: body.rm_lines.length + body.pm_lines.length, source: body.source })
 

@@ -14,6 +14,8 @@ import { resolveAccess } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
+import { scopeParams } from "@/lib/scope"
+import { getViewScope } from "@/lib/brand-view"
 import { rawMaterials } from "@/lib/queries/raw-materials"
 import { packingMaterials as PMMaterials } from "@/lib/queries/packing-materials"
 import { fuzzyRank } from "@/lib/fuzzy-search"
@@ -34,6 +36,11 @@ export default async function MaterialMasterPage({
   const userId = parseInt(session.user.id)
   const access = await resolveAccess(userId, session.user.roles, "/masters/material-master")
   if (access === "none") redirect("/auth/unauthorized")
+
+  // Material Master was previously unscoped. A material has no brand of its own,
+  // so the predicate derives it through details_recipe — see brandScopeFor in
+  // lib/queries/raw-materials.ts. Materials used by no brand stay visible.
+  const scope = await getViewScope(userId)
 
   // ── Read URL params ────────────────────────────────────────────────────────
   const sp    = await searchParams
@@ -56,10 +63,13 @@ export default async function MaterialMasterPage({
 
   // PM: [like×4, status×2, type×2, LIMIT, OFFSET]
   // RM: [like×4, status×2, make×2, type×2, LIMIT, OFFSET]
-  const rmParams    = [like, like, like, like, status, status, make, make, type, type]
-  const pmParams    = [like, like, like, like, status, status, type, type]
-  const rmParamsNoSearch = [null, null, null, null, status, status, make, make, type, type]
-  const pmParamsNoSearch = [null, null, null, null, status, status, type, type]
+  // brandScope is appended LAST because brandScopeFor() is interpolated after the
+  // final filter in each base-list WHERE block. These arrays are positional.
+  const brandScope  = scopeParams(scope.brandIds)
+  const rmParams    = [like, like, like, like, status, status, make, make, type, type, ...brandScope]
+  const pmParams    = [like, like, like, like, status, status, type, type, ...brandScope]
+  const rmParamsNoSearch = [null, null, null, null, status, status, make, make, type, type, ...brandScope]
+  const pmParamsNoSearch = [null, null, null, null, status, status, type, type, ...brandScope]
 
   let rows: AnyRow[]
   let total: number

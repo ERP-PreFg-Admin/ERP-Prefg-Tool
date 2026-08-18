@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { X } from "lucide-react"
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
@@ -12,6 +12,7 @@ import { Select } from "@/components/ui/select"
 import { useToast } from "@/components/ui/toast"
 import { RemarksField, PO_REASON_PRESETS } from "@/components/masters/RemarksField"
 import type { RecipeChoice, MfgOption, MfgSkuOption, WarehouseOption } from "./po-types"
+import { warehousesForEntity, warehouseLabel, warehouseKey } from "./po-utils"
 import { useQuotedRate } from "./useQuotedRate"
 import { todayIST } from "@/lib/date"
 
@@ -27,6 +28,22 @@ type PoLineRowState = {
   qty: string
   expected_on: string
   destination: string
+  /** Which legal entity sells this SKU — narrows this row's destination list. */
+  entity_code: string | null
+}
+
+/**
+ * The first mother warehouse this entity actually operates, else the first site
+ * offered. Per row rather than per dialog: two SKUs in one batch can belong to
+ * different entities, and the old dialog-wide default could preselect a site the
+ * row's entity has no facility at.
+ */
+function defaultDestination(options: WarehouseOption[]): string {
+  return (
+    options.find((w) => w.name.toLowerCase().includes("mumbai"))?.name
+    ?? options.find((w) => w.type === "MWH")?.name
+    ?? ""
+  )
 }
 
 // One SKU row — the quoted rate is fetched independently per row (display
@@ -44,6 +61,13 @@ function PoLineRow({
   onRemove: () => void
 }) {
   const { rate, loading: rateLoading } = useQuotedRate(row.sku_code, mfgId)
+
+  // Only this SKU's entity's facilities. A NULL entity_code means unattributed, so
+  // nothing is narrowed — see warehousesForEntity.
+  const destinations = useMemo(
+    () => warehousesForEntity(warehouseOptions, row.entity_code),
+    [warehouseOptions, row.entity_code]
+  )
 
   return (
     <tr className="border-b border-border last:border-0">
@@ -91,15 +115,20 @@ function PoLineRow({
         />
       </td>
       <td className="px-2 py-1.5 align-top">
+        {/* w-56, not w-full: in an auto-layout table `w-full` resolves against a
+            cell the browser has already squeezed to fit, so the closed select
+            collapsed to "Mu…" and the selected destination became unreadable. An
+            explicit width makes the column claim its space and the container
+            scroll instead — same approach as the qty/date inputs beside it. */}
         <Select
           value={row.destination}
           onChange={(e) => onChange("destination", e.target.value)}
-          className="w-full text-xs"
+          className="w-56 text-xs"
         >
           <option value="">— Select —</option>
-          {warehouseOptions.map((w) => (
-            <option key={w.id} value={w.name}>
-              {w.name}{w.zone ? ` — ${w.zone}` : ""} ({w.type})
+          {destinations.map((w) => (
+            <option key={warehouseKey(w)} value={w.name}>
+              {warehouseLabel(w)}
             </option>
           ))}
         </Select>
@@ -142,10 +171,6 @@ export default function AddPODialog({
   const { toast } = useToast()
 
   const today = todayIST()
-  const defaultDest =
-    warehouseOptions.find((w) => w.name.toLowerCase().includes("mumbai"))?.name
-    ?? warehouseOptions.find((w) => w.type === "MWH")?.name
-    ?? ""
 
   useEffect(() => {
     if (open) {
@@ -179,7 +204,10 @@ export default function AddPODialog({
             recipe_id: s.boms?.[0] ? String(s.boms[0].recipe_id) : "",
             qty: "",
             expected_on: "",
-            destination: defaultDest,
+            entity_code: s.entity_code ?? null,
+            // Defaulted from THIS row's entity's warehouses, so the preselected
+            // destination is always one the row can actually be sent to.
+            destination: defaultDestination(warehousesForEntity(warehouseOptions, s.entity_code)),
           }))
         )
       })
@@ -289,7 +317,10 @@ export default function AddPODialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o && !submitting) onClose() }}>
-      <DialogContent className="max-w-3xl">
+      {/* max-w-5xl: eight columns, and the destination now carries a facility code.
+          At 3xl the table overflowed and the remove button sat off-screen behind a
+          scrollbar. */}
+      <DialogContent className="max-w-5xl">
         <DialogHeader>
           <DialogTitle>Add Purchase Order</DialogTitle>
           <p className="text-xs text-muted-foreground pt-1">

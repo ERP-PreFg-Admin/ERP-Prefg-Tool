@@ -1,16 +1,51 @@
 import nodemailer from "nodemailer"
-import { GMAIL_USER, GMAIL_APP_PASSWORD, MAIL_SIGNATURE_TITLE } from "@/lib/env"
+import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2"
+import {
+  GMAIL_USER, GMAIL_APP_PASSWORD, MAIL_SIGNATURE_TITLE,
+  MAIL_PROVIDER, MAIL_FROM, MAIL_FROM_NAME, SES_CONFIG_SET,
+  AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+} from "@/lib/env"
 import { query } from "@/lib/db"
 import { generatePoPdf, type PoEmailData } from "@/lib/pdf/po-document"
+import { resolveLetterhead, resolveShipTo, type PoEmailRow } from "@/lib/pdf/po-letterhead"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { entityEmails } from "@/lib/queries/entity-emails"
+import { splitRecipients, type RecipientRow } from "@/lib/recipients"
 import { fetchPurchaseOrderPdf } from "@/lib/uniware"
 import { buildMultiSheetXlsx, type ExportColumn } from "@/lib/export"
+import { assertAttachmentsWithinLimit } from "@/lib/mail-limits"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import crypto from "crypto"
 
-const transporter = nodemailer.createTransport({
+// ── Transports ───────────────────────────────────────────────────────────────
+//
+// Nodemailer builds the MIME either way; only the delivery leg differs. That is
+// why the migration touches the transport and the From header and nothing else —
+// the templates, PO tables and multi-attachment assembly below are unchanged.
+//
+// SES: nodemailer 7's SES transport calls `new SendEmailCommand({ Content: {
+// Raw: { Data } }, FromEmailAddress, Destination })` on the supplied client —
+// the SESv2 shape, hence @aws-sdk/client-sesv2 rather than client-ses, and
+// ses:SendEmail rather than the v1 ses:SendRawEmail in the IAM policy.
+//
+// Credentials are passed explicitly to mirror lib/s3.ts. When the EC2 instance
+// role takes over (see instance-role-migration.md) both drop this block together
+// and the SDK resolves via IMDS.
+const sesTransport = nodemailer.createTransport({
+  SES: {
+    sesClient: new SESv2Client({
+      region: AWS_REGION,
+      credentials: {
+        accessKeyId:     AWS_ACCESS_KEY_ID,
+        secretAccessKey: AWS_SECRET_ACCESS_KEY,
+      },
+    }),
+    SendEmailCommand,
+  },
+})
+
+const gmailTransport = nodemailer.createTransport({
   service: "gmail",
   auth: {
     user: GMAIL_USER,
@@ -19,36 +54,42 @@ const transporter = nodemailer.createTransport({
   secure: true,
 })
 
-const ctx = {
-  module: "MAILER",
-  requestId: crypto.randomUUID(),
+const transporter = MAIL_PROVIDER === "ses" ? sesTransport : gmailTransport
+
+/** From header. Gmail can only send as the authenticated mailbox; SES sends as
+ *  the address the IAM ses:FromAddress condition pins. */
+const fromHeader =
+  MAIL_PROVIDER === "ses"
+    ? `${MAIL_FROM_NAME} <${MAIL_FROM}>`
+    : `${MAIL_FROM_NAME} <${GMAIL_USER}>`
+
+/** Extra SESv2 fields nodemailer merges into the command. Empty on Gmail, which
+ *  would reject an unknown option. */
+const sesOptions = MAIL_PROVIDER === "ses" ? { ses: { ConfigurationSetName: SES_CONFIG_SET } } : {}
+
+/**
+ * Per-send log context. This used to be a module-level constant, which meant one
+ * requestId for the whole process lifetime — every mail line in CloudWatch shared
+ * it, so correlating "which send produced this error" was impossible. One id per
+ * send is the useful unit.
+ */
+function mailerCtx() {
+  return { module: "MAILER", requestId: crypto.randomUUID() }
 }
 
-type PoEmailRow = {
-  po_no: string
-  date: string | null
-  expected_on: string | null
-  destination: string | null
-  dest_location: string | null
-  sku_code: string
-  sku_name: string | null
-  qty: number | string
-  unit_price: number | string | null
-  total_amount: number | string | null
-  mfg_name: string
-  mfg_code: string
-  registered_name: string | null
-  gst_number: string | null
-  location: string | null
-  mfg_email: string | null
-  raised_by_name: string | null
-}
+// Attachment ceiling lives in lib/mail-limits.ts so it can be unit-tested
+// without importing this file's DB/PDF/Uniware dependencies.
 
 export async function fetchPoData(poId: number): Promise<PoEmailData | null> {
   const rows = await query<PoEmailRow>(purchaseOrdersSql.selectForEmail, [poId])
   const po = rows[0]
   if (!po) return null
   return {
+    // Which legal entity is buying, and where the goods land. Resolved here so
+    // both PO templates receive finished strings and can't disagree about it —
+    // see lib/pdf/po-letterhead.ts for the fallback ladder.
+    letterhead:      resolveLetterhead(po),
+    ship_to:         resolveShipTo(po),
     po_no:           po.po_no,
     date:            po.date,
     expected_on:     po.expected_on,
@@ -92,22 +133,17 @@ export async function resolveRecipients(
    * place for a notification to land than nowhere.
    */
   legalEntityCode: string | null = null
-): Promise<string[]> {
+): Promise<{ to: string[]; cc: string[] }> {
+  // One query per shape, because each carries a different rule about which
+  // employee rows come along: a site's, versus a manufacturer's plus the
+  // "every manufacturer" wildcard.
   const rows =
     entityType === "warehouse"
-      ? await query<{ email: string }>(entityEmails.selectByWarehouseForEntity, [entityCode, legalEntityCode])
-      : await query<{ email: string }>(entityEmails.selectByEntity, [entityType, entityCode])
-  const seen = new Set<string>()
-  const recipients: string[] = []
-  for (const raw of [primaryEmail, ...rows.map((r) => r.email)]) {
-    const email = raw?.trim()
-    if (!email) continue
-    const key = email.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    recipients.push(email)
-  }
-  return recipients
+      ? await query<RecipientRow>(entityEmails.selectByWarehouseForEntity, [entityCode, legalEntityCode])
+      : entityType === "mfg"
+      ? await query<RecipientRow>(entityEmails.selectForMfg, [entityCode, entityCode])
+      : await query<RecipientRow>(entityEmails.selectByEntity, [entityType, entityCode])
+  return splitRecipients(rows, primaryEmail)
 }
 
 export type SelectedPoLine = {
@@ -228,6 +264,7 @@ export async function sendMfgSelectionEmail(
   mfgId: number,
   selected: SelectedPoLine[]
 ): Promise<boolean> {
+  const ctx = mailerCtx()
   const mfgRows = await query<{ code: string; name: string; email: string | null }>(
     `SELECT m.code, m.name, d.email FROM master_mfgs m JOIN details_mfg d ON d.mfg_id = m.id WHERE m.id = ? LIMIT 1`,
     [mfgId]
@@ -238,8 +275,17 @@ export async function sendMfgSelectionEmail(
     return false
   }
 
-  const recipients = await resolveRecipients("mfg", mfg.code, mfg.email)
-  if (recipients.length === 0) {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const formatted = `${year}-${month}-${day}`;
+  
+
+  const { to, cc } = await resolveRecipients("mfg", mfg.code, mfg.email)
+  // Both empty, not just `to`: an internal employee copied on every
+  // manufacturer is a real recipient, so a mail with only a CC still goes.
+  if (to.length === 0 && cc.length === 0) {
     logger.warn({ ...ctx, mfgId, message: "sendMfgSelectionEmail: manufacturer has no email on file, skipping" })
     return false
   }
@@ -282,16 +328,26 @@ export async function sendMfgSelectionEmail(
   ])
   attachments.push({ filename: `PO-Summary-${mfg.code}.xlsx`, content: Buffer.from(xlsxBuffer) })
 
+  assertAttachmentsWithinLimit(attachments, `PO selection email for ${mfg.code}`)
+
+  // Everyone the mail reached, for the audit trail — the split is a header
+  // detail, and a log that lists only To answers "who was told?" wrongly.
+  const allRecipients = [...to, ...cc].join(", ")
+
   const eventId = makeEventId("PO_SELECTION_EMAIL", "send", mfgId)
   recordRawEvent("PO_SELECTION_EMAIL", eventId, {
-    mfgId, mfg_name: mfg.name, mfg_email: recipients.join(", "), selectedCount: selected.length, attachmentCount: attachments.length,
+    mfgId, mfg_name: mfg.name, mfg_email: allRecipients, selectedCount: selected.length, attachmentCount: attachments.length,
   })
 
   try {
     await transporter.sendMail({
-      from: `mcaffeine ERP <${GMAIL_USER}>`,
-      to: recipients.join(", "),
-      subject: `PO Update — ${mfg.name}`,
+      ...sesOptions,
+      from: fromHeader,
+      to: to.join(", "),
+      // Omitted entirely when empty rather than sent as "": nodemailer treats a
+      // blank Cc as a malformed address and throws.
+      ...(cc.length ? { cc: cc.join(", ") } : {}),
+      subject: `PO Update — ${mfg.name} - ${formatted}`,
       html: `
         <div style="font-family:sans-serif;max-width:620px;margin:auto;color:#111">
           <h2 style="margin-bottom:4px">PO Update: ${mfg.name}</h2>
@@ -316,8 +372,8 @@ export async function sendMfgSelectionEmail(
     throw sendErr
   }
 
-  logger.info({ ...ctx, eventId, mfgId, mfg_name: mfg.name, mfg_email: recipients.join(", "), message: "PO selection email sent successfully" })
-  recordProcessedEvent("PO_SELECTION_EMAIL", eventId, { mfgId, mfg_name: mfg.name, mfg_email: recipients.join(", ") })
+  logger.info({ ...ctx, eventId, mfgId, mfg_name: mfg.name, mfg_email: allRecipients, message: "PO selection email sent successfully" })
+  recordProcessedEvent("PO_SELECTION_EMAIL", eventId, { mfgId, mfg_name: mfg.name, mfg_email: allRecipients })
   return true
 }
 
@@ -383,6 +439,7 @@ export type InwardInvoiceMail = {
  * which is already committed by the time this runs.
  */
 export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<boolean> {
+  const ctx = mailerCtx()
   const { mfgId, destination, facility, legalEntityCode, invoiceNo, invoiceDate, uniwarePoCode, invoicePdf, items, senderName } = mail
 
   // Only for the subject line — the manufacturer is not a recipient here.
@@ -397,8 +454,10 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
   }
 
   // Shared warehouse addresses plus this legal entity's own point of contact.
-  const recipients = await resolveRecipients("warehouse", destination, null, legalEntityCode ?? null)
-  if (recipients.length === 0) {
+  const { to, cc } = await resolveRecipients("warehouse", destination, null, legalEntityCode ?? null)
+  // Both empty, not just `to`: an employee attached to this site is a real
+  // recipient, so a CC-only notification still goes out.
+  if (to.length === 0 && cc.length === 0) {
     logger.warn({
       ...ctx, mfgId, destination, legalEntityCode,
       message: "sendInwardInvoiceEmail: warehouse has no email on file, skipping",
@@ -434,16 +493,24 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
     }
   }
 
+  assertAttachmentsWithinLimit(attachments, `Inward invoice email for ${invoiceNo}`)
+
+  // Everyone the mail reached, for the audit trail — To and CC together.
+  const allRecipients = [...to, ...cc].join(", ")
+
   const eventId = makeEventId("PO_INWARD_INVOICE_EMAIL", "send", mfgId)
   recordRawEvent("PO_INWARD_INVOICE_EMAIL", eventId, {
     mfgId, mfg_name: mfg.name, destination, invoiceNo, uniwarePoCode,
-    warehouse_email: recipients.join(", "), attachmentCount: attachments.length,
+    warehouse_email: allRecipients, attachmentCount: attachments.length,
   })
 
   try {
     await transporter.sendMail({
-      from: `mcaffeine ERP <${GMAIL_USER}>`,
-      to: recipients.join(", "),
+      ...sesOptions,
+      from: fromHeader,
+      to: to.join(", "),
+      // Omitted entirely when empty — nodemailer throws on a blank Cc.
+      ...(cc.length ? { cc: cc.join(", ") } : {}),
       subject,
       html: `
         <div style="font-family:sans-serif;max-width:620px;margin:auto;color:#111;font-size:14px;line-height:1.6">
@@ -464,7 +531,7 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
 
   logger.info({
     ...ctx, eventId, mfgId, mfg_name: mfg.name, destination, invoiceNo, uniwarePoCode,
-    warehouse_email: recipients.join(", "), message: "Inward invoice email sent to warehouse",
+    warehouse_email: allRecipients, message: "Inward invoice email sent to warehouse",
   })
   recordProcessedEvent("PO_INWARD_INVOICE_EMAIL", eventId, { mfgId, destination, invoiceNo, uniwarePoCode })
   return true

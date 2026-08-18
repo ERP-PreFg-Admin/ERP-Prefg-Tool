@@ -21,10 +21,17 @@ import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } 
 import logger from "@/lib/logger"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { assertPoInScope } from "@/lib/po-guard"
+import { isDraftPo } from "@/lib/po-rules"
 import { ApiError } from "@/lib/gateway/errors"
 import { poIdParamSchema, poSplitSchema } from "@/lib/validation/purchase-order-detail"
 
-const SPLITTABLE = new Set(["draft", "raised", "punched", "partially_received"])
+// Drafts are absent on purpose: a split divides an order the manufacturer
+// already has, and before the mail goes out there is nothing to divide — change
+// the quantity instead. isDraftPo covers the raised-but-unmailed case too, which
+// is what PO Tracking badges as Draft and what PoDataRow hides Split on. The two
+// must refuse the same set: a stricter API rejects a button the user was shown,
+// a looser one lets a draft be split by URL.
+const SPLITTABLE = new Set(["raised", "punched", "partially_received"])
 
 export const POST = withGateway({
   paramsSchema: poIdParamSchema,
@@ -41,11 +48,18 @@ export const POST = withGateway({
     const poRows = await query<any>(purchaseOrdersSql.selectForSplit, [poId])
     const po = poRows[0]
     if (!po) throw new ApiError(404, "not_found", "PO not found.")
+    if (isDraftPo(po)) {
+      throw new ApiError(
+        409,
+        "not_splittable",
+        `${po.po_no} is still a draft. Send it to the manufacturer first — a split divides an order they already have.`
+      )
+    }
     if (!SPLITTABLE.has(po.status)) {
       throw new ApiError(
         409,
         "not_splittable",
-        `Cannot split a PO with status '${po.status}'. Allowed: draft, raised, punched, partially_received.`
+        `Cannot split a PO with status '${po.status}'. Allowed: raised, punched, partially_received.`
       )
     }
     if (po.reference_po) {
@@ -94,6 +108,10 @@ export const POST = withGateway({
     const conn: PoolConnection = await pool.getConnection()
     await conn.beginTransaction()
     try {
+      // Unreachable since drafts stopped being splittable (isDraft above), so
+      // childStatus is always 'raised'. Kept because it is the only description
+      // of what splitting a draft would have to do — mint an approval per child,
+      // since none of them has been through one — if that rule is ever relaxed.
       const isParentDraft = po.status === "draft"
       const childStatus   = isParentDraft ? "draft" : "raised"
 

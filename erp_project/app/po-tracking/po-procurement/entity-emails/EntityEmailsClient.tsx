@@ -30,6 +30,8 @@ type EntityEmailRow = {
   /** master_entity.code, warehouse rows only. NULL = serves every entity. */
   legal_entity_code: string | null
   email: string
+  /** Which header this address goes in. Older rows read back as 'to'. */
+  recipient_type: string
   purpose: string | null
   created_at: string | null
 }
@@ -78,6 +80,7 @@ export default function EntityEmailsClient({
           <option value="vendor">Vendor</option>
           <option value="mfg">Manufacturer</option>
           <option value="warehouse">Warehouse</option>
+          <option value="employee">Employee</option>
         </Select>
         <MasterToolbarActions>
           <Button
@@ -105,16 +108,17 @@ export default function EntityEmailsClient({
             <TableHeader>
               <TableRow>
                 <TableHead>Type</TableHead>
-                <TableHead>Code</TableHead>
+                <TableHead>Attached To</TableHead>
                 <TableHead>Legal Entity</TableHead>
                 <TableHead>Email</TableHead>
+                <TableHead>Send As</TableHead>
                 <TableHead>Purpose</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8 text-sm">
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8 text-sm">
                     No entity emails found.
                   </TableCell>
                 </TableRow>
@@ -122,7 +126,13 @@ export default function EntityEmailsClient({
                 rows.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="capitalize">{r.entity_type}</TableCell>
-                    <TableCell className="font-mono">{r.entity_code}</TableCell>
+                    <TableCell className="font-mono">
+                      {/* '*' is a real stored value, not missing data: one
+                          employee row standing in for every manufacturer. */}
+                      {r.entity_code === "*"
+                        ? <span className="font-sans text-xs">All manufacturers</span>
+                        : r.entity_code}
+                    </TableCell>
                     <TableCell>
                       {/* "All" rather than an em dash: a blank here means the row
                           serves every entity, which is a real value, not missing
@@ -136,6 +146,11 @@ export default function EntityEmailsClient({
                       )}
                     </TableCell>
                     <TableCell>{r.email}</TableCell>
+                    <TableCell>
+                      {r.recipient_type === "cc"
+                        ? <Badge variant="secondary">CC</Badge>
+                        : <span className="text-muted-foreground text-xs">To</span>}
+                    </TableCell>
                     <TableCell>{r.purpose ?? "—"}</TableCell>
                   </TableRow>
                 ))

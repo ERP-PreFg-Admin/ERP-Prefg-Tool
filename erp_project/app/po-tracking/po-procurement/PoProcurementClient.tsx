@@ -22,7 +22,10 @@ import { cn } from "@/lib/utils"
 
 import type { MfgOption, PoRow, SkuOption, TabKey, WarehouseOption } from "./po-types"
 import { INWARD_TABS, STATUS_CONFIG, TAB_LABEL, TABS } from "./po-types"
-import { fmtInt } from "./po-utils"
+import {
+  fmtInt, warehouseKey,
+  destFilterValue, destFilterLabel, destFilterSelection, parseDestFilter,
+} from "./po-utils"
 import { PO_BULK_CSV_FIELDS } from "./po-bulk-fields"
 import PoTable from "./PoTable"
 import PoHistoryDialog from "./PoHistoryDialog"
@@ -89,6 +92,7 @@ export default function PoProcurementClient({
   currentDateTo,
   currentSku,
   currentDestination,
+  currentDestEntity,
   statusCounts,
   summary,
   skuOptions,
@@ -113,6 +117,8 @@ export default function PoProcurementClient({
   currentDateTo: string
   currentSku: string
   currentDestination: string
+  /** master_entity.code half of the destination filter — see destFilterValue. */
+  currentDestEntity: string
   statusCounts: Record<string, number>
   /** Quantities, not PO counts — see summaryStats in lib/queries/purchase-orders.ts. */
   summary: { total: number; openQty: number; committedQty: number; receivedQty: number; overdueQty: number; overduePos: number; draftPos: number }
@@ -120,8 +126,9 @@ export default function PoProcurementClient({
   mfgOptions: MfgOption[]
   warehouseOptions: WarehouseOption[]
   sessionUserId: number
-  /** "inwarding" = the PO Inwarding page: same table/filters, but receiving is
-   *  the only write action — no PO creation, bulk upload, or mail flow. */
+  /** "inwarding" = the PO Inwarding page: same table/filters, but the only way
+   *  to write is Add Invoice — no PO creation, bulk upload, mail flow, or
+   *  hand-typed receipt. */
   mode?: "procurement" | "inwarding"
 }) {
   const isInwarding = mode === "inwarding"
@@ -177,7 +184,11 @@ export default function PoProcurementClient({
   const [draftDateFrom,    setDraftDateFrom]    = useState(currentDateFrom)
   const [draftDateTo,      setDraftDateTo]      = useState(currentDateTo)
   const [draftSku,         setDraftSku]         = useState(currentSku)
-  const [draftDestination, setDraftDestination] = useState(currentDestination)
+  // One <select>, two URL params: the option value packs the site and the entity
+  // (see destFilterValue), because purchase_orders.destination only stores the site.
+  const [draftDestination, setDraftDestination] = useState(
+    destFilterSelection(currentDestination, currentDestEntity)
+  )
 
   const skuFilterOptions = useMemo(
     () => [{ id: 0, sku_code: "", name: "All SKUs", status: "active" }, ...skuOptions],
@@ -191,7 +202,7 @@ export default function PoProcurementClient({
       dateFrom:    draftDateFrom,
       dateTo:      draftDateTo,
       sku:         draftSku,
-      destination: draftDestination,
+      ...parseDestFilter(draftDestination),
     })
     setShowFilters(false)
   }
@@ -203,7 +214,7 @@ export default function PoProcurementClient({
     setDraftDateTo("")
     setDraftSku("")
     setDraftDestination("")
-    navigate({ mfgCode: "", poType: "", dateFrom: "", dateTo: "", sku: "", destination: "" })
+    navigate({ mfgCode: "", poType: "", dateFrom: "", dateTo: "", sku: "", destination: "", destEntity: "" })
     setShowFilters(false)
   }
 
@@ -265,7 +276,7 @@ export default function PoProcurementClient({
             setDraftDateFrom(currentDateFrom)
             setDraftDateTo(currentDateTo)
             setDraftSku(currentSku)
-            setDraftDestination(currentDestination)
+            setDraftDestination(destFilterSelection(currentDestination, currentDestEntity))
             setShowFilters((v) => !v)
           }}
         >
@@ -383,10 +394,14 @@ export default function PoProcurementClient({
                   onChange={(e) => setDraftDestination(e.target.value)}
                   className="w-full"
                 >
+                  {/* One option per (site, entity): Pep's Mumbai and Kreative's are
+                      different destinations. The value carries both halves because
+                      purchase_orders.destination stores only the shared site name —
+                      parseDestFilter splits it into two URL params on Apply. */}
                   <option value="">All Destinations</option>
                   {warehouseOptions.map((w) => (
-                    <option key={w.id} value={w.name}>
-                      {w.name}{w.zone ? ` — ${w.zone}` : ""} ({w.type})
+                    <option key={warehouseKey(w)} value={destFilterValue(w)}>
+                      {destFilterLabel(w)}
                     </option>
                   ))}
                 </Select>
@@ -450,7 +465,7 @@ export default function PoProcurementClient({
             onToggleRow={toggleRow}
             onToggleAll={toggleAll}
             selectable={!isInwarding}
-            receiveOnly={isInwarding}
+            inwardingMode={isInwarding}
             showUniwareCode={isInwarding}
             selectedPoId={inwarding.selectedPoId}
             onOpenInwarding={(r) => inwarding.openFor(r.id)}

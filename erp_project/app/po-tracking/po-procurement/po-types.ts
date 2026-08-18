@@ -9,6 +9,9 @@ export type PoRow = {
   sku_code: string | null
   sku_name: string | null
   sku_status: string | null
+  /** Which of OUR legal entities sells this PO's SKU, via brand. Null when the
+   *  SKU is unattributed or its brand has no entity — see resolveLetterhead. */
+  entity_code: string | null
   /** The recipe this PO is against. Null on POs raised before bom_code became a
    *  bulk-upload column, and on anything raised from the Add PO dialog. */
   recipe_id: number | null
@@ -36,6 +39,10 @@ export type PoRow = {
   /** Unicommerce's PO code for this row — inward POs only, null everywhere else. */
   uniware_po_code: string | null
   destination: string | null
+  /** The Unicommerce facility at `destination` for this PO's entity. Null when
+   *  either is unresolved — the site isn't set up for that entity, or the SKU is
+   *  unattributed so there's no entity to resolve against. */
+  dest_facility_code: string | null
   /**
    * What the row shows. Derived server-side: partial receipts become
    * `partially_received`, and a raised PO the manufacturer hasn't been mailed
@@ -59,11 +66,29 @@ export type PoRow = {
   po_raised_by: number | null
 }
 
-export type SkuOption       = { id: number; sku_code: string; name: string; status: string }
+export type SkuOption       = { id: number; sku_code: string; name: string; status: string; entity_code: string | null }
 /** `registered_name` is the legal entity from details_mfg — the name a supplier
  *  invoice header prints. matchMfg matches on it ahead of `name`. */
 export type MfgOption       = { id: number; code: string; name: string; registered_name: string | null }
-export type WarehouseOption = { id: number; name: string; location: string | null; zone: string | null; type: "CWH" | "MWH" }
+
+/**
+ * One (warehouse, legal entity) pair — NOT one warehouse.
+ *
+ * Every location runs under both Pep and Kreative with a different Unicommerce
+ * facility, so `id` repeats across rows and cannot be used as a React key on its
+ * own. Filter with warehousesForEntity() (po-utils.ts) before rendering.
+ */
+export type WarehouseOption = {
+  id: number
+  name: string
+  location: string | null
+  zone: string | null
+  type: "CWH" | "MWH"
+  /** master_entity.code. NULL = the site has no per-entity row, so it serves both. */
+  entity_code: string | null
+  /** The Unicommerce facility this entity inwards into at this site. */
+  facility_code: string | null
+}
 
 export type BadgeVariant = "default" | "secondary" | "success" | "warning" | "info" | "destructive" | "outline"
 
@@ -85,7 +110,9 @@ export const STATUS_KEYS = Object.keys(STATUS_CONFIG)
  * already filters them out of every query. STATUS_CONFIG still carries the
  * status so a punched row anywhere else renders with the right badge.
  */
-export const TABS = ["all", ...STATUS_KEYS.filter((k) => k !== "punched")] as const
+// "open" is the same pseudo-status the inwarding desk uses (statusMatchValues in
+// lib/queries/purchase-orders.ts) — everything still awaiting goods, in one tab.
+export const TABS = ["all", "open", ...STATUS_KEYS.filter((k) => k !== "punched")] as const
 export type TabKey = (typeof TABS)[number]
 
 /* ── Inwarding detail panel ───────────────────────────────────────────────── */
@@ -184,7 +211,8 @@ export const EMPTY_FORM: ImpromptuForm = {
 
 /** One recipe a manufacturer produces a SKU under — /api/v1/purchase-orders/mfg-skus. */
 export type RecipeChoice = { recipe_id: number; bom_code: string; status: string | null }
-export type MfgSkuOption = { sku_code: string; sku_name: string; boms?: RecipeChoice[] }
+/** `entity_code` narrows the row's destination dropdown — see warehousesForEntity. */
+export type MfgSkuOption = { sku_code: string; sku_name: string; boms?: RecipeChoice[]; entity_code: string | null }
 
 export type SplitRow = { destination: string; qty: string }
 

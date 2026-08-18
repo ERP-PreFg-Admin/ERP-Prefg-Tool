@@ -149,13 +149,15 @@ const MASTERS_ONLY = `AND NOT ${IS_SPLIT_CHILD}`
 // are all scoped by one edit. Warehouse compares against `destination`, which
 // holds master_warehouse.name (there is no FK) — lib/scope.ts resolves ids to
 // names for exactly this reason.
-// Params: scopeParams(mfgIds) then scopeParams(warehouseNames), i.e. 4 values.
+// Params: scopeParams(mfgIds) then scopeParams(warehouseNames), i.e. 4 values and then brandIds - 6 values.
 const SCOPE_WHERE = `
     AND (? IS NULL OR po.mfg_id      IN (?))
-    AND (? IS NULL OR po.destination IN (?))`
+    AND (? IS NULL OR po.destination IN (?))
+    AND (? IS NULL OR sk.brand_id IS NULL OR sk.brand_id IN (?))`
 
 // ── Shared WHERE fragment (all filters) ──────────────────────────────────────
-// Params (23): [like×6, status×4, mfgCode×2, poType×2, dateFrom×2, dateTo×2, sku×2, destination×2, excludeInward]
+// Params (25 + 6 scope = 31 via buildFilterParams): [like×6, status×4, mfgCode×2,
+// poType×2, dateFrom×2, dateTo×2, sku×2, destination×2, destEntity×2, excludeInward]
 // The status filter matches an IN-list rather than a single value so the
 // "received" tab can also pull in short-closed POs and the PO Inwarding page's
 // "open" tab can span raised/punched/partially_received — see statusMatchValues().
@@ -168,12 +170,14 @@ const FULL_WHERE = `
     AND (? IS NULL OR po.date       <= ?)
     AND (? IS NULL OR po.sku_code    = ?)
     AND (? IS NULL OR po.destination = ?)
+    AND (? IS NULL OR ent.code       = ?)
     ${EXCLUDE_INWARD}
     ${MASTERS_ONLY}
     ${SCOPE_WHERE}
 `
 
-// Params (19): [like×6, mfgCode×2, poType×2, dateFrom×2, dateTo×2, sku×2, destination×2, excludeInward]
+// Params (21 + 6 scope = 27 via buildStatusCountParams): [like×6, mfgCode×2, poType×2,
+// dateFrom×2, dateTo×2, sku×2, destination×2, destEntity×2, excludeInward]
 // Used by statusCounts and summaryStats which ignore the status filter.
 const SUMMARY_WHERE = `
   WHERE (? IS NULL OR po.po_no LIKE ? OR m.code LIKE ? OR m.name LIKE ? OR po.sku_code LIKE ? OR sk.name LIKE ?)
@@ -183,6 +187,7 @@ const SUMMARY_WHERE = `
     AND (? IS NULL OR po.date       <= ?)
     AND (? IS NULL OR po.sku_code    = ?)
     AND (? IS NULL OR po.destination = ?)
+    AND (? IS NULL OR ent.code       = ?)
     ${EXCLUDE_INWARD}
     ${MASTERS_ONLY}
     ${SCOPE_WHERE}
@@ -191,11 +196,28 @@ const SUMMARY_WHERE = `
 // master_recipe is LEFT JOINed even though bulk-created POs now always carry a
 // recipe_id: every PO raised before that rule, and every one raised from the Add
 // PO dialog, still has none.
+// master_brand/master_entity are id-joins off sk, so they are 1:1 and cannot fan
+// the row set out — safe to sit in the shared FROM even though COUNT uses it too.
+// They give the row its legal entity, which the Split dialog needs to narrow its
+// destination dropdown the same way the Add PO dialog does.
 const FROM_JOINS = `
   FROM purchase_orders po
   INNER JOIN master_mfgs m  ON m.id        = po.mfg_id
   LEFT  JOIN master_skus sk ON sk.sku_code = po.sku_code
   LEFT  JOIN master_recipe b ON b.id        = po.recipe_id
+  LEFT  JOIN master_brand  br  ON br.id  = sk.brand_id
+  LEFT  JOIN master_entity ent ON ent.id = br.entity_id
+  -- The Unicommerce facility this PO will actually inward into: the destination
+  -- site, as ITS legal entity. Two index lookups, both on unique keys
+  -- (uq_warehouse_name, uq_warehouse_entity), so neither can fan the row set out —
+  -- which matters because this FROM is shared with COUNT and the export.
+  -- dwe.entity_id = ent.id never matches when ent is NULL, so an unattributed PO
+  -- simply gets no facility rather than an arbitrary one.
+  LEFT  JOIN master_warehouse dw ON dw.name = po.destination
+  LEFT  JOIN details_warehouse_entity dwe
+         ON dwe.warehouse_id = dw.id
+        AND dwe.entity_id    = ent.id
+        AND dwe.status       = 'active'
   ${CHILD_AGG_JOIN}
 `
 
@@ -215,6 +237,8 @@ const SELECT_COLS = `
     ${RECEIVED_TOTAL_EXPR}       AS received_total,
     m.id   AS mfg_id, m.code AS mfg_code, m.name AS mfg_name,
     sk.name   AS sku_name, sk.status AS sku_status,
+    ent.code  AS entity_code,
+    dwe.facility_code AS dest_facility_code,
     (SELECT raised_by FROM approvals WHERE module = 'PO' AND entity_id = po.id ORDER BY id DESC LIMIT 1) AS po_raised_by,
     (SELECT email FROM details_mfg WHERE mfg_id = m.id LIMIT 1) AS mfg_email
 `
@@ -247,7 +271,7 @@ export const purchaseOrdersSql = {
   /**
    * Paginated PO list with all filters.
    * Use buildSelectPaginated(sortBy, sortDir) to get the sorted variant.
-   * Params: buildFilterParams(...) + [LIMIT, OFFSET]  (22 + 2 = 24 total)
+   * Params: buildFilterParams(...) + [LIMIT, OFFSET]  (31 + 2 = 33 total)
    */
   buildSelectPaginated(sortBy = "date", sortDir: "asc" | "desc" = "desc"): string {
     const col = SAFE_SORT_COLS[sortBy] ?? "po.date"
@@ -261,7 +285,7 @@ export const purchaseOrdersSql = {
     `
   },
 
-  /** COUNT matching the full WHERE. Params: buildFilterParams(...)  (22 total) */
+  /** COUNT matching the full WHERE. Params: buildFilterParams(...)  (31 total) */
   countPaginated: `
     SELECT COUNT(*) AS total
     ${FROM_JOINS}
@@ -271,7 +295,7 @@ export const purchaseOrdersSql = {
   /**
    * Every PO matching the full WHERE, unpaginated — for the CSV/Excel export
    * (which must return all rows a filtered/searched view would page through,
-   * not just the current page). Params: buildFilterParams(...)  (22 total)
+   * not just the current page). Params: buildFilterParams(...)  (31 total)
    */
   buildSelectFiltered(sortBy = "date", sortDir: "asc" | "desc" = "desc"): string {
     const col = SAFE_SORT_COLS[sortBy] ?? "po.date"
@@ -284,7 +308,7 @@ export const purchaseOrdersSql = {
     `
   },
 
-  /** Per-status counts for tab badges (ignores status param). Params: buildStatusCountParams(...)  (18 total) */
+  /** Per-status counts for tab badges (ignores status param). Params: buildStatusCountParams(...)  (27 total) */
   statusCounts: `
     SELECT ${DISPLAY_STATUS_EXPR} AS status, COUNT(*) AS cnt
     ${FROM_JOINS}
@@ -331,7 +355,7 @@ export const purchaseOrdersSql = {
    * received figure is the rolled-up one, so a split PO contributes its full
    * original quantity exactly once no matter how many children it has.
    *
-   * Params: buildStatusCountParams(...)  (18 total)
+   * Params: buildStatusCountParams(...)  (27 total)
    */
   summaryStats: `
     SELECT
@@ -475,8 +499,16 @@ export const purchaseOrdersSql = {
    * assertPoInScope (lib/po-guard.ts) before any read or write that addresses a
    * PO by id. Params: [id]
    */
+  /** Every dimension assertPoInScope checks, in one read. brand_id comes via the
+   *  SKU because purchase_orders has no brand column; LEFT JOIN so a PO with a
+   *  NULL or unmatched sku_code still returns its row with brand_id NULL, which
+   *  the guard treats as unattributed rather than forbidden.
+   *  Parameters: [id] */
   selectScopeById: `
-    SELECT id, mfg_id, destination FROM purchase_orders WHERE id = ? LIMIT 1
+    SELECT po.id, po.mfg_id, po.destination, sk.brand_id
+    FROM purchase_orders po
+    LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
+    WHERE po.id = ? LIMIT 1
   `,
 
   selectById: `
@@ -487,19 +519,95 @@ export const purchaseOrdersSql = {
     WHERE po.id = ? LIMIT 1
   `,
 
-  /** Lightweight SKU list for the Impromptu PO dropdown. */
+  /** Lightweight SKU list for the Impromptu PO dropdown.
+   *  `entity_code` is which of OUR legal entities sells this SKU — the dialog
+   *  narrows the destination dropdown to that entity's facilities. NULL for an
+   *  unattributed SKU or a brand with no entity, which means "don't narrow". */
   skuOptions: `
-    SELECT id, sku_code, name, status
-    FROM master_skus
-    WHERE status NOT IN ('inactive', 'discontinued')
-    ORDER BY sku_code ASC
+    SELECT sk.id, sk.sku_code, sk.name, sk.status, ent.code AS entity_code
+    FROM master_skus sk
+    LEFT JOIN master_brand  br  ON br.id  = sk.brand_id
+    LEFT JOIN master_entity ent ON ent.id = br.entity_id
+    WHERE sk.status NOT IN ('inactive', 'discontinued')
+    ORDER BY sk.sku_code ASC
   `,
 
-  /** All warehouses for the destination dropdown. */
+  /**
+   * Warehouses for the destination dropdown — ONE ROW PER (site, legal entity).
+   *
+   * Every location operates under both Pep and Kreative with a different
+   * Unicommerce facility, so a single row per location cannot say which facility a
+   * PO will inward against. The dropdown narrows to the SKU's entity and shows its
+   * facility code; warehousesForEntity() in po-utils.ts does the filtering.
+   *
+   * ⚠️ `id` is NO LONGER UNIQUE across rows — a location appears once per entity.
+   * React keys must combine id with entity_code.
+   *
+   * LEFT JOIN, deliberately: a location with no per-entity row yet comes back once
+   * with entity_code NULL and stays selectable for everybody. Making it INNER
+   * would silently remove destinations from the dropdown as soon as the child data
+   * is incomplete, and there is no error message for a warehouse that just isn't
+   * on the list.
+   *
+   * `type` prefers the per-entity override (details_warehouse_entity.type), since
+   * a site can be a mother warehouse for one entity and a child for the other.
+   */
   warehouseOptions: `
-    SELECT id, name, location, zone, type
-    FROM master_warehouse
-    ORDER BY type DESC, name ASC
+    SELECT
+      w.id, w.name, w.location, w.zone,
+      COALESCE(dwe.type, w.type) AS type,
+      e.code            AS entity_code,
+      dwe.facility_code AS facility_code
+    FROM master_warehouse w
+    LEFT JOIN details_warehouse_entity dwe
+           ON dwe.warehouse_id = w.id AND dwe.status = 'active'
+    LEFT JOIN master_entity e ON e.id = dwe.entity_id
+    ORDER BY COALESCE(dwe.type, w.type) DESC, w.name ASC, e.code ASC
+  `,
+
+  /**
+   * Can a PO for this SKU be sent to this destination?
+   *
+   * The dropdown already narrows to the SKU's legal entity
+   * (warehousesForEntity in app/po-tracking/po-procurement/po-utils.ts), but the
+   * dropdown is not a boundary: `destination` is free text on the request and PO
+   * numbers are guessable, so an old bookmark or a hand-built call can still pair a
+   * Hyphen SKU with a Pep-only site. That PO creates fine and then dies at
+   * inwarding, where facilityByDestinationAndPan resolves no facility.
+   *
+   * Returns exactly the three facts destinationAllowed() needs, in one round trip:
+   *
+   *  - `entity_code`     — NULL for an unattributed SKU, i.e. don't narrow
+   *  - `site_configured` — whether the site has ANY active per-entity row. 0 means
+   *                        "not set up yet", which serves everyone, NOT "serves nobody"
+   *  - `serves`          — whether THIS entity has an active row at that site
+   *
+   * The decision is deliberately not baked into the SQL as a single boolean: the
+   * three cases have to stay individually visible so lib/po-guard.ts can apply the
+   * same rules the UI helper applies, and be tested against it.
+   *
+   * Parameters: [destination, destination, sku_code]
+   */
+  selectDestinationEntityCheck: `
+    SELECT
+      ent.code AS entity_code,
+      EXISTS (
+        SELECT 1 FROM master_warehouse w
+        JOIN details_warehouse_entity dwe
+          ON dwe.warehouse_id = w.id AND dwe.status = 'active'
+        WHERE w.name = ?
+      ) AS site_configured,
+      EXISTS (
+        SELECT 1 FROM master_warehouse w
+        JOIN details_warehouse_entity dwe
+          ON dwe.warehouse_id = w.id AND dwe.status = 'active'
+        WHERE w.name = ? AND dwe.entity_id = ent.id
+      ) AS serves
+    FROM master_skus sk
+    LEFT JOIN master_brand  br  ON br.id  = sk.brand_id
+    LEFT JOIN master_entity ent ON ent.id = br.entity_id
+    WHERE sk.sku_code = ?
+    LIMIT 1
   `,
 
   /** Lightweight MFG list for the Impromptu PO dropdown.
@@ -541,7 +649,7 @@ export const purchaseOrdersSql = {
    */
   selectForSplit: `
     SELECT id, po_no, mfg_id, sku_code, recipe_id, qty, unit_price, total_amount,
-           received_qty, expected_on, status, reference_po
+           received_qty, expected_on, status, reference_po, email_sent_at
     FROM purchase_orders WHERE id = ? LIMIT 1
   `,
 
@@ -728,6 +836,9 @@ export const purchaseOrdersSql = {
       AND ${UNALLOCATED_QTY_EXPR} > 0
     -- Oldest-first: the invoice dialog's FIFO allocator consumes this list in
     -- order, so a DESC sort would have the picker contradict the allocation.
+      -- Reference PO picker: without this it lists another brand's PO numbers and
+      -- SKU names, which is a genuine read of data the list page already hides.
+      AND (? IS NULL OR sk.brand_id IS NULL OR sk.brand_id IN (?))
     ORDER BY po.date ASC, po.id ASC
   `,
 
@@ -803,6 +914,26 @@ export const purchaseOrdersSql = {
   },
 
   /** Full PO data for email generation and PDF rendering. Parameters: [po_id] */
+  /**
+   * Everything the PO document needs, including WHOSE document it is.
+   *
+   * The letterhead is resolved here rather than in the PDF: the PO's SKU carries
+   * the brand, the brand carries the legal entity, and that entity's registration
+   * for the DESTINATION is what must be billed — GST is state-wise, which is why
+   * details_warehouse_entity holds bill_to_* per (site, entity) rather than
+   * master_entity holding one address. See lib/pdf/po-letterhead.ts for the
+   * fallback ladder these columns feed.
+   *
+   * ⚠️ EVERY letterhead join below MUST stay LEFT. Three cases legitimately
+   * resolve to nothing — an unattributed SKU (brand_id NULL), a brand with no
+   * entity (DND), and a warehouse with no row for that entity — and all three must
+   * still produce a PDF. An INNER JOIN here returns no row, fetchPoData returns
+   * null, and that surfaces as a 404 on the preview and a silently missing
+   * attachment on the manufacturer mail (lib/mailer.ts logs and continues).
+   * tests/db/po-letterhead.test.ts pins it.
+   *
+   * Parameters: [poId]
+   */
   selectForEmail: `
     SELECT
       po.po_no, po.date, po.expected_on, po.destination,
@@ -812,12 +943,25 @@ export const purchaseOrdersSql = {
       m.name             AS mfg_name,
       d.registered_name, d.gst_number, d.location, d.email AS mfg_email,
       wh.location        AS dest_location,
-      u.name             AS raised_by_name
+      u.name             AS raised_by_name,
+      ent.code           AS entity_code,
+      ent.legal_name     AS entity_legal_name,
+      ent.bank_name, ent.bank_account_no, ent.bank_ifsc, ent.bank_branch,
+      dwe.bill_to_name, dwe.bill_to_address, dwe.bill_to_gstin,
+      dwe.ship_to_name, dwe.ship_to_gstin, dwe.ship_to_address,
+      dwe.ship_to_line1, dwe.ship_to_line2,
+      dwe.ship_to_city, dwe.ship_to_state, dwe.ship_to_pincode
     FROM purchase_orders po
     INNER JOIN master_mfgs      m  ON m.id          = po.mfg_id
     INNER JOIN details_mfg      d  ON d.mfg_id      = m.id
     LEFT  JOIN master_skus      sk ON sk.sku_code    = po.sku_code
     LEFT  JOIN master_warehouse wh ON wh.name        = po.destination
+    LEFT  JOIN master_brand     br  ON br.id  = sk.brand_id
+    LEFT  JOIN master_entity    ent ON ent.id = br.entity_id
+    LEFT  JOIN details_warehouse_entity dwe
+           ON dwe.warehouse_id = wh.id
+          AND dwe.entity_id    = ent.id
+          AND dwe.status       = 'active'
     LEFT  JOIN (
       SELECT entity_id, raised_by FROM approvals
       WHERE module = 'PO'
@@ -870,6 +1014,19 @@ export function buildFilterParams(
   destination: string | null,
   excludeInward = false,
   scope:       UserScope,
+  /**
+   * master_entity.code, paired with `destination`.
+   *
+   * A location is one row of master_warehouse but TWO destinations — Pep's Mumbai
+   * facility and Kreative's are different places to send goods. `destination`
+   * alone can't tell them apart, because purchase_orders.destination stores the
+   * shared name, so the filter takes both halves and the entity comes from the
+   * PO's own SKU (the ent join in FROM_JOINS).
+   *
+   * Last and defaulted so every existing caller keeps compiling; the two pages
+   * that have a destination filter pass it.
+   */
+  destEntity:  string | null = null,
 ): unknown[] {
   const like = search ? `%${search}%` : null
   const [statusA, statusB, statusC] = statusMatchValues(status)
@@ -882,14 +1039,16 @@ export function buildFilterParams(
     dateTo,      dateTo,                // dateTo ×2
     sku,         sku,                   // sku ×2
     destination, destination,           // destination ×2
+    destEntity,  destEntity,            // destEntity ×2
     excludeInward ? 1 : null,           // excludeInward ×1
     ...scopeParams(scope.mfgIds),         // entity scope: mfg ×2
     ...scopeParams(scope.warehouseNames), // entity scope: warehouse ×2
+    ...scopeParams(scope.brandIds) ,     // extity scopr: brand ×2
   ]
 }
 
 /**
- * Build the 23-element param array for statusCounts / summaryStats
+ * Build the 25-element param array for statusCounts / summaryStats
  * (same as buildFilterParams but without the status filter quad).
  */
 export function buildStatusCountParams(
@@ -902,6 +1061,8 @@ export function buildStatusCountParams(
   destination: string | null,
   excludeInward = false,
   scope:       UserScope,
+  /** master_entity.code, paired with `destination` — see buildFilterParams. */
+  destEntity:  string | null = null,
 ): unknown[] {
   const like = search ? `%${search}%` : null
   return [
@@ -912,8 +1073,10 @@ export function buildStatusCountParams(
     dateTo,      dateTo,                // dateTo ×2
     sku,         sku,                   // sku ×2
     destination, destination,           // destination ×2
+    destEntity,  destEntity,            // destEntity ×2
     excludeInward ? 1 : null,           // excludeInward ×1
     ...scopeParams(scope.mfgIds),         // entity scope: mfg ×2
     ...scopeParams(scope.warehouseNames), // entity scope: warehouse ×2
+    ...scopeParams(scope.brandIds),       // entity scope: brand ×2
   ]
 }

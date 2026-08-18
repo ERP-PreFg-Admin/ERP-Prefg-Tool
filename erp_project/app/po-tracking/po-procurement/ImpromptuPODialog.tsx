@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
@@ -13,6 +13,7 @@ import { useToast } from "@/components/ui/toast"
 import { RemarksField, PO_REASON_PRESETS } from "@/components/masters/RemarksField"
 import type { EditData, ImpromptuForm, MfgOption, MfgSkuOption, SkuOption, WarehouseOption } from "./po-types"
 import { EMPTY_FORM } from "./po-types"
+import { warehousesForEntity, warehouseLabel, warehouseKey } from "./po-utils"
 import { useQuotedRate } from "./useQuotedRate"
 
 export default function ImpromptuPODialog({
@@ -90,6 +91,18 @@ export default function ImpromptuPODialog({
     ? form.recipe_id
     : bomChoices[0] ? String(bomChoices[0].recipe_id) : ""
 
+  // Only the SKU's own legal entity's warehouses — a destination belonging to the
+  // other entity has no facility for this PO to inward into.
+  const skuEntity = skuOptions.find((s) => s.sku_code === form.sku_code)?.entity_code ?? null
+  const destinations = useMemo(
+    () => warehousesForEntity(warehouseOptions, skuEntity),
+    [warehouseOptions, skuEntity]
+  )
+  // Derived, not fixed up in an effect — same reasoning as selectedBomId above. A
+  // destination carried over from a different entity's SKU is not on the new list,
+  // so it reads back as unselected rather than being silently submitted.
+  const selectedDest = destinations.some((w) => w.name === form.destination) ? form.destination : ""
+
   function set(field: keyof ImpromptuForm, value: string) {
     setForm((f) => ({ ...f, [field]: value }))
     setErrors((e) => ({ ...e, [field]: "" }))
@@ -130,7 +143,7 @@ export default function ImpromptuPODialog({
         unit_price:   unitPrice,
         total_amount: totalAmt,
         expected_on:  form.expected_on,
-        destination:  form.destination || undefined,
+        destination:  selectedDest || undefined,
         reason:       form.reason.trim(),
       }
       const res = isEdit
@@ -273,11 +286,11 @@ export default function ImpromptuPODialog({
           {/* Destination — defaults to Mother Warehouse */}
           <div className="grid gap-1.5">
             <Label htmlFor="ipo-dest">Destination Warehouse</Label>
-            <Select id="ipo-dest" value={form.destination} onChange={(e) => set("destination", e.target.value)} className="w-full">
+            <Select id="ipo-dest" value={selectedDest} onChange={(e) => set("destination", e.target.value)} className="w-full">
               <option value="">— Select Warehouse (optional) —</option>
-              {warehouseOptions.map((w) => (
-                <option key={w.id} value={w.name}>
-                  {w.name}{w.zone ? ` — ${w.zone}` : ""} ({w.type})
+              {destinations.map((w) => (
+                <option key={warehouseKey(w)} value={w.name}>
+                  {warehouseLabel(w)}
                 </option>
               ))}
             </Select>

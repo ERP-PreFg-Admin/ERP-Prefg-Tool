@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import type { InvoiceForm } from "./invoice-form"
 import type { ParsedCharge } from "@/types/invoice"
 import type { MfgOption, WarehouseOption } from "../po-procurement/po-types"
+import { warehousesForEntity, warehouseLabel, warehouseKey } from "../po-procurement/po-utils"
 
 const textareaCls =
   "w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
@@ -132,10 +133,16 @@ export function InvoiceFields({
             onChange={(e) => setField("destination", e.target.value)}
             className="w-full"
           >
+            {/* One entry per SITE here, not per (site, entity) — unlike the PO
+                list's destination filter. This is the invoice FORM: it writes
+                invoice_mfg.destination, and which entity's facility that resolves to
+                is decided by the invoice's own buyer GSTIN in lib/invoice-inward.ts,
+                not by this dropdown. Offering both would ask the user to choose
+                something their choice cannot affect. Hence no facility code either. */}
             <option value="">— Select Warehouse —</option>
-            {warehouseOptions.map((w) => (
-              <option key={w.id} value={w.name}>
-                {w.name}{w.zone ? ` — ${w.zone}` : ""} ({w.type})
+            {warehousesForEntity(warehouseOptions, null).map((w) => (
+              <option key={warehouseKey(w)} value={w.name}>
+                {warehouseLabel(w)}
               </option>
             ))}
           </Select>

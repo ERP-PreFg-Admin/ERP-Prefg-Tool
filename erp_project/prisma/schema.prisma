@@ -287,6 +287,7 @@ enum user_entity_scope_type {
   mfg
   vendor
   warehouse
+  brand
 }
 
 /// Per-request activity trail, written by lib/gateway/with-gateway.ts for every
@@ -467,6 +468,9 @@ model entity_emails {
   /// prisma/add_entity_email_legal_entity.sql.
   legal_entity_code String?             @db.VarChar(50)
   email       String                    @db.VarChar(255)
+  /// Which header this address goes in. Defaults to `to`, which is how every
+  /// row behaved before the column existed.
+  recipient_type entity_emails_recipient_type @default(to)
   purpose     String?                   @db.VarChar(100)
   created_at  DateTime?                 @default(now()) @db.Timestamp(0)
 
@@ -695,7 +699,12 @@ model master_skus {
   id                                             Int                       @id @default(autoincrement())
   sku_code                                       String                    @unique(map: "sku_code") @db.VarChar(50)
   name                                           String                    @db.VarChar(200)
+  /// Free text, and the grouping key for variant families alongside
+  /// base_sku_sno. Kept for display; `brand_id` is the access boundary.
   brand                                          String?                   @db.VarChar(100)
+  /// master_brand.id — the ACCESS BOUNDARY key. NULL = unattributed, which means
+  /// visible to every brand-scoped user. See prisma/add_master_brand.sql.
+  brand_id                                       Int?
   category                                       String?                   @db.VarChar(100)
   status                                         master_skus_status?       @default(active)
   created_at                                     DateTime?                 @default(now()) @db.Timestamp(0)
@@ -707,8 +716,40 @@ model master_skus {
   users                                          users?                    @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "master_skus_ibfk_1")
   sku_variants_sku_variants_parent_sku_idToskus  sku_variants[]            @relation("sku_variants_parent_sku_idToskus")
   sku_variants_sku_variants_variant_sku_idToskus sku_variants[]            @relation("sku_variants_variant_sku_idToskus")
+  master_brand                                   master_brand?             @relation(fields: [brand_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_sku_brand")
 
   @@index([created_by], map: "created_by")
+  @@index([brand_id], map: "idx_sku_brand_id")
+}
+
+/// Our brands, canonicalised. Exists because brand became an ACCESS BOUNDARY and
+/// master_skus.brand is free text — the dev survey found 'FIEN' (a transposed
+/// 'Fein') on 28 SKUs, which a `brand = 'Fein'` predicate would have silently
+/// excluded. `brand_key` is the normalised comparison key and mirrors brandKey()
+/// in lib/constants.ts; if the two diverge, the boundary and the display value
+/// disagree.
+///
+/// `entity_id` is nullable: DND is a real brand whose legal entity is not yet
+/// identified, which entityForBrand() already models by returning null rather
+/// than guessing.
+model master_brand {
+  id          Int                  @id @default(autoincrement())
+  brand_key   String               @unique(map: "uq_master_brand_key") @db.VarChar(50)
+  name        String               @db.VarChar(100)
+  po_code     String               @db.VarChar(20)
+  entity_id   Int?
+  status      master_brand_status  @default(active)
+  created_at  DateTime             @default(now()) @db.DateTime(0)
+
+  master_entity master_entity? @relation(fields: [entity_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_brand_entity")
+  master_skus   master_skus[]
+
+  @@index([entity_id], map: "fk_brand_entity")
+}
+
+enum master_brand_status {
+  active
+  inactive
 }
 
 model master_vendors {
@@ -769,10 +810,20 @@ model master_entity {
   code       String                @unique(map: "uq_master_entity_code") @db.VarChar(50)
   legal_name String                @unique(map: "uq_master_entity_legal_name") @db.VarChar(150)
   pan        String?               @unique(map: "uq_master_entity_pan") @db.VarChar(10)
+  /// Bank details for the PO document's "Company Bank Details" band. No address
+  /// or GSTIN columns here on purpose: details_warehouse_entity already holds
+  /// bill_to_* per (site, entity), which is the right grain because GST
+  /// registration is state-wise.
+  bank_name       String?           @db.VarChar(150)
+  /// VarChar, not an Int — leading zeros are significant.
+  bank_account_no String?           @db.VarChar(30)
+  bank_ifsc       String?           @db.VarChar(11)
+  bank_branch     String?           @db.VarChar(150)
   status     master_entity_status? @default(active)
   created_at DateTime?             @default(now()) @db.Timestamp(0)
 
   details_warehouse_entity details_warehouse_entity[]
+  master_brand             master_brand[]
 }
 
 /// One row per (location, legal entity): that entity's Unicommerce facility, GST
@@ -990,6 +1041,14 @@ enum entity_emails_entity_type {
   vendor
   mfg
   warehouse
+  /// One of our own people, from `users`. entity_code is the warehouse name or
+  /// manufacturer code they are attached to — or '*' for every manufacturer.
+  employee
+}
+
+enum entity_emails_recipient_type {
+  to
+  cc
 }
 
 enum history_vrm_mtrl_type {

@@ -2,7 +2,7 @@
 
 import { AlertTriangle, MoreVertical } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { cn } from "@/lib/utils"
+import { createPortal } from "react-dom"
 
 export type MenuAction = {
   label: string
@@ -22,15 +22,35 @@ const VARIANT_CLS: Record<string, string> = {
 export default function PoActionMenu({ actions }: { actions: MenuAction[] }) {
   const [open, setOpen]     = useState(false)
   const [openUp, setOpenUp] = useState(false)
+  /** The button's viewport box — the portalled menu is positioned off it. */
+  const [box, setBox]       = useState<DOMRect | null>(null)
   const ref                 = useRef<HTMLDivElement>(null)
+  const menuRef             = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!open) return
     function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      // Both refs: the menu is portalled to <body>, so it is not inside `ref`
+      // and a click on an item would otherwise read as a click outside.
+      if (!ref.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false)
     }
     document.addEventListener("mousedown", handler)
     return () => document.removeEventListener("mousedown", handler)
+  }, [open])
+
+  // Keep the menu on the button while it's open. Capture phase, because what
+  // scrolls is the table wrapper, not the window.
+  useEffect(() => {
+    if (!open) return
+    const measure = () => setBox(ref.current?.getBoundingClientRect() ?? null)
+    measure()
+    window.addEventListener("scroll", measure, true)
+    window.addEventListener("resize", measure)
+    return () => {
+      window.removeEventListener("scroll", measure, true)
+      window.removeEventListener("resize", measure)
+    }
   }, [open])
 
   if (actions.length === 0) return null
@@ -57,12 +77,20 @@ export default function PoActionMenu({ actions }: { actions: MenuAction[] }) {
         <MoreVertical className="h-3.5 w-3.5" />
       </button>
 
-      {open && (
+      {open && box && createPortal(
         <div
-          className={cn(
-            "absolute right-0 z-50 min-w-45 rounded-md border border-border bg-popover shadow-md",
-            openUp ? "bottom-full mb-1" : "top-full mt-1"
-          )}
+          ref={menuRef}
+          // Fixed + portalled rather than absolute, for the reason FuzzySelect's
+          // list is: the table sits in an `overflow-auto` wrapper, which clipped
+          // the menu. On a full page the box is tall enough to hide that; with a
+          // single row the menu opened *into* the table and had to be scrolled to.
+          style={{
+            right: window.innerWidth - box.right,
+            ...(openUp ? { bottom: window.innerHeight - box.top + 4 } : { top: box.bottom + 4 }),
+          }}
+          // pointer-events-auto is load-bearing: a modal dialog sets
+          // `pointer-events: none` on <body>, and this menu is portalled there.
+          className="pointer-events-auto fixed z-9999 min-w-45 rounded-md border border-border bg-popover shadow-md"
         >
           {actions.map((action, i) => (
             action.disabled ? (
@@ -86,7 +114,8 @@ export default function PoActionMenu({ actions }: { actions: MenuAction[] }) {
               </button>
             )
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

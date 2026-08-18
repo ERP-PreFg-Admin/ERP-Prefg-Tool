@@ -10,8 +10,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
 
-type EntityType = "vendor" | "mfg" | "warehouse"
+type EntityType = "vendor" | "mfg" | "warehouse" | "employee"
 type EntityOption = { id: number; code: string; name: string }
+/** What an employee row hangs off. "all_mfgs" is stored as entity_code '*'. */
+type AttachTo = "warehouse" | "mfg" | "all_mfgs"
 
 const TYPE_LABEL: Record<EntityType, string> = {
   mfg: "Manufacturer",
@@ -19,10 +21,15 @@ const TYPE_LABEL: Record<EntityType, string> = {
   // Warehouses are keyed by name, not a code — that's what
   // purchase_orders.destination stores, and what the inward mail looks up.
   warehouse: "Warehouse",
+  employee: "Employee",
 }
-type EmailRow = { email: string; purpose: string }
 
-const emptyRow = (): EmailRow => ({ email: "", purpose: "" })
+/** The wildcard entity_code meaning "every manufacturer, including future ones". */
+const ALL_MFGS = "*"
+
+type EmailRow = { email: string; recipient_type: "to" | "cc"; purpose: string }
+
+const emptyRow = (): EmailRow => ({ email: "", recipient_type: "to", purpose: "" })
 
 export default function AddEntityEmailDialog({
   open, onClose, onSaved, vendorOptions, mfgOptions, warehouseOptions, legalEntityOptions,
@@ -41,6 +48,8 @@ export default function AddEntityEmailDialog({
   /** "" means every legal entity — the pre-existing behaviour of every row. */
   const [legalEntityCode, setLegalEntityCode] = useState("")
   const [rows, setRows] = useState<EmailRow[]>([emptyRow()])
+  /** Employee only: what the addresses are attached to. */
+  const [attachTo, setAttachTo] = useState<AttachTo>("all_mfgs")
   const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError] = useState("")
 
@@ -51,8 +60,11 @@ export default function AddEntityEmailDialog({
     setEntityCode("")
     setLegalEntityCode("")
     setRows([emptyRow()])
+    setAttachTo("all_mfgs")
     setApiError("")
   }, [open])
+
+  const isEmployee = entityType === "employee"
 
   const codeOptions =
     entityType === "vendor" ? vendorOptions
@@ -71,9 +83,26 @@ export default function AddEntityEmailDialog({
 
   async function handleSubmit() {
     setApiError("")
-    if (!entityCode) { setApiError("Select an entity."); return }
-    const filled = rows.filter((r) => r.email.trim())
-    if (filled.length === 0) { setApiError("Enter at least one email address."); return }
+
+    // "All manufacturers" is the one code the user doesn't pick from a list.
+    const code = isEmployee && attachTo === "all_mfgs" ? ALL_MFGS : entityCode
+    if (!code) {
+      setApiError(
+        !isEmployee ? "Select an entity."
+        : attachTo === "warehouse" ? "Select a warehouse."
+        : "Select a manufacturer."
+      )
+      return
+    }
+
+    const emails = rows
+      .filter((r) => r.email.trim())
+      .map((r) => ({
+        email: r.email.trim(),
+        recipient_type: r.recipient_type,
+        purpose: r.purpose.trim() || undefined,
+      }))
+    if (emails.length === 0) { setApiError("Enter at least one email address."); return }
 
     setSubmitting(true)
     try {
@@ -82,10 +111,10 @@ export default function AddEntityEmailDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           entity_type: entityType,
-          entity_code: entityCode,
+          entity_code: code,
           // Omitted rather than "" for non-warehouse types, which the schema rejects.
           legal_entity_code: entityType === "warehouse" ? legalEntityCode || undefined : undefined,
-          emails: filled.map((r) => ({ email: r.email.trim(), purpose: r.purpose.trim() || undefined })),
+          emails,
         }),
       })
       const data = await res.json()
@@ -122,18 +151,65 @@ export default function AddEntityEmailDialog({
                 <option value="mfg">Manufacturer</option>
                 <option value="vendor">Vendor</option>
                 <option value="warehouse">Warehouse</option>
+                <option value="employee">Employee / other person</option>
               </Select>
             </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="ee-code">{TYPE_LABEL[entityType]}</Label>
-              <Select id="ee-code" value={entityCode} className="w-full" onChange={(e) => setEntityCode(e.target.value)}>
-                <option value="">— Select —</option>
-                {codeOptions.map((o) => (
-                  <option key={o.id} value={o.code}>{o.code} — {o.name}</option>
-                ))}
-              </Select>
-            </div>
+
+            {/* Employee picks WHAT it hangs off; the others pick the entity itself. */}
+            {isEmployee ? (
+              <div className="grid gap-1.5">
+                <Label htmlFor="ee-attach">Attach To</Label>
+                <Select
+                  id="ee-attach" value={attachTo} className="w-full"
+                  onChange={(e) => { setAttachTo(e.target.value as AttachTo); setEntityCode("") }}
+                >
+                  <option value="all_mfgs">All manufacturers</option>
+                  <option value="mfg">One manufacturer</option>
+                  <option value="warehouse">One warehouse</option>
+                </Select>
+              </div>
+            ) : (
+              <div className="grid gap-1.5">
+                <Label htmlFor="ee-code">{TYPE_LABEL[entityType]}</Label>
+                <Select id="ee-code" value={entityCode} className="w-full" onChange={(e) => setEntityCode(e.target.value)}>
+                  <option value="">— Select —</option>
+                  {codeOptions.map((o) => (
+                    <option key={o.id} value={o.code}>{o.code} — {o.name}</option>
+                  ))}
+                </Select>
+              </div>
+            )}
           </div>
+
+          {isEmployee && (
+            <>
+              {attachTo !== "all_mfgs" && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ee-attach-code">
+                    {attachTo === "warehouse" ? "Warehouse" : "Manufacturer"}
+                  </Label>
+                  <Select
+                    id="ee-attach-code" value={entityCode} className="w-full"
+                    onChange={(e) => setEntityCode(e.target.value)}
+                  >
+                    <option value="">— Select —</option>
+                    {(attachTo === "warehouse" ? warehouseOptions : mfgOptions).map((o) => (
+                      <option key={o.id} value={o.code}>{o.code} — {o.name}</option>
+                    ))}
+                  </Select>
+                </div>
+              )}
+
+              <p className="text-xs text-muted-foreground">
+                {attachTo === "all_mfgs"
+                  ? "One row per address, covering every manufacturer — including any added later."
+                  : attachTo === "warehouse"
+                  ? "Looped in on the inward-invoice mail for this site, for every legal entity."
+                  : "Looped in on the PO mail for this manufacturer only."}
+                {" "}Anyone can be added here, including people outside the company — the address is typed, not picked from your users.
+              </p>
+            </>
+          )}
 
           {/* Warehouses only. Every location operates under both Pep and
               Kreative, and the point of contact at the site is not necessarily
@@ -163,35 +239,44 @@ export default function AddEntityEmailDialog({
 
           <div className="grid gap-2">
             <Label>Emails</Label>
-            {rows.map((row, i) => (
-              <div key={i} className="flex items-start gap-2">
-                <Input
-                  type="email" placeholder="name@example.com"
-                  value={row.email} onChange={(e) => updateRow(i, { email: e.target.value })}
-                />
-                <Input
-                  placeholder="Purpose (e.g. PO, Invoice)"
-                  value={row.purpose} onChange={(e) => updateRow(i, { purpose: e.target.value })}
-                />
-                <button
-                  type="button"
-                  onClick={() => removeRow(i)}
-                  disabled={rows.length === 1}
-                  className="mt-1.5 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-                  title="Remove"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={addRow}
-              className="rounded-lg border border-dashed border-muted-foreground/40 px-3 py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors flex items-center gap-1.5 w-fit"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Add another email
-            </button>
+              {rows.map((row, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <Input
+                    type="email" placeholder="name@example.com"
+                    value={row.email} onChange={(e) => updateRow(i, { email: e.target.value })}
+                  />
+                  <Select
+                    value={row.recipient_type}
+                    onChange={(e) => updateRow(i, { recipient_type: e.target.value as "to" | "cc" })}
+                    aria-label="Send as"
+                    className="w-20 shrink-0"
+                  >
+                    <option value="to">To</option>
+                    <option value="cc">CC</option>
+                  </Select>
+                  <Input
+                    placeholder="Purpose (e.g. PO, Invoice)"
+                    value={row.purpose} onChange={(e) => updateRow(i, { purpose: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeRow(i)}
+                    disabled={rows.length === 1}
+                    className="mt-1.5 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                    title="Remove"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={addRow}
+                className="rounded-lg border border-dashed border-muted-foreground/40 px-3 py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors flex items-center gap-1.5 w-fit"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add another email
+              </button>
           </div>
 
           {apiError && <p className="text-sm text-destructive">{apiError}</p>}

@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
-import { getUserScope, inScope, scopeParams } from "@/lib/scope"
+import { inScope, scopeParams } from "@/lib/scope"
+import { getViewScope } from "@/lib/brand-view"
 import { redirect, notFound } from "next/navigation"
 import { timedQuery } from "@/lib/query-timing"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
@@ -75,7 +76,7 @@ export default async function ManufacturerDetailPage({
 
   // Page permission says whether the Cost Manager is usable at all; entity
   // scope says which manufacturers. Both must pass.
-  const scope = await getUserScope(userId)
+  const scope = await getViewScope(userId)
   if (!inScope(scope, "mfg", id)) redirect("/auth/unauthorized")
 
   const sp = await searchParams
@@ -101,7 +102,7 @@ export default async function ManufacturerDetailPage({
 
       <div className="space-y-4">
         <TabBar mfgId={id} currentTab={tab} />
-        {tab === "active" && <LineStatusTabContent mfgId={id} />}
+        {tab === "active" && <LineStatusTabContent mfgId={id} brandScope={scopeParams(scope.brandIds)} />}
         {tab === "misc_cost" && <MiscTabContent mfgId={id} />}
         {tab === "rm_vendor" && <RmVendorTabContent mfgId={id} />}
         {tab === "agreed_rates" && <AgreedRatesTabContent mfgId={id} />}
@@ -110,6 +111,7 @@ export default async function ManufacturerDetailPage({
           // needs the vendor dimension of the scope too.
           <FinalCostingTabContent
             mfgId={id}
+            brandScope={scopeParams(scope.brandIds)}
             vendorScope={[...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds)]}
             approvedScope={[...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds)]}
           />
@@ -121,9 +123,9 @@ export default async function ManufacturerDetailPage({
   )
 }
 
-async function LineStatusTabContent({ mfgId }: { mfgId: number }) {
+async function LineStatusTabContent({ mfgId, brandScope }: { mfgId: number; brandScope: unknown[] }) {
   const [lineRows, bomOptions, liveBomRows, materialCostRows, miscCostRows] = await Promise.all([
-    timedQuery<MfgLine>(manufacturingSql.selectLinesByMfg, [mfgId, null, null], { label: "manufacturing.selectLinesByMfg" }),
+    timedQuery<MfgLine>(manufacturingSql.selectLinesByMfg, [mfgId, null, null, ...brandScope], { label: "manufacturing.selectLinesByMfg" }),
     timedQuery<{ id: number; bom_code: string; sku_code: string | null; sku_name: string | null }>(manufacturingSql.bomOptionsForMfg, [mfgId], { label: "manufacturing.bomOptionsForMfg" }),
     timedQuery<{ sku_id: number; sku_code: string | null; live_bom_count: number; bom_ids: string; bom_codes: string }>(recipeSql.selectSkusWithMultipleLiveBomsByMfg, [mfgId], { label: "bom.selectSkusWithMultipleLiveBomsByMfg" }),
     // Same two queries the Agreed Final Costing tab runs — the warning shown
@@ -198,13 +200,13 @@ async function AgreedRatesTabContent({ mfgId }: { mfgId: number }) {
 }
 
 async function FinalCostingTabContent({
-  mfgId, vendorScope, approvedScope,
-}: { mfgId: number; vendorScope: unknown[]; approvedScope: unknown[] }) {
+  mfgId, brandScope, vendorScope, approvedScope,
+}: { mfgId: number; brandScope: unknown[]; vendorScope: unknown[]; approvedScope: unknown[] }) {
   const [
     lineRows, materialCostRows, miscCostRows, bomLineInputRows,
     minMaxRmRows, minMaxPmRows, approvedRmRows, approvedPmRows,
   ] = await Promise.all([
-    timedQuery<MfgLine>(manufacturingSql.selectLiveLinesByMfg, [mfgId], { label: "manufacturing.selectLiveLinesByMfg (costing)" }),
+    timedQuery<MfgLine>(manufacturingSql.selectLiveLinesByMfg, [mfgId, ...brandScope], { label: "manufacturing.selectLiveLinesByMfg (costing)" }),
     timedQuery<{
       recipe_id: number; rm_cost: string; pm_cost: string
       filling: string | null; rm_line_count: number

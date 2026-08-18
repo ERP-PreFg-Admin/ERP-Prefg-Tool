@@ -10,6 +10,8 @@ import type { PoolConnection } from "mysql2/promise"
 import logger from "@/lib/logger"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { getUserScope, scopeParams, assertInScope } from "@/lib/scope"
+import { assertSkuCodeInBrandScope, assertSkuCodesInBrandScope } from "@/lib/brand-guard"
+import { assertDestinationServesEntity } from "@/lib/po-guard"
 import { ApiError } from "@/lib/gateway/errors"
 import { poActionSchema } from "@/lib/validation/purchase-orders"
 import { monthIST } from "@/lib/date"
@@ -23,6 +25,7 @@ export const GET = withGateway({
     const rows = await query<any>(purchaseOrdersSql.selectAll, [
       ...scopeParams(scope.mfgIds),
       ...scopeParams(scope.warehouseNames),
+      ...scopeParams(scope.brandIds),
     ])
     return NextResponse.json(rows)
   },
@@ -54,6 +57,14 @@ export const POST = withGateway({
   // z.union, and PoCreate has no "action" field at all, so a direct property
   // access wouldn't type-check without narrowing via "in" first.)
   if ("rows" in body) {
+    // Checked here, not in poBulkHandler: that runs on approval as the APPROVER,
+    // and the approvals queue is deliberately not brand-scoped. Upload is the
+    // only point at which the uploader's own grant is knowable.
+    await assertSkuCodesInBrandScope(
+      userId,
+      body.rows.map((r) => String((r as Record<string, unknown>).sku_code ?? ""))
+    )
+
     const yyyymm = monthIST()
     const eventId = makeEventId("PO_BULK", "stage")
     recordRawEvent("PO_BULK", eventId, { rowCount: body.rows.length })
@@ -87,6 +98,15 @@ export const POST = withGateway({
   const scope = await getUserScope(userId)
   assertInScope(scope, "mfg", mfg_id)
   if (destination) assertInScope(scope, "warehouse", destination)
+  // …nor against a brand they don't hold. The SKU is what carries the brand, and
+  // the lookup below re-reads it anyway; this throws 403 before any of that.
+  await assertSkuCodeInBrandScope(userId, sku_code, scope)
+  // …and not into the OTHER legal entity's warehouse. The dialog's dropdown already
+  // narrows to this SKU's entity, but `destination` is free text on the request, so
+  // the dropdown is guidance and this is the rule. Sending a Hyphen PO to a
+  // Pep-only site creates cleanly and then fails at inwarding, where no facility
+  // resolves for that (site, entity) pair.
+  await assertDestinationServesEntity(sku_code, destination)
 
   // Resolve brand from SKU and validate status in one query
   const skuRows = await query<{ status: string; brand: string | null }>(

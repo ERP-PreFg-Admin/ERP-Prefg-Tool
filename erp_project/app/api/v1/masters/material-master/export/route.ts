@@ -22,6 +22,7 @@
 
 import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
+import { getUserScope, scopeParams } from "@/lib/scope"
 import { rawMaterials as rmSql }                from "@/lib/queries/raw-materials"
 import { packingMaterials as pmSql }            from "@/lib/queries/packing-materials"
 import { buildCsv, buildXlsx, buildExportFilename } from "@/lib/export"
@@ -46,10 +47,15 @@ export const GET = withGateway({
   const makeParam   = make   || null
   const typeParam   = type   || null
 
-  // RM: [like×4, status×2, make×2, type×2] — PM: [like×4, status×2, type×2]
+  // An export must not be a way around the boundary.
+  const brandScope = scopeParams((await getUserScope(Number(session.user.id))).brandIds)
+
+  // RM: [like×4, status×2, make×2, type×2, brandScope×2]
+  // PM: [like×4, status×2, type×2, brandScope×2]
+  // brandScope last, matching where brandScopeFor() is interpolated.
   const filterParams = isPm
-    ? [like, like, like, like, statusParam, statusParam, typeParam, typeParam]
-    : [like, like, like, like, statusParam, statusParam, makeParam, makeParam, typeParam, typeParam]
+    ? [like, like, like, like, statusParam, statusParam, typeParam, typeParam, ...brandScope]
+    : [like, like, like, like, statusParam, statusParam, makeParam, makeParam, typeParam, typeParam, ...brandScope]
 
   const columns   = isPm ? PM_BASE_EXPORT_COLUMNS  : RM_BASE_EXPORT_COLUMNS
   const countSql  = isPm ? pmSql.countAll           : rmSql.countAll

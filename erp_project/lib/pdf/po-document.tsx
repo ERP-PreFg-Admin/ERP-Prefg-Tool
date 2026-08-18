@@ -1,12 +1,37 @@
+/**
+ * The purchase order document. ONE template, for every legal entity.
+ *
+ * Everything that differs between Pep and Kreative is DATA, not layout: the legal
+ * name, the address, the GSTIN and the bank block all arrive resolved on
+ * `d.letterhead`, and the delivery address on `d.ship_to`.
+ *
+ * ── Where those values come from ────────────────────────────────────────────
+ *   purchase_orders.sku_code → master_skus.brand_id → master_brand.entity_id
+ *     → master_entity            (legal name, bank)
+ *   + purchase_orders.destination → master_warehouse
+ *     → details_warehouse_entity (bill-to and ship-to, per site AND entity)
+ *
+ * The bill-to is per (site, entity) rather than per entity because GST
+ * registration is state-wise: a Guwahati delivery must bill under the Guwahati
+ * registration, not the head office's. See lib/pdf/po-letterhead.ts for the
+ * resolution and its fallbacks, and purchaseOrdersSql.selectForEmail for the joins.
+ *
+ * Resolved at RENDER time, not stamped at creation — so attributing a SKU's brand
+ * or filling in a site's bill-to fixes the PDF of every existing PO, without
+ * touching a single purchase_orders row.
+ *
+ * This file renders. It resolves nothing and holds no fallbacks of its own.
+ */
+
 import React from "react"
 import {
   Document, Page, Text, View, StyleSheet, Font, renderToBuffer,
 } from "@react-pdf/renderer"
 import { IST } from "@/lib/date"
+import type { PoLetterhead, PoShipTo } from "@/lib/pdf/po-letterhead"
 
-// react-pdf only wraps text at whitespace by default, so a long unbroken
-// token (e.g. a long PO code) overflows its column into the next one.
-// Allow breaking at any character when a word doesn't fit.
+// react-pdf only breaks lines at whitespace, so one long unbroken token (a PO
+// code, an account number) overflows its column into the neighbouring one.
 Font.registerHyphenationCallback((word) => Array.from(word))
 
 export type PoEmailData = {
@@ -27,14 +52,10 @@ export type PoEmailData = {
   location: string | null
   mfg_email: string | null
   raised_by_name: string
-}
-
-// ── Brand constants ────────────────────────────────────────────────────────────
-const COMPANY = {
-  name:  "Pep Technologies Pvt Ltd, MCaffeine",
-  addr1: "A1 304, Kanakia Boomerang, Chandivali, Andheri (E),",
-  addr2: "Mumbai 400072",
-  gst:   "GST no- 27AAICP2804J1ZC",
+  /** Who the PO is from — resolved, never a raw row. See po-letterhead.ts. */
+  letterhead: PoLetterhead
+  /** Where the goods go. */
+  ship_to: PoShipTo
 }
 
 const TEAL   = "#1e7a7a"
@@ -136,7 +157,11 @@ const S = StyleSheet.create({
     backgroundColor: YELLOW, paddingHorizontal: 8, paddingVertical: 5,
     borderTopWidth: 0.5, borderTopColor: BD,
   },
-  bankTx: { fontFamily: "Helvetica-Bold", fontSize: 8 },
+  bankTx:   { fontFamily: "Helvetica-Bold", fontSize: 8 },
+  bankBody: { paddingHorizontal: 8, paddingVertical: 5 },
+  bankRow:  { flexDirection: "row", marginBottom: 1.5 },
+  bankKey:  { fontFamily: "Helvetica-Bold", fontSize: 7.5, width: 70 },
+  bankVal:  { fontSize: 7.5, flex: 1 },
 
   // Declaration
   decl:      { marginHorizontal: 20, marginTop: 8, borderWidth: 1, borderColor: BD, padding: 8 },
@@ -146,9 +171,11 @@ const S = StyleSheet.create({
 
 // ── Document ───────────────────────────────────────────────────────────────────
 function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
-  const base = num(d.total_amount)
-  const gst  = base > 0 ? Math.round(base * GST_RATE) : 0
+  const base  = num(d.total_amount)
+  const gst   = base > 0 ? Math.round(base * GST_RATE) : 0
   const grand = base + gst
+  const lh    = d.letterhead
+  const ship  = d.ship_to
 
   return (
     <Document>
@@ -156,10 +183,11 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
 
         {/* ── Teal header ── */}
         <View style={S.header}>
-          <Text style={S.hName}>{COMPANY.name}</Text>
-          <Text style={S.hSub}>{COMPANY.addr1}</Text>
-          <Text style={S.hSub}>{COMPANY.addr2}</Text>
-          <Text style={S.hSub}>{COMPANY.gst}</Text>
+          <Text style={S.hName}>{lh.name}</Text>
+          {lh.address_lines.map((line, i) => (
+            <Text key={i} style={S.hSub}>{line}</Text>
+          ))}
+          {lh.gstin ? <Text style={S.hSub}>GST no- {lh.gstin}</Text> : null}
         </View>
 
         {/* ── Date ── */}
@@ -170,22 +198,29 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
         {/* ── 3-column info ── */}
         <View style={S.infoWrap}>
 
-          {/* Billing Address */}
+          {/* Billing Address — this entity's registration for THIS destination.
+              GST is state-wise, so it is per (site, entity), not per entity. */}
           <View style={S.infoCol}>
             <Text style={S.infoTitle}>Billing Address</Text>
-            <Text style={S.infoBold}>{COMPANY.name}</Text>
-            <Text style={S.infoLine}>{COMPANY.addr1}</Text>
-            <Text style={S.infoLine}>{COMPANY.addr2}</Text>
-            <Text style={S.infoLine}>{COMPANY.gst}</Text>
+            <Text style={S.infoBold}>{lh.name}</Text>
+            {lh.address_lines.map((line, i) => (
+              <Text key={i} style={S.infoLine}>{line}</Text>
+            ))}
+            {lh.gstin ? <Text style={S.infoLine}>GST no- {lh.gstin}</Text> : null}
           </View>
 
-          {/* Delivery Address */}
+          {/* Delivery Address — the consignee. Its GSTIN is deliberately not
+              necessarily this entity's: Pep operates most sites, so Kreative
+              usually ships under Pep's registration for that state. */}
           <View style={S.infoCol}>
             <Text style={S.infoTitle}>Delivery Address</Text>
-            {d.destination
-              ? <Text style={S.infoBold}>{d.destination}</Text>
+            {ship.name
+              ? <Text style={S.infoBold}>{ship.name}</Text>
               : <Text style={S.infoLine}>—</Text>}
-            {d.dest_location ? <Text style={S.infoLine}>{d.dest_location}</Text> : null}
+            {ship.address_lines.map((line, i) => (
+              <Text key={i} style={S.infoLine}>{line}</Text>
+            ))}
+            {ship.gstin ? <Text style={S.infoLine}>GSTIN: {ship.gstin}</Text> : null}
           </View>
 
           {/* Purchase Order To */}
@@ -266,7 +301,7 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
             </View>
           </View>
 
-          {/* Row 2: (empty) | "GST As applicable" | "18%" */}
+          {/* Row 2: (empty) | "GST As applicable" | 18% amount */}
           <View style={S.btmRow}>
             <View style={S.btmLeft} />
             <View style={S.btmMid}>
@@ -282,16 +317,41 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
           {/* Row 3: Total — yellow highlight */}
           <View style={S.totalHL}>
             <Text style={{ flex: 1, fontFamily: "Helvetica-Bold", fontSize: 8 }}>Total</Text>
-            <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 8, marginRight: 20 }}>18%</Text>
+            <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 8, marginRight: 20 }}>{GST_RATE * 100}%</Text>
             <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 9, color: TEAL }}>
               {grand > 0 ? fmtN(grand) : "—"}
             </Text>
           </View>
 
-          {/* Company Bank Details */}
+          {/* Company Bank Details — the heading alone when the entity has no bank on
+              file, which is how this band shipped for months. resolveBank returns
+              null unless name, A/C and IFSC are all present, so a half-filled block
+              is never printed. */}
           <View style={S.bankHL}>
             <Text style={S.bankTx}>Company Bank Details</Text>
           </View>
+          {lh.bank ? (
+            <View style={S.bankBody}>
+              <View style={S.bankRow}>
+                <Text style={S.bankKey}>Bank</Text>
+                <Text style={S.bankVal}>{lh.bank.name}</Text>
+              </View>
+              <View style={S.bankRow}>
+                <Text style={S.bankKey}>A/C No.</Text>
+                <Text style={S.bankVal}>{lh.bank.account_no}</Text>
+              </View>
+              <View style={S.bankRow}>
+                <Text style={S.bankKey}>IFSC</Text>
+                <Text style={S.bankVal}>{lh.bank.ifsc}</Text>
+              </View>
+              {lh.bank.branch ? (
+                <View style={S.bankRow}>
+                  <Text style={S.bankKey}>Branch</Text>
+                  <Text style={S.bankVal}>{lh.bank.branch}</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
         {/* ── Declaration ── */}

@@ -10,6 +10,8 @@
 // Query params:
 //   format — "csv" (default) | "xlsx"
 //   search — same predicate the list uses (invoice_no / manufacturer name)
+//   mfgCode, destination, dateFrom, dateTo — the list's filters, so the file
+//     matches what's on screen rather than everything the search alone matches
 //
 // Responses:
 //   200 — file attachment
@@ -27,13 +29,19 @@ import logger from "@/lib/logger"
 export const GET = withGateway({
   access: { pageSlug: "/po-tracking/invoices", level: "viewer" },
   handler: async ({ req, session, ctx }) => {
-    const format = req.nextUrl.searchParams.get("format") === "xlsx" ? "xlsx" : "csv"
-    const search = req.nextUrl.searchParams.get("search")?.trim() || null
+    const sp     = req.nextUrl.searchParams
+    const format = sp.get("format") === "xlsx" ? "xlsx" : "csv"
+    const search = sp.get("search")?.trim() || null
 
     // Scoped exactly like the list — an export is the easiest way to walk out
     // with rows the screen would have hidden.
     const scope  = await getUserScope(Number(session.user.id))
-    const params = buildInvoiceParams(search, scope)
+    const params = buildInvoiceParams(search, scope, {
+      mfgCode:     sp.get("mfgCode")?.trim()     || null,
+      destination: sp.get("destination")?.trim() || null,
+      dateFrom:    sp.get("dateFrom")?.trim()    || null,
+      dateTo:      sp.get("dateTo")?.trim()      || null,
+    })
 
     try {
       const filename = buildExportFilename("invoices", format, { search })

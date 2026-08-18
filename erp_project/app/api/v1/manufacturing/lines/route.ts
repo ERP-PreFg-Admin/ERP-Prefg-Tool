@@ -12,6 +12,7 @@ import { ApiError } from "@/lib/gateway/errors"
 import { mfgLineActionSchema } from "@/lib/validation/manufacturing"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { getUserScope, assertInScope } from "@/lib/scope"
+import { assertRecipeInBrandScope } from "@/lib/brand-guard"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 
@@ -27,10 +28,14 @@ export const POST = withGateway({
     const scope = await getUserScope(userId)
     if (body.action === "create") {
       assertInScope(scope, "mfg", body.mfg_id)
+      // A line attaches a recipe to a manufacturer, so it is a write against
+      // that recipe's brand.
+      await assertRecipeInBrandScope(userId, body.recipe_id, scope)
     } else {
-      const rows = await query<{ mfg_id: number }>(manufacturingSql.selectLineById, [body.id])
+      const rows = await query<{ mfg_id: number; recipe_id: number }>(manufacturingSql.selectLineById, [body.id])
       if (rows.length === 0) throw new ApiError(404, "not_found", "Manufacturing line not found")
       assertInScope(scope, "mfg", rows[0].mfg_id)
+      await assertRecipeInBrandScope(userId, rows[0].recipe_id, scope)
     }
 
     if (body.action === "create") {

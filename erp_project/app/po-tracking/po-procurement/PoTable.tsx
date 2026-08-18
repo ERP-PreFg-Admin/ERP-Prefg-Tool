@@ -36,7 +36,7 @@ export default function PoTable({
   onToggleRow,
   onToggleAll,
   selectable = true,
-  receiveOnly = false,
+  inwardingMode = false,
   showUniwareCode = false,
   selectedPoId = null,
   onOpenInwarding,
@@ -62,9 +62,10 @@ export default function PoTable({
   onToggleAll: (ids: number[]) => void
   /** false drops the checkbox column entirely (PO Inwarding has no mail flow). */
   selectable?: boolean
-  /** PO Inwarding mode: receiving is the point, so Receive gets a labelled
-   *  button and the procurement-side actions (edit, split, cancel) are hidden. */
-  receiveOnly?: boolean
+  /** PO Inwarding mode: the desk reads invoices, it doesn't write orders. The
+   *  procurement actions (edit, split, cancel) are hidden, and so is Receive —
+   *  a receipt there comes from the supplier invoice through Add Invoice. */
+  inwardingMode?: boolean
   /** Only inward POs are mirrored to Unicommerce, so the column is dead weight
    *  anywhere they aren't shown. PO Inwarding turns it on. */
   showUniwareCode?: boolean
@@ -117,7 +118,7 @@ export default function PoTable({
     // Cancel voids the whole order, so it's off the table once anything has
     // been received — Short Close handles that case. A master with live
     // children can't be cancelled either: they'd point at a voided order.
-    const canCancel     = !receiveOnly && ["raised", "punched"].includes(status)
+    const canCancel     = !inwardingMode && ["raised", "punched"].includes(status)
       && receivedQty === 0 && allocatedQty === 0
 
     const actions: MenuAction[] = []
@@ -177,7 +178,7 @@ export default function PoTable({
     onEdit,
     onSplit,
     onReceive: setReceiveTarget,
-    receiveOnly,
+    inwardingMode,
     showUniwareCode,
     selectedPoId,
     onOpenInwarding,

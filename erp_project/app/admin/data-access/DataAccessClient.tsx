@@ -36,7 +36,12 @@ const SECTIONS: { type: EntityType; label: string; singular: string; hint: strin
   { type: "mfg", label: "Manufacturers", singular: "manufacturer", hint: "MFG Cost Manager, PO tracking, rate masters" },
   { type: "vendor", label: "Vendors", singular: "vendor", hint: "Vendor master, RM/PM vendor rates" },
   { type: "warehouse", label: "Warehouses", singular: "warehouse", hint: "PO destinations" },
+  { type: "brand", label: "Brands", singular: "brand", hint: "SKUs, POs, recipes, costing, invoices, materials" },
 ]
+// NOTE: this is an array, not a Record<EntityType, …>, so a missing dimension
+// compiles fine and simply renders no row — the grant becomes unsettable rather
+// than erroring. If a fifth dimension is ever added, this list is the one place
+// the compiler will NOT remind you about.
 
 const MODE_OPTIONS = [
   { key: "all", label: "All" },

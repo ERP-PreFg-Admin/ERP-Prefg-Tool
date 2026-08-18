@@ -96,7 +96,7 @@ export const bom = {
 
   /**
    * Paginated Recipe list with optional search, material-type, and status filters.
-   * Params: [like, like, like, type, type, status, status, LIMIT, OFFSET]
+   * Params: [like×3, brandScope×2, type×2, status×2, LIMIT, OFFSET]
    *   like   — '%search%' or null (bom_code / sku_code columns)
    *   type   — 'rm'|'pm' or null
    *   status — 'draft'|'active'|'inactive' or null
@@ -112,6 +112,7 @@ export const bom = {
     INNER JOIN master_recipe AS b ON b.id = bd.recipe_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
     WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+      AND (? IS NULL OR s.brand_id IS NULL OR s.brand_id IN (?))
       AND (? IS NULL OR bd.mtrl_type = ?)
       AND (? IS NULL OR b.status = ?)
     ORDER BY b.bom_code ASC
@@ -121,7 +122,7 @@ export const bom = {
   /**
    * Fetch ALL matching Recipe rows for export (no LIMIT/OFFSET).
    * Same WHERE clause as selectPaginated.
-   * Params: [like, like, like, type, type, status, status]
+   * Params: [like×3, brandScope×2, type×2, status×2]
    */
   selectAllFiltered: `
     SELECT
@@ -134,6 +135,7 @@ export const bom = {
     INNER JOIN master_recipe AS b ON b.id = bd.recipe_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
     WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+      AND (? IS NULL OR s.brand_id IS NULL OR s.brand_id IN (?))
       AND (? IS NULL OR bd.mtrl_type = ?)
       AND (? IS NULL OR b.status = ?)
     ORDER BY b.bom_code ASC
@@ -141,7 +143,7 @@ export const bom = {
 
   /**
    * Matching COUNT for selectPaginated.
-   * Params: [like, like, like, type, type, status, status]
+   * Params: [like×3, brandScope×2, type×2, status×2]
    */
   countAll: `
     SELECT COUNT(*) AS total
@@ -149,6 +151,7 @@ export const bom = {
     INNER JOIN master_recipe AS b ON b.id = bd.recipe_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
     WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+      AND (? IS NULL OR s.brand_id IS NULL OR s.brand_id IN (?))
       AND (? IS NULL OR bd.mtrl_type = ?)
       AND (? IS NULL OR b.status = ?)
   `,
@@ -276,6 +279,7 @@ export const bom = {
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
     WHERE b.status <> 'inactive'
       AND (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+      AND (? IS NULL OR s.brand_id IS NULL OR s.brand_id IN (?))
       AND (? IS NULL OR b.status = ?)
     ORDER BY b.bom_code ASC
     LIMIT ? OFFSET ?
@@ -285,7 +289,7 @@ export const bom = {
    * Fetch ALL matching Recipe headers (no LIMIT/OFFSET) — feeds the fuzzy-search
    * ranking path (lib/fuzzy-search.ts) when a search term is present. Same
    * shape/WHERE as selectPaginatedGrouped.
-   * Params: [like, like, like, status, status]
+   * Params: [like×3, brandScope×2, status×2]
    */
   selectAllFilteredGrouped: `
     SELECT
@@ -300,13 +304,14 @@ export const bom = {
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
     WHERE b.status <> 'inactive'
       AND (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+      AND (? IS NULL OR s.brand_id IS NULL OR s.brand_id IN (?))
       AND (? IS NULL OR b.status = ?)
     ORDER BY b.bom_code ASC
   `,
 
   /**
    * Matching COUNT for selectPaginatedGrouped (one Recipe header = one row).
-   * Params: [like, like, like, status, status]
+   * Params: [like×3, brandScope×2, status×2]
    */
   countGrouped: `
     SELECT COUNT(*) AS total
@@ -314,6 +319,7 @@ export const bom = {
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
     WHERE b.status <> 'inactive'
       AND (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+      AND (? IS NULL OR s.brand_id IS NULL OR s.brand_id IN (?))
       AND (? IS NULL OR b.status = ?)
   `,
 
@@ -633,4 +639,15 @@ export const bom = {
     WHERE h.recipe_id = ?
     ORDER BY h.last_updated DESC, h.mtrl_type ASC, h.mtrl_id ASC
   `,
+  /** The brand behind a recipe, for the write-side brand guard. Reached through
+   *  master_recipe.sku_id, which is nullable — a recipe with no SKU resolves to
+   *  no brand and the guard treats that as unattributed.
+   *  Parameters: [recipe_id] */
+  selectBrandIdByRecipeId: `
+    SELECT s.brand_id
+    FROM master_recipe b
+    LEFT JOIN master_skus s ON s.id = b.sku_id
+    WHERE b.id = ? LIMIT 1
+  `,
+
 }

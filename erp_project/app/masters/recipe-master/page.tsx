@@ -11,6 +11,8 @@ import { resolveAccess } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
+import { scopeParams } from "@/lib/scope"
+import { getViewScope } from "@/lib/brand-view"
 import { bom } from "@/lib/queries/recipe"
 import { fuzzyRank } from "@/lib/fuzzy-search"
 import {
@@ -34,6 +36,10 @@ export default async function RecipeMasterPage({
   const access = await resolveAccess(userId, session.user.roles, "/masters/recipe-master")
   if (access === "none") redirect("/auth/unauthorized")
 
+  // Brand scope. Recipe master was previously unscoped — a recipe reaches a brand
+  // through master_recipe.sku_id, and a NULL sku_id stays visible to everyone.
+  const scope = await getViewScope(userId)
+
   // ── Read URL params ────────────────────────────────────────────────────────
   const sp            = await searchParams
   const { page, size, offset } = parsePaginationParams(sp)
@@ -44,8 +50,8 @@ export default async function RecipeMasterPage({
   const status = statusFilter ? statusFilter  : null
 
   // ── DB query (paginated, one row per Recipe header) ───────────────────────────
-  // Param order: [like×3, status×2, LIMIT, OFFSET] (data)
-  //              [like×3, status×2]                (count)
+  // Param order: [like×3, brandScope×2, status×2, LIMIT, OFFSET] (data)
+  //              [like×3, brandScope×2, status×2]                (count)
   const pageStart = performance.now()
   console.log(`[AUDIT] Recipe Master load - page=${page}, size=${size}, search=${search || "none"}, status=${status || "all"}`)
 
@@ -60,15 +66,15 @@ export default async function RecipeMasterPage({
 
   if (search) {
     const allMatching = await timedQuery<RecipeListItem>(
-      bom.selectAllFilteredGrouped, [null, null, null, status, status], { label: "selectAllFilteredGrouped" }
+      bom.selectAllFilteredGrouped, [null, null, null, ...scopeParams(scope.brandIds), status, status], { label: "selectAllFilteredGrouped" }
     )
     const ranked = fuzzyRank(allMatching, search, ["bom_code", "sku_code"])
     total = ranked.length
     rows = ranked.slice(offset, offset + size)
   } else {
     const [dbRows, countRows] = await Promise.all([
-      timedQuery<RecipeListItem>(bom.selectPaginatedGrouped, [like, like, like, status, status, size, offset], { label: "selectPaginatedGrouped" }),
-      timedQuery<{ total: number }>(bom.countGrouped, [like, like, like, status, status], { label: "countGrouped" }),
+      timedQuery<RecipeListItem>(bom.selectPaginatedGrouped, [like, like, like, ...scopeParams(scope.brandIds), status, status, size, offset], { label: "selectPaginatedGrouped" }),
+      timedQuery<{ total: number }>(bom.countGrouped, [like, like, like, ...scopeParams(scope.brandIds), status, status], { label: "countGrouped" }),
     ])
     rows = dbRows
     total = Number(countRows[0]?.total ?? 0)

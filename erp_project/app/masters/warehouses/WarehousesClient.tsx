@@ -14,6 +14,11 @@
  *
  * Filters in memory: 18 rows, so no PaginationBar and no server round trip.
  * Plain <TableHead> like ManufacturersClient, not DataTable/ColumnDef.
+ *
+ * The filter panel is the shared FilterPanel chrome, but WITHOUT the draft-state
+ * +navigate() dance the other masters use: those filter server-side through the
+ * URL, and here the whole table is already in memory. So each select binds
+ * straight to state and applies as you change it — Apply only closes the panel.
  */
 
 import { useMemo, useState } from "react"
@@ -26,6 +31,10 @@ import {
 import { SearchInput } from "@/components/masters/SearchInput"
 import { MasterToolbar, MasterToolbarActions } from "@/components/masters/MasterToolbar"
 import { StatusBadge } from "@/components/masters/StatusBadge"
+import {
+  useFilterPanel, FilterToggleButton, FilterPanel, FilterField,
+} from "@/components/masters/FilterPanel"
+import { Select } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Pencil } from "lucide-react"
@@ -33,6 +42,11 @@ import { useRouter } from "next/navigation"
 import { AddWarehouseDialog } from "./AddWarehouseDialog"
 import { EditWarehouseDialog } from "./EditWarehouseDialog"
 import { WarehouseDetailPanel } from "./WarehouseDetailPanel"
+// Row, the filter predicate and the two status/type resolvers live in filters.ts
+// so they can be tested — see tests/unit/warehouse-filters.test.ts. `Row` carries
+// the entity, not just the warehouse: dropping it is what used to leak Kreative's
+// facility, GSTINs and addresses into a Pep record and vice versa.
+import { type Row, NO_FILTERS, typeOf, statusOf, matchesRow } from "./filters"
 import type { Warehouse, WarehouseEntity, Entity } from "@/types/masters"
 
 export default function WarehousesClient({
@@ -46,8 +60,10 @@ export default function WarehousesClient({
 }) {
   const router = useRouter()
   const [search, setSearch] = useState("")
-  const [editing, setEditing] = useState<Warehouse | null>(null)
-  const [viewing, setViewing] = useState<Warehouse | null>(null)
+  const [filters, setFilters] = useState(NO_FILTERS)
+  const [editing, setEditing] = useState<Row | null>(null)
+  const [viewing, setViewing] = useState<Row | null>(null)
+  const filterPanel = useFilterPanel()
 
   /** warehouse_id -> its entity rows, so the table and the Edit dialog both read
    *  the child data without re-querying. */
@@ -69,7 +85,7 @@ export default function WarehousesClient({
    * still listed — a missing pair is exactly what needs fixing, and hiding it
    * would make it invisible on the only screen that can fix it.
    */
-  const flat = useMemo(
+  const flat = useMemo<Row[]>(
     () =>
       rows.flatMap((warehouse) =>
         entities.map((entity) => ({
@@ -82,23 +98,53 @@ export default function WarehousesClient({
     [rows, entities, byWarehouse]
   )
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return flat
-    return flat.filter((r) =>
-      [
-        r.warehouse.name, r.warehouse.location, r.warehouse.state, r.warehouse.zone,
-        r.entity.code, r.entity.legal_name,
-        r.detail?.facility_code, r.detail?.bill_to_gstin, r.detail?.ship_to_gstin,
-        r.detail?.remarks,
-      ]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(q))
-    )
-  }, [flat, search])
+  /** Every entity's PAN. Passed down because a ship-to GSTIN must be one of OURS
+   *  but need not be the row's own entity — Pep operates most sites — so the
+   *  one-entity dialog cannot derive this set itself. */
+  const ourPans = useMemo(
+    () => entities.map((e) => e.pan).filter((p): p is string => Boolean(p)),
+    [entities]
+  )
 
-  /** The per-entity type wins; the location's is the fallback. */
-  const typeOf = (r: (typeof flat)[number]) => r.detail?.type ?? r.warehouse.type
+  /**
+   * Zone and Status options come from the rows rather than from a fixed list
+   * (ZONE_OPTIONS / the status ENUM): an option that matches nothing is worse
+   * than no option, and the location statuses in play depend on what is mid-
+   * approval right now. Entity comes from `entities` — every location is meant to
+   * have a row for each, so an entity with none yet must still be selectable to
+   * find the gap.
+   */
+  // The type predicates are load-bearing: `zone` is nullable, and a bare
+  // .filter(Boolean) leaves the element type `string | null`, which then fails to
+  // typecheck as an <option value>.
+  const zoneOptions = useMemo(
+    () => [...new Set(rows.map((r) => r.zone).filter((z): z is string => Boolean(z)))].sort(),
+    [rows]
+  )
+  const statusOptions = useMemo(
+    () => [...new Set(flat.map(statusOf).filter((s): s is string => Boolean(s)))].sort(),
+    [flat]
+  )
+
+  const filtered = useMemo(
+    () => flat.filter((r) => matchesRow(r, filters, search)),
+    [flat, search, filters]
+  )
+
+  const activeFilterCount = Object.values(filters).filter(Boolean).length
+  const hasFilters = Boolean(search) || activeFilterCount > 0
+
+  /** One select's onChange. "all" is the sentinel the other masters' panels use
+   *  for the blank option, because an <option value=""> loses its selected state
+   *  in some browsers. */
+  const setFilter = (key: keyof typeof NO_FILTERS) => (value: string) =>
+    setFilters((f) => ({ ...f, [key]: value === "all" ? "" : value }))
+
+  function clearAllFilters() {
+    setFilters(NO_FILTERS)
+    setSearch("")
+    filterPanel.close()
+  }
 
   const COL_COUNT = 9
 
@@ -114,13 +160,98 @@ export default function WarehousesClient({
           onChange={setSearch}
           placeholder="Search facility, location, entity, GSTIN or remarks…"
         />
+        <FilterToggleButton
+          open={filterPanel.open}
+          onToggle={filterPanel.toggle}
+          activeCount={activeFilterCount}
+        />
         <MasterToolbarActions>
           <AddWarehouseDialog entities={entities} onSuccess={() => router.refresh()} />
         </MasterToolbarActions>
       </MasterToolbar>
 
+      {/* onApply only closes: every select above already applied on change, since
+          there is no server round trip to batch. */}
+      <FilterPanel
+        open={filterPanel.open}
+        onClose={filterPanel.close}
+        onApply={filterPanel.close}
+        onClear={clearAllFilters}
+      >
+        <FilterField label="Legal Entity">
+          <Select
+            className="w-full"
+            value={filters.entity || "all"}
+            onChange={(e) => setFilter("entity")(e.target.value)}
+          >
+            <option value="all">All Entities</option>
+            {entities.map((entity) => (
+              <option key={entity.code} value={entity.code}>
+                {entity.code} — {entity.legal_name}
+              </option>
+            ))}
+          </Select>
+        </FilterField>
+
+        <FilterField label="Type">
+          <Select
+            className="w-full"
+            value={filters.type || "all"}
+            onChange={(e) => setFilter("type")(e.target.value)}
+          >
+            <option value="all">All Types</option>
+            <option value="MWH">MWH — Mother Warehouse</option>
+            <option value="CWH">CWH — Child Warehouse</option>
+          </Select>
+        </FilterField>
+
+        <FilterField label="Zone">
+          <Select
+            className="w-full"
+            value={filters.zone || "all"}
+            onChange={(e) => setFilter("zone")(e.target.value)}
+          >
+            <option value="all">All Zones</option>
+            {zoneOptions.map((zone) => (
+              <option key={zone} value={zone}>{zone}</option>
+            ))}
+          </Select>
+        </FilterField>
+
+        <FilterField label="Status">
+          <Select
+            className="w-full"
+            value={filters.status || "all"}
+            onChange={(e) => setFilter("status")(e.target.value)}
+          >
+            <option value="all">All Status</option>
+            {statusOptions.map((status) => (
+              <option key={status} value={status}>{status.replace("_", " ")}</option>
+            ))}
+          </Select>
+        </FilterField>
+
+        <FilterField label="Uniware Facility">
+          <Select
+            className="w-full"
+            value={filters.configured || "all"}
+            onChange={(e) => setFilter("configured")(e.target.value)}
+          >
+            <option value="all">Configured or not</option>
+            <option value="yes">Configured</option>
+            {/* The one that earns its place: these are the pairs that silently
+                block inwarding, and this screen is the only place to fix them. */}
+            <option value="no">Not configured</option>
+          </Select>
+        </FilterField>
+      </FilterPanel>
+
       <Card>
-        <RecordCountHeader total={filtered.length} matching={search || undefined} />
+        <RecordCountHeader
+          total={filtered.length}
+          matching={search || undefined}
+          onClearFilters={hasFilters ? clearAllFilters : undefined}
+        />
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -141,8 +272,8 @@ export default function WarehousesClient({
                 <TableRow>
                   <TableCell colSpan={COL_COUNT} className="text-center py-10">
                     <EmptyState
-                      hasFilters={Boolean(search)}
-                      filteredMessage="No warehouses match your search."
+                      hasFilters={hasFilters}
+                      filteredMessage="No warehouses match your filters."
                     />
                   </TableCell>
                 </TableRow>
@@ -154,14 +285,14 @@ export default function WarehousesClient({
                   // a screen reader.
                   <TableRow
                     key={row.key}
-                    onClick={() => setViewing(row.warehouse)}
+                    onClick={() => setViewing(row)}
                     className="cursor-pointer"
                   >
                     <TableCell className="font-mono text-xs font-medium">
                       <button
                         type="button"
                         className="text-left hover:underline focus-visible:underline focus-visible:outline-none"
-                        onClick={(e) => { e.stopPropagation(); setViewing(row.warehouse) }}
+                        onClick={(e) => { e.stopPropagation(); setViewing(row) }}
                       >
                         {row.detail?.facility_code ?? (
                           <span className="font-sans text-muted-foreground">Not configured</span>
@@ -200,10 +331,10 @@ export default function WarehousesClient({
                       <Button
                         variant="ghost"
                         size="icon"
-                        aria-label={`Edit ${row.warehouse.name}`}
+                        aria-label={`Edit ${row.warehouse.name} — ${row.entity.code}`}
                         // stopPropagation or the row's own handler also fires and
                         // the detail panel opens behind the edit dialog.
-                        onClick={(e) => { e.stopPropagation(); setEditing(row.warehouse) }}
+                        onClick={(e) => { e.stopPropagation(); setEditing(row) }}
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
@@ -216,18 +347,20 @@ export default function WarehousesClient({
         </CardContent>
       </Card>
 
+      {/* One entity only — the row that was clicked. */}
       <WarehouseDetailPanel
-        warehouse={viewing}
-        entities={entities}
-        entityRows={viewing ? byWarehouse.get(viewing.id) ?? [] : []}
+        warehouse={viewing?.warehouse ?? null}
+        entity={viewing?.entity ?? null}
+        entityRow={viewing?.detail ?? null}
         onClose={() => setViewing(null)}
-        onEdit={setEditing}
+        onEdit={() => viewing && setEditing(viewing)}
       />
 
       <EditWarehouseDialog
-        warehouse={editing}
-        entities={entities}
-        entityRows={editing ? byWarehouse.get(editing.id) ?? [] : []}
+        warehouse={editing?.warehouse ?? null}
+        entity={editing?.entity ?? null}
+        entityRow={editing?.detail ?? null}
+        ourPans={ourPans}
         onSuccess={() => router.refresh()}
         onClose={() => setEditing(null)}
       />

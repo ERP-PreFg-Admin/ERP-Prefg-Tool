@@ -47,7 +47,10 @@ const DETAIL_FIELDS = [
   { key: "type",            label: "Type",            required: true,  colSpan: 1, isSelect: true, options: TYPE_OPTIONS, noBlankOption: true },
   { key: "registered_name", label: "Registered Name", required: true, colSpan: 1, placeholder: "Legal registered name" },
   { key: "location",        label: "Location",        required: false, colSpan: 1, placeholder: "e.g. Mumbai" },
-  { key: "zone",            label: "Zone",            required: true, colSpan: 1, isSelect: true, options: ZONE_OPTIONS },
+  // Optional, matching the bulk upload: a vendor can be onboarded before its
+  // zone is decided. The <select> still offers only ZONE_OPTIONS, so a value
+  // that IS entered is always a real zone.
+  { key: "zone",            label: "Zone",            required: false, colSpan: 1, isSelect: true, options: ZONE_OPTIONS },
   { key: "gst_number",      label: "GST Number",      required: false, colSpan: 1, placeholder: "e.g. 27AAEPM1234C1Z5" },
   { key: "bank_name",       label: "Bank Name",       required: false, colSpan: 1, placeholder: "e.g. HDFC Bank" },
   { key: "ifsc_number",     label: "IFSC Number",     required: false, colSpan: 1, placeholder: "e.g. HDFC0001234" },

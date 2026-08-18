@@ -56,10 +56,34 @@ export const AWS_S3_BUCKET_EVENTS  = required("S3_BUCKET_EVENTS_AWS")
 
 export const NANONET_API_KEY = required("NANONET_API_KEY")
 
-// ── Gmail SMTP ───────────────────────────────────────────────────────────────
+// ── Outbound mail ────────────────────────────────────────────────────────────
+//
+// Two transports live side by side for the Gmail → SES cutover. MAIL_PROVIDER
+// picks one at module load; rollback is flipping this value in SSM and
+// redeploying, with no code change. See ~/.claude/plans/ses-migration.md.
+//
+// Once SES has run clean for a full cycle of PO and inward mail, delete
+// MAIL_PROVIDER, GMAIL_USER and GMAIL_APP_PASSWORD — here, in lib/mailer.ts,
+// and from SSM /erp-app/{test,prod}.
 
-export const GMAIL_USER         = required("GMAIL_USER")
-export const GMAIL_APP_PASSWORD = required("GMAIL_APP_PASSWORD")
+export const MAIL_PROVIDER = process.env.MAIL_PROVIDER === "ses" ? "ses" : "gmail"
+
+// Gmail SMTP — the outgoing transport. Not `required()` any more: once
+// MAIL_PROVIDER=ses these are unset, and a missing-var error on every boot would
+// train people to ignore the env warnings that still matter.
+export const GMAIL_USER         = process.env.GMAIL_USER ?? ""
+export const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD ?? ""
+
+// SES. MAIL_FROM must match the ses:FromAddress condition in
+// deploy/iam-policy-erp-app-runtime-ses.json exactly — a mismatch is
+// AccessDenied on every send, so changing the sender is an IAM change too.
+export const MAIL_FROM      = process.env.MAIL_FROM ?? "erp.prefg@mcaffeine.com"
+export const MAIL_FROM_NAME = process.env.MAIL_FROM_NAME ?? "mcaffeine ERP"
+
+// Attaches every send to the configuration set whose event destination feeds
+// bounce/complaint events to SNS. Without it SES emits no events at all and the
+// suppression list stays silently empty.
+export const SES_CONFIG_SET = process.env.SES_CONFIG_SET ?? "erp-app"
 
 // Job title printed under the sender's name on inward-invoice emails. The name
 // itself comes from whoever filed the invoice, so only the title is configured.

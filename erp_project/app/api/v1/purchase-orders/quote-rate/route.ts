@@ -19,7 +19,7 @@ import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { computeWastage, computeTotalCosting } from "@/lib/costing/final-costing"
 import type { MiscCostType } from "@/types/masters"
 import { withGateway } from "@/lib/gateway/with-gateway"
-import { getUserScope, assertInScope } from "@/lib/scope"
+import { getUserScope, assertInScope, scopeParams } from "@/lib/scope"
 import { ApiError } from "@/lib/gateway/errors"
 import { quoteRateQuerySchema } from "@/lib/validation/purchase-order-detail"
 
@@ -31,10 +31,13 @@ export const GET = withGateway({
       throw new ApiError(400, "validation_error", "Invalid query parameters", parsed.error.flatten())
     }
     const { sku_code: skuCode, mfg_id: mfgId } = parsed.data
-    assertInScope(await getUserScope(Number(session.user.id)), "mfg", mfgId)
+    // Hoisted rather than inlined because the brand params below need it too.
+    // getUserScope is cache()-wrapped, so this is still one query per request.
+    const scope = await getUserScope(Number(session.user.id))
+    assertInScope(scope, "mfg", mfgId)
 
     const [lineRows, materialCostRows, miscCostRows] = await Promise.all([
-      query<{ recipe_id: number; sku_code: string }>(manufacturingSql.selectLiveLinesByMfg, [mfgId]),
+      query<{ recipe_id: number; sku_code: string }>(manufacturingSql.selectLiveLinesByMfg, [mfgId, ...scopeParams(scope.brandIds)]),
       query<{ recipe_id: number; rm_cost: string; pm_cost: string }>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId]),
       query<{ recipe_id: number; type: MiscCostType; cost: string }>(manufacturingSql.selectMiscCostsByMfg, [mfgId]),
     ])

@@ -34,7 +34,7 @@ export default function PoDataRow({
   onSplit,
   onReceive,
   menuActions,
-  receiveOnly,
+  inwardingMode,
   showUniwareCode,
   selectedPoId,
   onOpenInwarding,
@@ -55,7 +55,8 @@ export default function PoDataRow({
   onSplit?: (row: PoRow) => void
   onReceive: (row: PoRow) => void
   menuActions: MenuAction[]
-  receiveOnly: boolean
+  /** PO Inwarding desk: no edit, split, cancel or Receive — see canReceive. */
+  inwardingMode: boolean
   showUniwareCode: boolean
   selectedPoId: number | null
   onOpenInwarding?: (row: PoRow) => void
@@ -68,15 +69,22 @@ export default function PoDataRow({
   // Edit is gated on the stored status, not the displayed one: a raised PO
   // awaiting its notification mail shows as Draft, but it has already cleared
   // approval and the PUT route rejects it.
-  const canEdit  = !receiveOnly && r.raw_status === "draft" && r.po_raised_by === sessionUserId
+  const canEdit  = !inwardingMode && r.raw_status === "draft" && r.po_raised_by === sessionUserId
   // Splits are one level deep, so a child never offers Split. Neither does a
   // master that is fully allocated — there is nothing left to hand out.
-  const canSplit = !receiveOnly && !isChild
-    && ["draft", "raised", "punched", "partially_received"].includes(status)
+  // Nor a draft: `status` here is the DISPLAYED one, so this also covers a
+  // raised PO the manufacturer hasn't been mailed about yet. A split divides an
+  // order they already have; the split route refuses the same set.
+  const canSplit = !inwardingMode && !isChild
+    && ["raised", "punched", "partially_received"].includes(status)
     && num(r.qty) - num(r.received_qty) - num(r.split_qty) > 0
   // Goods arrive against the split, not the order it came off, so a master with
   // children can only receive what it hasn't allocated away.
-  const canReceive = ["raised", "punched", "partially_received"].includes(status)
+  // Not on the inwarding desk: receipts there come from the supplier invoice via
+  // Add Invoice, which books the quantity, the batch and the document together.
+  // A hand-typed quantity beside it was a second, unsourced way to move stock.
+  const canReceive = !inwardingMode
+    && ["raised", "punched", "partially_received"].includes(status)
     && num(r.qty) - num(r.received_qty) - num(r.split_qty) > 0
 
   // A split master isn't mailable: the manufacturer needs the individual splits,
@@ -92,8 +100,15 @@ export default function PoDataRow({
         // brought back on hover if it's being read.
         status === "cancelled" && "opacity-55 hover:opacity-100",
         selectedPoId === r.id && "bg-primary/5",
-        // Children read as belonging to the row above rather than as peers of it.
-        isChild && "bg-muted/30 border-l-2 border-l-violet-400/70"
+        // An open master and its children read as one block, in the same violet
+        // this table already uses for "part of this order lives elsewhere".
+        // The accent goes on the first CELL, not the row: border-separate (see
+        // components/ui/table.tsx) drops any border set on a <tr>.
+        isSplitMaster && expanded &&
+          "bg-violet-100/70 hover:bg-violet-100 dark:bg-violet-950/25 dark:hover:bg-violet-950/40",
+        isChild &&
+          "bg-violet-100 hover:bg-violet-200/70 dark:bg-violet-950/40 dark:hover:bg-violet-950/60 " +
+          "[&>*:first-child]:border-l-2 [&>*:first-child]:border-l-violet-500"
       )}
     >
       {showExpandColumn && (
@@ -216,8 +231,16 @@ export default function PoDataRow({
         </TableCell>
       )}
 
+      {/* The facility under the site name, not beside it: this column is already
+          the narrowest thing on a wide table, and the code is what the warehouse
+          and Uniware key on when the goods actually arrive. Absent when the SKU is
+          unattributed or the site isn't set up for its entity — the same two gaps
+          the destination dropdown reports. */}
       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-        {r.destination ?? "—"}
+        <div>{r.destination ?? "—"}</div>
+        {r.dest_facility_code && (
+          <div className="font-mono text-[10px] opacity-70">{r.dest_facility_code}</div>
+        )}
       </TableCell>
 
       <TableCell>
@@ -248,15 +271,9 @@ export default function PoDataRow({
             <button
               onClick={() => onReceive(r)}
               title="Receive against PO"
-              className={cn(
-                "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors",
-                receiveOnly
-                  ? "border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300"
-                  : "border border-input hover:bg-accent"
-              )}
+              className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent transition-colors"
             >
               <PackageCheck className="h-3 w-3" />
-              {receiveOnly && "Receive"}
             </button>
           )}
           <PoActionMenu actions={menuActions} />

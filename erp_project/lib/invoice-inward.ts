@@ -39,6 +39,7 @@ import { supplierInvoicesSql } from "@/lib/queries/supplier-invoices"
 import { manufacturers as manufacturersSql } from "@/lib/queries/manufacturers"
 import { skus as skusSql } from "@/lib/queries/skus"
 import { receivePo } from "@/lib/po-receive"
+import { mergeInwardLinesBySku, type InwardLine } from "@/lib/invoice-merge"
 import { createPurchaseOrder, futureDeliveryDate, uniwareEnabled } from "@/lib/uniware"
 import { UNIWARE_VENDOR_CODE } from "@/lib/env"
 import { sendInwardInvoiceEmail } from "@/lib/mailer"
@@ -76,6 +77,7 @@ export type InwardOutcome = {
 
 const numOrNull = (v: unknown) =>
   v == null || v === "" || Number.isNaN(Number(v)) ? null : Number(v)
+
 
 /**
  * Validate SKUs and resolve each one's brand, before any transaction opens.
@@ -143,7 +145,8 @@ async function writeInvoiceAndPos(
   const created: InwardOutcome["created"] = []
   const receivedOut: InwardOutcome["received"] = []
   const poLines: { id: number; po_no: string; sku_code: string; sku_name: string | null; qty: number; unitPrice: number | null; mrp: number | null }[] = []
-  const lineLinks: { poId: number; receivedAgainstPoId: number | null; linkType: "created" | "received" }[] = []
+  /** Every line, in invoice order — merged by SKU below into the inward POs. */
+  const staged: InwardLine[] = []
 
   const nextSeq = new Map<string, number>()
   /** Seeds lazily: a brand reached only via a received line comes from the
@@ -166,31 +169,23 @@ async function writeInvoiceAndPos(
     const totalAmount = numOrNull(item.total_amount) ?? (unitPrice != null ? unitPrice * qty : null)
 
     if (item.reference_po_id != null) {
-      // Credit the existing order and still raise an inward PO, so every
-      // invoice line is visible in the PO table.
+      // Credit the existing order first — the inward POs are written after the
+      // loop, once every line's SKU is known and repeats can be merged.
       const refPoId = Number(item.reference_po_id)
       const r = await receivePo(conn, refPoId, qty, userId)
       receivedOut.push({ id: refPoId, po_no: r.po_no, qty, status: r.status })
 
-      // Brand from the parent's number: a received line needn't carry a SKU.
-      const brand = r.po_no.split("-")[0] || "INW"
-      const po_no = await nextPoNo(brand)
-      const skuCode = r.sku_code ?? item.sku_code?.trim() ?? null
-
-      const [res] = await conn.execute(purchaseOrdersSql.insertInwardReceived, [
-        po_no, Number(mfg_id), skuCode, qty, unitPrice, totalAmount,
-        expectedOn, destination, invoice_no, attachmentKey, qty, r.po_no,
+      staged.push({
+        // The order's own SKU wins: a received line needn't carry one.
+        skuCode: r.sku_code ?? item.sku_code?.trim() ?? "",
+        skuName: item.sku_name ?? null,
+        qty, unitPrice, totalAmount, mrp: numOrNull(item.mrp),
+        // Brand from the parent's number, for the inward PO number.
+        brand: r.po_no.split("-")[0] || "INW",
+        refPoId, refPoNo: r.po_no,
         // Recipe inherited from the order being settled, not re-resolved.
-        r.recipe_id, Number(mfg_id), skuCode,
-      ])
-      const poId = (res as { insertId: number }).insertId
-      await conn.execute(purchaseOrdersSql.insertPoHistory, [
-        poId, po_no, "create", null, null, null, attachmentKey, userId,
-      ])
-
-      created.push({ id: poId, po_no, sku_code: skuCode ?? "" })
-      poLines.push({ id: poId, po_no, sku_code: skuCode ?? "", sku_name: item.sku_name ?? null, qty, unitPrice, mrp: numOrNull(item.mrp) })
-      lineLinks.push({ poId, receivedAgainstPoId: refPoId, linkType: "received" })
+        recipeId: r.recipe_id ?? null,
+      })
       continue
     }
 
@@ -199,28 +194,50 @@ async function writeInvoiceAndPos(
     // only description of what a reference-free inward line would mean if that
     // rule is ever relaxed.
     const skuCode = item.sku_code?.trim() ?? ""
-    const po_no = await nextPoNo(brandBySku.get(skuCode)!)
-    const [res] = await conn.execute(purchaseOrdersSql.insertInward, [
-      po_no, Number(mfg_id), skuCode, qty, unitPrice, totalAmount,
-      expectedOn, destination, invoice_no, attachmentKey,
-      Number(mfg_id), skuCode,
-    ])
+    staged.push({
+      skuCode, skuName: item.sku_name ?? null,
+      qty, unitPrice, totalAmount, mrp: numOrNull(item.mrp),
+      brand: brandBySku.get(skuCode)!,
+      refPoId: null, refPoNo: null, recipeId: null,
+    })
+  }
+
+  // ONE inward PO per SKU, matching the single Uniware PO's merged items —
+  // see mergeInwardLinesBySku. Written after the receipt loop because a
+  // received line only learns its order's SKU from receivePo.
+  const poIdBySku = new Map<string, number>()
+  for (const line of mergeInwardLinesBySku(staged)) {
+    const { skuCode, qty, unitPrice, totalAmount } = line
+    const po_no = await nextPoNo(line.brand)
+
+    const [res] = line.refPoNo
+      ? await conn.execute(purchaseOrdersSql.insertInwardReceived, [
+          po_no, Number(mfg_id), skuCode, qty, unitPrice, totalAmount,
+          expectedOn, destination, invoice_no, attachmentKey, qty, line.refPoNo,
+          line.recipeId, Number(mfg_id), skuCode,
+        ])
+      : await conn.execute(purchaseOrdersSql.insertInward, [
+          po_no, Number(mfg_id), skuCode, qty, unitPrice, totalAmount,
+          expectedOn, destination, invoice_no, attachmentKey,
+          Number(mfg_id), skuCode,
+        ])
     const poId = (res as { insertId: number }).insertId
     await conn.execute(purchaseOrdersSql.insertPoHistory, [
       poId, po_no, "create", null, null, null, attachmentKey, userId,
     ])
 
     created.push({ id: poId, po_no, sku_code: skuCode })
-    poLines.push({ id: poId, po_no, sku_code: skuCode, sku_name: item.sku_name ?? null, qty, unitPrice, mrp: numOrNull(item.mrp) })
-    lineLinks.push({ poId, receivedAgainstPoId: null, linkType: "created" })
+    poLines.push({ id: poId, po_no, sku_code: skuCode, sku_name: line.skuName, qty, unitPrice, mrp: line.mrp })
+    poIdBySku.set(skuCode, poId)
   }
 
-  // One row per invoice line, each tagged to the PO it resolved to. After the
-  // loop because a receipt line only learns its PO id from receivePo.
+  // One row per invoice line — the per-line detail the merge above collapses
+  // (batch, expiry, and which order this particular line settled) lives here.
   for (const [i, item] of line_items.entries()) {
-    const link = lineLinks[i]
+    const line = staged[i]
     await conn.execute(supplierInvoicesSql.insertItem, [
-      invoiceId, i + 1, link.poId, link.receivedAgainstPoId, link.linkType,
+      invoiceId, i + 1, poIdBySku.get(line.skuCode)!, line.refPoId,
+      line.refPoId != null ? "received" : "created",
       item.sku_code?.trim() || null, item.parsed_sku_code, item.sku_name,
       item.batch, item.mfg_date, item.expiry, item.hsn,
       Number(item.qty),
@@ -357,8 +374,9 @@ export async function runInwardInvoice(
     await emit({ step: "uniware", status: "skipped", message: "Uniware is not configured" })
   } else {
     try {
-      // ONE Uniware PO carrying every SKU — unlike our side, where the model is
-      // one PO per SKU.
+      // ONE Uniware PO carrying every SKU. poLines is already one row per SKU
+      // (mergeInwardLinesBySku), so this and our inward POs line up 1:1;
+      // mergeItemsBySku downstream stays as the guard against a repeat here.
       const res = await createPurchaseOrder({
         facility : facility,
         vendorCode: UNIWARE_VENDOR_CODE || mfgCode,

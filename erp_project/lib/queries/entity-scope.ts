@@ -48,6 +48,13 @@ export const entityScopeSql = {
     SELECT id, name AS code, name FROM master_warehouse ORDER BY name ASC
   `,
 
+  brandOptions: `
+    SELECT id, po_code AS code , name
+    FROM master_brand 
+    WHERE status = 'active'
+    ORDER By name ASC
+  `,
+
   /** Per-user assigned counts, for the "who is scoped" summary on the tab. */
   countsByUser: `
     SELECT user_id, entity_type, COUNT(*) AS assigned

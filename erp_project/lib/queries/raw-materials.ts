@@ -6,6 +6,44 @@
 import { scopeParams, type UserScope } from "@/lib/scope"
 import { SQL_TODAY_IST } from "@/lib/date"
 
+/**
+ * Brand scope for a MATERIAL, which has no brand of its own.
+ *
+ * A material is visible when it appears in a recipe for one of your brands, OR
+ * when it appears in no brand-attributed recipe at all. That second arm is not a
+ * loophole — it is what keeps a newly added material visible on the very page you
+ * would add it from, and it matches the `brand_id IS NULL` allowance every other
+ * predicate makes.
+ *
+ * Back-derivation is deliberately many-to-many: one RM legitimately serves
+ * several brands, so this is EXISTS rather than a join — a join would multiply
+ * the material row once per recipe that uses it.
+ *
+ * Rate rows (cost_master_*) carry NO predicate of their own; they inherit
+ * visibility through their material.
+ *
+ * `mtrl_type` is lowercase 'rm'/'pm' in details_recipe — see
+ * lib/queries/manufacturing.ts:358.
+ *
+ * Params: [flag, brandIds] — 2 values, from scopeParams(scope.brandIds).
+ */
+const brandScopeFor = (mtrlType: "rm" | "pm", idColumn: string) => `
+    AND (? IS NULL
+         OR EXISTS (
+           SELECT 1 FROM details_recipe dr
+           JOIN master_recipe mr ON mr.id = dr.recipe_id
+           JOIN master_skus  ms ON ms.id = mr.sku_id
+           WHERE dr.mtrl_type = '${mtrlType}' AND dr.mtrl_id = ${idColumn}
+             AND ms.brand_id IN (?)
+         )
+         OR NOT EXISTS (
+           SELECT 1 FROM details_recipe dr
+           JOIN master_recipe mr ON mr.id = dr.recipe_id
+           JOIN master_skus  ms ON ms.id = mr.sku_id
+           WHERE dr.mtrl_type = '${mtrlType}' AND dr.mtrl_id = ${idColumn}
+             AND ms.brand_id IS NOT NULL
+         ))`
+
 export const rawMaterials = {
   // ============ SELECT QUERIES ============
 
@@ -125,6 +163,7 @@ export const rawMaterials = {
       AND (? IS NULL OR status = ?)
       AND (? IS NULL OR make = ?)
       AND (? IS NULL OR type = ?)
+      ${brandScopeFor("rm", "master_rm.id")}
     ORDER BY name ASC
   `,
 
@@ -139,6 +178,7 @@ export const rawMaterials = {
       AND (? IS NULL OR status = ?)
       AND (? IS NULL OR make = ?)
       AND (? IS NULL OR type = ?)
+      ${brandScopeFor("rm", "master_rm.id")}
     ORDER BY name ASC
     LIMIT ? OFFSET ?
   `,
@@ -150,6 +190,7 @@ export const rawMaterials = {
       AND (? IS NULL OR status = ?)
       AND (? IS NULL OR make = ?)
       AND (? IS NULL OR type = ?)
+      ${brandScopeFor("rm", "master_rm.id")}
   `,
 
   /**

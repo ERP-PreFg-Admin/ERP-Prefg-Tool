@@ -18,6 +18,7 @@
 
 import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
+import { getUserScope, scopeParams } from "@/lib/scope"
 import { bom as recipeSql } from "@/lib/queries/recipe"
 import { buildCsv, buildXlsx, buildExportFilename } from "@/lib/export"
 import { RECIPE_EXPORT_COLUMNS } from "@/lib/export-configs"
@@ -39,8 +40,18 @@ export const GET = withGateway({
   const typeParam   = type   || null
   const statusParam = status || null
 
-  // Params match selectPaginated / countAll: [like×3, type×2, status×2]
-  const filterParams = [like, like, like, typeParam, typeParam, statusParam, statusParam]
+  // An export must not be a way around the boundary.
+  const scope = await getUserScope(Number(session.user.id))
+
+  // Params match selectPaginated / countAll: [like×3, brandScope×2, type×2, status×2].
+  // brandScope sits after the likes because that is where the predicate is in the
+  // WHERE clause — mysql2 binds by position.
+  const filterParams = [
+    like, like, like,
+    ...scopeParams(scope.brandIds),
+    typeParam, typeParam,
+    statusParam, statusParam,
+  ]
 
   try {
     const [{ total }] = await query<{ total: number }>(

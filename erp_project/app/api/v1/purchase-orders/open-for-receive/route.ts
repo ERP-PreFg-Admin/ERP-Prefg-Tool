@@ -10,7 +10,7 @@ import { z } from "zod"
 import { query } from "@/lib/db"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { withGateway } from "@/lib/gateway/with-gateway"
-import { getUserScope, assertInScope } from "@/lib/scope"
+import { getUserScope, assertInScope, scopeParams } from "@/lib/scope"
 import type { OpenPoOption } from "@/types/invoice"
 
 const paramsSchema = z.object({
@@ -27,9 +27,10 @@ export const GET = withGateway({
     // manufacturer before the user has picked one.
     if (!parsed.success) return NextResponse.json({ pos: [] })
 
-    assertInScope(await getUserScope(Number(session.user.id)), "mfg", parsed.data.mfg_id)
+    const scope = await getUserScope(Number(session.user.id))
+    assertInScope(scope, "mfg", parsed.data.mfg_id)
 
-    const pos = await query<OpenPoOption>(purchaseOrdersSql.openForReceiveByMfg, [parsed.data.mfg_id])
+    const pos = await query<OpenPoOption>(purchaseOrdersSql.openForReceiveByMfg, [parsed.data.mfg_id, ...scopeParams(scope.brandIds)])
     return NextResponse.json({ pos })
   },
 })

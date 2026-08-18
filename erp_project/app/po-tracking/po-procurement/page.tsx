@@ -5,7 +5,8 @@ import { parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
 import { purchaseOrdersSql, buildFilterParams, buildStatusCountParams } from "@/lib/queries/purchase-orders"
 import { getPoDropdownOptions } from "@/lib/cached-reference-data"
-import { getUserScope, filterByScope } from "@/lib/scope"
+import { filterByScope } from "@/lib/scope"
+import { getViewScope } from "@/lib/brand-view"
 import { fetchChildrenByParent } from "@/lib/po-children"
 import type { PoRow } from "./po-types"
 import PoProcurementClient from "./PoProcurementClient"
@@ -35,6 +36,10 @@ export default async function PoProcurementPage({
   const dateTo          = String(sp.dateTo      ?? "")
   const skuFilter       = String(sp.sku         ?? "")
   const destFilter      = String(sp.destination ?? "")
+  // The (site, entity) destination filter travels as two params: a location is
+  // one master_warehouse row but two destinations, and purchase_orders.destination
+  // stores only the shared site name. See destFilterValue in po-utils.ts.
+  const destEntity      = String(sp.destEntity ?? "")
 
   const status = statusFilter || null
 
@@ -42,9 +47,9 @@ export default async function PoProcurementPage({
   // against goods already received, so they're not procurement's to track and
   // they distort every tab count and summary card on this page. PO Inwarding is
   // where they live.
-  const scope = await getUserScope(userId)
-  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poType  || null, skuFilter || null, dateFrom || null, dateTo|| null, destFilter || null, true, scope)
-  const statusCountParams = buildStatusCountParams(search || null, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, true, scope)
+  const scope = await getViewScope(userId)
+  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poType  || null, skuFilter || null, dateFrom || null, dateTo|| null, destFilter || null, true, scope, destEntity || null)
+  const statusCountParams = buildStatusCountParams(search || null, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, true, scope, destEntity || null)
 
   const pageStart = performance.now()
   console.log(`[AUDIT] PO Procurement load - page=${page}, size=${size}, search=${search || "none"}, status=${status ?? "all"}, sortBy=${sortBy}, sortDir=${sortDir}`)
@@ -75,6 +80,10 @@ export default async function PoProcurementPage({
   // "Received" tab also covers short-closed POs (see buildFilterParams' statusMatchValues) —
   // its displayed count needs to include them too. "Short Closed" keeps its own separate count.
   statusCounts.received = (statusCounts.received ?? 0) + (statusCounts.short_closed ?? 0)
+  // "Open" is a pseudo-status (see statusMatchValues) — its badge is the sum of
+  // the three real statuses it spans. Set after `all` so it isn't counted twice.
+  statusCounts.open =
+    (statusCounts.raised ?? 0) + (statusCounts.punched ?? 0) + (statusCounts.partially_received ?? 0)
 
   const s = summaryRows[0] ?? {}
   const summary = {
@@ -111,6 +120,7 @@ export default async function PoProcurementPage({
         currentDateTo={dateTo}
         currentSku={skuFilter}
         currentDestination={destFilter}
+        currentDestEntity={destEntity}
         statusCounts={statusCounts}
         summary={summary}
         skuOptions={skus}

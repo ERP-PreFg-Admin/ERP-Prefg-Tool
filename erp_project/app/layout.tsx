@@ -5,7 +5,9 @@ import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth";
 import { resolveAccess, type AccessLevel } from "@/lib/permissions";
 import { NAV_SLUGS } from "@/lib/pages";
-import { getUserScope, scopeParams, UNRESTRICTED } from "@/lib/scope";
+import { getUserScope, scopeParams, UNRESTRICTED } from "@/lib/scope"
+import { getBrandView, getSelectableBrands } from "@/lib/brand-view"
+import { BrandViewSwitcher } from "@/components/BrandViewSwitcher";
 import ClientLayout from "@/components/ClientLayout";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { timedQuery } from "@/lib/query-timing";
@@ -56,6 +58,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // Entity-scoped: out-of-scope manufacturers are absent from the sidebar
   // entirely, not locked — the lock icon would still disclose the name.
   const scope = session ? await getUserScope(Number(session.user.id)) : UNRESTRICTED;
+  // The platform-view switcher's data. Resolved here so the first render is
+  // already correct — no flash of unfiltered data, which a client-side fetch
+  // would produce.
+  const brandOptions = session ? await getSelectableBrands(Number(session.user.id)) : []
+  const brandView = session ? await getBrandView(Number(session.user.id)) : null
+
   const mfgs = session
     ? await timedQuery<{ id: number; name: string }>(manufacturingSql.selectActiveForNav, scopeParams(scope.mfgIds), { label: "manufacturing.selectActiveForNav" })
     : [];
@@ -90,7 +98,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </head>
       <body className="h-full">
         <ThemeProvider>
-          <ClientLayout user={user} mfgs={mfgs} access={access}>{children}</ClientLayout>
+          <ClientLayout
+          user={user}
+          mfgs={mfgs}
+          access={access}
+          topBarRight={<BrandViewSwitcher brands={brandOptions} active={brandView} />}
+        >{children}</ClientLayout>
         </ThemeProvider>
       </body>
     </html>

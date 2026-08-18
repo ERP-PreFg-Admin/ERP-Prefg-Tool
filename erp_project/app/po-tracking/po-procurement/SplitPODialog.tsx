@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Plus, Scissors, X } from "lucide-react"
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
@@ -11,7 +11,7 @@ import { useToast } from "@/components/ui/toast"
 import { Select } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import type { PoRow, SplitRow, WarehouseOption } from "./po-types"
-import { fmtInt, num } from "./po-utils"
+import { fmtInt, num, warehousesForEntity, warehouseLabel, warehouseKey } from "./po-utils"
 
 export default function SplitPODialog({
   open, onClose, po, warehouseOptions, onSplit,
@@ -28,6 +28,15 @@ export default function SplitPODialog({
   const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError]     = useState("")
   const { toast } = useToast()
+
+  // A split is still a PO for the parent's SKU, so it inherits the parent's legal
+  // entity and can only go where that entity has a facility. Narrowed for the same
+  // reason as the Add PO dialog — sending a child somewhere the entity doesn't
+  // operate breaks its inwarding, not its creation, so nothing here would catch it.
+  const destinations = useMemo(
+    () => warehousesForEntity(warehouseOptions, po?.entity_code ?? null),
+    [warehouseOptions, po?.entity_code]
+  )
 
   useEffect(() => {
     if (open && po) {
@@ -181,9 +190,9 @@ export default function SplitPODialog({
                       className="flex-1"
                     >
                       <option value="">— Destination —</option>
-                      {warehouseOptions.map((w) => (
-                        <option key={w.id} value={w.name}>
-                          {w.name}{w.zone ? ` — ${w.zone}` : ""} ({w.type})
+                      {destinations.map((w) => (
+                        <option key={warehouseKey(w)} value={w.name}>
+                          {warehouseLabel(w)}
                         </option>
                       ))}
                     </Select>

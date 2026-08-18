@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { execute, pool, query } from "@/lib/db"
 import { skus as skuSql } from "@/lib/queries/skus"
+import { assertSkuIdInBrandScope } from "@/lib/brand-guard"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { insertHistoryEntry } from "@/lib/master-routes/history-utils"
 import { parseS3Import } from "@/lib/import-s3"
@@ -110,6 +111,10 @@ export const POST = withGateway({
 
       const eventId = makeEventId("SKU_UPDATE", "update", id)
       const logCtx = { ...ctx, eventId, module: "SKU_UPDATE" }
+
+      // The list hides other brands' SKUs, but `id` is a guessable integer and
+      // this path never looked at the brand until now.
+      await assertSkuIdInBrandScope(userId, id)
 
       const pending = await query(approvalsSql.hasPending, ["SKU", id])
       if (pending.length > 0) {
