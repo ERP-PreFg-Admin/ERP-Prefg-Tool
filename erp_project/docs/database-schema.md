@@ -447,7 +447,9 @@ erDiagram
         int id PK
         string entity_type
         string entity_code
+        string legal_entity_code
         string email
+        enum recipient_type
         string purpose
         datetime created_at
     }
@@ -494,7 +496,7 @@ erDiagram
 
 **`vendor_details`** — Location, GST number, and banking details (`bank_name`, `ifsc_number`, `account_number`) for a vendor. `status` enum: `active`, `inactive`, `in_review`, `draft`, `rejected`.
 
-**`purchase_orders`** — Purchase orders issued to manufacturers. `po_no` is unique. `received_qty` defaults to 0. `status` enum: `draft`, `raised`, `punched`, `partially_received`, `received`, `short_closed`, `cancelled`, `rejected`; typical lifecycle is `draft` → `raised` → `punched` → `partially_received` → `received` (or `short_closed` / `cancelled` / `rejected`). `po_type` enum: `normal`, `impromptu` (default), **`inward`** — `normal` on manual bulk-CSV creates and PO splits, `inward` on POs auto-raised from a parsed supplier invoice. `reference_po` links a split-off child PO back to its parent `po_no` (splitting adjusts the parent's `qty`/`total_amount` directly and does not touch `status`/`received_qty`, since a split is not a receiving event). `csv_source_key` records the S3 key of the bulk-upload CSV a row was created from. `email_sent_at` timestamps the vendor notification email. **`uniware_po_code`** holds the Unicommerce PO code an invoice's inward POs were mirrored under — our model is one PO per SKU while Uniware's mirror is one PO carrying every SKU on the invoice, so a whole invoice's inward POs share one code, stamped on each row rather than joined so the PO list doesn't grow a join. `NULL` for every non-inward PO and for inward POs raised while Uniware was unconfigured.
+**`purchase_orders`** — Purchase orders issued to manufacturers. `po_no` is unique. `received_qty` defaults to 0. `status` enum: `draft`, `raised`, `punched`, `partially_received`, `received`, `short_closed`, `cancelled`, `rejected`; typical lifecycle is `draft` → `raised` → `punched` → `partially_received` → `received` (or `short_closed` / `cancelled` / `rejected`). `po_type` enum: `normal`, `impromptu` (default), **`inward`** — `normal` on manual bulk-CSV creates and PO splits, `inward` on POs auto-raised from a parsed supplier invoice. `reference_po` links a split-off child PO back to its parent `po_no` (splitting adjusts the parent's `qty`/`total_amount` directly and does not touch `status`/`received_qty`, since a split is not a receiving event). `csv_source_key` records the S3 key of the bulk-upload CSV a row was created from. `email_sent_at` timestamps the vendor notification email. **`uniware_po_code`** holds the Unicommerce PO code an invoice's inward POs were mirrored under. One invoice becomes one Uniware PO carrying every SKU, and on our side one inward PO **per SKU** (see `lib/invoice-merge.ts`) — so the two line up item-for-item, and a whole invoice's inward POs share one code, stamped on each row rather than joined so the PO list doesn't grow a join. `NULL` for every non-inward PO and for inward POs raised while Uniware was unconfigured.
 
 **`invoice_mfg`** — Header of a supplier invoice inwarded on the PO Inwarding screen: invoice number/date, currency, e-way bill, vehicle number, both GSTINs, bill-to / ship-to blocks, the printed buyer PO reference, the grand total, the S3 key of the original PDF, the receiving `destination` (a `master_warehouse.name`), and `uniware_po_code`. **`UNIQUE (mfg_id, invoice_no)`** — re-submitting the same invoice is a DB error rather than a second round of credited `received_qty`; keyed on both columns because two manufacturers can each legitimately issue "INV-001".
 
@@ -510,7 +512,19 @@ erDiagram
 
 **`history_pos`** — Audit trail for the PO bulk-CSV create/update flow, and for goods receipts booked through `lib/po-receive.ts` (both the manual and the invoice path). One row per changed field for an `update` action; a single summary row (`field_name`/`old_value`/`new_value` all null) for a `create` action — mirrors the `approval_items` diff-per-field convention. `action_type` enum: `create`, `update`.
 
-**`entity_emails`** — Per-vendor/manufacturer/**warehouse** email addresses used by the mail flows (multiple recipients per `purpose`). Looked up by `(entity_type, entity_code)`. `entity_type` is `ENUM('vendor','mfg','warehouse')` — the `warehouse` value was added for the inward-invoice notification, whose `entity_code` is the `master_warehouse.name` that `purchase_orders.destination` stores. It was previously `ENUM('vendor','mfg')`, so inserting `'warehouse'` was **silently coerced to `''`** rather than rejected; `prisma/add_warehouse_entity_email_type.sql` widens the column and repairs the blank rows.
+**`entity_emails`** — Per-vendor/manufacturer/**warehouse**/**employee** email addresses used by the mail flows (multiple recipients per `purpose`). Looked up by `(entity_type, entity_code)`. `entity_type` is `ENUM('vendor','mfg','warehouse','employee')` — the `warehouse` value was added for the inward-invoice notification, whose `entity_code` is the `master_warehouse.name` that `purchase_orders.destination` stores. It was previously `ENUM('vendor','mfg')`, so inserting `'warehouse'` was **silently coerced to `''`** rather than rejected; `prisma/add_warehouse_entity_email_type.sql` widens the column and repairs the blank rows.
+
+**`employee`** is a person to loop in rather than an entity to write to — one of ours or an outside party (3PL, CHA, consultant), so the address is **typed, not picked from `users`**; people who need copying often hold no login here. Its `entity_code` is what the row hangs off:
+
+| `entity_code` | Meaning |
+|---|---|
+| a `master_warehouse.name` | copied on that site's inward-invoice mail, for every legal entity |
+| a `master_mfgs.code` | copied on that manufacturer's PO mail |
+| `'*'` | **every** manufacturer, including ones added later. Only ever written on an employee row |
+
+`entity_code` carries no foreign key — it points at three different tables depending on `entity_type` — so `app/api/v1/entity-emails/route.ts` validates the code against the right table on insert, `'*'` excepted. Otherwise a typo is accepted and then silently mails no one.
+
+**`recipient_type`** `ENUM('to','cc') NOT NULL DEFAULT 'to'` applies to every type, not just employees. Existing rows took the default, so no mail changed recipients when it was added. `splitRecipients` (`lib/recipients.ts`) turns the rows into `{ to, cc }`; an address listed both ways is sent **once, in To**. Added by `prisma/add_entity_email_employee_cc.sql`.
 
 **`approvals`** — Generic approval request header. `module` and `entity_id` identify what is being approved. `status` enum: `pending`, `approved`, `rejected`, `withdrawn`.
 
@@ -600,6 +614,11 @@ Schema changes applied straight to RDS are kept as commented SQL files alongside
 | `rename_mfg_line_on_hold_to_inactive.sql` | `master_recipe_mfg.status`: `on_hold` → `inactive` (data only — the column is `VARCHAR(50)`, not an enum) | Yes |
 | `fix_details_bom_columns.sql` | Repairs `details_recipe` after live drift: `mtrl_amount` → `amount` (widened to `DECIMAL(12,4)` because RM lines store a formulation percentage), `updated_on` → `last_updated`, adds `effective_from`/`effective_till`. Every BOM master, costing and BOM-approval query failed with `ER_BAD_FIELD_ERROR` until it ran. | No |
 | `restore_details_bom_amounts.sql` | Restores the formulation amounts the same drift zeroed, from the `history_recipe` approval snapshots. Only touches rows still at `0`, so re-running can't overwrite a hand-re-entered amount. Recovers BOMs 1 and 6 only — 2/3/4/5 have no snapshot and must be re-entered. | Yes |
+| `add_master_brand.sql` | `master_brand` + `master_skus.brand_id`, backfilled; corrects the `FIEN` → `Fein` typo on 28 SKUs. Brand becomes an access boundary, and free text can't be one | No |
+| `add_entity_bank_details.sql` | Bank columns on `master_entity`, for the PO document's "Company Bank Details" band — a bank account belongs to a legal entity, not a warehouse | No |
+| `add_entity_email_employee_cc.sql` | `entity_emails.entity_type` ← adds `employee`; new `recipient_type ENUM('to','cc') DEFAULT 'to'` | No |
+
+> **Re-runnable: No** is the norm for column adds here. The RDS instance is **real MySQL 8.0**, which has no `ADD COLUMN IF NOT EXISTS` — run each once per schema, on **both** the test and prod databases, and keep `prisma/schema.prisma` in sync.
 
 ## How to Add a New Table
 

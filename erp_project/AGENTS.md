@@ -20,6 +20,12 @@ the two disagree, CLAUDE.md wins.
 - `npm test` — unit tests (`node:test`, no DB, no credentials)
 - `npm run test:db` — DB tests, each rolled back
 
+Two gotchas worth knowing before you trust a green check:
+
+- `npx tsc --noEmit` can report clean on a file `npm run build` then rejects — `tsconfig.json` has `"incremental": true` and a stale `tsconfig.tsbuildinfo` skips it. Use `--incremental false` when it matters.
+- `npm run build` refuses to start while `npm run dev` is running; Next 16 takes a single lock on `.next`.
+- A unit test may only import **pure** modules. Anything reaching `lib/db`, `lib/s3` or `lib/mailer` throws at import without credentials, which is why logic worth testing gets extracted (`lib/po-split.ts`, `lib/invoice-merge.ts`, `lib/recipients.ts`, `lib/mail-limits.ts`, `lib/po-rules.ts`).
+
 There is **no** `db:test` / `db:generate` / `db:migrate` / `db:push` / `db:seed`
 npm alias, despite older docs referencing them. Prisma is invoked as raw
 `npx prisma …`, and migrations in practice are the hand-written `prisma/*.sql`

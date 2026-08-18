@@ -2,7 +2,9 @@
 
 > **Related docs:** [API Reference](./api-reference.md) · [Database Schema](./database-schema.md) · [Environment & Scripts](./environment-and-scripts.md) · design spec: [`docs/superpowers/specs/2026-08-03-invoice-inwarding-design.md`](./superpowers/specs/2026-08-03-invoice-inwarding-design.md)
 
-The PO Inwarding screen (`/po-tracking/po-inwarding`) is the goods-receipt desk's view of purchase orders. It shows the same table, filters and sorting as FG POs Tracking — `PoProcurementClient` runs with `mode="inwarding"`, which strips the procurement-side writes (create, bulk upload, mail, split, cancel) and leaves **Receive** as the row action. It lands on the "open" tab (`raised` + `partially_received`) rather than everything ever raised, and adds an `inward` tab that filters on `po_type` rather than status, so POs an invoice booked in already-complete stay reachable.
+The PO Inwarding screen (`/po-tracking/po-inwarding`) is the goods-receipt desk's view of purchase orders. It shows the same table, filters and sorting as FG POs Tracking — `PoProcurementClient` runs with `mode="inwarding"` (the prop is `inwardingMode` on `PoTable`/`PoDataRow`), which strips every procurement-side write: create, bulk upload, mail, split, cancel. It lands on the "open" tab (`raised` + `partially_received`) rather than everything ever raised, and adds an `inward` tab that filters on `po_type` rather than status, so POs an invoice booked in already-complete stay reachable.
+
+**There is no manual Receive on this desk.** The row-level Receive button was removed: a receipt here comes from the supplier invoice through Add Invoice, which books the quantity, the batch and the document together. A hand-typed quantity beside it was a second, unsourced way to move stock. `ReceivePODialog` and `POST /api/v1/purchase-orders/[id]/receive` still exist and are still reachable from **FG PO Procurement** — only the inwarding desk lost the button.
 
 On top of that sits **Add Invoice** — upload a supplier's invoice PDF, have it read automatically, review the fields against the original, and turn each line into an inward PO (and, where the goods were already ordered, a goods receipt against the existing PO).
 
@@ -177,7 +179,7 @@ The dialog used to report only problems, which left "nothing is wrong" and "noth
 |-------|------|
 | `invoice_mfg` | One header per invoice. `UNIQUE (mfg_id, invoice_no)` — re-submitting the same invoice is a DB error rather than a second round of credited `received_qty`. Keyed on both columns because two manufacturers can each legitimately issue "INV-001". |
 | `invoice_items_mfg` | One row per invoice line, carrying both the printed value (`parsed_sku_code`) and the mapped one (`sku_code`) |
-| `purchase_orders` | One inward PO per line, `po_type = 'inward'`, numbered `<BRAND>-INW-<YYYYMM>-<NNN>`. `expected_on` is the **invoice's own date** (backdated on purpose: the goods have already shipped) |
+| `purchase_orders` | **One inward PO per SKU** (not per line — see below), `po_type = 'inward'`, numbered `<BRAND>-INW-<YYYYMM>-<NNN>`. `expected_on` is the **invoice's own date** (backdated on purpose: the goods have already shipped) |
 | `history_pos` | The audit row each receipt writes, via `lib/po-receive.ts` |
 
 `invoice_items_mfg` holds two PO links, because a line can relate to two orders:
@@ -197,6 +199,18 @@ The inward PO is inserted one of two ways:
 
 Referenced lines take their brand from the parent PO's number rather than the SKU, because such a line needn't carry a SKU at all.
 
+### One inward PO per SKU — `lib/invoice-merge.ts`
+
+Lines are written in two passes. Pass 1 credits each line's receipt against its referenced order (that allocation is genuinely per line). Pass 2 runs `mergeInwardLinesBySku` over the staged lines and writes **one inward PO per SKU**.
+
+A single SKU reaches that point several times as a matter of course: the FIFO allocator splits a line covered by two open POs into two rows, and two printed lines can carry the same SKU. Writing one PO per row produced three of our POs against the **one merged item** Uniware creates for the same invoice — nothing the desk could reconcile. `mergeItemsBySku` in `lib/uniware.ts` had already been given this rule (after the 2026-08-12 failure, where a repeated `itemSKU` was rejected outright); this is our side of the same rule, and `tests/unit/inward-merge.test.ts` pins the two together.
+
+- Quantities and amounts **sum**; the unit price is quantity-weighted and rounded to 2dp, exactly as `mergeItemsBySku` does, so the PO's value still equals the lines' value.
+- Descriptive fields take the first non-null.
+- `reference_po` is the **first** order settled. The column is `VARCHAR(50)` and holds one number — comma-joining three would overflow it. The complete mapping lives on `invoice_items_mfg` (still one row per printed line, with its own `received_against_po_id`) and in Uniware's `ReferenceOrder` field, which does comma-join.
+
+The merge is a pure function in its own module so a credential-free unit test can load it — importing `lib/invoice-inward.ts` pulls in `lib/s3`, which throws at import without an AWS region.
+
 `mfg_date` / `expiry` are `VARCHAR`, not `DATE`: invoices often print them month-only (`Jun-2026`).
 
 Before any transaction opens, `resolveBrands` validates every mapped SKU — an unknown code is a `400 sku_not_found`, and a SKU that isn't `active` is a `400 sku_not_active`. Inward PO numbers use the same brand-code mapping as procurement's single-PO route, so an inward PO number is recognisable alongside the ones procurement raises.
@@ -213,7 +227,7 @@ Before any transaction opens, `resolveBrands` validates every mapped SKU — an 
 
 ## Uniware (Unicommerce) Mirror — `lib/uniware.ts`
 
-Our model is **one PO per SKU**; Uniware's mirror is **one PO carrying every SKU on the invoice**. That code is stamped onto every inward PO row (`purchase_orders.uniware_po_code`) as well as the invoice header (`invoice_mfg.uniware_po_code`), so the PO list — the hottest query on that table — doesn't grow a join.
+Uniware's mirror is **one PO carrying every SKU on the invoice**, and since the merge above our inward POs line up with its items 1:1 — one per SKU on both sides. `mergeItemsBySku` stays in `buildPurchaseOrder` as the guard against a repeat reaching the payload. That code is stamped onto every inward PO row (`purchase_orders.uniware_po_code`) as well as the invoice header (`invoice_mfg.uniware_po_code`), so the PO list — the hottest query on that table — doesn't grow a join.
 
 | Call | Purpose |
 |------|---------|
@@ -241,11 +255,23 @@ Because one Uniware PO settles several of ours, it carries a **`ReferenceOrder`*
 
 Deliberately not `sendMfgSelectionEmail`: that one reports PO status *to the manufacturer* and attaches PO documents we generate. This one goes to the **receiving warehouse** — the manufacturer already knows the order and shipped the goods; it's the warehouse that needs the paperwork for stock arriving at their door.
 
-- Recipients: `entity_emails` rows with `entity_type = 'warehouse'` and `entity_code` = the `master_warehouse.name` that `purchase_orders.destination` stores. (The column was `ENUM('vendor','mfg')`, so inserting `'warehouse'` was silently coerced to `''` — widened by `prisma/add_warehouse_entity_email_type.sql`.)
+- Recipients: `entity_emails` rows with `entity_code` = the `master_warehouse.name` that `purchase_orders.destination` stores, and `entity_type` of either **`warehouse`** (the site's own contacts) or **`employee`** (a person looped in on that site — ours or an outside party). (The column was `ENUM('vendor','mfg')`, so inserting `'warehouse'` was silently coerced to `''` — widened by `prisma/add_warehouse_entity_email_type.sql`, then again by `add_entity_email_employee_cc.sql`.)
+- **To vs CC:** each row carries `recipient_type ENUM('to','cc')`. `resolveRecipients` returns `{ to, cc }` via `splitRecipients` (`lib/recipients.ts`), and the mail sets both headers. An address listed both ways is sent **once, in To** — the same person receiving a To and a CC copy of one mail is a duplicate in their inbox. `cc` is omitted entirely when empty; nodemailer throws on a blank `Cc`.
+- Employee rows never carry a `legal_entity_code`, so the shared-address arm of `selectByWarehouseForEntity` already includes them for every entity.
 - Attachments: the original invoice PDF, plus the Uniware PO document when it can be fetched (best-effort — the goods are already booked).
 - Subject: `Create PO : <MFG NAME> || Invoice No : <no> || <D-MON-YY>`, left as the MIS team wrote it.
 - Signed with the filer's own name plus `MAIL_SIGNATURE_TITLE` (default `MIS Executive`).
-- **No recipients on file returns `false`, it does not throw** — a warehouse with no email is a data gap, not a failure of an already-committed invoice.
+- **No recipients on file returns `false`, it does not throw** — a warehouse with no email is a data gap, not a failure of an already-committed invoice. The check is that To **and** CC are both empty: a site whose only entry is a CC'd employee is still notified.
+
+---
+
+## The Invoices Page — `/po-tracking/invoices`
+
+The document-shaped view of the same data: one row per supplier invoice, expanding to its line items. Our POs are one SKU each; an invoice is one document covering many, so listing the POs flat hides the document they came from. `InvoiceGroupTable` is shared with the inwarding desk's **Invoice History** dialog so the two can't drift.
+
+- **Filters** — search (invoice no / manufacturer), manufacturer, destination and an invoice-date range, inline in the toolbar. Held in component state, not the URL: the table fetches client-side, so there is no server render to drive with a search param the way the masters pages do. They reach the table as a **query string** prop rather than an object, because a string compares by value and an object would be a new identity on every render, refetching forever.
+- **Uniware Code** sits on the invoice row, not in the line view: Uniware holds one PO per invoice, so it belongs to the document. The old per-line "Inward PO" column was dropped — after the per-SKU merge it repeats across every line of a SKU and says nothing the invoice-level code doesn't. **Received against** stays per line, because two lines of one SKU can settle two different open POs.
+- The export carries the same filters, so the file matches what is on screen.
 
 ---
 
@@ -255,8 +281,10 @@ Deliberately not `sendMfgSelectionEmail`: that one reports PO status *to the man
 |----------|---------|
 | `POST /api/v1/purchase-orders/invoice/parse` | Multipart PDF → `{ ok, parsed }`. `422 unparseable` when nothing usable came back (wrong file, unreadable scan) rather than an empty success the user has to diagnose from a blank form. `10 MB` cap, PDF only. |
 | `POST /api/v1/purchase-orders/invoice` | Multipart (`file` + JSON `payload`) → NDJSON step stream. Validated with `invoiceInwardSchema`; no `schema` on the gateway because it's multipart. |
-| `GET /api/v1/purchase-orders/invoice` | Invoice history list, `?limit` (clamped 1–100) `&offset` |
+| `GET /api/v1/purchase-orders/invoice` | Invoice history list, `?limit` (clamped 1–100) `&offset`, `&search`, plus the filters `&mfgCode` `&destination` `&dateFrom` `&dateTo` (invoice date). All optional; `buildInvoiceParams` turns an absent one into a NULL that switches its predicate off |
 | `GET /api/v1/purchase-orders/invoice/[id]` | One invoice: header, items, and the POs each line resolved to |
+| `GET /api/v1/purchase-orders/invoice/export` | The same filters, unpaginated → CSV (invoices) or two-sheet XLSX (invoices + every line) |
+| `GET /api/v1/purchase-orders/[id]/inwarding` | Everything inwarded against one PO, for the detail panel. `404` = no such PO — the panel treats that as a dead `?inwardFor=` and clears it |
 | `GET /api/v1/purchase-orders/open-for-receive?mfg_id=` | Open POs for the per-line Reference PO picker. Entity-scope checked. |
 
 ## Files
@@ -264,11 +292,14 @@ Deliberately not `sendMfgSelectionEmail`: that one reports PO status *to the man
 | Path | Role |
 |------|------|
 | `lib/invoice-inward.ts` | The whole committed sequence and its compensation rules |
+| `lib/invoice-merge.ts` | `mergeInwardLinesBySku` — one inward PO per SKU. Pure, so a unit test can load it |
+| `lib/recipients.ts` | `splitRecipients` — entity_emails rows → `{ to, cc }`. Pure, same reason |
 | `lib/nanonets.ts` | Extraction wire format |
 | `lib/invoice-mapping.ts` | Fuzzy invoice → masters mapping |
 | `lib/uniware.ts` | OAuth + PO create/fetch |
 | `lib/po-receive.ts` | Shared receipt/tolerance/auto-close logic |
 | `lib/queries/supplier-invoices.ts` | SQL for both invoice tables |
 | `types/invoice.ts` | `ParsedInvoice`, `ParsedLineItem`, `OpenPoOption`, invoice-history row types |
-| `prisma/add_supplier_invoices.sql`, `add_inward_po_type.sql`, `add_invoice_item_reference_po.sql`, `add_invoice_uniware_po_code.sql`, `add_po_uniware_code.sql`, `add_warehouse_entity_email_type.sql` | The migrations, in the order they were applied |
+| `prisma/add_supplier_invoices.sql`, `add_inward_po_type.sql`, `add_invoice_item_reference_po.sql`, `add_invoice_uniware_po_code.sql`, `add_po_uniware_code.sql`, `add_warehouse_entity_email_type.sql`, `add_entity_email_employee_cc.sql` | The migrations, in the order they were applied |
+| `tests/unit/inward-merge.test.ts`, `recipients.test.ts`, `invoice-filters.test.ts` | The merge rule, the To/CC split, and the filter param/placeholder count |
 | `scripts/_check-invoice-mapping.ts`, `_check-inward-count.ts`, `_check-inward-sequence.ts`, `_check-inward-mail-summary.ts`, `_check-uniware-push.ts`, `_check-uniware-po-pdf.ts`, `_check-backdated-po.ts` | Verification scripts for each part of the flow |

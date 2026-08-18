@@ -24,6 +24,8 @@ Next.js 16 App Router · React 19 · TypeScript · Tailwind CSS v4 · Prisma 7 (
 | `npm run test:db` | DB tests against `DB_NAME_TEST`, each wrapped in a transaction that is **always rolled back** |
 | `npm run test:checks` | The older `scripts/_check-*.ts` scripts (`-- --db` to include the DB ones) |
 | `npm run lint:changed` | ESLint on changed files only — the ratchet over ~238 pre-existing errors |
+| `npx tsc --noEmit --incremental false` | The reliable type check. **Plain `npx tsc --noEmit` can report clean on a file that `next build` then rejects** — `tsconfig.json` sets `"incremental": true`, and a stale `tsconfig.tsbuildinfo` skips re-checking. `next build` always checks cold |
+| `npm run build` | Won't run while `npm run dev` is up — Next 16 takes one lock on `.next` and answers "Another next build process is already running" |
 | `npm run db:test` | Verify DB connection — ⚠️ **this script does not exist** (see `docs/qa-audit-2026-08.md` #9); nor do `db:generate`, `db:migrate`, `db:push`, `db:studio`, `db:seed` |
 
 ---
@@ -310,6 +312,20 @@ This eliminates `any` type noise and gives full IntelliSense on `conn.execute`, 
 
 ---
 
+## PO Tracking — the rules that bite
+
+**Displayed status ≠ stored status.** `DISPLAY_STATUS_EXPR` reads a stored-`raised` PO with no `email_sent_at` back as **Draft** — a PO the manufacturer hasn't been told about isn't really raised. That derived value is what the tabs filter on and what the table badges, so "is this a draft?" has one answer, `isDraftPo()` in `lib/po-rules.ts`, and both the UI and the API must use it. `raw_status` is the stored value, and only gates actions the API validates against it (the edit action).
+
+| Rule | Where |
+|---|---|
+| **A draft cannot be split** — split divides an order the manufacturer already has; before the mail goes out there is nothing to divide, change the quantity instead. Covers raised-but-unmailed, not just stored `draft` | `PoDataRow.canSplit` + the 409 in `[id]/split/route.ts`. The UI hiding a button is never the guard — PO ids are guessable integers |
+| **No manual receive on the inwarding desk** — receipts there come from the invoice (Add Invoice), which books quantity, batch and document together | `PoDataRow.canReceive`, gated on `inwardingMode`. Procurement keeps its Receive |
+| **Tabs** — FG tracking leads with `all` then `open`; `open` is a pseudo-status spanning `raised` + `punched` + `partially_received`, expanded by `statusMatchValues()` and never stored. Its badge is summed client-side | `po-types.ts` `TABS` / `INWARD_TABS`, `po-procurement/page.tsx` |
+| **Split children** are never rows of their own — reached by expanding the master, and highlighted with it as one block. `IS_SPLIT_CHILD` exempts inward POs, so an inward PO's `reference_po` doesn't hide it from the list | `MASTERS_ONLY`, `lib/po-children.ts`, `PoDataRow` |
+| **Row menus must be portalled.** The table sits in an `overflow-auto` wrapper, so an `absolute` dropdown is clipped — invisible on a full page, obvious on a one-row table | `PoActionMenu`, same pattern as `components/ui/FuzzySelect` |
+
+> `lib/po-split.ts` is a parallel implementation used only by its own DB test, and it has drifted (it still shrinks the parent's `qty`, which the split route deliberately stopped doing). **The route is the production path.**
+
 ## lib/queries/ Files
 
 | File | Domain |
@@ -318,7 +334,7 @@ This eliminates `any` type noise and gives full IntelliSense on `conn.execute`, 
 | `lib/queries/approvals.ts` | Approval workflow — insert, select, hasPending |
 | `lib/queries/auth.ts` | Authentication — sessions, session history |
 | `lib/queries/recipe.ts` | Recipe master — `master_recipe`, `details_recipe`, `artifacts_recipe` (was `bom.ts`) |
-| `lib/queries/entity-emails.ts` | Mail recipients per vendor / mfg / **warehouse** |
+| `lib/queries/entity-emails.ts` | Mail recipients per vendor / mfg / **warehouse** / **employee**, each row a `to` or a `cc`. An employee row is anyone worth looping in — ours or an outside party (3PL, CHA), so the address is typed, never picked from `users`. Its `entity_code` is the warehouse name or mfg code it hangs off, or `'*'` for **every** manufacturer including future ones |
 | `lib/queries/entity-scope.ts` | `user_entity_scope` + the admin picker's entity lists |
 | `lib/queries/history.ts` | Generic per-module audit trail — `history_masters_edits` |
 | `lib/queries/manufacturers.ts` | Manufacturer master — master_mfgs + details_mfg |
@@ -415,6 +431,12 @@ it to `/api/v1/v2/` — a 404 that compiled, linted and type-checked.
 | `lib/admin-guards.ts` | `assertNotSelfLockout` / `assertNotSelfScope` — no UI recovery path exists for either |
 | `lib/gateway/with-gateway.ts` | The route wrapper (auth, access, Zod, logging, `activity_log`) |
 | `lib/invoice-inward.ts` | Supplier invoice → inward POs: S3 → DB → Uniware → email, ordered least-reversible-last |
+| `lib/invoice-merge.ts` | `mergeInwardLinesBySku` — ONE inward PO per SKU, mirroring `mergeItemsBySku` in `lib/uniware.ts` so our POs and Uniware's items line up 1:1 |
+| `lib/recipients.ts` | `splitRecipients` — `entity_emails` rows → `{ to, cc }`, deduped with To winning over CC |
+| `lib/mail-limits.ts` | Outbound attachment size ceiling |
+| `lib/pdf/po-letterhead.ts` | Who a PO is FROM and where it ships: `sku_code → brand → entity`, with the fallback ladder. `po-document.tsx` renders every entity from it — there is no per-entity template |
+| `lib/po-rules.ts` | `poTolerance` (when a PO is closed out) and `isDraftPo` (draft **as PO Tracking means it** — stored `draft`, or `raised` with no `email_sent_at`) |
+| `lib/brand-view.ts` / `lib/brand-guard.ts` | Brand as an access boundary: the GRANT (`user_entity_scope`) vs the currently-VIEWED set, kept apart — conflating them is privilege escalation. Reads filter in SQL, writes go through the guard |
 | `lib/po-receive.ts` | Shared goods-receipt logic (tolerance, auto-close, `history_pos`) — takes an open connection, never opens its own transaction |
 | `lib/costing/final-costing.ts` | The Agreed Final Costing formula, in one place |
 | `lib/queries/` | SQL strings grouped by domain (see table above) |

@@ -108,7 +108,8 @@ The least-covered flow — external services, long-running, and it books stock. 
 | 6.7 | Close the tab mid-review, then reopen Add Invoice | The draft (**including the PDF**) is offered back from IndexedDB; no re-parse needed | | |
 | 6.8 | Abandon a review without submitting, then check S3 | **No orphaned object** — nothing is stored until submit | | |
 | 6.9 | Submit and watch the step stream | Four steps report in order: stored → POs created → Uniware → warehouse notified | | |
-| 6.10 | Check the results | One inward PO per line (`po_type = 'inward'`), `expected_on` = the **invoice date** (backdated), `invoice_mfg` + `invoice_items_mfg` written | | |
+| 6.10 | Check the results | One inward PO **per SKU** (`po_type = 'inward'`) — a SKU the FIFO match split across two POs still produces ONE inward PO, quantities summed. `expected_on` = the **invoice date** (backdated). `invoice_mfg` written, and `invoice_items_mfg` still one row **per printed line** | | |
+| 6.10a | Compare against Uniware | Our inward POs and the single Uniware PO's items match 1:1 — same SKUs, same quantities | | |
 | 6.11 | **Submit the same invoice again** | Refused by `UNIQUE (mfg_id, invoice_no)`. Critically: `received_qty` on any referenced PO is **not** credited twice. | | |
 | 6.12 | On a line, pick an existing open PO as Reference PO | That PO's `received_qty` is credited **and** the line still raises its own inward PO (`link_type = 'received'`, both PO links stored) | | |
 | 6.13 | Reference a PO belonging to an out-of-scope manufacturer | Not offered in the picker; refused if forced | | |

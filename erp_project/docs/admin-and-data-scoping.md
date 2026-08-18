@@ -118,8 +118,8 @@ Every helper in `lib/scope.ts` preserves that: an unrestricted dimension compile
 ```sql
 CREATE TABLE user_entity_scope (
   user_id     INT NOT NULL,
-  entity_type ENUM('mfg','vendor','warehouse') NOT NULL,
-  entity_id   INT NOT NULL,  -- master_mfgs.id | master_vendors.id | master_warehouse.id
+  entity_type ENUM('mfg','vendor','warehouse','brand') NOT NULL,
+  entity_id   INT NOT NULL,  -- master_mfgs.id | master_vendors.id | master_warehouse.id | master_brand.id
   created_at  DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by  INT NULL,
   PRIMARY KEY (user_id, entity_type, entity_id),
@@ -140,6 +140,7 @@ export type UserScope = {
   mfgIds: number[] | null          // null = unrestricted, never an empty array
   vendorIds: number[] | null
   warehouseNames: string[] | null  // resolved from ids, because `destination` stores the name
+  brandIds: number[] | null
 }
 ```
 
@@ -168,13 +169,31 @@ Why the three differ:
 
 The sidebar drops out-of-scope manufacturers **entirely** rather than locking them — a lock icon would still disclose the name.
 
+### Brand — the grant vs the view
+
+Brand is the fourth dimension, and the only one with a **user-facing switcher**, so it carries a distinction the other three don't. Conflating the two is a privilege escalation:
+
+| | Where | Meaning |
+|---|---|---|
+| **The GRANT** | `user_entity_scope` rows, `entity_type = 'brand'` | The boundary. What this user is *allowed* to see |
+| **The VIEW** | `lib/brand-view.ts`, driven by `components/BrandViewSwitcher.tsx` | What they are *currently looking at* — always a subset of the grant, never a widening of it |
+
+`getViewScope(userId)` returns the grant narrowed by the current view; `getUserScope(userId)` returns the grant alone. A page that lists rows uses the view (so the switcher works); a guard that decides whether a write is allowed uses the grant. Passing a brand id in from the client can only ever narrow.
+
+Brand became an access boundary only once it was a real entity: `master_skus.brand` was free text with no FK and a `SELECT DISTINCT` dropdown behind it — `prisma/add_master_brand.sql` created `master_brand`, added `master_skus.brand_id`, backfilled it and fixed a `FIEN`/`Fein` typo across 28 SKUs. **Free text cannot be a boundary.**
+
+Reads filter in SQL — the brand predicates live in `lib/queries/skus.ts`, `purchase-orders.ts`, `recipe.ts`, `manufacturing.ts` and `supplier-invoices.ts`. Writes can't: `execute()` uses prepared statements and doesn't expand arrays, so a scope predicate can't ride along on an INSERT/UPDATE. `lib/brand-guard.ts` asserts instead, the same reasoning `assertInScope` gives.
+
+**A row that resolves to no brand is visible**, consistently everywhere: a SKU with `brand_id IS NULL` is unattributed, so there is nothing to exclude it on. The predicates are written `(? IS NULL OR sk.brand_id IS NULL OR sk.brand_id IN (?))`, and the invoice list expresses the same idea as an `EXISTS ... OR NOT EXISTS` pair — brand is per *line* there, and one invoice can legitimately carry several brands' SKUs.
+
 ### Deliberately not scoped yet
 
 Don't assume a screen is scoped because `lib/scope.ts` exists — grep for the call. Known gaps:
 
 - **The approvals queue** — `approvalsSql.listPending` stores only module + `entity_id`, and bulk modules store `entity_id = user_id`.
 - **BOM master** — no `mfg_id`; linkage is via `master_recipe_mfg`.
-- **The supplier-invoice list.**
+
+The supplier-invoice list **is** scoped now — `buildInvoiceParams` carries manufacturer, destination and brand.
 
 `scripts/_check-entity-scope.ts` exercises the helpers and the scoped queries.
 

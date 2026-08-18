@@ -961,7 +961,9 @@ Update the S3 attachment key on a PO. If a previous key exists it is deleted fro
 
 > Reworked (commit `3ae9bc5`). Now uses `withGateway` (see [Design Pattern](#design-pattern-current-implementation)); only 1 split row is required (previously 2), the parent's `qty`/`total_amount` is now reduced by the split total instead of `received_qty` being credited, and the response no longer includes `split_type`.
 
-Split a PO into N child POs, each optionally destined for a different manufacturer and warehouse. Splittable statuses: `draft`, `raised`, `punched`, `partially_received`.
+Split a PO into N child POs, each optionally destined for a different manufacturer and warehouse. Splittable statuses: `raised`, `punched`, `partially_received`.
+
+**A draft cannot be split.** A split divides an order the manufacturer already has; before the mail goes out there is nothing to divide — change the quantity instead. "Draft" here means what PO Tracking shows (`isDraftPo` in `lib/po-rules.ts`): a stored `draft`, **or** a `raised` PO with no `email_sent_at`. The table hides the Split button on exactly that set, and this route refuses the same set with a 409 — a looser API would let a draft be split by URL.
 
 ```json
 // Request body
@@ -982,7 +984,7 @@ Split a PO into N child POs, each optionally destined for a different manufactur
 
 **Parent PO effect** — the parent's `qty` (and `total_amount`, recalculated from `unit_price`) is reduced by the split total; `status` and `received_qty` are left untouched — a split is not a receiving event. `short_closed` is now set only manually (e.g. via a separate Close action), never automatically by splitting.
 
-Child PO statuses mirror the parent: `draft` parent → `draft` children; any other parent status → `raised` children. Child PO numbers: `{parent_po_no}-S001`, `{parent_po_no}-S002`, … If the parent was `draft`, each child additionally gets its own `PO` approval record (create) with a full field diff. Splitting a parent that isn't `draft` inserts the children directly, same as a normal raise.
+Children are always `raised`. (The `draft` parent → `draft` children branch, and the per-child `PO` approval it minted, is now unreachable and kept only as a description of what relaxing the rule would have to do.) Child PO numbers: `{parent_po_no}-S001`, `{parent_po_no}-S002`, … If the parent was `draft`, each child additionally gets its own `PO` approval record (create) with a full field diff. Splitting a parent that isn't `draft` inserts the children directly, same as a normal raise.
 
 ```json
 // Response 200
@@ -996,7 +998,9 @@ Child PO statuses mirror the parent: `draft` parent → `draft` children; any ot
 { "error": "PO not found." }
 
 // 409 — PO status prevents splitting
-{ "error": "Cannot split a PO with status 'received'. Allowed: draft, raised, punched, partially_received." }
+{ "error": "Cannot split a PO with status 'received'. Allowed: raised, punched, partially_received." }
+// 409 — still a draft
+{ "error": "PEP-2608-004 is still a draft. Send it to the manufacturer first — a split divides an order they already have." }
 ```
 
 ---
