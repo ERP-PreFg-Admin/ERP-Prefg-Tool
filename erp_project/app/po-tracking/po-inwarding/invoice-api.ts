@@ -2,7 +2,7 @@
 // request shapes live in one place and the dialog reads as phases, not fetches.
 
 import type { OpenPoOption, ParsedInvoice } from "@/types/invoice"
-import type { DetectedMfg } from "@/lib/invoice-detect"
+import type { DetectedMfg } from "@/lib/invoice/invoice-detect"
 import { monthIST } from "@/lib/date"
 import { tooLargeMessage } from "./invoice-form"
 

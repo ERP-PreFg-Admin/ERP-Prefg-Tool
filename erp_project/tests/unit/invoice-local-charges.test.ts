@@ -5,7 +5,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { parseCharges, chargesTotal, parseTaxSummary } from "../../lib/invoice-local/charges"
+import { parseCharges, chargesTotal, parseTaxSummary } from "../../lib/invoice/local/charges"
 
 /** The two tables that matter, in the shape the text layer emits them. */
 const KAIN = [

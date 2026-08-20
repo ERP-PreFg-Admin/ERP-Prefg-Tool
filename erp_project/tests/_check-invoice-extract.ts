@@ -26,7 +26,7 @@
 
 import { readdirSync, readFileSync, statSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { detectFromPdf } from "../lib/invoice-detect"
+import { detectFromPdf } from "../lib/invoice/invoice-detect"
 import { parseInvoice, strategyFor, configFor } from "../lib/nanonets"
 import type { ParsedInvoice } from "../types/invoice"
 

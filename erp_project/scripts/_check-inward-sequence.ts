@@ -7,7 +7,7 @@
 // Uniware and emails a manufacturer, so it has to be done by hand through the UI.
 import "dotenv/config"
 import assert from "node:assert"
-import { INWARD_STEPS } from "../lib/invoice-inward"
+import { INWARD_STEPS } from "../lib/invoice/invoice-inward"
 import { buildPurchaseOrder } from "../lib/uniware"
 
 // ── Requirement 5: the sequence, in order ────────────────────────────────────

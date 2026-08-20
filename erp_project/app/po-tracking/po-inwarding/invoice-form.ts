@@ -3,7 +3,7 @@
 // invoice to a reviewable form, and the validation over it, can be read (and
 // exercised) without rendering anything.
 
-import { matchMfg, matchSku, matchWarehouse, toDateInputValue } from "@/lib/invoice-mapping"
+import { matchMfg, matchSku, matchWarehouse, toDateInputValue } from "@/lib/invoice/invoice-mapping"
 import type { OpenPoOption, ParsedCharge, ParsedInvoice } from "@/types/invoice"
 import type { MfgOption, SkuOption, WarehouseOption } from "../po-procurement/po-types"
 

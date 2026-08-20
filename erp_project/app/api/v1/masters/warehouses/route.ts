@@ -31,7 +31,7 @@ import logger from "@/lib/logger"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { warehouseActionSchema, type WarehouseEntityRow } from "@/lib/validation/warehouses"
-import { panOf } from "@/lib/gstin"
+import { panOf } from "@/lib/invoice/gstin"
 import { STATUS } from "@/lib/constants"
 
 /** Child-row fields the approval diff carries. Must stay in step with

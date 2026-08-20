@@ -1,4 +1,4 @@
-import { findGstins, isOurs } from "@/lib/gstin"
+import { findGstins, isOurs } from "@/lib/invoice/gstin"
 
 // The rupee sign extracts as "₹" from some Tally PDFs and as "ī" from others,
 // depending on how the font is embedded. Both mean the same column.

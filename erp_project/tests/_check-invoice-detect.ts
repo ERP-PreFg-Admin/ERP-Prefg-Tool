@@ -25,8 +25,8 @@
 
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { findGstins, extractPdfText, lookupMfgByGstin } from "../lib/invoice-detect"
-import { panOf } from "../lib/gstin"
+import { findGstins, extractPdfText, lookupMfgByGstin } from "../lib/invoice/invoice-detect"
+import { panOf } from "../lib/invoice/gstin"
 
 const DEFAULT_DIR = resolve(process.cwd(), "..", "Invoices")
 

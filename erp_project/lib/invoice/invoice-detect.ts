@@ -11,9 +11,9 @@
  */
 
 import { extractText , getDocumentProxy} from "unpdf"
-import { query } from "./db"
-import { manufacturers } from "./queries/manufacturers"
-import logger from "./logger"
+import { query } from "../db"
+import { manufacturers } from "../queries/manufacturers"
+import logger from "../logger"
 // GSTIN shape and which ones are ours live in ./gstin — pure, so callers that
 // only need those stay unit-testable without the DB credentials ./db requires.
 import { findGstins, sellerGstinsOf } from "./gstin"

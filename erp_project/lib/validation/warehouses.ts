@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { isGstinShape } from "@/lib/gstin"
+import { isGstinShape } from "@/lib/invoice/gstin"
 
 const WAREHOUSE_TYPES = ["CWH", "MWH"] as const
 

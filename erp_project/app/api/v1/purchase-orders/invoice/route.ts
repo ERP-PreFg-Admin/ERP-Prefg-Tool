@@ -31,7 +31,7 @@ import { assertSkuCodesInBrandScope } from "@/lib/brand-guard"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { invoiceInwardSchema } from "@/lib/validation/purchase-orders"
-import { runInwardInvoice, type StepEvent } from "@/lib/invoice-inward"
+import { runInwardInvoice, type StepEvent } from "@/lib/invoice/invoice-inward"
 import { makeEventId, recordRawEvent, recordProcessedEvent, recordFailedEvent } from "@/lib/events"
 import logger from "@/lib/logger"
 

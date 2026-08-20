@@ -5,7 +5,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { parseLocallyVerbose } from "../../lib/invoice-local"
+import { parseLocallyVerbose } from "../../lib/invoice/local"
 
 const OURS = "27AAJCK9697F1ZS"
 const CHERYL_GSTIN = "27AAACC4638H1ZQ"

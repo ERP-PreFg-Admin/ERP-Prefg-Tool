@@ -11,7 +11,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { panOf, isOurs, sellerGstinsOf, OUR_PANS } from "../../lib/gstin"
+import { panOf, isOurs, sellerGstinsOf, OUR_PANS } from "../../lib/invoice/gstin"
 
 // Real values, from the sample set. PEP invoices under several state codes, which
 // is the whole reason the comparison is on PAN rather than the full GSTIN.

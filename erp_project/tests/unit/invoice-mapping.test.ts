@@ -6,7 +6,7 @@
 // normalizeParsedInvoice; this file is only the mfg ranking.)
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { matchMfg } from "../../lib/invoice-mapping"
+import { matchMfg } from "../../lib/invoice/invoice-mapping"
 import type { MfgOption } from "../../app/po-tracking/po-procurement/po-types"
 
 const MFGS: MfgOption[] = [

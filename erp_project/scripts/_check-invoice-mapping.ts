@@ -9,7 +9,7 @@ import assert from "node:assert/strict"
 // credential, but importing lib/nanonets pulls lib/env in at module load.
 import "dotenv/config"
 import { normalizeParsedInvoice } from "../lib/nanonets"
-import { bestMatch, matchSku, matchWarehouse, toDateInputValue } from "../lib/invoice-mapping"
+import { bestMatch, matchSku, matchWarehouse, toDateInputValue } from "../lib/invoice/invoice-mapping"
 import type { SkuOption, WarehouseOption } from "../app/po-tracking/po-procurement/po-types"
 
 // ── Fixture: verbatim result.content from a live extraction ──────────────────

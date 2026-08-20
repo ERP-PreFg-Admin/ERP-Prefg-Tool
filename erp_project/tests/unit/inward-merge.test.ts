@@ -6,7 +6,7 @@
 // an edge one — the FIFO allocator produces it.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mergeInwardLinesBySku, type InwardLine } from "../../lib/invoice-merge"
+import { mergeInwardLinesBySku, type InwardLine } from "../../lib/invoice/invoice-merge"
 
 const line = (over: Partial<InwardLine> = {}): InwardLine => ({
   skuCode: "SKU-A", skuName: "Face Wash", qty: 100,

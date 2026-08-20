@@ -29,9 +29,9 @@ export const maxDuration = 300
 
 import { NextResponse } from "next/server"
 import { parseInvoice, strategyFor, configFor } from "@/lib/nanonets"
-import { detectFromPdf } from "@/lib/invoice-detect"
-import { parseLocallyVerbose } from "@/lib/invoice-local"
-import { parseCharges } from "@/lib/invoice-local/charges"
+import { detectFromPdf } from "@/lib/invoice/invoice-detect"
+import { parseLocallyVerbose } from "@/lib/invoice/local"
+import { parseCharges } from "@/lib/invoice/local/charges"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { makeEventId, recordRawEvent, recordProcessedEvent, recordFailedEvent } from "@/lib/events"

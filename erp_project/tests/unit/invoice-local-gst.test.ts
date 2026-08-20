@@ -8,7 +8,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { inferGstPercent } from "../../lib/invoice-local"
+import { inferGstPercent } from "../../lib/invoice/local"
 
 test("derives 18% from Reve Pharma's own figures", () => {
   // taxable 1,04,552.88 → total 1,23,372.00 (incl. a stated -0.40 round off)

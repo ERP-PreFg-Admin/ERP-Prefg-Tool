@@ -1,5 +1,5 @@
 import type { ParsedInvoice, ParsedLineItem } from "@/types/invoice"
-import { findGstins, isOurs } from "@/lib/gstin"
+import { findGstins, isOurs } from "@/lib/invoice/gstin"
 import { MONEY, clean, num, toLines, slashDateToTally } from "./util"
 
 // Item row, all columns run together, rate carrying four decimals:

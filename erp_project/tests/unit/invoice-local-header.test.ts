@@ -6,7 +6,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { parseHeader } from "../../lib/invoice-local/header"
+import { parseHeader } from "../../lib/invoice/local/header"
 
 const SELLER = "27AAKFR0481L1ZT"
 const OURS_MH = "27AAICP2804J1ZC"

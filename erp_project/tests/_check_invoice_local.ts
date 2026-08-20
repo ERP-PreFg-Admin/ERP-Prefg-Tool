@@ -1,7 +1,7 @@
 // import {readdirSync , readFileSync , statSync , existsSync} from "node:fs"
 // import {join , resolve} from "node:path"
-// import { extractPdfText } from "@/lib/invoice-detect"
-// import { parseTallyRows } from "@/lib/invoice-local/tally"
+// import { extractPdfText } from "@/lib/invoice/invoice-detect"
+// import { parseTallyRows } from "@/lib/invoice/local/tally"
 
 // const ROOT = resolve(process.cwd(), ".." , "Invoices")
 // const filter = process.argv[2]?.toLowerCase()
@@ -39,8 +39,8 @@
 
 import { readdirSync, readFileSync, statSync, existsSync, writeFileSync, mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { extractPdfText } from "../lib/invoice-detect"
-import { parseTallyRows } from "../lib/invoice-local/tally"
+import { extractPdfText } from "../lib/invoice/invoice-detect"
+import { parseTallyRows } from "../lib/invoice/local/tally"
 
 const ROOT = resolve(process.cwd(), "..", "Invoices")
 const OUT = resolve(process.cwd(), ".invoice-samples")
