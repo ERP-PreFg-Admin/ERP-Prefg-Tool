@@ -239,6 +239,15 @@ const SELECT_COLS = `
     sk.name   AS sku_name, sk.status AS sku_status,
     ent.code  AS entity_code,
     dwe.facility_code AS dest_facility_code,
+    -- What Unicommerce last reported for this PO's mirror. A scalar subquery
+    -- rather than a join: idx_supplier_invoices_uniware_po is a plain index, not
+    -- unique, so a join could fan the row set out — and this FROM is shared with
+    -- countPaginated and the export, where a fanned row set is a wrong total.
+    -- NULL on a PO that was never mirrored, and on one nobody has synced yet;
+    -- the timestamp that distinguishes them lives on the invoices tab.
+    (SELECT im.uniware_status FROM invoice_mfg im
+      WHERE im.uniware_po_code = po.uniware_po_code
+      LIMIT 1) AS uniware_status,
     (SELECT raised_by FROM approvals WHERE module = 'PO' AND entity_id = po.id ORDER BY id DESC LIMIT 1) AS po_raised_by,
     (SELECT email FROM details_mfg WHERE mfg_id = m.id LIMIT 1) AS mfg_email
 `
@@ -938,6 +947,10 @@ export const purchaseOrdersSql = {
     SELECT
       po.po_no, po.date, po.expected_on, po.destination,
       po.sku_code, po.qty, po.unit_price, po.total_amount,
+      -- The order this one was split off, when it is a split. The split PO
+      -- document exists to name it (lib/pdf/split-po-document.tsx); the ordinary
+      -- document ignores it.
+      po.reference_po,
       sk.name            AS sku_name,
       m.code             AS mfg_code,
       m.name             AS mfg_name,

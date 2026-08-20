@@ -712,3 +712,61 @@ export type FinalCostingComparisonRow = FinalCostingRow & {
   total_delta: number
   total_delta_pct: number
 }
+/**
+ * One cell of the MFG × Facility matrix on /po-tracking/mfg-overview — a
+ * (manufacturer, facility) pair, where a facility is a details_warehouse_entity
+ * row (location × legal entity), NOT a master_warehouse row.
+ *
+ * The matrix query returns the full cross-product, so a pair that has never been
+ * configured still arrives here with zeroes and a null `un_mfg_code`. See
+ * cellState() in app/po-tracking/mfg-overview/mapping-state.ts for what each
+ * combination means on screen.
+ */
+export type MfgFacilityCell = {
+  mfg_id: number
+  mfg_code: string | null
+  mfg_name: string
+  /** details_warehouse_entity.id */
+  wh_id: number
+  wh_name: string
+  /** master_warehouse.code — NULL on every row today, so the UI shows
+   *  facility_code as the column's second line instead. */
+  wh_code: string | null
+  location: string | null
+  entity_code: string
+  /** The Unicommerce Facility header value. Null means Uniware cannot be
+   *  addressed here at all. */
+  facility_code: string | null
+  wh_type: string
+  /** This pair's Uniware vendor code. Null = the manufacturer is not a vendor at
+   *  this facility, which is what makes the cell inert. */
+  un_mfg_code: string | null
+  total_skus: number
+  mapped_skus: number
+  /** Of the mapped ones, how many a Vendor Item Master import has confirmed. */
+  confirmed_skus: number
+  /** Mapped but neither pushed nor seen — drives the warning overlay. */
+  unpushed_skus: number
+  /** Mapped here but no longer a live line on this manufacturer. */
+  orphan_skus: number
+  last_seen_at: string | null
+}
+
+/** One SKU in the matrix drilldown panel, with its mapping state at one facility. */
+export type MfgFacilitySkuRow = {
+  sku_id: number
+  sku_code: string
+  sku_name: string | null
+  brand_id: number | null
+  /** 1 when a live master_recipe_mfg line links this SKU to the manufacturer —
+   *  the costing-side relation. 0 means it is known only from Unicommerce. */
+  has_recipe: number
+  /** 1 when the SKU is actively mapped at some facility. */
+  has_mapping: number
+  /** Null when this SKU has no row at this facility at all. */
+  map_id: number | null
+  map_status: "active" | "inactive" | null
+  un_pushed_at: string | null
+  un_push_error: string | null
+  un_seen_at: string | null
+}

@@ -49,7 +49,8 @@ const INVOICE_WHERE = `
 const INVOICE_LIST_BODY = `
   SELECT si.id, si.invoice_no, si.invoice_date, si.currency, si.destination,
          si.invoice_total, si.eway_bill_no, si.vehicle_no,
-         si.attachment_key, si.uniware_po_code, si.created_at,
+         si.attachment_key, si.uniware_po_code,
+         si.uniware_status, si.uniware_synced_at, si.created_at,
          m.code AS mfg_code, m.name AS mfg_name,
          u.name AS created_by_name,
          COUNT(sii.id)                   AS item_count,
@@ -106,6 +107,36 @@ export const supplierInvoicesSql = {
    * PO that doesn't exist. Parameters: [uniware_po_code, invoice_id]
    */
   setUniwarePoCode: `UPDATE invoice_mfg SET uniware_po_code = ? WHERE id = ?`,
+
+  /**
+   * Every mirrored invoice, for the sync-all button — the code to ask Uniware
+   * about, plus the two facts that decide which facility to ask as (destination
+   * and the PAN of the entity billed; see warehouse.facilityByDestinationAndPan).
+   *
+   * One row per Uniware PO, because that is the grain of uniware_po_code here:
+   * the inward POs sharing a code are not listed separately, so the sync makes
+   * one call per Uniware PO rather than one per PO row.
+   *
+   * Newest first and LIMITed: the recent ones are the ones still moving, and an
+   * unbounded list would be an unbounded number of Uniware round trips inside one
+   * request. The caller reports what the limit cut off.
+   * Parameters: [limit]
+   */
+  selectAllForStatusSync: `
+    SELECT si.id, si.uniware_po_code, si.destination, si.buyer_gstin
+    FROM invoice_mfg si
+    WHERE si.uniware_po_code IS NOT NULL
+    ORDER BY si.id DESC
+    LIMIT ?
+  `,
+
+  /** Stamp what Uniware just said, and when it said it.
+   *  Parameters: [uniware_status, id] */
+  setUniwareStatus: `
+    UPDATE invoice_mfg
+       SET uniware_status = ?, uniware_synced_at = NOW()
+     WHERE id = ?
+  `,
 
   /**
    * Has this manufacturer already had this invoice entered? Drives the

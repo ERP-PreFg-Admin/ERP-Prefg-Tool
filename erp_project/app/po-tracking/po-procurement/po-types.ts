@@ -38,6 +38,10 @@ export type PoRow = {
   invoice_no: string | null
   /** Unicommerce's PO code for this row — inward POs only, null everywhere else. */
   uniware_po_code: string | null
+  /** What Unicommerce last reported for that code. Null when the PO was never
+   *  mirrored and when nobody has synced it yet — the timestamp that tells those
+   *  apart is on the invoices tab, not here. */
+  uniware_status: string | null
   destination: string | null
   /** The Unicommerce facility at `destination` for this PO's entity. Null when
    *  either is unresolved — the site isn't set up for that entity, or the SKU is

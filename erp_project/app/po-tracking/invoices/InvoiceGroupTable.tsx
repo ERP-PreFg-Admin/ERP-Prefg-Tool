@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { SectionHead } from "../po-inwarding/InvoiceFields"
+import UniwareStatusBadge from "../UniwareStatusBadge"
 import type { InvoiceHistoryHeader, InvoiceHistoryItem } from "@/types/invoice"
 import { IST } from "@/lib/date"
 
@@ -45,6 +46,7 @@ export default function InvoiceGroupTable({
   search = "",
   filterQuery = "",
   pageSize = 25,
+  reloadKey = 0,
   emptyHint,
   className,
 }: {
@@ -55,6 +57,10 @@ export default function InvoiceGroupTable({
    *  fetch effect below doesn't re-run on every parent render. */
   filterQuery?: string
   pageSize?: number
+  /** Bump to refetch the current page. Rows are fetched client-side, so
+   *  router.refresh() can't reach them — the Uniware sync needs this to make the
+   *  statuses it just wrote appear. */
+  reloadKey?: number
   /** Shown when there are no invoices — the two hosts word this differently. */
   emptyHint?: React.ReactNode
   className?: string
@@ -76,6 +82,10 @@ export default function InvoiceGroupTable({
   /** Pure fetcher — holds no state, so callers can drive it from an effect
    *  without tripping react-hooks/set-state-in-effect. Throws on failure. */
   const fetchPage = useCallback(async (nextOffset: number) => {
+    // Read so `reloadKey` is a real dependency and not an "unnecessary" one: a
+    // bump has to change this callback's identity, which is what re-runs the
+    // effect below and refetches the page.
+    void reloadKey
     const params = new URLSearchParams(filterQuery)
     params.set("limit", String(pageSize))
     params.set("offset", String(nextOffset))
@@ -84,7 +94,7 @@ export default function InvoiceGroupTable({
     const data = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(data.error ?? "Couldn't load invoices.")
     return data as { invoices?: InvoiceHistoryHeader[]; total?: number }
-  }, [pageSize, search, filterQuery])
+  }, [pageSize, search, filterQuery, reloadKey])
 
   const apply = useCallback((data: { invoices?: InvoiceHistoryHeader[]; total?: number }, at: number) => {
     setError("")
@@ -174,6 +184,9 @@ export default function InvoiceGroupTable({
                   beside our own number rather than down in the lines: Uniware
                   holds ONE PO per invoice, not one per line. */}
               <th>Uniware Code</th>
+              {/* Unicommerce's own status for that PO, and the button that asks
+                  again. On the invoice row for the same reason the code is. */}
+              <th>Uniware Status</th>
               <th>Manufacturer</th>
               <th>Destination</th>
               <th className="text-right">Total</th>
@@ -184,13 +197,13 @@ export default function InvoiceGroupTable({
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={9} className="px-2 py-8 text-center text-muted-foreground">
+              <tr><td colSpan={10} className="px-2 py-8 text-center text-muted-foreground">
                 <Loader2 className="mx-auto h-4 w-4 animate-spin" />
               </td></tr>
             )}
 
             {!loading && invoices.length === 0 && (
-              <tr><td colSpan={9} className="px-2 py-8 text-center text-muted-foreground">
+              <tr><td colSpan={10} className="px-2 py-8 text-center text-muted-foreground">
                 {search.trim()
                   ? `No invoices match “${search.trim()}”.`
                   : filterQuery
@@ -232,6 +245,12 @@ export default function InvoiceGroupTable({
                     <td className="whitespace-nowrap font-mono text-[11px]">
                       {inv.uniware_po_code ?? <span className="text-muted-foreground">—</span>}
                     </td>
+                    <td>
+                      <UniwareStatusBadge
+                        status={inv.uniware_status}
+                        syncedAt={inv.uniware_synced_at}
+                      />
+                    </td>
                     <td className="max-w-56">
                       <div className="truncate" title={inv.mfg_name}>{inv.mfg_name}</div>
                       <div className="font-mono text-[11px] text-muted-foreground">{inv.mfg_code}</div>
@@ -268,7 +287,7 @@ export default function InvoiceGroupTable({
 
                   {isOpen && (
                     <tr className="border-t border-border bg-muted/20">
-                      <td colSpan={9} className="px-3 py-2">
+                      <td colSpan={10} className="px-3 py-2">
                         {itemsLoading && !lines ? (
                           <div className="flex items-center gap-2 py-3 text-muted-foreground">
                             <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading items…

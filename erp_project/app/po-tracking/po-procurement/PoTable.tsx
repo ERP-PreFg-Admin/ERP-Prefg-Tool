@@ -20,7 +20,8 @@ import { poTolerance, SortHead, type SortDir } from "./PoTableCells"
 
 // Columns always present: PO No., Manufacturer, PO Date, Exp. Dispatch, SKU,
 // Recipe, PO Qty, Received, Rate, Amount, Invoice No, Destination, Status, Actions.
-// The checkbox, Uniware Code and expand columns are conditional and counted in.
+// The checkbox, expand and the two Uniware columns (Code and Status, which
+// share one flag) are conditional and counted in.
 const BASE_COLUMN_COUNT = 14
 
 export default function PoTable({
@@ -92,7 +93,7 @@ export default function PoTable({
   // actually expand.
   const hasSplits = rows.some((r) => Number(r.child_count) > 0)
   const columnCount =
-    BASE_COLUMN_COUNT + (selectable ? 1 : 0) + (showUniwareCode ? 1 : 0) + (hasSplits ? 1 : 0)
+    BASE_COLUMN_COUNT + (selectable ? 1 : 0) + (showUniwareCode ? 2 : 0) + (hasSplits ? 1 : 0)
 
   // Select-all covers what a checkbox could reach: the unsplit masters on this
   // page, plus the children of the split ones. A split master is skipped —
@@ -217,6 +218,7 @@ export default function PoTable({
                   <SortHead colKey="total_amount" {...sh}>Amount</SortHead>
                   <TableHead>Invoice No</TableHead>
                   {showUniwareCode && <TableHead>Uniware Code</TableHead>}
+                  {showUniwareCode && <TableHead>Uniware Status</TableHead>}
                   <TableHead>Destination</TableHead>
                   <SortHead colKey="status"       {...sh}>Status</SortHead>
                   <TableHead className="text-right">Actions</TableHead>

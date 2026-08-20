@@ -40,8 +40,8 @@ import { manufacturers as manufacturersSql } from "@/lib/queries/manufacturers"
 import { skus as skusSql } from "@/lib/queries/skus"
 import { receivePo } from "@/lib/po-receive"
 import { mergeInwardLinesBySku, type InwardLine } from "@/lib/invoice-merge"
-import { createPurchaseOrder, futureDeliveryDate, uniwareEnabled } from "@/lib/uniware"
-import { UNIWARE_VENDOR_CODE } from "@/lib/env"
+import { createPurchaseOrder, futureDeliveryDate, uniwareEnabled, uniwareVendorCode } from "@/lib/uniware"
+import { UNIWARE_SANDBOX } from "@/lib/env"
 import { sendInwardInvoiceEmail } from "@/lib/mailer"
 import { ApiError } from "@/lib/gateway/errors"
 import logger from "@/lib/logger"
@@ -300,7 +300,11 @@ export async function runInwardInvoice(
     )
     facility = whRows[0]?.facility_code?.trim() || undefined
     legalEntityCode = whRows[0]?.entity_code
-    if(!facility) {
+    // Off prod the facility is discarded anyway (uniwareFacility pins the
+    // sandbox), so refusing here would only stop dev from testing the flow at a
+    // site nobody has mapped yet. On prod it stays a hard stop: the resolved
+    // facility is the only thing deciding which warehouse sees the PO.
+    if(!facility && !UNIWARE_SANDBOX) {
       throw new ApiError(
         400, "warehouse_facility_missing",
         `'${destination}' has no active Uniware facility for the entity billed on this invoice ` +
@@ -379,7 +383,7 @@ export async function runInwardInvoice(
       // mergeItemsBySku downstream stays as the guard against a repeat here.
       const res = await createPurchaseOrder({
         facility : facility,
-        vendorCode: UNIWARE_VENDOR_CODE || mfgCode,
+        vendorCode: uniwareVendorCode(mfgCode),
         currencyCode: body.currency || "INR",
         // Almost always omitted here: expectedOn is the invoice date, which is
         // in the past because the goods have already shipped, and Uniware only

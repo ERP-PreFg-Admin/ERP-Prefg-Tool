@@ -18,7 +18,8 @@
 
 import {
   UNIWARE_BASE_URL, UNIWARE_USER_NAME, UNIWARE_PASSWORD,
-  UNIWARE_CLIENT_ID, UNIWARE_FACILITY,
+  UNIWARE_CLIENT_ID, UNIWARE_FACILITY, UNIWARE_VENDOR_CODE,
+  UNIWARE_SANDBOX, UNIWARE_SANDBOX_FACILITY, UNIWARE_SANDBOX_VENDOR,
 } from "@/lib/env"
 import logger from "@/lib/logger"
 
@@ -107,9 +108,53 @@ export async function getToken(): Promise<UniwareToken> {
   return inFlight
 }
 
+/**
+ * Which facility a call actually goes to — the ONE place that decides, so every
+ * endpoint (create, /po/show, getPurchaseOrderDetails) obeys the same rule and a
+ * future one gets it for free.
+ *
+ * Off prod the resolved facility is deliberately discarded: the sandbox tenant
+ * holds no HYP_B2B_GGN or mCaff_Kolkata2, so sending one turns every dev call
+ * into "not found" — indistinguishable from a deleted PO. Dev therefore always
+ * talks to TEST_FACILITY.
+ *
+ * On prod the resolved value wins, and landing on the sandbox facility is refused
+ * outright rather than sent: a real PO in TEST_FACILITY is invisible to the
+ * warehouse that is expecting the goods, and nothing downstream would report it.
+ */
+export function uniwareFacility(resolved?: string): string {
+  if (UNIWARE_SANDBOX) return UNIWARE_SANDBOX_FACILITY
+
+  const facility = resolved?.trim() || UNIWARE_FACILITY
+  if (facility === UNIWARE_SANDBOX_FACILITY) {
+    throw new Error(
+      "Refusing a production Uniware call against the sandbox facility " +
+      `(${UNIWARE_SANDBOX_FACILITY}) — set UNIWARE_FACILITY, or map the destination's ` +
+      "facility on /masters/warehouses."
+    )
+  }
+  return facility
+}
+
+/**
+ * The vendor code a pushed PO is raised against. Off prod, always the sandbox
+ * vendor — a real code is not configured in the sandbox tenant and would be
+ * rejected there anyway.
+ *
+ * On prod the configured code wins, falling back to the manufacturer's own code.
+ * That fallback is known not to work ("Vendor [MFG-002-AJA] is not configured for
+ * the facility") and stays only because failing at Uniware with that message is
+ * more useful than failing here with a vaguer one. It goes away when the push
+ * reads un_code_mfg_sku_wh_map.
+ */
+export function uniwareVendorCode(mfgCode: string): string {
+  if (UNIWARE_SANDBOX) return UNIWARE_SANDBOX_VENDOR
+  return UNIWARE_VENDOR_CODE || mfgCode
+}
+
 /** Headers every Uniware REST call needs. */
 function authHeaders(token: UniwareToken, facility?: string) {
-  return { Authorization: `Bearer ${token.accessToken}`, Facility: facility || UNIWARE_FACILITY }
+  return { Authorization: `Bearer ${token.accessToken}`, Facility: uniwareFacility(facility) }
 }
 
 // ── Purchase orders ──────────────────────────────────────────────────────────
@@ -298,6 +343,333 @@ export async function createPurchaseOrder(po: UniwarePoInput): Promise<{ purchas
   return { purchaseOrderCode: assigned }
 }
 
+// ── Export jobs ──────────────────────────────────────────────────────────────
+// Unicommerce has no endpoint that returns a report directly. Every report is an
+// ASYNCHRONOUS EXPORT JOB: create it, poll until the status turns SUCCESSFUL, then
+// download the CSV from the filePath the status call hands back.
+//
+//   POST /services/rest/v1/export/job/create   Facility header REQUIRED -> jobCode
+//   POST /services/rest/v1/export/job/status   no Facility header       -> status, filePath
+//
+// Docs: documentation.unicommerce.com/docs/export-create.html and export-status.html
+
+/** `exportColums` is Unicommerce's own spelling, in their published contract — not
+ *  a typo to fix. Correcting it makes the request silently return every column.
+ *  tests/unit/uniware-export.test.ts pins it, for the same reason
+ *  tests/unit/nanonets-endpoints.test.ts pins that path. */
+export const EXPORT_COLUMNS_KEY = "exportColums"
+
+/** The report this module exists to pull. Named exactly as Uniware lists it. */
+export const VENDOR_ITEM_EXPORT = "Vendor Item Master"
+
+/** Columns we ask for. Uniware returns display names, not these keys. */
+export const VENDOR_ITEM_COLUMNS = [
+  "inventory", "vendorCode", "vendorSkuCode", "facility", "itemTypeSku", "itemTypeName",
+]
+
+/**
+ * Is this failure permanent for this facility?
+ *
+ * A wrong or inaccessible facility code answers 403 "Illegal Access, facility is
+ * required" and will answer it forever — retrying wastes the whole budget. A 500 or
+ * a rate limit is worth another go.
+ *
+ * Deliberately NOT fatal: a rejected column list. That has its own fallback (ask
+ * for every column instead), so classifying it as fatal would skip the retry that
+ * fixes it.
+ */
+export function isFatalExportError(status: number, text: string): boolean {
+  if (status === 400 || status === 403 || status === 404) return true
+  const t = text.toLowerCase()
+  if (t.includes("invalid column")) return false
+  return ["facility", "not found", "does not exist", "no access", "not authorized", "permission"]
+    .some((hint) => t.includes(hint))
+}
+
+/** Thrown when retrying cannot help — the caller should skip this facility. */
+export class UniwareFatalError extends Error {}
+
+type ExportEnvelope = {
+  successful?: boolean
+  message?: string
+  errors?: { description?: string; message?: string }[]
+  warnings?: { description?: string; message?: string }[]
+}
+
+/** Uniware's error text, however it chose to report it. */
+function envelopeError(data: ExportEnvelope, status: number, fallback: string): string {
+  const msgs = (data.errors ?? []).map((e) => e.description || e.message).filter(Boolean)
+  return msgs.join("; ") || data.message || `${fallback} (HTTP ${status})`
+}
+
+/**
+ * Queue an export for ONE facility and return its job code.
+ *
+ * `columns` empty asks for every column — the documented fallback when a named
+ * list is rejected.
+ */
+export async function createExportJob(
+  facility: string,
+  jobTypeName = VENDOR_ITEM_EXPORT,
+  columns: string[] = VENDOR_ITEM_COLUMNS,
+): Promise<string> {
+  if (!facility) throw new Error("An export job needs a facility — it is what scopes the report.")
+  const token = await getToken()
+  const res = await fetch(`${BASE}/services/rest/v1/export/job/create`, {
+    method: "POST",
+    // ⚠️ The Facility header is set DIRECTLY, not via authHeaders() — because
+    // authHeaders() pipes whatever it is given through uniwareFacility(), which
+    // replaces it with the sandbox facility off prod. Routing a raw facility through
+    // that helper looks like it preserves the value and does not.
+    //
+    // The pin is right for a WRITE: a purchase order created against the wrong
+    // warehouse is destructive and irreversible. An export job is a READ — it
+    // produces a report and changes no business data, so there is nothing to protect
+    // and pinning it actively breaks the feature: every facility returns the sandbox
+    // facility's catalogue, whose vendor codes then match nothing, and the import
+    // reports "0 mapped" everywhere while looking successful. That is precisely the
+    // bug this comment replaced, so do not "tidy" this back into authHeaders().
+    //
+    // Omit the header entirely and the call 403s "Illegal Access, facility is required".
+    headers: {
+      Authorization: `Bearer ${token.accessToken}`,
+      Facility: facility,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      exportJobTypeName: jobTypeName,
+      [EXPORT_COLUMNS_KEY]: columns,
+      exportFilters: [],
+      frequency: "ONETIME",
+    }),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  })
+
+  const raw = await res.text()
+  if (!raw.trim()) {
+    if (isFatalExportError(res.status, "")) {
+      throw new UniwareFatalError(`Uniware returned an empty response (HTTP ${res.status}) for ${facility}`)
+    }
+    throw new Error(`Uniware returned an empty response (HTTP ${res.status}) — check Facility and auth.`)
+  }
+  let data: ExportEnvelope & { jobCode?: string; exportJobId?: string }
+  try {
+    data = JSON.parse(raw)
+  } catch {
+    if (isFatalExportError(res.status, raw)) throw new UniwareFatalError(`${facility}: ${raw.slice(0, 200)}`)
+    throw new Error(`Uniware returned non-JSON (HTTP ${res.status}): ${raw.slice(0, 300)}`)
+  }
+  if (!data.successful) {
+    const message = envelopeError(data, res.status, "Uniware rejected the export job")
+    if (isFatalExportError(res.status, message)) throw new UniwareFatalError(`${facility}: ${message}`)
+    throw new Error(message)
+  }
+  if (!data.jobCode) throw new Error("Uniware accepted the export job but returned no jobCode")
+  return data.jobCode
+}
+
+export type ExportJobStatus = { status: string; filePath: string | null }
+
+/** One status read. Takes no Facility header — the job code already identifies it. */
+export async function getExportJobStatus(jobCode: string): Promise<ExportJobStatus> {
+  const token = await getToken()
+  const res = await fetch(`${BASE}/services/rest/v1/export/job/status`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token.accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ jobCode }),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  })
+  const raw = await res.text()
+  if (!raw.trim()) throw new Error(`Empty status response for job ${jobCode} (HTTP ${res.status})`)
+  let data: ExportEnvelope & { status?: string; filePath?: string }
+  try {
+    data = JSON.parse(raw)
+  } catch {
+    throw new Error(`Non-JSON status response for job ${jobCode}: ${raw.slice(0, 200)}`)
+  }
+  if (!data.successful) {
+    throw new Error(envelopeError(data, res.status, `Status check failed for job ${jobCode}`))
+  }
+  return { status: (data.status ?? "").toUpperCase(), filePath: data.filePath ?? null }
+}
+
+/**
+ * Where a job's status sits, in the only three categories a caller cares about.
+ *
+ * Uniware documents SUCCESSFUL as the terminal success and does not enumerate the
+ * rest, so anything naming a failure is treated as terminal and everything else as
+ * still running. Erring that way means an unrecognised in-progress state costs a
+ * few more polls, whereas the opposite would abandon a job that was about to
+ * finish.
+ */
+export function classifyJobStatus(status: string): "done" | "failed" | "pending" {
+  const s = status.toUpperCase()
+  if (s === "SUCCESSFUL" || s === "SUCCESS" || s === "COMPLETE" || s === "COMPLETED") return "done"
+  if (s.includes("FAIL") || s.includes("ERROR") || s.includes("CANCEL")) return "failed"
+  return "pending"
+}
+
+/**
+ * Poll until the job is ready, then return its download path.
+ *
+ * `onTick` reports each attempt so a caller can stream progress — an export of a
+ * large facility takes tens of seconds and a silent wait reads as a hang.
+ */
+export async function pollExportJob(
+  jobCode: string,
+  opts: { attempts?: number; delayMs?: number; onTick?: (attempt: number, status: string) => void } = {},
+): Promise<string> {
+  const attempts = opts.attempts ?? 40
+  const delayMs = opts.delayMs ?? 3000
+
+  for (let i = 1; i <= attempts; i++) {
+    const { status, filePath } = await getExportJobStatus(jobCode)
+    opts.onTick?.(i, status)
+    const verdict = classifyJobStatus(status)
+    if (verdict === "failed") throw new Error(`Export job ${jobCode} ended as ${status}`)
+    if (verdict === "done") {
+      if (!filePath) throw new Error(`Export job ${jobCode} succeeded but returned no filePath`)
+      return filePath
+    }
+    if (i < attempts) await new Promise((r) => setTimeout(r, delayMs))
+  }
+  throw new Error(`Export job ${jobCode} was still running after ${attempts} checks`)
+}
+
+/**
+ * Fetch the report CSV.
+ *
+ * `filePath` may be absolute or relative to the tenant, so both are handled. The
+ * bearer token goes with it: unauthenticated, Uniware answers a login page with
+ * HTTP 200 rather than failing, and parsing that as a CSV yields zero rows and a
+ * "nothing to import" that is entirely wrong — the same trap fetchPurchaseOrderPdf
+ * guards with its PDF magic-byte check.
+ */
+export async function downloadExportCsv(filePath: string): Promise<string> {
+  const token = await getToken()
+  const url = /^https?:\/\//i.test(filePath) ? filePath : `${BASE}${filePath.startsWith("/") ? "" : "/"}${filePath}`
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token.accessToken}` },
+    // Generous: the largest facility's report is a few MB.
+    signal: AbortSignal.timeout(120_000),
+  })
+  if (!res.ok) throw new Error(`Downloading the export failed (HTTP ${res.status})`)
+
+  const text = await res.text()
+  const head = text.slice(0, 200).toLowerCase()
+  if (head.includes("<html") || head.includes("<!doctype")) {
+    throw new Error("The export download returned an HTML page, not a CSV — the session was not accepted.")
+  }
+  if (!text.trim()) throw new Error("The export download was empty.")
+  return text
+}
+
+/**
+ * One line of a vendor's catalogue at one facility: "this vendor supplies this
+ * item here".
+ *
+ * `unitPrice` is MANDATORY per Unicommerce's contract, which is the awkward part —
+ * see resolveUnitPrice() in lib/mfg-facility-push.ts for where the number comes
+ * from and why a missing one refuses the push rather than sending 0.
+ */
+export type UniwareVendorItemInput = {
+  /** Resolved facility code. Passed through uniwareFacility(), so off prod it is
+   *  replaced by the sandbox facility like every other call. */
+  facility?: string
+  vendorCode: string
+  itemTypeSkuCode: string
+  /** The manufacturer's own code for the item, if they use one. */
+  vendorSkuCode?: string | null
+  unitPrice: number
+  inventory?: number | null
+  priority?: number | null
+  enabled?: boolean
+}
+
+/**
+ * Create or update a vendor item in Unicommerce.
+ *
+ * The endpoint is `createOrEdit`, which makes it idempotent by design: re-sending
+ * the same (vendor, facility, item) updates rather than duplicating. That is what
+ * makes the retry path safe — a row whose push outcome we never learned can simply
+ * be sent again.
+ *
+ * Facility-scoped, so the Facility header decides which catalogue the item lands
+ * in. It goes through uniwareFacility() rather than being used raw, so off prod it
+ * is pinned to the sandbox tenant and cannot touch a real facility.
+ *
+ * Returns nothing: unlike purchaseOrder/create there is no assigned code to read
+ * back. Success is `successful: true` and nothing more.
+ */
+export async function createVendorItem(item: UniwareVendorItemInput): Promise<void> {
+  if (!item.vendorCode) throw new Error("vendorCode is required")
+  if (!item.itemTypeSkuCode) throw new Error("itemTypeSkuCode is required")
+  if (!Number.isFinite(item.unitPrice)) {
+    throw new Error("unitPrice is required and must be a number")
+  }
+
+  const token = await getToken()
+  const facility = uniwareFacility(item.facility)
+
+  // Only documented fields — Uniware rejects unknown keys.
+  const payload = {
+    vendorItemType: {
+      vendorCode: item.vendorCode,
+      itemTypeSkuCode: item.itemTypeSkuCode,
+      vendorSkuCode: item.vendorSkuCode ?? undefined,
+      inventory: item.inventory ?? undefined,
+      unitPrice: item.unitPrice,
+      priority: item.priority ?? undefined,
+      enabled: item.enabled ?? true,
+    },
+  }
+
+  const res = await fetch(`${BASE}/services/rest/v1/purchase/vendorItemType/createOrEdit`, {
+    method: "POST",
+    headers: { ...authHeaders(token, facility), "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  })
+
+  // Same three-step read as createPurchaseOrder: Uniware answers HTTP 200 with
+  // `successful: false`, so res.ok is not a success check, and an empty or
+  // non-JSON body means a Facility/auth problem rather than a business failure.
+  const raw = await res.text()
+  if (!raw.trim()) {
+    throw new Error(`Uniware returned an empty response (HTTP ${res.status}) — check Facility and auth.`)
+  }
+  let data: {
+    successful?: boolean
+    message?: string
+    errors?: { description?: string; message?: string; fieldName?: string }[]
+    warnings?: { description?: string; message?: string }[]
+  }
+  try {
+    data = JSON.parse(raw)
+  } catch {
+    throw new Error(`Uniware returned non-JSON (HTTP ${res.status}): ${raw.slice(0, 300)}`)
+  }
+
+  if (!data.successful) {
+    const msgs = (data.errors ?? [])
+      .map((e) => [e.fieldName, e.description || e.message].filter(Boolean).join(": "))
+      .filter(Boolean)
+    throw new Error(
+      msgs.join("; ") || data.message ||
+      `Uniware rejected the vendor item (HTTP ${res.status})`
+    )
+  }
+  for (const w of data.warnings ?? []) {
+    logger.warn({
+      module: "UNIWARE",
+      vendorCode: item.vendorCode,
+      itemTypeSkuCode: item.itemTypeSkuCode,
+      message: w.description || w.message,
+    })
+  }
+}
+
 /**
  * Download the PO document Unicommerce renders for a code.
  *
@@ -326,6 +698,47 @@ export async function fetchPurchaseOrderPdf(code: string , facility? : string): 
     throw new Error(`Uniware PO document ${code}: expected a PDF, got ${ct} (${buf.length} bytes)`)
   }
   return buf
+}
+
+/**
+ * The status Unicommerce currently reports for a PO code.
+ *
+ *   POST /services/rest/v1/purchase/purchaseOrder/getPurchaseOrderDetails
+ *
+ * statusCode sits at the TOP level of the response, beside successful/errors —
+ * there is NO purchaseOrder wrapper. Reaching through one yields undefined and
+ * reads as a PO with no status rather than as a bug, which is why this pulls it
+ * flat. Confirmed against the live endpoint; see the FINDINGS block in
+ * check_uniware_apis/po_grn.py.
+ *
+ * Facility-scoped like purchaseOrder/create: the same code asked of the wrong
+ * facility is simply not found, so the caller must resolve the right one rather
+ * than fall back to a default.
+ */
+export async function fetchPurchaseOrderStatus(code: string, facility?: string): Promise<string> {
+  const token = await getToken()
+
+  const res = await fetch(`${BASE}/services/rest/v1/purchase/purchaseOrder/getPurchaseOrderDetails`, {
+    method: "POST",
+    headers: { ...authHeaders(token, facility), "Content-Type": "application/json" },
+    body: JSON.stringify({ purchaseOrderCode: code }),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  })
+
+  const data = (await res.json().catch(() => ({}))) as {
+    successful?: boolean
+    statusCode?: string
+    errors?: { description?: string; message?: string }[]
+  }
+
+  // HTTP 200 with successful:false is how this API reports a business failure —
+  // res.ok is not a success check here (see the module header).
+  if (!data.successful) {
+    const msgs = (data.errors ?? []).map((e) => e.description || e.message).filter(Boolean)
+    throw new Error(msgs.join("; ") || `Uniware returned no purchase order ${code} (HTTP ${res.status})`)
+  }
+  if (!data.statusCode) throw new Error(`Uniware returned no statusCode for ${code}`)
+  return data.statusCode
 }
 
 export type UniwarePushResult = {

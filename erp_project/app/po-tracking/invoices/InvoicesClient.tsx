@@ -9,6 +9,7 @@ import { Select } from "@/components/ui/select"
 import { SearchInput } from "@/components/masters/SearchInput"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import type { MfgOption } from "../po-procurement/po-types"
+import SyncUniwareButton from "../SyncUniwareButton"
 import InvoiceGroupTable from "./InvoiceGroupTable"
 
 export default function InvoicesClient({
@@ -26,6 +27,10 @@ export default function InvoicesClient({
   const [destination, setDestination] = useState("")
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
+  // Bumped after a Uniware sync. The table fetches its own rows, so
+  // router.refresh() can't reach them and the new statuses would stay invisible
+  // until the next filter change.
+  const [reloadKey, setReloadKey] = useState(0)
 
   // Built as a query string, not an object: the table takes it as a prop and
   // refetches when it changes, and a string compares by value — an object would
@@ -89,7 +94,8 @@ export default function InvoicesClient({
               <X className="h-3.5 w-3.5" /> Clear
             </Button>
           )}
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-3">
+            <SyncUniwareButton onDone={() => setReloadKey((k) => k + 1)} />
             {/* The search and filters are component state, not URL params, and
                 DownloadButton only reads useSearchParams — extraParams is how
                 they reach the export. */}
@@ -111,6 +117,7 @@ export default function InvoicesClient({
           <InvoiceGroupTable
             search={search}
             filterQuery={filterQuery}
+            reloadKey={reloadKey}
             emptyHint="No invoices yet. They appear here once one is read on PO Inwarding via Add Invoice."
           />
         </div>

@@ -19,6 +19,7 @@ import { Select } from "@/components/ui/select"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { cn } from "@/lib/utils"
+import SyncUniwareButton from "../SyncUniwareButton"
 
 import type { MfgOption, PoRow, SkuOption, TabKey, WarehouseOption } from "./po-types"
 import { INWARD_TABS, STATUS_CONFIG, TAB_LABEL, TABS } from "./po-types"
@@ -296,6 +297,9 @@ export default function PoProcurementClient({
             <Button size="lg" variant="outline" onClick={() => setShowInvoiceHistory(true)}>
               <FileClock className="h-3.5 w-3.5" /> Invoice History
             </Button>
+            {/* router.refresh() is enough here: this list is server-rendered, so
+                the refreshed statuses arrive with the next render. */}
+            <SyncUniwareButton onDone={afterAction} />
           </>
         )}
         {!isInwarding && (

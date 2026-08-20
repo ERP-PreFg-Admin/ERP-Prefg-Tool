@@ -81,6 +81,80 @@ export type CreateMiscCost = z.infer<typeof createMiscCostSchema>
 export type UpdateMiscCost = z.infer<typeof updateMiscCostSchema>
 export type MiscCostAction = z.infer<typeof miscCostActionSchema>
 
+// ── MFG × Facility SKU mapping (un_code_mfg_sku_wh_map) ──────────────────────
+// The matrix on /po-tracking/mfg-overview. `wh_id` is details_warehouse_entity.id
+// — a FACILITY (location × legal entity) — not master_warehouse.id.
+
+/**
+ * Replace the whole mapped-SKU set for one (mfg, facility) — one Save, mirroring
+ * the PUT in app/api/v1/admin/entity-scope/route.ts.
+ *
+ * `sku_codes` may be EMPTY: unticking everything is a real edit ("nothing is made
+ * here any more"), and rejecting it would leave no way to undo a mis-map. The
+ * pair's vendor-code row survives regardless.
+ *
+ * The 2000 cap is a trust boundary, not decoration — it bounds the number of
+ * placeholders in the generated multi-row INSERT.
+ */
+export const setFacilityMapSchema = z.object({
+  action: z.literal("set-map"),
+  mfg_id: z.coerce.number().int().positive(),
+  wh_id: z.coerce.number().int().positive(),
+  sku_codes: z.array(z.string().trim().min(1)).max(2000),
+})
+
+/**
+ * Set this (facility, mfg) pair's Uniware vendor code — the row that makes the
+ * cell mappable at all.
+ *
+ * Upper-cased nowhere on purpose: Uniware's own codes are mixed-case and
+ * inconsistent (`arovea`, `AROVEA_`, `ReVe Pharma`), and it is their string, not
+ * ours, so normalising it would stop matching the export.
+ */
+export const setFacilityVendorCodeSchema = z.object({
+  action: z.literal("set-vendor-code"),
+  mfg_id: z.coerce.number().int().positive(),
+  wh_id: z.coerce.number().int().positive(),
+  un_mfg_code: z.string().trim().min(1, "Uniware vendor code is required").max(100),
+  remarks: z.string().trim().max(500).nullable().optional(),
+})
+
+/**
+ * Sync ONE facility straight from Unicommerce — the app runs the export job itself,
+ * so no file changes hands.
+ *
+ * Just the facility code: everything else (which manufacturers, which SKUs) is
+ * resolved server-side from `un_code_mfg_sku_wh_map` and `master_skus`, so a client
+ * cannot widen what an import touches.
+ */
+export const syncFacilityCodeSchema = z.object({
+  facility_code: z.string().trim().min(1).max(50),
+})
+
+/**
+ * Re-attempt the Uniware push for one (mfg, facility).
+ *
+ * Safe to repeat: the endpoint is `vendorItemType/createOrEdit`, and only rows with
+ * `un_pushed_at IS NULL` are candidates, so a retry can neither duplicate an item
+ * nor re-send one Uniware already has.
+ */
+export const retryFacilityPushSchema = z.object({
+  action: z.literal("retry-push"),
+  mfg_id: z.coerce.number().int().positive(),
+  wh_id: z.coerce.number().int().positive(),
+})
+
+export const facilityMapActionSchema = z.discriminatedUnion("action", [
+  setFacilityMapSchema,
+  setFacilityVendorCodeSchema,
+  retryFacilityPushSchema,
+])
+
+export type SetFacilityMap = z.infer<typeof setFacilityMapSchema>
+export type SetFacilityVendorCode = z.infer<typeof setFacilityVendorCodeSchema>
+export type SyncFacilityCode = z.infer<typeof syncFacilityCodeSchema>
+export type FacilityMapAction = z.infer<typeof facilityMapActionSchema>
+
 // ── Export route params ──────────────────────────────────────────────────────
 
 export const mfgIdParamSchema = z.object({

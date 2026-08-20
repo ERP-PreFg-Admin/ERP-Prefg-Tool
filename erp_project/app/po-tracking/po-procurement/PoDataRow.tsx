@@ -18,6 +18,7 @@ import { STATUS_CONFIG } from "./po-types"
 import { fmtDate, fmtInt, fmtMoney, fmtRate, isImpromptu, num } from "./po-utils"
 import { ProgressCell } from "./PoTableCells"
 import PoActionMenu, { type MenuAction } from "./PoActionMenu"
+import UniwareStatusBadge from "../UniwareStatusBadge"
 
 export default function PoDataRow({
   r,
@@ -228,6 +229,14 @@ export default function PoDataRow({
       {showUniwareCode && (
         <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
           {r.uniware_po_code ?? "—"}
+        </TableCell>
+      )}
+
+      {/* Unicommerce's own view of this PO. Read-only here — the refresh is the
+          Sync Uniware button in the toolbar, one call for the whole list. */}
+      {showUniwareCode && (
+        <TableCell className="text-xs">
+          <UniwareStatusBadge status={r.uniware_status} />
         </TableCell>
       )}
 

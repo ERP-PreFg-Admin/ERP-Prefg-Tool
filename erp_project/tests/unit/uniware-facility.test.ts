@@ -16,6 +16,22 @@
 // `npm test` runs without --env-file, so nothing else sets these. The imports
 // below are therefore dynamic and inside the tests — a static import is hoisted
 // above these assignments and would read empty strings.
+//
+// ⚠️ This also requires ONE PROCESS PER FILE, which is why `npm test` passes
+// --test-isolation=process explicitly rather than relying on the runner's
+// default. Share a process with tests/unit/uniware-items.test.ts (which imports
+// lib/uniware statically) and whichever file loads first pins lib/env — the
+// assignments below then no-op and every assertion here reads TEST_FACILITY,
+// lib/env.ts's own default. That failure is order-dependent, so it shows up as a
+// flake rather than a break. Same requirement makes uniware-sandbox.test.ts a
+// separate file; see the APP_ENV note below.
+// APP_ENV=prod for the same reason: off prod, uniwareFacility() deliberately
+// discards the resolved facility and pins the sandbox, which would make every
+// assertion below pass on TEST_FACILITY and prove nothing about the threading.
+// The sandbox rule itself is pinned in uniware-sandbox.test.ts, which needs the
+// opposite APP_ENV and therefore has to be its own file — lib/env.ts reads
+// process.env once at module load.
+process.env.APP_ENV = "prod"
 process.env.UNIWARE_BASE_URL = "https://uniware.test"
 process.env.UNIWARE_USER_NAME = "test-user"
 process.env.UNIWARE_PASSWORD = "test-pass"
@@ -115,6 +131,18 @@ test("fetchPurchaseOrderPdf sends the facility it was given", async () => {
 
   assert.equal(cap.facility, "mCaff_Kolkata2")
   assert.equal(buf.subarray(0, 5).toString("latin1"), "%PDF-")
+})
+
+test("on prod, the sandbox facility is refused rather than sent", async () => {
+  // The silent-loss case: a real PO in TEST_FACILITY is invisible to the
+  // warehouse expecting the goods, and nothing downstream reports it. Reachable
+  // by a warehouse row holding the sandbox code, or by UNIWARE_FACILITY being
+  // left unset in prod SSM (it then defaults to TEST_FACILITY).
+  const { uniwareFacility } = await import("../../lib/uniware")
+
+  assert.throws(() => uniwareFacility("TEST_FACILITY"), /Refusing a production Uniware call/)
+  // A real one still passes straight through.
+  assert.equal(uniwareFacility("GGN_WAREHOUSE"), "GGN_WAREHOUSE")
 })
 
 test("fetchPurchaseOrderPdf falls back to UNIWARE_FACILITY when given none", async () => {

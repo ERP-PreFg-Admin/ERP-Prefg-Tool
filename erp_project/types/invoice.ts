@@ -114,6 +114,11 @@ export type InvoiceHistoryHeader = {
   /** The PO Unicommerce minted for this invoice — one there, one per SKU here.
    *  Null when the mirror was skipped (Uniware not configured). */
   uniware_po_code: string | null
+  /** What Unicommerce last reported for that PO, and when we asked. Refreshed by
+   *  the Sync button, never on a schedule — so a null timestamp means never
+   *  asked, which is not the same as a PO with no status. */
+  uniware_status:    string | null
+  uniware_synced_at: string | null
   created_at:      string
   mfg_code:        string
   mfg_name:        string
