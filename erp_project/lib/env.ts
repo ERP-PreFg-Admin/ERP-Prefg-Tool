@@ -78,7 +78,7 @@ export const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD ?? ""
 // deploy/iam-policy-erp-app-runtime-ses.json exactly — a mismatch is
 // AccessDenied on every send, so changing the sender is an IAM change too.
 export const MAIL_FROM      = process.env.MAIL_FROM ?? "erp.prefg@mcaffeine.com"
-export const MAIL_FROM_NAME = process.env.MAIL_FROM_NAME ?? "mcaffeine ERP"
+export const MAIL_FROM_NAME = process.env.MAIL_FROM_NAME ?? "PEP ERP"
 
 // Attaches every send to the configuration set whose event destination feeds
 // bounce/complaint events to SNS. Without it SES emits no events at all and the
@@ -103,16 +103,32 @@ export const UNIWARE_USER_NAME = process.env.UNIWARE_USER_NAME ?? ""
 export const UNIWARE_PASSWORD  = process.env.UNIWARE_PASSWORD  ?? ""
 // Unicommerce's stock public OAuth client — no per-tenant value to configure.
 export const UNIWARE_CLIENT_ID = process.env.UNIWARE_CLIENT_ID ?? "my-trusted-client"
-// purchaseOrder/create is facility-scoped, so this decides where a PO lands.
-// Defaults to the sandbox until the flow is signed off.
-export const UNIWARE_FACILITY  = process.env.UNIWARE_FACILITY  ?? "TEST_FACILITY"
+
+// The sandbox pair. Off prod EVERY Uniware call is forced to these, whatever the
+// warehouse master resolved — see uniwareFacility()/uniwareVendorCode() in
+// lib/uniware.ts, which is the one place that decides.
+//
+// Not merely defaults: a dev push carrying a resolved facility like HYP_B2B_GGN
+// asks the sandbox tenant about a facility it doesn't have, so the call fails
+// with "not found" and reads as a missing PO rather than as wrong plumbing. The
+// PO the sandbox does hold lives in TEST_FACILITY.
+export const UNIWARE_SANDBOX_FACILITY = "TEST_FACILITY"
+export const UNIWARE_SANDBOX_VENDOR   = "Test_Vendor"
+/** True on every environment except APP_ENV=prod — the same test/prod split the
+ *  DB name uses above, because NODE_ENV can't tell the containers apart. */
+export const UNIWARE_SANDBOX = APP_ENV !== "prod"
+
+// purchaseOrder/create is facility-scoped, so this decides where a PO lands when
+// the caller resolved nothing. On prod that resolution is the real answer and
+// this is only the fallback; off prod it is ignored in favour of the pin above.
+export const UNIWARE_FACILITY  = process.env.UNIWARE_FACILITY  ?? UNIWARE_SANDBOX_FACILITY
 // Uniware vendors are configured per facility and are NOT the same identifier
 // as master_mfgs.code — falling back to the manufacturer code fails with
-// "Vendor [MFG-002-AJA] is not configured for the facility". Until a real
-// mfg → vendor mapping exists this pins every push to the sandbox vendor, which
-// pairs with UNIWARE_FACILITY above. MUST be overridden before going live, or
-// every PO lands against the test vendor.
-export const UNIWARE_VENDOR_CODE = process.env.UNIWARE_VENDOR_CODE ?? "Test_Vendor"
+// "Vendor [MFG-002-AJA] is not configured for the facility". A real
+// mfg → vendor → facility mapping is being built in un_code_mfg_sku_wh_map
+// (lib/queries/mfg-facility-map.ts); until the push reads from it, prod needs
+// this set explicitly in SSM.
+export const UNIWARE_VENDOR_CODE = process.env.UNIWARE_VENDOR_CODE ?? UNIWARE_SANDBOX_VENDOR
 
 // ── App base URL ─────────────────────────────────────────────────────────────
 // Used to build absolute links back into the app (e.g. PO links in emails).

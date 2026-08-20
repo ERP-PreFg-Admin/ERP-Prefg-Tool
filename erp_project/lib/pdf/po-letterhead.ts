@@ -22,6 +22,8 @@
 /** One row of purchaseOrdersSql.selectForEmail. */
 export type PoEmailRow = {
   po_no: string
+  /** The order this PO was split off, or null. Only the split document prints it. */
+  reference_po: string | null
   date: string | null
   expected_on: string | null
   destination: string | null

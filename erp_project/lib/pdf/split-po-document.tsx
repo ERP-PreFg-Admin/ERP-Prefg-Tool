@@ -1,106 +1,67 @@
 /**
- * The purchase order document. ONE template, for every legal entity.
+ * The purchase order document for a SPLIT PO.
  *
- * Everything that differs between Pep and Kreative is DATA, not layout: the legal
- * name, the address, the GSTIN and the bank block all arrive resolved on
- * `d.letterhead`, and the delivery address on `d.ship_to`.
+ * A variant of lib/pdf/po-document.tsx, not a second design: same letterhead, same
+ * three info columns, same totals band, same bank block and declaration. Three
+ * things differ, all of them from the printed sample this was built against
+ * (MPO-OO113186-2_MUM_HAIR_SPRAY_20ML.pdf):
  *
- * ── Where those values come from ────────────────────────────────────────────
- *   purchase_orders.sku_code → master_skus.brand_id → master_brand.entity_id
- *     → master_entity            (legal name, bank)
- *   + purchase_orders.destination → master_warehouse
- *     → details_warehouse_entity (bill-to and ship-to, per site AND entity)
+ *   1. The PO number sits in the header beside the date, not in a table column —
+ *      a split's table has one line and the number belongs to the document.
+ *   2. `Split of <parent PO>` under it. This is the whole reason the split gets
+ *      its own document: the manufacturer already holds paperwork for the order
+ *      this came off, and that number is what lets them reconcile the two.
+ *   3. The SKU column is headed `Description`, matching the sample.
  *
- * The bill-to is per (site, entity) rather than per entity because GST
- * registration is state-wise: a Guwahati delivery must bill under the Guwahati
- * registration, not the head office's. See lib/pdf/po-letterhead.ts for the
- * resolution and its fallbacks, and purchaseOrdersSql.selectForEmail for the joins.
+ * The colours, GST rate, padding-row count and number/date helpers are IMPORTED
+ * from po-document.tsx rather than restated. Two copies of GST_RATE is how one
+ * document silently stops agreeing with the other about a total.
  *
- * Resolved at RENDER time, not stamped at creation — so attributing a SKU's brand
- * or filling in a site's bill-to fixes the PDF of every existing PO, without
- * touching a single purchase_orders row.
+ * Like its sibling this file only renders: `letterhead` and `ship_to` arrive
+ * already resolved by lib/pdf/po-letterhead.ts, which stays the only place the
+ * fallback ladder lives.
  *
- * This file renders. It resolves nothing and holds no fallbacks of its own.
+ * The sample also carries a `CIN NO.` on the vendor block. There is no CIN column
+ * anywhere — details_mfg has registered_name, gst_number and location — so it is
+ * omitted rather than printed as an empty label. Adding it is a details_mfg
+ * change first.
  */
 
 import React from "react"
 import {
   Document, Page, Text, View, StyleSheet, Font, renderToBuffer,
 } from "@react-pdf/renderer"
-import { IST } from "@/lib/date"
-import type { PoLetterhead, PoShipTo } from "@/lib/pdf/po-letterhead"
+import {
+  type PoEmailData,
+  TEAL, YELLOW, BD, GST_RATE, EMPTY_ROWS,
+  num, fmtN, fmtDate,
+} from "@/lib/pdf/po-document"
 
-// react-pdf only breaks lines at whitespace, so one long unbroken token (a PO
-// code, an account number) overflows its column into the neighbouring one.
+// Same reason as the ordinary document: react-pdf only breaks at whitespace, so
+// one long unbroken token (a PO code, an account number) overflows its column.
 Font.registerHyphenationCallback((word) => Array.from(word))
 
-export type PoEmailData = {
-  po_no: string
-  /** The order this PO was split off, or null. Read only by
-   *  lib/pdf/split-po-document.tsx — this document ignores it. */
-  reference_po: string | null
-  date: string | null
-  expected_on: string | null
-  destination: string | null
-  dest_location: string | null
-  sku_code: string
-  sku_name: string | null
-  qty: number
-  unit_price: number | null
-  total_amount: number | null
-  mfg_name: string
-  mfg_code: string
-  registered_name: string | null
-  gst_number: string | null
-  location: string | null
-  mfg_email: string | null
-  raised_by_name: string
-  /** Who the PO is from — resolved, never a raw row. See po-letterhead.ts. */
-  letterhead: PoLetterhead
-  /** Where the goods go. */
-  ship_to: PoShipTo
-}
-
-// Exported for lib/pdf/split-po-document.tsx, which is a variant of this document
-// rather than a second design. Two copies of GST_RATE is the kind of drift where
-// one document quietly stops matching the other's arithmetic.
-export const TEAL   = "#1e7a7a"
-export const YELLOW = "#FFE500"
-export const BD     = "#cccccc"
-export const GST_RATE = 0.18
-export const EMPTY_ROWS = 8
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
-export function num(v: number | null | undefined) { return v ? Number(v) : 0 }
-export function fmtN(v: number | null | undefined) {
-  if (!v) return "—"
-  return Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 })
-}
-export function fmtDate(d: string | null | undefined) {
-  if (!d) return "—"
-  try {
-    return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: IST })
-  } catch { return String(d) }
-}
-
-// ── Styles ─────────────────────────────────────────────────────────────────────
 const S = StyleSheet.create({
   page: { fontFamily: "Helvetica", fontSize: 8, color: "#222", backgroundColor: "#fff" },
 
-  // Header
   header:  { backgroundColor: TEAL, paddingVertical: 12, paddingHorizontal: 20, alignItems: "center" },
   hName:   { fontFamily: "Helvetica-Bold", fontSize: 11, color: "#fff", marginBottom: 2 },
   hSub:    { fontSize: 8, color: "#cde8e8", marginBottom: 1 },
 
-  // Date row
-  dateBar: {
-    flexDirection: "row", justifyContent: "flex-end",
-    paddingHorizontal: 20, paddingVertical: 5,
+  // PO number left, date right — the sample's own arrangement. The parent PO goes
+  // on its own line beneath, where it can't be mistaken for this PO's number.
+  refBar: {
+    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+    paddingHorizontal: 20, paddingTop: 6,
+  },
+  refPo:   { fontFamily: "Helvetica-Bold", fontSize: 9 },
+  refDate: { fontFamily: "Helvetica-Bold", fontSize: 8 },
+  splitOf: {
+    paddingHorizontal: 20, paddingTop: 2, paddingBottom: 5,
     borderBottomWidth: 1, borderBottomColor: BD,
   },
-  dateTxt: { fontFamily: "Helvetica-Bold", fontSize: 8 },
+  splitOfTx: { fontSize: 7.5, color: TEAL, fontFamily: "Helvetica-Bold" },
 
-  // 3-column info block
   infoWrap: {
     flexDirection: "row", marginHorizontal: 20, marginTop: 8,
     borderWidth: 1, borderColor: BD,
@@ -111,10 +72,7 @@ const S = StyleSheet.create({
   infoLine:  { fontSize: 7.5, marginBottom: 1.5 },
   infoBold:  { fontFamily: "Helvetica-Bold", fontSize: 7.5, marginBottom: 1.5 },
 
-  // Table wrapper
   tbl: { marginHorizontal: 20, marginTop: 10, borderWidth: 1, borderColor: BD },
-
-  // Rows
   tHead: {
     flexDirection: "row", backgroundColor: YELLOW,
     borderBottomWidth: 1, borderBottomColor: BD,
@@ -131,28 +89,27 @@ const S = StyleSheet.create({
     minHeight: 24, alignItems: "center",
   },
 
-  // Table columns
-  cSr:  { width: "5%",  paddingHorizontal: 4, paddingVertical: 3, borderRightWidth: 0.5, borderRightColor: BD },
-  cPo:  { width: "15%", paddingHorizontal: 4, paddingVertical: 3, borderRightWidth: 0.5, borderRightColor: BD },
-  cDs:  { width: "30%", paddingHorizontal: 4, paddingVertical: 3, borderRightWidth: 0.5, borderRightColor: BD },
-  cSk:  { width: "15%", paddingHorizontal: 4, paddingVertical: 3, borderRightWidth: 0.5, borderRightColor: BD },
-  cQt:  { width: "10%", paddingHorizontal: 4, paddingVertical: 3, textAlign: "right", borderRightWidth: 0.5, borderRightColor: BD },
-  cPr:  { width: "12%", paddingHorizontal: 4, paddingVertical: 3, textAlign: "right", borderRightWidth: 0.5, borderRightColor: BD },
-  cAm:  { width: "13%", paddingHorizontal: 4, paddingVertical: 3, textAlign: "right" },
+  // Wider goods column than the ordinary document: dropping the PO Number column
+  // frees 15% and the product description is what actually needs the room.
+  cSr: { width: "6%",  paddingHorizontal: 4, paddingVertical: 3, borderRightWidth: 0.5, borderRightColor: BD },
+  cDs: { width: "38%", paddingHorizontal: 4, paddingVertical: 3, borderRightWidth: 0.5, borderRightColor: BD },
+  cSk: { width: "20%", paddingHorizontal: 4, paddingVertical: 3, borderRightWidth: 0.5, borderRightColor: BD },
+  cQt: { width: "11%", paddingHorizontal: 4, paddingVertical: 3, textAlign: "right", borderRightWidth: 0.5, borderRightColor: BD },
+  cPr: { width: "12%", paddingHorizontal: 4, paddingVertical: 3, textAlign: "right", borderRightWidth: 0.5, borderRightColor: BD },
+  cAm: { width: "13%", paddingHorizontal: 4, paddingVertical: 3, textAlign: "right" },
   thTx: { fontFamily: "Helvetica-Bold", fontSize: 7.5 },
   tdTx: { fontSize: 7.5 },
 
-  // Bottom section
   btm: { marginHorizontal: 20, marginTop: 8, borderWidth: 1, borderColor: BD },
   btmRow: {
     flexDirection: "row",
     borderBottomWidth: 0.5, borderBottomColor: BD, minHeight: 22,
   },
-  btmLeft:   { flex: 3, paddingHorizontal: 8, paddingVertical: 5, borderRightWidth: 0.5, borderRightColor: BD },
-  btmMid:    { flex: 2, paddingHorizontal: 8, paddingVertical: 5, borderRightWidth: 0.5, borderRightColor: BD },
-  btmRight:  { flex: 2, paddingHorizontal: 8, paddingVertical: 5 },
-  btmLabel:  { fontFamily: "Helvetica-Bold", fontSize: 7.5 },
-  btmVal:    { fontSize: 7.5 },
+  btmLeft:  { flex: 3, paddingHorizontal: 8, paddingVertical: 5, borderRightWidth: 0.5, borderRightColor: BD },
+  btmMid:   { flex: 2, paddingHorizontal: 8, paddingVertical: 5, borderRightWidth: 0.5, borderRightColor: BD },
+  btmRight: { flex: 2, paddingHorizontal: 8, paddingVertical: 5 },
+  btmLabel: { fontFamily: "Helvetica-Bold", fontSize: 7.5 },
+  btmVal:   { fontSize: 7.5 },
 
   totalHL: {
     flexDirection: "row", backgroundColor: YELLOW, alignItems: "center",
@@ -169,14 +126,12 @@ const S = StyleSheet.create({
   bankKey:  { fontFamily: "Helvetica-Bold", fontSize: 7.5, width: 70 },
   bankVal:  { fontSize: 7.5, flex: 1 },
 
-  // Declaration
   decl:      { marginHorizontal: 20, marginTop: 8, borderWidth: 1, borderColor: BD, padding: 8 },
   declTitle: { fontFamily: "Helvetica-Bold", fontSize: 7.5, marginBottom: 4 },
   declTxt:   { fontSize: 7, color: "#555", marginBottom: 2 },
 })
 
-// ── Document ───────────────────────────────────────────────────────────────────
-function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
+function SplitPurchaseOrderDoc({ d }: { d: PoEmailData }) {
   const base  = num(d.total_amount)
   const gst   = base > 0 ? Math.round(base * GST_RATE) : 0
   const grand = base + gst
@@ -187,7 +142,6 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
     <Document>
       <Page size="A4" style={S.page}>
 
-        {/* ── Teal header ── */}
         <View style={S.header}>
           <Text style={S.hName}>{lh.name}</Text>
           {lh.address_lines.map((line, i) => (
@@ -196,16 +150,18 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
           {lh.gstin ? <Text style={S.hSub}>GST no- {lh.gstin}</Text> : null}
         </View>
 
-        {/* ── Date ── */}
-        <View style={S.dateBar}>
-          <Text style={S.dateTxt}>{fmtDate(d.date)}</Text>
+        <View style={S.refBar}>
+          <Text style={S.refPo}>{d.po_no}</Text>
+          <Text style={S.refDate}>{fmtDate(d.date)}</Text>
+        </View>
+        <View style={S.splitOf}>
+          {/* Rendered even when reference_po is somehow null: this template is
+              only ever used for a split, so a missing parent is a data problem
+              worth showing rather than a line to quietly drop. */}
+          <Text style={S.splitOfTx}>Split of {d.reference_po ?? "—"}</Text>
         </View>
 
-        {/* ── 3-column info ── */}
         <View style={S.infoWrap}>
-
-          {/* Billing Address — this entity's registration for THIS destination.
-              GST is state-wise, so it is per (site, entity), not per entity. */}
           <View style={S.infoCol}>
             <Text style={S.infoTitle}>Billing Address</Text>
             <Text style={S.infoBold}>{lh.name}</Text>
@@ -215,9 +171,9 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
             {lh.gstin ? <Text style={S.infoLine}>GST no- {lh.gstin}</Text> : null}
           </View>
 
-          {/* Delivery Address — the consignee. Its GSTIN is deliberately not
-              necessarily this entity's: Pep operates most sites, so Kreative
-              usually ships under Pep's registration for that state. */}
+          {/* The consignee's own GSTIN, which is deliberately not necessarily this
+              entity's — Pep operates most sites, so Kreative rows usually ship
+              under Pep's registration for that state. */}
           <View style={S.infoCol}>
             <Text style={S.infoTitle}>Delivery Address</Text>
             {ship.name
@@ -229,7 +185,6 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
             {ship.gstin ? <Text style={S.infoLine}>GSTIN: {ship.gstin}</Text> : null}
           </View>
 
-          {/* Purchase Order To */}
           <View style={S.infoColL}>
             <Text style={S.infoTitle}>Purchase Order to -</Text>
             <Text style={S.infoBold}>{d.mfg_name}</Text>
@@ -240,24 +195,18 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
           </View>
         </View>
 
-        {/* ── Table ── */}
         <View style={S.tbl}>
-
-          {/* Header row — yellow */}
           <View style={S.tHead}>
             <Text style={[S.cSr, S.thTx]}>Sr No</Text>
-            <Text style={[S.cPo, S.thTx]}>PO Number</Text>
             <Text style={[S.cDs, S.thTx]}>Description of Goods</Text>
-            <Text style={[S.cSk, S.thTx]}>SKU Code</Text>
+            <Text style={[S.cSk, S.thTx]}>Description</Text>
             <Text style={[S.cQt, S.thTx]}>Quantity</Text>
             <Text style={[S.cPr, S.thTx]}>Price</Text>
             <Text style={[S.cAm, S.thTx]}>Amount</Text>
           </View>
 
-          {/* Data row */}
           <View style={S.tRow}>
             <Text style={[S.cSr, S.tdTx]}>1</Text>
-            <Text style={[S.cPo, S.tdTx]}>{d.po_no}</Text>
             <Text style={[S.cDs, S.tdTx]}>{d.sku_name ?? "—"}</Text>
             <Text style={[S.cSk, S.tdTx]}>{d.sku_code}</Text>
             <Text style={[S.cQt, S.tdTx]}>{num(d.qty).toLocaleString("en-IN")}</Text>
@@ -265,11 +214,9 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
             <Text style={[S.cAm, S.tdTx]}>{base > 0 ? fmtN(base) : "—"}</Text>
           </View>
 
-          {/* Empty rows */}
           {Array.from({ length: EMPTY_ROWS }).map((_, i) => (
             <View key={i} style={S.tRow}>
               <Text style={S.cSr}> </Text>
-              <Text style={S.cPo}> </Text>
               <Text style={S.cDs}> </Text>
               <Text style={S.cSk}> </Text>
               <Text style={S.cQt}> </Text>
@@ -278,10 +225,8 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
             </View>
           ))}
 
-          {/* Total row */}
           <View style={S.tTotalRow}>
             <Text style={[S.cSr, S.tdTx]}> </Text>
-            <Text style={[S.cPo, S.tdTx]}> </Text>
             <Text style={[S.cDs, S.tdTx]}> </Text>
             <Text style={[S.cSk, S.thTx]}>Total</Text>
             <Text style={[S.cQt, S.thTx]}>{num(d.qty).toLocaleString("en-IN")}</Text>
@@ -290,10 +235,7 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
           </View>
         </View>
 
-        {/* ── Bottom: Dispatch / GST ── */}
         <View style={S.btm}>
-
-          {/* Row 1: Dispatch Date | "Value" | "Tax" */}
           <View style={S.btmRow}>
             <View style={S.btmLeft}>
               <Text style={S.btmLabel}>Dispatch Date</Text>
@@ -307,7 +249,6 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
             </View>
           </View>
 
-          {/* Row 2: (empty) | "GST As applicable" | 18% amount */}
           <View style={S.btmRow}>
             <View style={S.btmLeft} />
             <View style={S.btmMid}>
@@ -320,7 +261,6 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
             </View>
           </View>
 
-          {/* Row 3: Total — yellow highlight */}
           <View style={S.totalHL}>
             <Text style={{ flex: 1, fontFamily: "Helvetica-Bold", fontSize: 8 }}>Total</Text>
             <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 8, marginRight: 20 }}>{GST_RATE * 100}%</Text>
@@ -329,10 +269,8 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
             </Text>
           </View>
 
-          {/* Company Bank Details — the heading alone when the entity has no bank on
-              file, which is how this band shipped for months. resolveBank returns
-              null unless name, A/C and IFSC are all present, so a half-filled block
-              is never printed. */}
+          {/* Heading always, block only when resolveBank returned something — it
+              is all-or-nothing by design, so a half-filled bank block can't print. */}
           <View style={S.bankHL}>
             <Text style={S.bankTx}>Company Bank Details</Text>
           </View>
@@ -360,7 +298,6 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
           ) : null}
         </View>
 
-        {/* ── Declaration ── */}
         <View style={S.decl}>
           <Text style={S.declTitle}>Declaration</Text>
           <Text style={S.declTxt}>
@@ -374,7 +311,7 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
   )
 }
 
-export async function generatePoPdf(data: PoEmailData): Promise<Buffer> {
-  const buf = await renderToBuffer(<PurchaseOrderDoc d={data} />)
+export async function generateSplitPoPdf(data: PoEmailData): Promise<Buffer> {
+  const buf = await renderToBuffer(<SplitPurchaseOrderDoc d={data} />)
   return Buffer.from(buf)
 }

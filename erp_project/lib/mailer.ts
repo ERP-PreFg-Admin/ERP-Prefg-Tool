@@ -7,9 +7,11 @@ import {
 } from "@/lib/env"
 import { query } from "@/lib/db"
 import { generatePoPdf, type PoEmailData } from "@/lib/pdf/po-document"
+import { generateSplitPoPdf } from "@/lib/pdf/split-po-document"
 import { resolveLetterhead, resolveShipTo, type PoEmailRow } from "@/lib/pdf/po-letterhead"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { entityEmails } from "@/lib/queries/entity-emails"
+import { emailSuppressionsSql } from "@/lib/queries/email-suppressions"
 import { splitRecipients, type RecipientRow } from "@/lib/recipients"
 import { fetchPurchaseOrderPdf } from "@/lib/uniware"
 import { buildMultiSheetXlsx, type ExportColumn } from "@/lib/export"
@@ -111,6 +113,7 @@ export async function fetchPoData(poId: number): Promise<PoEmailData | null> {
     letterhead:      resolveLetterhead(po),
     ship_to:         resolveShipTo(po),
     po_no:           po.po_no,
+    reference_po:    po.reference_po,
     date:            po.date,
     expected_on:     po.expected_on,
     destination:     po.destination,
@@ -153,7 +156,7 @@ export async function resolveRecipients(
    * place for a notification to land than nowhere.
    */
   legalEntityCode: string | null = null
-): Promise<{ to: string[]; cc: string[] }> {
+): Promise<{ to: string[]; cc: string[]; dropped: string[] }> {
   // One query per shape, because each carries a different rule about which
   // employee rows come along: a site's, versus a manufacturer's plus the
   // "every manufacturer" wildcard.
@@ -163,7 +166,24 @@ export async function resolveRecipients(
       : entityType === "mfg"
       ? await query<RecipientRow>(entityEmails.selectForMfg, [entityCode, entityCode])
       : await query<RecipientRow>(entityEmails.selectByEntity, [entityType, entityCode])
-  return splitRecipients(rows, primaryEmail)
+
+  // Addresses SES has hard-bounced or that complained. Read per call rather than
+  // cached: the list changes from the SNS webhook, and a stale cache here means
+  // continuing to mail an address SES already rejected — which is the reputation
+  // damage the suppression list exists to avoid.
+  const suppressedRows = await query<{ email: string }>(emailSuppressionsSql.selectAll)
+  const suppressed = new Set(suppressedRows.map((r) => r.email.toLowerCase()))
+
+  const result = splitRecipients(rows, primaryEmail, suppressed)
+  if (result.dropped.length > 0) {
+    logger.warn({
+      ...mailerCtx(), entityType, entityCode,
+      dropped: result.dropped.join(", "),
+      remaining: result.to.length + result.cc.length,
+      message: "Recipients dropped — suppressed after an earlier bounce or complaint",
+    })
+  }
+  return result
 }
 
 export type SelectedPoLine = {
@@ -202,35 +222,23 @@ function poTableRows(lines: { po_no: string; sku_code: string; sku_name: string 
 }
 
 /**
- * The split-PO table. A split needs two columns the others don't — the order it
- * came off, so the manufacturer can reconcile it against paperwork they already
- * hold, and the destination, since splitting a PO is usually about sending part
- * of it somewhere else.
+ * Split the selection the way the two emails need it.
+ *
+ * A split is a re-issue of demand the manufacturer already holds, against an order
+ * they can be pointed back at — so it gets its own mail (sendSplitPoEmail) rather
+ * than a table inside the consolidated one, where "newly raised" would read as new
+ * demand. Only raised splits: a cancelled one is a cancellation, and that belongs
+ * in the consolidated mail's Cancelled table with the rest.
+ *
+ * Exported so tests/unit/split-po-email.test.ts can pin the partition without a
+ * route, a transport or a database — same reason lib/po-split.ts was extracted.
  */
-function splitSection(lines: SelectedPoLine[]): string {
-  if (lines.length === 0) return ""
-  return `
-    <h3 style="margin:20px 0 4px;font-size:14px">Split Purchase Orders</h3>
-    <p style="margin:0 0 6px;font-size:12px;color:#555">
-      Part of an existing order, re-issued as its own PO. The original PO number is shown against each line.
-    </p>
-    <table style="width:100%;border-collapse:collapse;font-size:13px">
-      <tr style="background:#f5f5f5">
-        <td style="padding:6px 12px;font-weight:600">PO No.</td>
-        <td style="padding:6px 12px;font-weight:600">Split From</td>
-        <td style="padding:6px 12px;font-weight:600">SKU</td>
-        <td style="padding:6px 12px;font-weight:600">Deliver To</td>
-        <td style="padding:6px 12px;font-weight:600;text-align:right">Quantity</td>
-      </tr>
-      ${lines.map((l) => `
-        <tr>
-          <td style="padding:6px 12px;border-bottom:1px solid #eee">${escapeHtml(l.po_no)}</td>
-          <td style="padding:6px 12px;border-bottom:1px solid #eee">${escapeHtml(l.reference_po ?? "—")}</td>
-          <td style="padding:6px 12px;border-bottom:1px solid #eee">${escapeHtml(l.sku_code)}${l.sku_name ? " — " + escapeHtml(l.sku_name) : ""}</td>
-          <td style="padding:6px 12px;border-bottom:1px solid #eee">${escapeHtml(l.destination ?? "—")}</td>
-          <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${Number(l.qty).toLocaleString("en-IN")}</td>
-        </tr>`).join("")}
-    </table>`
+export function partitionSplits(lines: SelectedPoLine[]): {
+  splits: SelectedPoLine[]
+  rest: SelectedPoLine[]
+} {
+  const isSplit = (l: SelectedPoLine) => l.status === "raised" && !!l.reference_po
+  return { splits: lines.filter(isSplit), rest: lines.filter((l) => !isSplit(l)) }
 }
 
 export function poSection(title: string, lines: { po_no: string; sku_code: string; sku_name: string | null; qty: number }[]): string {
@@ -251,16 +259,6 @@ const PO_SHEET_COLUMNS: ExportColumn[] = [
   { key: "po_no", label: "PO No.", type: "text" },
   { key: "sku_code", label: "SKU Code", type: "text" },
   { key: "sku_name", label: "SKU Name", type: "text" },
-  { key: "qty", label: "Quantity", type: "number" },
-]
-
-// Splits carry the order they came off and where they're going — see splitSection.
-const SPLIT_SHEET_COLUMNS: ExportColumn[] = [
-  { key: "po_no", label: "PO No.", type: "text" },
-  { key: "reference_po", label: "Split From", type: "text" },
-  { key: "sku_code", label: "SKU Code", type: "text" },
-  { key: "sku_name", label: "SKU Name", type: "text" },
-  { key: "destination", label: "Deliver To", type: "text" },
   { key: "qty", label: "Quantity", type: "number" },
 ]
 
@@ -302,11 +300,20 @@ export async function sendMfgSelectionEmail(
   const formatted = `${year}-${month}-${day}`;
   
 
-  const { to, cc } = await resolveRecipients("mfg", mfg.code, mfg.email)
+  const { to, cc, dropped } = await resolveRecipients("mfg", mfg.code, mfg.email)
   // Both empty, not just `to`: an internal employee copied on every
   // manufacturer is a real recipient, so a mail with only a CC still goes.
   if (to.length === 0 && cc.length === 0) {
-    logger.warn({ ...ctx, mfgId, message: "sendMfgSelectionEmail: manufacturer has no email on file, skipping" })
+    // "No email on file" and "every address was suppressed" need different
+    // fixes — add a contact, versus correct a bounced one — so the log has to
+    // say which. Reporting the wrong one sends someone hunting the wrong screen.
+    logger.warn({
+      ...ctx, mfgId,
+      suppressed: dropped.length > 0 ? dropped.join(", ") : undefined,
+      message: dropped.length > 0
+        ? "sendMfgSelectionEmail: every recipient is suppressed after an earlier bounce or complaint, skipping"
+        : "sendMfgSelectionEmail: manufacturer has no email on file, skipping",
+    })
     return false
   }
 
@@ -316,12 +323,13 @@ export async function sendMfgSelectionEmail(
   }))
 
   // Selected lines split into the tables the summary shows — any other selected
-  // status (e.g. punched, received) isn't part of this summary. Splits come out
-  // of the raised list into their own section: they are raised, but "newly
-  // raised" reads as new demand, and a split is a re-issue of demand the
-  // manufacturer already has on an order it can be pointed back at.
-  const splitLines     = selected.filter((l) => l.status === "raised" && !!l.reference_po)
-  const raisedLines    = selected.filter((l) => l.status === "raised" && !l.reference_po)
+  // status (e.g. punched, received) isn't part of this summary.
+  //
+  // No split filter here: the route partitions them off with partitionSplits()
+  // before calling, so a raised split never reaches this function. Re-filtering
+  // would be a guard against a caller that doesn't exist, and it would hide the
+  // real bug (a split routed to the wrong mail) by silently dropping the line.
+  const raisedLines    = selected.filter((l) => l.status === "raised")
   const cancelledLines = selected.filter((l) => l.status === "cancelled")
 
   const attachments: { filename: string; content: Buffer }[] = []
@@ -340,11 +348,13 @@ export async function sendMfgSelectionEmail(
     }
   }
 
+  // No Splits sheet: a raised split isn't in this mail at all any more. It still
+  // appears under Open when it is genuinely still awaiting goods, which is what
+  // ongoingByMfg returns — that is deliberate and must not be filtered.
   const xlsxBuffer = await buildMultiSheetXlsx([
-    { name: "Raised",    columns: PO_SHEET_COLUMNS,       rows: toSheetRows(raisedLines) },
-    { name: "Splits",    columns: SPLIT_SHEET_COLUMNS,    rows: splitLines.map((l) => ({ ...l, reference_po: l.reference_po ?? "", destination: l.destination ?? "" })) },
-    { name: "Cancelled", columns: PO_SHEET_COLUMNS,       rows: toSheetRows(cancelledLines) },
-    { name: "Open",      columns: PO_SHEET_COLUMNS,       rows: toSheetRows(openLines) },
+    { name: "Raised",    columns: PO_SHEET_COLUMNS, rows: toSheetRows(raisedLines) },
+    { name: "Cancelled", columns: PO_SHEET_COLUMNS, rows: toSheetRows(cancelledLines) },
+    { name: "Open",      columns: PO_SHEET_COLUMNS, rows: toSheetRows(openLines) },
   ])
   attachments.push({ filename: `PO-Summary-${mfg.code}.xlsx`, content: Buffer.from(xlsxBuffer) })
 
@@ -373,7 +383,6 @@ export async function sendMfgSelectionEmail(
           <h2 style="margin-bottom:4px">PO Update: ${mfg.name}</h2>
           <p style="color:#555;margin-top:0">Please find the latest status of the following purchase orders${pdfsAttached > 0 ? " (PDFs attached for raised/cancelled POs; full details in the attached Excel)" : " (full details in the attached Excel)"}.</p>
           ${poSection("Newly Raised Purchase Orders", raisedLines)}
-          ${splitSection(splitLines)}
           ${poSection("Cancelled Purchase Orders", cancelledLines)}
           ${poSection("Remaining Open Purchase Orders", openLines)}
           <p style="font-size:12px;color:#888;margin-top:20px">
@@ -394,6 +403,142 @@ export async function sendMfgSelectionEmail(
 
   logger.info({ ...ctx, eventId, mfgId, mfg_name: mfg.name, mfg_email: allRecipients, message: "PO selection email sent successfully" })
   recordProcessedEvent("PO_SELECTION_EMAIL", eventId, { mfgId, mfg_name: mfg.name, mfg_email: allRecipients })
+  return true
+}
+
+// ── Split PO notification ────────────────────────────────────────────────────
+
+/** One "PO No. — value" row of the split detail block. */
+function detailRow(label: string, value: string): string {
+  return `
+    <tr>
+      <td style="padding:6px 12px;border-bottom:1px solid #eee;font-weight:600;width:150px">${escapeHtml(label)}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #eee">${escapeHtml(value)}</td>
+    </tr>`
+}
+
+/**
+ * One email for ONE split PO.
+ *
+ * Deliberately not a section inside sendMfgSelectionEmail. A split is a re-issue
+ * of demand the manufacturer already holds against an order they can be pointed
+ * back at — inside a mail headed "PO Update" with a Newly Raised table above it,
+ * that reads as new demand, and the one fact that matters (which order this came
+ * off) becomes a column in a five-column table.
+ *
+ * So the body is the split's own details and nothing else: no open snapshot, no
+ * other statuses, no XLSX. The attachment is the split PO document
+ * (lib/pdf/split-po-document.tsx), which states the same thing on letterhead.
+ *
+ * Returns true if sent, false if there is nobody to send to. Throws on a real send
+ * failure — the caller decides what that costs, same contract as
+ * sendMfgSelectionEmail.
+ */
+export async function sendSplitPoEmail(mfgId: number, line: SelectedPoLine): Promise<boolean> {
+  const ctx = mailerCtx()
+  const mfgRows = await query<{ code: string; name: string; email: string | null }>(
+    `SELECT m.code, m.name, d.email FROM master_mfgs m JOIN details_mfg d ON d.mfg_id = m.id WHERE m.id = ? LIMIT 1`,
+    [mfgId]
+  )
+  const mfg = mfgRows[0]
+  if (!mfg) {
+    logger.warn({ ...ctx, mfgId, po_no: line.po_no, message: "sendSplitPoEmail: manufacturer not found" })
+    return false
+  }
+
+  const { to, cc, dropped } = await resolveRecipients("mfg", mfg.code, mfg.email)
+  // Both empty, not just `to` — an internal employee copied on every manufacturer
+  // is a real recipient, so a mail with only a CC still goes.
+  if (to.length === 0 && cc.length === 0) {
+    logger.warn({
+      ...ctx, mfgId, po_no: line.po_no,
+      suppressed: dropped.length > 0 ? dropped.join(", ") : undefined,
+      message: dropped.length > 0
+        ? "sendSplitPoEmail: every recipient is suppressed after an earlier bounce or complaint, skipping"
+        : "sendSplitPoEmail: manufacturer has no email on file, skipping",
+    })
+    return false
+  }
+
+  // A PDF failure doesn't stop the mail: the body carries the same details in
+  // text, and a split the manufacturer never hears about is the worse outcome.
+  // Same call the consolidated path makes for its own attachments.
+  const attachments: { filename: string; content: Buffer }[] = []
+  try {
+    const data = await fetchPoData(line.id)
+    if (data) {
+      attachments.push({
+        filename: `PO-${line.po_no}.pdf`,
+        content: (await generateSplitPoPdf(data)) as unknown as Buffer,
+      })
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    logger.error({
+      ...ctx, poId: line.id, po_no: line.po_no, error: message,
+      message: "Split PO PDF generation failed — sending the split email without the attachment",
+    })
+  }
+
+  assertAttachmentsWithinLimit(attachments, `Split PO email for ${line.po_no}`)
+
+  const allRecipients = [...to, ...cc].join(", ")
+  const parent = line.reference_po ?? "—"
+  const eventId = makeEventId("PO_SPLIT_EMAIL", "send", line.id)
+  recordRawEvent("PO_SPLIT_EMAIL", eventId, {
+    mfgId, mfg_name: mfg.name, mfg_email: allRecipients,
+    po_no: line.po_no, reference_po: line.reference_po, attachmentCount: attachments.length,
+  })
+
+  try {
+    await getTransporter().sendMail({
+      ...sesOptions,
+      from: fromHeader,
+      to: to.join(", "),
+      // Omitted when empty rather than sent as "": nodemailer treats a blank Cc as
+      // a malformed address and throws.
+      ...(cc.length ? { cc: cc.join(", ") } : {}),
+      // The parent PO is in the subject, not just the body — this lands in an
+      // inbox beside the mail for the order it came off.
+      subject: `Split PO — ${line.po_no} (split of ${parent}) — ${mfg.name}`,
+      html: `
+        <div style="font-family:sans-serif;max-width:620px;margin:auto;color:#111">
+          <h2 style="margin-bottom:4px">Split Purchase Order: ${escapeHtml(line.po_no)}</h2>
+          <p style="color:#555;margin-top:0">
+            This is part of purchase order <strong>${escapeHtml(parent)}</strong>, re-issued as its own PO.
+            It is not additional quantity${attachments.length > 0 ? " — the PO document is attached" : ""}.
+          </p>
+          <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:12px">
+            ${detailRow("PO No.", line.po_no)}
+            ${detailRow("Split From", parent)}
+            ${detailRow("SKU", line.sku_code + (line.sku_name ? " — " + line.sku_name : ""))}
+            ${detailRow("Deliver To", line.destination ?? "—")}
+            ${detailRow("Quantity", Number(line.qty).toLocaleString("en-IN"))}
+          </table>
+          <p style="font-size:12px;color:#888;margin-top:20px">
+            This is an auto-generated email from the mcaffeine ERP system.
+            Please confirm receipt by replying to this email.
+          </p>
+        </div>
+      `,
+      attachments: attachments.length > 0 ? attachments : undefined,
+    })
+  } catch (sendErr: unknown) {
+    const message = sendErr instanceof Error ? sendErr.message : String(sendErr)
+    const stack = sendErr instanceof Error ? sendErr.stack : undefined
+    logger.error({ ...ctx, eventId, po_no: line.po_no, err: message, stack, message: "Split PO email send failed" })
+    recordFailedEvent("PO_SPLIT_EMAIL", eventId, { mfgId, mfg_name: mfg.name, po_no: line.po_no }, message)
+    throw sendErr
+  }
+
+  logger.info({
+    ...ctx, eventId, mfgId, mfg_name: mfg.name, mfg_email: allRecipients,
+    po_no: line.po_no, reference_po: line.reference_po,
+    message: "Split PO email sent successfully",
+  })
+  recordProcessedEvent("PO_SPLIT_EMAIL", eventId, {
+    mfgId, mfg_name: mfg.name, mfg_email: allRecipients, po_no: line.po_no,
+  })
   return true
 }
 
@@ -474,13 +619,16 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
   }
 
   // Shared warehouse addresses plus this legal entity's own point of contact.
-  const { to, cc } = await resolveRecipients("warehouse", destination, null, legalEntityCode ?? null)
+  const { to, cc, dropped } = await resolveRecipients("warehouse", destination, null, legalEntityCode ?? null)
   // Both empty, not just `to`: an employee attached to this site is a real
   // recipient, so a CC-only notification still goes out.
   if (to.length === 0 && cc.length === 0) {
     logger.warn({
       ...ctx, mfgId, destination, legalEntityCode,
-      message: "sendInwardInvoiceEmail: warehouse has no email on file, skipping",
+      suppressed: dropped.length > 0 ? dropped.join(", ") : undefined,
+      message: dropped.length > 0
+        ? "sendInwardInvoiceEmail: every recipient is suppressed after an earlier bounce or complaint, skipping"
+        : "sendInwardInvoiceEmail: warehouse has no email on file, skipping",
     })
     return false
   }

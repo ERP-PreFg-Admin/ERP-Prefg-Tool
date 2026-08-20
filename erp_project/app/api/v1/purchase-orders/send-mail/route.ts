@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server"
 import { query, execute } from "@/lib/db"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
-import { sendMfgSelectionEmail, type SelectedPoLine } from "@/lib/mailer"
+import {
+  sendMfgSelectionEmail, sendSplitPoEmail, partitionSplits, type SelectedPoLine,
+} from "@/lib/mailer"
 import { poSendMailSchema } from "@/lib/validation/purchase-orders"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { assertPoInScope } from "@/lib/po-guard"
@@ -13,9 +15,15 @@ import logger from "@/lib/logger"
 //
 // User-driven notification send: the selected POs (any mix of status —
 // newly raised, cancelled, whatever the user checked in the PO Procurement
-// table) are grouped by manufacturer and one consolidated email is sent per
-// manufacturer immediately. No approval gate — the stored status is not
-// changed here; raise/cancel already happened through their own flows.
+// table) are grouped by manufacturer and mailed immediately. No approval gate —
+// the stored status is not changed here; raise/cancel already happened through
+// their own flows.
+//
+// Each manufacturer's group becomes ONE consolidated email, plus ONE email per
+// raised split PO. A split is a re-issue of demand the manufacturer already holds
+// against an order they can be pointed back at, so it gets its own mail and its
+// own document rather than a table inside a "PO Update" — see partitionSplits and
+// sendSplitPoEmail in lib/mailer.ts.
 //
 // What this does mutate is email_sent_at, and only for the manufacturers whose
 // mail actually went out. PO Tracking shows a raised-but-unmailed PO as Draft
@@ -56,15 +64,38 @@ export const POST = withGateway({
       })
     }
 
-    const results: { mfg_id: number; mfg_name: string; sent: boolean; error?: string }[] = []
+    const results: { mfg_id: number; mfg_name: string; po_no?: string; sent: boolean; error?: string }[] = []
     const sentPoIds: number[] = []
     for (const [mfgId, group] of byMfg) {
-      try {
-        const sent = await sendMfgSelectionEmail(mfgId, group.lines)
-        results.push({ mfg_id: mfgId, mfg_name: group.mfg_name, sent })
-        if (sent) sentPoIds.push(...group.lines.map((l) => l.id))
-      } catch (err: any) {
-        results.push({ mfg_id: mfgId, mfg_name: group.mfg_name, sent: false, error: err.message })
+      // A raised split leaves the consolidated mail entirely and gets its own —
+      // see partitionSplits. Each leg is tried and reported separately, so the
+      // consolidated one failing can't hold back the splits, or the reverse.
+      const { splits, rest } = partitionSplits(group.lines)
+
+      // Skipped when the selection was nothing but splits: a "PO Update" whose
+      // only remaining content is the open snapshot is not an update of anything.
+      if (rest.length > 0) {
+        try {
+          const sent = await sendMfgSelectionEmail(mfgId, rest)
+          results.push({ mfg_id: mfgId, mfg_name: group.mfg_name, sent })
+          if (sent) sentPoIds.push(...rest.map((l) => l.id))
+        } catch (err: unknown) {
+          const error = err instanceof Error ? err.message : String(err)
+          results.push({ mfg_id: mfgId, mfg_name: group.mfg_name, sent: false, error })
+        }
+      }
+
+      // po_no on these results: one manufacturer can now have several legs in a
+      // batch, so a partial failure has to name the PO and not just the vendor.
+      for (const line of splits) {
+        try {
+          const sent = await sendSplitPoEmail(mfgId, line)
+          results.push({ mfg_id: mfgId, mfg_name: group.mfg_name, po_no: line.po_no, sent })
+          if (sent) sentPoIds.push(line.id)
+        } catch (err: unknown) {
+          const error = err instanceof Error ? err.message : String(err)
+          results.push({ mfg_id: mfgId, mfg_name: group.mfg_name, po_no: line.po_no, sent: false, error })
+        }
       }
     }
 

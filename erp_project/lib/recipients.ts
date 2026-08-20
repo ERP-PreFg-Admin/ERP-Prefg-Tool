@@ -25,10 +25,26 @@ export type RecipientRow = {
  */
 export function splitRecipients(
   rows: RecipientRow[],
-  primaryEmail: string | null = null
-): { to: string[]; cc: string[] } {
+  primaryEmail: string | null = null,
+  /**
+   * Lowercased addresses SES has told us not to send to again — permanent
+   * bounces and complaints, from `email_suppressions`.
+   *
+   * Filtered here rather than at the call sites because this is the one place
+   * every recipient passes through, and because it has to apply to **CC as well
+   * as To**. Suppressing only the To list would still copy a dead address on
+   * every mail, which SES counts as a repeat send to a known-bad recipient and
+   * which damages the domain's reputation exactly as a To would.
+   *
+   * `suppressed` is also applied to `primaryEmail`. That address comes from
+   * details_mfg.email and has no entity_emails row, so it is both un-suppressible
+   * by any per-row flag and the most likely to be stale.
+   */
+  suppressed: ReadonlySet<string> = new Set()
+): { to: string[]; cc: string[]; dropped: string[] } {
   const to: string[] = []
   const cc: string[] = []
+  const dropped: string[] = []
   /** lowercased address → the list it currently sits in. */
   const seen = new Map<string, "to" | "cc">()
 
@@ -36,6 +52,14 @@ export function splitRecipients(
     const email = raw?.trim()
     if (!email) return
     const key = email.toLowerCase()
+
+    // Checked before the dedupe bookkeeping, so a suppressed address can never
+    // occupy a slot in `seen` and shadow a later legitimate one.
+    if (suppressed.has(key)) {
+      if (!dropped.includes(email)) dropped.push(email)
+      return
+    }
+
     const already = seen.get(key)
     if (already === kind || already === "to") return
     if (already === "cc") {
@@ -49,5 +73,8 @@ export function splitRecipients(
 
   add(primaryEmail, "to")
   for (const r of rows) add(r.email, r.recipient_type === "cc" ? "cc" : "to")
-  return { to, cc }
+  // `dropped` is returned rather than swallowed so the caller can log which
+  // addresses were skipped. A silently shrinking recipient list is how the
+  // original problem — mail nobody receives — comes back in a new form.
+  return { to, cc, dropped }
 }

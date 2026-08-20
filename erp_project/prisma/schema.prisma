@@ -139,6 +139,12 @@ model supplier_invoices {
   /// Code Uniware assigned when this invoice was mirrored — its own series, and
   /// the reference quoted to the manufacturer.
   uniware_po_code String?                  @db.VarChar(64)
+  /// What Unicommerce last reported for that PO, and when we asked. Refreshed by
+  /// the Sync button on the invoices tab / PO Inwarding desk, never on a
+  /// schedule — so a NULL timestamp means never asked, not "no status".
+  /// See prisma/add_invoice_uniware_status.sql.
+  uniware_status    String?                @db.VarChar(40)
+  uniware_synced_at DateTime?              @db.DateTime(0)
   created_by      Int?
   created_at      DateTime                 @default(now()) @db.DateTime(0)
   mfgs            master_mfgs              @relation(fields: [mfg_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_supplier_invoices_mfg")
@@ -455,6 +461,33 @@ model details_vendor {
   master_vendors       master_vendors         @relation(fields: [vendor_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "details_vendor_ibfk_1")
 
   @@index([vendor_id], map: "vendor_id")
+}
+
+/// Addresses SES reported as a permanent bounce or a complaint. Written by the
+/// SNS webhook (app/api/v1/webhooks/ses/route.ts), read by resolveRecipients()
+/// in lib/mailer.ts to drop them from both the To and CC list of every send.
+///
+/// Deliberately NOT a flag on entity_emails: resolveRecipients also merges a
+/// `primaryEmail` from details_mfg.email, which has no entity_emails row and so
+/// could not be suppressed by a per-row column — and it is the address most
+/// likely to be stale. See prisma/add_email_suppressions.sql.
+model email_suppressions {
+  id             Int                        @id @default(autoincrement())
+  /// Stored lowercased by the webhook, so the UNIQUE index gives idempotency
+  /// under SNS's at-least-once delivery.
+  email          String                     @unique(map: "uq_email_suppression") @db.VarChar(255)
+  reason         email_suppressions_reason
+  /// SES's own sub-classification — bounceSubType, or complaintFeedbackType.
+  /// Kept verbatim so the admin screen can explain why, not just that.
+  detail         String?                    @db.VarChar(500)
+  ses_message_id String?                    @db.VarChar(255)
+  suppressed_at  DateTime                   @default(now()) @db.Timestamp(0)
+}
+
+enum email_suppressions_reason {
+  bounce
+  complaint
+  manual
 }
 
 model entity_emails {

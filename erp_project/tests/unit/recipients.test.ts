@@ -66,3 +66,90 @@ test("blank and whitespace-only addresses are dropped, not sent as empty", () =>
   assert.deepEqual(to, [])
   assert.deepEqual(cc, [])
 })
+
+// ── Suppression (email_suppressions, fed by the SES webhook) ─────────────────
+// A suppressed address is one SES has already hard-bounced or that complained.
+// Continuing to mail it damages the sending domain's reputation, which is the
+// thing the whole Gmail → SES migration is protecting.
+
+test("a suppressed address is removed from To", () => {
+  const { to, dropped } = splitRecipients(
+    [{ email: "good@x.com" }, { email: "dead@x.com" }],
+    null,
+    new Set(["dead@x.com"])
+  )
+  assert.deepEqual(to, ["good@x.com"])
+  assert.deepEqual(dropped, ["dead@x.com"])
+})
+
+test("a suppressed address is removed from CC too, not just To", () => {
+  // The bug this guards: filtering only To would still copy a known-bad address
+  // on every send. SES counts a CC as a recipient exactly like a To.
+  const { to, cc, dropped } = splitRecipients(
+    [{ email: "good@x.com" }, { email: "dead@x.com", recipient_type: "cc" }],
+    null,
+    new Set(["dead@x.com"])
+  )
+  assert.deepEqual(to, ["good@x.com"])
+  assert.deepEqual(cc, [])
+  assert.deepEqual(dropped, ["dead@x.com"])
+})
+
+test("the primary email is suppressible", () => {
+  // primaryEmail comes from details_mfg.email and has no entity_emails row, so
+  // no per-row flag could ever suppress it — and it is the most likely to be
+  // stale.
+  const { to, dropped } = splitRecipients(
+    [{ email: "other@x.com" }],
+    "dead@mfg.com",
+    new Set(["dead@mfg.com"])
+  )
+  assert.deepEqual(to, ["other@x.com"])
+  assert.deepEqual(dropped, ["dead@mfg.com"])
+})
+
+test("suppression matching is case-insensitive", () => {
+  const { to, dropped } = splitRecipients(
+    [{ email: "  DeAd@X.com " }],
+    null,
+    new Set(["dead@x.com"])
+  )
+  assert.deepEqual(to, [])
+  assert.deepEqual(dropped, [" DeAd@X.com ".trim()])
+})
+
+test("every recipient suppressed yields empty lists, not a silent partial send", () => {
+  // The caller has to be able to tell "nobody to send to" from "sent fine".
+  const { to, cc, dropped } = splitRecipients(
+    [{ email: "a@x.com" }, { email: "b@x.com", recipient_type: "cc" }],
+    "c@x.com",
+    new Set(["a@x.com", "b@x.com", "c@x.com"])
+  )
+  assert.deepEqual(to, [])
+  assert.deepEqual(cc, [])
+  assert.equal(dropped.length, 3)
+})
+
+test("a suppressed address does not shadow a later legitimate one", () => {
+  // Suppression is checked before the dedupe bookkeeping. If it were checked
+  // after, the suppressed address would claim the `seen` slot and the same
+  // address arriving as a valid To later would be silently skipped.
+  const { to, cc } = splitRecipients(
+    [{ email: "dead@x.com", recipient_type: "cc" }, { email: "live@x.com" }],
+    null,
+    new Set(["dead@x.com"])
+  )
+  assert.deepEqual(to, ["live@x.com"])
+  assert.deepEqual(cc, [])
+})
+
+test("no suppression set behaves exactly as before", () => {
+  // Default argument: every existing caller keeps its current behaviour.
+  const { to, cc, dropped } = splitRecipients([
+    { email: "a@x.com" },
+    { email: "c@x.com", recipient_type: "cc" },
+  ])
+  assert.deepEqual(to, ["a@x.com"])
+  assert.deepEqual(cc, ["c@x.com"])
+  assert.deepEqual(dropped, [])
+})

@@ -59,13 +59,13 @@
     {
       "Sid": "SesSendForVerification",
       "Effect": "Allow",
-      "Action": ["ses:SendEmail"],
+      "Action": ["ses:SendEmail", "ses:SendRawEmail"],
       "Resource": [
         "arn:aws:ses:ap-south-1:157320387454:identity/mcaffeine.com",
         "arn:aws:ses:ap-south-1:157320387454:identity/erp.prefg@mcaffeine.com",
         "arn:aws:ses:ap-south-1:157320387454:configuration-set/erp-app"
       ],
-      "_comment": "Needed to exercise the simulator addresses (bounce@/complaint@/ooto@simulator.amazonses.com) during Phase 2 verification. Both identity ARNs listed - SES was observed authorising against the address-level ARN, see iam-policy-erp-app-runtime-ses.json."
+      "_comment": "Needed to exercise the simulator addresses (bounce@/complaint@/ooto@simulator.amazonses.com) during Phase 2 verification. Both identity ARNs are listed because SES authorises against the address-level ARN before a domain identity exists and the domain-level ARN afterwards. SendRawEmail is required alongside SendEmail for any send carrying raw MIME - see iam-policy-erp-app-runtime-ses.json for why."
     },
     {
       "Sid": "SnsManageEventTopic",

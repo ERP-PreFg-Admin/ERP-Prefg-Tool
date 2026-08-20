@@ -17,6 +17,9 @@ import {
  *  for an unattributed SKU delivered to a site with no per-entity row. */
 const bare = (over: Partial<PoEmailRow> = {}): PoEmailRow => ({
   po_no: "MCAFF-PO-202608-001",
+  // Not a split. Only lib/pdf/split-po-document.tsx reads this; the letterhead
+  // rules below don't care either way.
+  reference_po: null,
   date: "2026-08-14",
   expected_on: "2026-08-30",
   destination: "GGN",

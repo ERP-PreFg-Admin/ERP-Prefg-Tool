@@ -45,6 +45,36 @@ const readForEmail = async (conn: PoolConnection, poId: number): Promise<PoEmail
   return rows as PoEmailRow[]
 }
 
+/**
+ * Delete this warehouse's per-entity rows, clearing what references them first.
+ *
+ * These tests own their facility rows outright (DELETE then INSERT, so no
+ * pre-existing address column leaks into an assertion — see the note at the first
+ * call site). That worked while nothing referenced `details_warehouse_entity`.
+ * `un_code_mfg_sku_wh_map.wh_id` now does, and once the MFG × facility map is
+ * populated the DELETE fails on `fk_map_wh` — so the dependents have to go in the
+ * same breath. Both happen inside the rolled-back transaction, so nothing real is
+ * lost either way.
+ *
+ * Pass `entityId` to narrow to one entity's row, matching the two call shapes.
+ */
+async function clearFacilityRows(
+  conn: PoolConnection,
+  warehouseId: number,
+  entityId?: number
+) {
+  const where = entityId == null
+    ? { sql: "warehouse_id = ?", params: [warehouseId] }
+    : { sql: "warehouse_id = ? AND entity_id = ?", params: [warehouseId, entityId] }
+
+  await conn.execute(
+    `DELETE FROM un_code_mfg_sku_wh_map
+      WHERE wh_id IN (SELECT id FROM details_warehouse_entity WHERE ${where.sql})`,
+    where.params
+  )
+  await conn.execute(`DELETE FROM details_warehouse_entity WHERE ${where.sql}`, where.params)
+}
+
 /** An entity, a brand attributed to it, and a warehouse — or null to skip. */
 async function fixtures(conn: PoolConnection) {
   const [entRows] = await conn.execute("SELECT id, code FROM master_entity ORDER BY code LIMIT 1")
@@ -75,10 +105,7 @@ test("the full chain resolves the site's own bill-to", async () => {
     // lists, so any address column the real row already holds leaks into the
     // assertion. (ship_to_line2 did exactly that.) The transaction is rolled back,
     // so deleting the live row is safe and makes the fixture own every column.
-    await conn.execute(
-      "DELETE FROM details_warehouse_entity WHERE warehouse_id = ? AND entity_id = ?",
-      [f.warehouse.id, f.entity.id]
-    )
+    await clearFacilityRows(conn, f.warehouse.id, f.entity.id)
     await conn.execute<ResultSetHeader>(
       `INSERT INTO details_warehouse_entity
          (warehouse_id, entity_id, facility_code, bill_to_name, bill_to_address, bill_to_gstin,
@@ -123,10 +150,7 @@ test("a site with no bill-to prints the right company and no address", async () 
     if (!a || !f) return
 
     await conn.execute("UPDATE master_skus SET brand_id = ? WHERE sku_code = ?", [f.brandId, a.sku])
-    await conn.execute(
-      "DELETE FROM details_warehouse_entity WHERE warehouse_id = ? AND entity_id = ?",
-      [f.warehouse.id, f.entity.id]
-    )
+    await clearFacilityRows(conn, f.warehouse.id, f.entity.id)
 
     const po = await makePo(conn, a, { qty: 10, destination: f.warehouse.name })
     const rows = await readForEmail(conn, po.id)
@@ -260,9 +284,7 @@ test("the guard refuses the other entity's site and allows its own", async () =>
     await conn.execute("UPDATE master_skus SET brand_id = ? WHERE sku_code = ?", [f.brandId, a.sku])
 
     // This site is set up for the OTHER entity only.
-    await conn.execute(
-      "DELETE FROM details_warehouse_entity WHERE warehouse_id = ?", [f.warehouse.id]
-    )
+    await clearFacilityRows(conn, f.warehouse.id)
     await conn.execute(
       `INSERT INTO details_warehouse_entity (warehouse_id, entity_id, facility_code, status)
        VALUES (?, ?, 'QA_OTHER', 'active')`,
@@ -294,7 +316,7 @@ test("a site with no per-entity rows is allowed, not refused", async () => {
     if (!a || !f) return
 
     await conn.execute("UPDATE master_skus SET brand_id = ? WHERE sku_code = ?", [f.brandId, a.sku])
-    await conn.execute("DELETE FROM details_warehouse_entity WHERE warehouse_id = ?", [f.warehouse.id])
+    await clearFacilityRows(conn, f.warehouse.id)
 
     const row = await destCheck(conn, a.sku, f.warehouse.name)
     assert.equal(Number(row.site_configured), 0)
@@ -317,7 +339,7 @@ test("an INACTIVE row does not make a site count as configured for that entity",
 
     await conn.execute("UPDATE master_brand SET entity_id = ? WHERE id = ?", [mine.id, f.brandId])
     await conn.execute("UPDATE master_skus SET brand_id = ? WHERE sku_code = ?", [f.brandId, a.sku])
-    await conn.execute("DELETE FROM details_warehouse_entity WHERE warehouse_id = ?", [f.warehouse.id])
+    await clearFacilityRows(conn, f.warehouse.id)
 
     // Our row is inactive; the other entity's is live.
     await conn.execute(
