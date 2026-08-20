@@ -10,15 +10,13 @@
 // ── The constraint this imposes on what can be tested ──────────────────────
 // MySQL implicitly commits when beginTransaction() is called with one already
 // open (see CLAUDE.md). So code under test MUST take an open connection and not
-// manage its own transaction — lib/po-receive.ts and lib/po-split.ts do exactly
-// that. Route handlers own their transaction and therefore cannot be tested
-// through this harness; test the helper they call instead.
+// manage its own transaction — lib/po/po-receive.ts does exactly that. Route
+// handlers own their transaction and therefore cannot be tested through this
+// harness; test the helper they call instead.
 import "dotenv/config"
 import type { PoolConnection, ResultSetHeader } from "mysql2/promise"
 import { pool } from "../../lib/db"
 import { APP_ENV, DB_NAME } from "../../lib/env"
-import { purchaseOrdersSql } from "../../lib/queries/purchase-orders"
-import type { SplitParentPo } from "../../lib/po-split"
 
 /**
  * Refuses to run against production, belt and braces.
@@ -181,22 +179,6 @@ export async function makePo(
   }
 }
 
-/**
- * Load a PO through the SAME query the split route uses, so a test passes
- * splitPo() exactly the row shape production passes it.
- *
- * Don't hand splitPo() a makePo() return value directly: that object carries only
- * the columns the fixture set, and a missing `expected_on` reaches mysql2 as
- * `undefined`, which it rejects outright ("Bind parameters must not contain
- * undefined").
- */
-export async function readForSplit(conn: PoolConnection, id: number): Promise<SplitParentPo> {
-  const [rows] = await conn.execute(purchaseOrdersSql.selectForSplit, [id])
-  const po = (rows as SplitParentPo[])[0]
-  if (!po) throw new Error(`fixture PO ${id} not found`)
-  return po
-}
-
 /** Re-read a PO's mutable columns, to assert what a helper actually wrote. */
 export async function readPo(conn: PoolConnection, id: number) {
   const [rows] = await conn.execute(
@@ -209,16 +191,6 @@ export async function readPo(conn: PoolConnection, id: number) {
     unit_price: string | number | null; total_amount: string | number | null
     status: string; reference_po: string | null
   }[])[0]
-}
-
-/** The children a split produced, by parent po_no. */
-export async function readChildren(conn: PoolConnection, parentPoNo: string) {
-  const [rows] = await conn.execute(
-    `SELECT id, po_no, qty, status, mfg_id, destination
-     FROM purchase_orders WHERE reference_po = ? ORDER BY po_no`,
-    [parentPoNo]
-  )
-  return rows as { id: number; po_no: string; qty: string | number; status: string; mfg_id: number; destination: string | null }[]
 }
 
 /** history_pos rows for one PO, oldest first. */
