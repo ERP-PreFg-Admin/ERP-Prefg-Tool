@@ -5,7 +5,9 @@ import {
   MAIL_PROVIDER, MAIL_FROM, MAIL_FROM_NAME, SES_CONFIG_SET,
   AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
 } from "@/lib/env"
-import { query } from "@/lib/db"
+import { query, execute } from "@/lib/db"
+import { uploadFile, getFileBuffer } from "@/lib/s3"
+import { s3FilesSql } from "@/lib/queries/s3-files"
 import { generatePoPdf, type PoEmailData } from "@/lib/pdf/po-document"
 import { generateSplitPoPdf } from "@/lib/pdf/split-po-document"
 import { resolveLetterhead, resolveShipTo, type PoEmailRow } from "@/lib/pdf/po-letterhead"
@@ -101,6 +103,92 @@ function mailerCtx() {
 
 // Attachment ceiling lives in lib/mail-limits.ts so it can be unit-tested
 // without importing this file's DB/PDF/Uniware dependencies.
+
+/**
+ * The PO document to attach — the stored one if this PO has ever been mailed,
+ * otherwise rendered now and stored for next time.
+ *
+ * ── Why it is stored rather than re-rendered ────────────────────────────────
+ * generatePoPdf reads the PO's CURRENT row. Re-rendering on a later send would
+ * produce a document reflecting today's rate, quantity and destination, sent
+ * under the same PO number the manufacturer already holds a different version
+ * of. That is worse than sending nothing: it silently misrepresents an agreed
+ * order, and afterwards nobody can say which version they were given.
+ *
+ * So the first send is the one that decides what the document says, and every
+ * later send re-attaches those exact bytes.
+ *
+ * The key also lights up the row's "Review PDF" action, which is gated on
+ * attachment_key being set — that option was missing for every mailed PO
+ * precisely because nothing here ever wrote one.
+ *
+ * A read or upload failure is NOT fatal: the mail still goes with whatever else
+ * it carries. Losing the attachment is bad; losing the notification is worse.
+ */
+async function poDocument(
+  line: { id: number; po_no: string },
+  render: (data: PoEmailData) => Promise<Buffer>,
+  ctx: ReturnType<typeof mailerCtx>
+): Promise<{ filename: string; content: Buffer } | null> {
+  const filename = `PO-${line.po_no}.pdf`
+
+  // Already stored? Send exactly what was sent before.
+  const [existing] = await query<{ attachment_key: string | null }>(
+    s3FilesSql.getPoAttachment,
+    [line.id]
+  )
+  if (existing?.attachment_key) {
+    try {
+      const content = await getFileBuffer(existing.attachment_key)
+      logger.info({ ...ctx, poId: line.id, po_no: line.po_no, key: existing.attachment_key, message: "PO document re-sent from S3" })
+      return { filename, content }
+    } catch (err) {
+      // The row points at an object that isn't there. Fall through and render —
+      // but do NOT overwrite the key, since something else owns it.
+      logger.error({
+        ...ctx, poId: line.id, po_no: line.po_no, key: existing.attachment_key,
+        error: err instanceof Error ? err.message : String(err),
+        message: "Stored PO document could not be read — rendering a fresh copy for this send only",
+      })
+    }
+  }
+
+  const data = await fetchPoData(line.id)
+  if (!data) {
+    // Used to be a silent `continue`. It is not the cause of any known bug, but
+    // it is a second route to "no PDF and no explanation", which cost two wrong
+    // hypotheses while diagnosing the first one.
+    logger.warn({ ...ctx, poId: line.id, po_no: line.po_no, message: "No PO data for the document — selectForEmail returned nothing, attaching no PDF" })
+    return null
+  }
+
+  const content = (await render(data)) as unknown as Buffer
+
+  // Store for next time. Best-effort: a failed upload costs us the reuse, not
+  // this send, so it must not throw past here.
+  try {
+    const stamp = new Date().toISOString().slice(0, 7)          // YYYY-MM
+    const safe  = line.po_no.replace(/[^A-Za-z0-9_-]+/g, "_")
+    const key   = `po-documents/${stamp}/${safe}-${line.id}.pdf`
+    await uploadFile(content, key, "application/pdf")
+    const res = await execute(s3FilesSql.setPoAttachmentIfAbsent, [key, line.id])
+    logger.info({
+      ...ctx, poId: line.id, po_no: line.po_no, key,
+      claimed: res.affectedRows === 1,
+      message: res.affectedRows === 1
+        ? "PO document stored and linked to the PO"
+        : "PO document stored, but the attachment slot was already taken — key not linked",
+    })
+  } catch (err) {
+    logger.error({
+      ...ctx, poId: line.id, po_no: line.po_no,
+      error: err instanceof Error ? err.message : String(err),
+      message: "PO document could not be stored — attached to this mail but not reusable",
+    })
+  }
+
+  return { filename, content }
+}
 
 export async function fetchPoData(poId: number): Promise<PoEmailData | null> {
   const rows = await query<PoEmailRow>(purchaseOrdersSql.selectForEmail, [poId])
@@ -199,10 +287,12 @@ export type SelectedPoLine = {
 }
 type OngoingPoLine = { po_no: string; sku_code: string; sku_name: string | null; qty: number }
 
-// Statuses worth attaching a PDF copy for — the two actions this flow exists
-// to notify manufacturers about. Other selected statuses (received, punched,
-// etc.) just show up in the summary table with no attachment.
-const ATTACHABLE_STATUSES = new Set(["raised", "cancelled"])
+// ATTACHABLE_STATUSES (raised | cancelled) used to gate whether a selected PO's
+// document was attached. Removed: the route passes the EFFECTIVE status, so any
+// PO with a part receipt read as 'partially_received' and lost its paperwork
+// permanently — see poDocument(). The mail's sections are built by filtering
+// `selected` directly (raisedLines / cancelledLines below), so nothing else
+// needed the set.
 
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) =>
@@ -334,13 +424,22 @@ export async function sendMfgSelectionEmail(
 
   const attachments: { filename: string; content: Buffer }[] = []
   let pdfsAttached = 0
+  // Every selected PO gets its document, whatever its status. The old
+  // ATTACHABLE_STATUSES gate here meant that receiving even one unit against a
+  // raised PO turned its effective status to 'partially_received' and the
+  // manufacturer could never be sent that order's paperwork again — on a 10,000
+  // unit PO with 1,200 in, which is exactly when they still need it.
+  //
+  //
+  // Bounded by the operator's selection: the "Remaining Open" section comes from
+  // ongoingByMfg and never contributes attachments, so this cannot balloon with
+  // the manufacturer's open book. assertAttachmentsWithinLimit below is the
+  // backstop for a very large selection.
   for (const line of selected) {
-    if (!ATTACHABLE_STATUSES.has(line.status)) continue
     try {
-      const data = await fetchPoData(line.id)
-      if (!data) continue
-      const pdfBuffer = await generatePoPdf(data)
-      attachments.push({ filename: `PO-${line.po_no}.pdf`, content: pdfBuffer as unknown as Buffer })
+      const doc = await poDocument(line, generatePoPdf, ctx)
+      if (!doc) continue
+      attachments.push(doc)
       pdfsAttached++
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
@@ -465,13 +564,11 @@ export async function sendSplitPoEmail(mfgId: number, line: SelectedPoLine): Pro
   // Same call the consolidated path makes for its own attachments.
   const attachments: { filename: string; content: Buffer }[] = []
   try {
-    const data = await fetchPoData(line.id)
-    if (data) {
-      attachments.push({
-        filename: `PO-${line.po_no}.pdf`,
-        content: (await generateSplitPoPdf(data)) as unknown as Buffer,
-      })
-    }
+    // Same store-once/reuse rule as the consolidated mail — a split child is its
+    // own purchase_orders row, so it owns its own attachment_key. Rendered with
+    // the split template, which prints the parent PO number.
+    const doc = await poDocument(line, generateSplitPoPdf, ctx)
+    if (doc) attachments.push(doc)
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
     logger.error({

@@ -85,7 +85,8 @@ export const MAIL_FROM_NAME = process.env.MAIL_FROM_NAME ?? "PEP ERP"
 // suppression list stays silently empty.
 export const SES_CONFIG_SET = process.env.SES_CONFIG_SET ?? "erp-app"
 
-// Job title printed under the sender's name on inward-invoice emails. The name
+// Job title printed under the sender's 
+// name on inward-invoice emails. The name
 // itself comes from whoever filed the invoice, so only the title is configured.
 export const MAIL_SIGNATURE_TITLE = process.env.MAIL_SIGNATURE_TITLE ?? "MIS Executive"
 

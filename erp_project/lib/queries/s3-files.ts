@@ -67,6 +67,28 @@ export const s3FilesSql = {
     SELECT attachment_key FROM purchase_orders WHERE id = ? LIMIT 1
   `,
 
+  /**
+   * Claim the attachment slot for a generated PO document, but only if nothing
+   * holds it yet. Parameters: [attachment_key, po_id]
+   *
+   * The `IS NULL` guard is the whole correctness argument for re-sending the same
+   * document. Without it, a second send would overwrite the key and the
+   * manufacturer's copy would stop matching ours — and two concurrent sends could
+   * each upload a different render and race to claim the row.
+   *
+   * It also protects the other meaning this column carries: an inward PO's
+   * attachment_key points at the supplier invoice it came from (see
+   * lib/invoice-inward.ts). Guarding on NULL means the mail path can never
+   * replace that.
+   *
+   * affectedRows tells the caller which happened: 1 = we claimed it, 0 = someone
+   * else already had it and their document is the one to send.
+   */
+  setPoAttachmentIfAbsent: `
+    UPDATE purchase_orders SET attachment_key = ?
+     WHERE id = ? AND attachment_key IS NULL
+  `,
+
   // ── Key authorization ────────────────────────────────────────────────────
 
   /**

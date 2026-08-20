@@ -179,3 +179,48 @@ export const getAgreedPmRatesByMfg = unstable_cache(
   ["ref-mfg-agreed-pm-rates"],
   { revalidate: MFG_RATES_REVALIDATE_SECONDS, tags: ["ref:mfg-pm-rates"] }
 )
+
+// ── Which approval modules invalidate which cached list ──────────────────────
+/**
+ * Approval module code -> the cache tags its approval makes stale.
+ *
+ * A MAP rather than a chain of `if (module === ...) revalidateTag(...)` in the
+ * approvals route, because that chain was the bug: it covered RM_RATE, PM_RATE and
+ * WAREHOUSE and silently omitted everything else. An approved manufacturer stayed
+ * missing from the PO and invoice dropdowns for up to REVALIDATE_SECONDS, which
+ * reads as "the master didn't save".
+ *
+ * Declared HERE, beside the caches, so a tag and the modules that dirty it are
+ * defined together — adding a cached list means adding its invalidators in the same
+ * file rather than remembering a route two directories away.
+ *
+ * The *_BULK variants matter as much as the singular ones: they are how several
+ * masters get created at a time, so omitting them means a bulk upload is exactly
+ * the case that does not show up.
+ *
+ * `ref:po-options` is one cache holding SKUs, manufacturers AND warehouses
+ * (getPoDropdownOptions), so all three families list it.
+ */
+export const CACHE_TAGS_BY_MODULE: Record<string, string[]> = {
+  // Feeds the PO + invoice dialogs' manufacturer dropdown.
+  MFG:            ["ref:manufacturers", "ref:po-options"],
+  MFG_BULK:       ["ref:manufacturers", "ref:po-options"],
+  // …their destination dropdown, per (site, legal entity).
+  WAREHOUSE:      ["ref:po-options"],
+  // …and their SKU pickers.
+  SKU:            ["ref:skus", "ref:po-options"],
+  VENDOR:         ["ref:vendors"],
+  VENDOR_BULK:    ["ref:vendors"],
+  RM_MAT:         ["ref:rm"],
+  RM_BULK:        ["ref:rm"],
+  PM_MAT:         ["ref:pm"],
+  PM_BULK:        ["ref:pm"],
+  RM_RATE:        ["ref:mfg-rm-rates"],
+  RM_RATE_BULK:   ["ref:mfg-rm-rates"],
+  PM_RATE:        ["ref:mfg-pm-rates"],
+  PM_RATE_BULK:   ["ref:mfg-pm-rates"],
+  RM_VRM:         ["ref:rm"],
+  RM_VRM_BULK:    ["ref:rm"],
+  PM_VRM:         ["ref:pm"],
+  PM_VRM_BULK:    ["ref:pm"],
+}

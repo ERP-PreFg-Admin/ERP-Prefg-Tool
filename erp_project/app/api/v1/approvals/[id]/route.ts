@@ -21,6 +21,7 @@ import { query, pool } from "@/lib/db"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { MODULE_HANDLERS, type DiffItem } from "@/lib/approvals/module-handlers"
 import { resolvePendingHistoryEntry } from "@/lib/master-routes/history-utils"
+import { CACHE_TAGS_BY_MODULE } from "@/lib/cached-reference-data"
 import { APPROVAL_STATUS, STATUS } from "@/lib/constants"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
@@ -102,17 +103,18 @@ export const POST = withGateway({
     await resolvePendingHistoryEntry(conn, approval.module, approval.entity_id, approverId, action === "approve" ? "approved" : "rejected")
     await conn.commit()
 
-    // Manufacturer-scoped cost_master_rm_mfg/cost_master_pm_mfg rate reads are cached
-    // (see lib/cached-reference-data.ts) since they rarely change — bust
-    // that cache immediately on approve/reject instead of waiting out the
-    // timer, so the Manufacturing module's RM Vendor / Agreed Rates tabs
-    // reflect this change on next load.
-    if (approval.module === "RM_RATE") revalidateTag("ref:mfg-rm-rates", "max")
-    if (approval.module === "PM_RATE") revalidateTag("ref:mfg-pm-rates", "max")
-    // getPoDropdownOptions caches the warehouse list (lib/cached-reference-data.ts),
-    // so without this an approved warehouse is missing from the PO destination
-    // dropdown — and a deactivated one still offered — until the timer expires.
-    if (approval.module === "WAREHOUSE") revalidateTag("ref:po-options", "max")
+    // Reference lists (dropdown options, agreed rates) are cached on a timer in
+    // lib/cached-reference-data.ts because they rarely change. An approval is
+    // exactly when they DO change, so bust the affected tags now instead of leaving
+    // a newly approved master missing from every dropdown until the timer expires —
+    // which reads to the user as "the master didn't save".
+    //
+    // Driven by a map declared beside the caches, not a chain of ifs here. The chain
+    // covered three modules and quietly missed the rest, including MFG and every
+    // *_BULK variant.
+    for (const tag of CACHE_TAGS_BY_MODULE[approval.module] ?? []) {
+      revalidateTag(tag, "max")
+    }
 
     recordProcessedEvent("APPROVAL", eventId, {
       approvalId, module: approval.module, entityId: approval.entity_id, approverId, action,
