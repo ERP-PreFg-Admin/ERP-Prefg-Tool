@@ -29,6 +29,21 @@ export const manufacturers = {
     ORDER BY mfg.code ASC
   `,
 
+  /**
+   * Just this manufacturer's business code.
+   *
+   * That code IS its Uniware vendor code, at every facility — see the
+   * `set-vendor-code` branch of app/api/v1/manufacturing/facility-map/route.ts,
+   * which resolves it here instead of taking one from the client. Deliberately
+   * narrower than `selectByCode` (reverse direction) and than the paginated
+   * selects (which join details_mfg for columns this does not need).
+   *
+   * Parameters: [id]
+   */
+  selectCodeById: `
+    SELECT mfg.code FROM master_mfgs AS mfg WHERE mfg.id = ? LIMIT 1
+  `,
+
   /** Resolve a manufacturer by its business code — used by rate-bulk CSV
    *  imports. Parameters: [code] */
   selectByCode: `

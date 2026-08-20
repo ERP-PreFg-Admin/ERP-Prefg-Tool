@@ -4,10 +4,12 @@
 // Table: un_code_mfg_sku_wh_map — one row per (facility, mfg, SKU), plus a
 // `sku_id IS NULL` row per pair carrying that pair's Uniware vendor code.
 //
-//   { action: "set-vendor-code", mfg_id, wh_id, un_mfg_code, remarks? }
+//   { action: "set-vendor-code", mfg_id, wh_id, remarks? }
 //     Records that this manufacturer IS a Uniware vendor at this facility. Must
 //     come first — un_mfg_code is NOT NULL on every row, so there is nothing to
 //     write a SKU mapping with until it exists. This is the grey → pink transition.
+//     The code is NOT a parameter: it is master_mfgs.code, one per manufacturer,
+//     identical at every facility (see the branch below).
 //     Response 200 { ok } · 409 (code already another mfg's here) · 404
 //
 //   { action: "set-map", mfg_id, wh_id, sku_codes[] }
@@ -28,6 +30,7 @@ import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { facilityMapActionSchema } from "@/lib/validation/manufacturing"
 import { mfgFacilityMap } from "@/lib/queries/mfg-facility-map"
+import { manufacturers } from "@/lib/queries/manufacturers"
 import { getUserScope, assertInScope, type UserScope } from "@/lib/scope"
 import { assertSkuCodesInBrandScope } from "@/lib/brand-guard"
 import { pushFacilityMap } from "@/lib/mfg-facility-push"
@@ -94,7 +97,22 @@ export const POST = withGateway({
 
     // ── set-vendor-code ──────────────────────────────────────────────────────
     if (body.action === "set-vendor-code") {
-      const code = body.un_mfg_code.trim()
+      // ONE code per manufacturer, the same at every facility, and never supplied
+      // by the client. master_mfgs.code is already auto-generated once per
+      // manufacturer (MFG-<serial>-<XX>) and already unique, so deriving from it
+      // costs no column and no generator — and two manufacturers cannot collide,
+      // because the value comes from the manufacturer itself.
+      const mfgRows = await query<{ code: string | null }>(
+        manufacturers.selectCodeById, [body.mfg_id]
+      )
+      const code = mfgRows[0]?.code?.trim()
+      if (!code) {
+        throw new ApiError(
+          404, "mfg_code_missing",
+          "This manufacturer has no business code, so it cannot be registered as a Uniware vendor."
+        )
+      }
+
       const eventId = makeEventId("MFG_FACILITY_CODE", "set", `${body.mfg_id}-${body.wh_id}`)
       const logCtx = { ...ctx, eventId, module: "MFG_FACILITY_CODE" }
       recordRawEvent("MFG_FACILITY_CODE", eventId, { mfgId: body.mfg_id, whId: body.wh_id, code })
@@ -104,6 +122,11 @@ export const POST = withGateway({
       // manufacturers sharing one Uniware vendor code at one facility means POs
       // and inwards land against the wrong ledger, and nothing downstream would
       // notice. Pinned by tests/db/mfg-facility-map.test.ts.
+      //
+      // Kept even though a derived code cannot collide: rows written before this
+      // change hold hand-typed codes, and one of those could already equal some
+      // manufacturer's business code. Dropping a guard because the NEW path can't
+      // trip it would leave the OLD data unguarded.
       const clash = await query<{ mfg_code: string; mfg_name: string }>(
         mfgFacilityMap.selectVendorCodeConflict,
         [body.wh_id, code, body.mfg_id]

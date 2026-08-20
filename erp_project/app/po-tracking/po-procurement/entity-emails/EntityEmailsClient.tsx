@@ -8,7 +8,7 @@
 
 import { useState } from "react"
 import { useUrlFilters } from "@/lib/useUrlFilters"
-import { ArrowLeft, Plus } from "lucide-react"
+import { ArrowLeft, Pencil, Plus } from "lucide-react"
 import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import { MasterToolbar, MasterToolbarActions } from "@/components/masters/MasterToolbar"
 import { Button } from "@/components/ui/button"
@@ -33,7 +33,13 @@ type EntityEmailRow = {
   /** Which header this address goes in. Older rows read back as 'to'. */
   recipient_type: string
   purpose: string | null
+  /** 'inactive' rows stay listed and keep their history, but every send path
+   *  filters status = 'active', so they receive nothing. */
+  status: string
   created_at: string | null
+  created_by: number | null
+  /** Resolved from users; null for the rows that predate the column. */
+  created_by_name: string | null
 }
 
 export default function EntityEmailsClient({
@@ -63,6 +69,9 @@ export default function EntityEmailsClient({
 }) {
   const { navigate, router } = useUrlFilters()
   const [showAdd, setShowAdd] = useState(false)
+  // The row being edited. One dialog serves both: the entity pickers and the
+  // address fields are identical, so a second component would duplicate them.
+  const [editing, setEditing] = useState<EntityEmailRow | null>(null)
 
   return (
     <>
@@ -113,24 +122,41 @@ export default function EntityEmailsClient({
                 <TableHead>Email</TableHead>
                 <TableHead>Send As</TableHead>
                 <TableHead>Purpose</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Added By</TableHead>
+                <TableHead>Added On</TableHead>
+                {canEdit && <TableHead className="text-right">Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8 text-sm">
+                  <TableCell colSpan={canEdit ? 10 : 9} className="text-center text-muted-foreground py-8 text-sm">
                     No entity emails found.
                   </TableCell>
                 </TableRow>
               ) : (
                 rows.map((r) => (
-                  <TableRow key={r.id}>
+                  <TableRow
+                    key={r.id}
+                    // Dimmed rather than hidden: an inactive contact is still a
+                    // record someone may need to find and reactivate.
+                    className={r.status === "inactive" ? "opacity-55 hover:opacity-100 transition-opacity" : undefined}
+                  >
                     <TableCell className="capitalize">{r.entity_type}</TableCell>
                     <TableCell className="font-mono">
-                      {/* '*' is a real stored value, not missing data: one
-                          employee row standing in for every manufacturer. */}
+                      {/* '*' is a real stored value, not missing data — one row
+                          standing in for every entity of its kind. What it stands
+                          for depends on entity_type: every MANUFACTURER on an
+                          employee row, every WAREHOUSE on a warehouse row (see
+                          selectForMfg vs selectByWarehouseForEntity). Labelling
+                          both "All manufacturers" would misdescribe the second. */}
                       {r.entity_code === "*"
-                        ? <span className="font-sans text-xs">All manufacturers</span>
+                        ? (
+                          <span className="font-sans text-xs">
+                            {r.entity_type === "warehouse" ? "All warehouses" : "All manufacturers"}
+                          </span>
+                        )
                         : r.entity_code}
                     </TableCell>
                     <TableCell>
@@ -152,6 +178,36 @@ export default function EntityEmailsClient({
                         : <span className="text-muted-foreground text-xs">To</span>}
                     </TableCell>
                     <TableCell>{r.purpose ?? "—"}</TableCell>
+                    <TableCell>
+                      {r.status === "inactive"
+                        ? <Badge variant="outline" title="Kept on file, but left out of every send">Inactive</Badge>
+                        : <Badge variant="success">Active</Badge>}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {/* Null on the rows that predate the column. Saying "—" is
+                          honest; inventing an author would not be. */}
+                      {r.created_by_name ?? <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell className="text-xs tabular-nums text-muted-foreground whitespace-nowrap">
+                      {r.created_at
+                        ? new Date(r.created_at).toLocaleDateString("en-IN",
+                            { day: "2-digit", month: "short", year: "numeric" })
+                        : "—"}
+                    </TableCell>
+                    {canEdit && (
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 gap-1.5 text-xs"
+                          onClick={() => setEditing(r)}
+                          title={`Edit ${r.email}`}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          Edit
+                        </Button>
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))
               )}
@@ -170,6 +226,22 @@ export default function EntityEmailsClient({
         legalEntityOptions={legalEntityOptions}
         onSaved={() => { setShowAdd(false); router.refresh() }}
       />
+
+      {/* Keyed by row id so opening a different contact remounts the dialog with
+          that row's values, rather than needing an effect to resync the form. */}
+      {editing && (
+        <AddEntityEmailDialog
+          key={editing.id}
+          open
+          editing={editing}
+          onClose={() => setEditing(null)}
+          vendorOptions={vendorOptions}
+          mfgOptions={mfgOptions}
+          warehouseOptions={warehouseOptions}
+          legalEntityOptions={legalEntityOptions}
+          onSaved={() => { setEditing(null); router.refresh() }}
+        />
+      )}
     </>
   )
 }

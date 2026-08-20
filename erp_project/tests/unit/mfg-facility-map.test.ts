@@ -15,6 +15,7 @@ import {
   MAP_STATE_CELL, MAP_STATE_DOT, MAP_STATE_LABEL, MAP_STATES,
   type MatrixCell,
 } from "../../app/po-tracking/mfg-overview/mapping-state"
+import { facilityMapActionSchema } from "../../lib/validation/manufacturing"
 
 /** A fully-configured, fully-mapped cell. Each test overrides just what it means. */
 function cell(over: Partial<MatrixCell> = {}): MatrixCell {
@@ -169,4 +170,33 @@ test("every state has a wash, a dot and a label", () => {
   }
   assert.equal(new Set(Object.values(MAP_STATE_LABEL)).size, MAP_STATES.length,
     "two states share a label, so the legend cannot distinguish them")
+})
+
+// ── The vendor code is not a client input ───────────────────────────────────────
+// One manufacturer has ONE Uniware vendor code (master_mfgs.code), identical at
+// every facility, resolved server-side. These pin the "cannot be edited" half of
+// that rule at the trust boundary — hiding the field in MfgFacilityMapPanel is a
+// UI choice, and a UI choice is not a guard.
+
+test("set-vendor-code does not accept a code from the client", () => {
+  const parsed = facilityMapActionSchema.parse({
+    action: "set-vendor-code",
+    mfg_id: 7,
+    wh_id: 3,
+    // A caller posting the field the form stopped showing — the exact
+    // per-facility divergence this replaced.
+    un_mfg_code: "hand_typed_override",
+  })
+  assert.ok(!("un_mfg_code" in parsed),
+    "un_mfg_code survived parsing, so a caller can still set a per-facility code")
+})
+
+test("set-vendor-code still needs the pair it registers", () => {
+  // Dropping un_mfg_code must not loosen anything else: without mfg_id/wh_id
+  // there is no pair to write, and the route would resolve a code for nobody.
+  for (const missing of ["mfg_id", "wh_id"] as const) {
+    const body: Record<string, unknown> = { action: "set-vendor-code", mfg_id: 7, wh_id: 3 }
+    delete body[missing]
+    assert.throws(() => facilityMapActionSchema.parse(body), `${missing} is not required`)
+  }
 })

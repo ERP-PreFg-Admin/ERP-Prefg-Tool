@@ -49,7 +49,10 @@ export default async function EntityEmailsPage({
       email: string
       recipient_type: string
       purpose: string | null
+      status: string
       created_at: string | null
+      created_by: number | null
+      created_by_name: string | null
     }>(
       entityEmails.selectPaginated,
       [type, type, like, like, like, like, size, offset],

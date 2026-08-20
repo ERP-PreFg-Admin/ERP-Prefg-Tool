@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
+import { apiErrorMessage } from "@/lib/api-error-message"
 
 type EntityType = "vendor" | "mfg" | "warehouse" | "employee"
 type EntityOption = { id: number; code: string; name: string }
@@ -25,18 +26,44 @@ const TYPE_LABEL: Record<EntityType, string> = {
 }
 
 /** The wildcard entity_code meaning "every manufacturer, including future ones". */
+// Same stored value for both, read differently by entity_type: on an employee row
+// it means every manufacturer, on a warehouse row every warehouse. See
+// selectForMfg and selectByWarehouseForEntity.
 const ALL_MFGS = "*"
+const ALL_WAREHOUSES = "*"
 
 type EmailRow = { email: string; recipient_type: "to" | "cc"; purpose: string }
 
 const emptyRow = (): EmailRow => ({ email: "", recipient_type: "to", purpose: "" })
 
+/** The stored row an edit is acting on. Absent = this is a create. */
+export type EditingEntityEmail = {
+  id: number
+  entity_type: string
+  entity_code: string
+  legal_entity_code: string | null
+  email: string
+  recipient_type: string
+  purpose: string | null
+  status: string
+}
+
 export default function AddEntityEmailDialog({
   open, onClose, onSaved, vendorOptions, mfgOptions, warehouseOptions, legalEntityOptions,
+  editing = null,
 }: {
   open: boolean
   onClose: () => void
   onSaved: () => void
+  /**
+   * Present = edit that row instead of creating. One dialog serves both because
+   * the entity pickers and address fields are identical; a second component
+   * would duplicate the type/code/legal-entity logic and then drift from it.
+   *
+   * An edit acts on ONE address — the list shows one per line, so that is the
+   * unit the user clicked. The multi-row adder is hidden accordingly.
+   */
+  editing?: EditingEntityEmail | null
   vendorOptions: EntityOption[]
   mfgOptions: EntityOption[]
   warehouseOptions: EntityOption[]
@@ -50,25 +77,56 @@ export default function AddEntityEmailDialog({
   const [rows, setRows] = useState<EmailRow[]>([emptyRow()])
   /** Employee only: what the addresses are attached to. */
   const [attachTo, setAttachTo] = useState<AttachTo>("all_mfgs")
+  /** Inactive keeps the row but stops it being mailed — every send path filters
+   *  status = 'active'. */
+  const [status, setStatus] = useState<"active" | "inactive">("active")
   const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError] = useState("")
 
   useEffect(() => {
     if (!open) return
     // eslint-disable-next-line react-hooks/set-state-in-effect -- resets form state each time the dialog is opened
-    setEntityType("mfg")
-    setEntityCode("")
-    setLegalEntityCode("")
-    setRows([emptyRow()])
-    setAttachTo("all_mfgs")
+    setEntityType((editing?.entity_type as EntityType) ?? "mfg")
+    setEntityCode(editing?.entity_code ?? "")
+    setLegalEntityCode(editing?.legal_entity_code ?? "")
+    setRows(editing
+      ? [{
+          email: editing.email,
+          recipient_type: editing.recipient_type === "cc" ? "cc" : "to",
+          purpose: editing.purpose ?? "",
+        }]
+      : [emptyRow()])
+    // Which picker an employee row was attached to isn't stored — infer it from
+    // whether the code matches a warehouse name. '*' is always all-manufacturers
+    // on an employee row.
+    setAttachTo(
+      editing?.entity_type !== "employee" ? "all_mfgs"
+      : editing.entity_code === "*"       ? "all_mfgs"
+      : warehouseOptions.some((w) => w.code === editing.entity_code) ? "warehouse"
+      : "mfg"
+    )
+    setStatus(editing?.status === "inactive" ? "inactive" : "active")
     setApiError("")
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seeded per open; `editing` is stable because the caller keys the dialog by row id
   }, [open])
 
   const isEmployee = entityType === "employee"
 
+  // "All warehouses" is a real stored row (entity_code = '*'), not a UI shortcut
+  // that fans out into one row per site — so a warehouse added next month is
+  // covered without anyone revisiting this list. Matched by the wildcard arm of
+  // selectByWarehouseForEntity.
+  //
+  // Offered on the warehouse type only. An employee row's '*' already means every
+  // MANUFACTURER, so the same value cannot also mean every warehouse without one
+  // meaning silently bleeding into the other.
+  const ALL_WAREHOUSES_OPTION: EntityOption = {
+    id: -1, code: ALL_WAREHOUSES, name: "every warehouse, including ones added later",
+  }
+
   const codeOptions =
     entityType === "vendor" ? vendorOptions
-    : entityType === "warehouse" ? warehouseOptions
+    : entityType === "warehouse" ? [ALL_WAREHOUSES_OPTION, ...warehouseOptions]
     : mfgOptions
 
   function updateRow(i: number, patch: Partial<EmailRow>) {
@@ -106,19 +164,39 @@ export default function AddEntityEmailDialog({
 
     setSubmitting(true)
     try {
+      // Omitted rather than "" for non-warehouse types, which the schema rejects.
+      const legal = entityType === "warehouse" ? legalEntityCode || undefined : undefined
+
       const res = await fetch("/api/v1/entity-emails", {
-        method: "POST",
+        method: editing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          entity_type: entityType,
-          entity_code: code,
-          // Omitted rather than "" for non-warehouse types, which the schema rejects.
-          legal_entity_code: entityType === "warehouse" ? legalEntityCode || undefined : undefined,
-          emails,
-        }),
+        body: JSON.stringify(
+          editing
+            // One address, by id. `emails[0]` is the only row in edit mode.
+            ? {
+                id: editing.id,
+                entity_type: entityType,
+                entity_code: code,
+                legal_entity_code: legal,
+                email: emails[0].email,
+                recipient_type: emails[0].recipient_type,
+                purpose: emails[0].purpose,
+                status,
+              }
+            : {
+                entity_type: entityType,
+                entity_code: code,
+                legal_entity_code: legal,
+                emails,
+                status,
+              }
+        ),
       })
       const data = await res.json()
-      if (!res.ok) { setApiError(data.error ?? "Failed to save."); return }
+      // apiErrorMessage, not data.error: the gateway puts the field-level Zod
+      // message in `details`, so reading only `error` reported "Invalid request"
+      // for a mistyped address.
+      if (!res.ok) { setApiError(apiErrorMessage(data, "Failed to save.")); return }
       onSaved()
     } catch {
       setApiError("Network error. Please try again.")
@@ -131,7 +209,7 @@ export default function AddEntityEmailDialog({
     <Dialog open={open} onOpenChange={(o) => { if (!o && !submitting) onClose() }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add Entity Email</DialogTitle>
+          <DialogTitle>{editing ? "Edit Entity Email" : "Add Entity Email"}</DialogTitle>
         </DialogHeader>
 
         <div className="grid gap-4 py-1">
@@ -238,7 +316,7 @@ export default function AddEntityEmailDialog({
           )}
 
           <div className="grid gap-2">
-            <Label>Emails</Label>
+            <Label>{editing ? "Email" : "Emails"}</Label>
               {rows.map((row, i) => (
                 <div key={i} className="flex items-start gap-2">
                   <Input
@@ -258,7 +336,7 @@ export default function AddEntityEmailDialog({
                     placeholder="Purpose (e.g. PO, Invoice)"
                     value={row.purpose} onChange={(e) => updateRow(i, { purpose: e.target.value })}
                   />
-                  <button
+                  {!editing && <button
                     type="button"
                     onClick={() => removeRow(i)}
                     disabled={rows.length === 1}
@@ -266,17 +344,36 @@ export default function AddEntityEmailDialog({
                     title="Remove"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  </button>}
                 </div>
               ))}
-              <button
+              {/* An edit acts on the one address the user clicked. Adding more
+                  here would have to become an insert, which is what the Add
+                  button on the list is for. */}
+              {!editing && <button
                 type="button"
                 onClick={addRow}
                 className="rounded-lg border border-dashed border-muted-foreground/40 px-3 py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors flex items-center gap-1.5 w-fit"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Add another email
-              </button>
+              </button>}
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="ee-status">Status</Label>
+            <Select
+              id="ee-status" value={status} className="w-full"
+              onChange={(e) => setStatus(e.target.value as "active" | "inactive")}
+            >
+              <option value="active">Active — receives mail</option>
+              <option value="inactive">Inactive — kept on file, not mailed</option>
+            </Select>
+            {status === "inactive" && (
+              <p className="text-xs text-muted-foreground">
+                Stays on the list and keeps its history, but is left out of every send.
+              </p>
+            )}
           </div>
 
           {apiError && <p className="text-sm text-destructive">{apiError}</p>}
@@ -285,7 +382,12 @@ export default function AddEntityEmailDialog({
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={submitting}>
-            {submitting ? "Adding…" : "Add Email(s)"}
+            {/* The verb matches the action, and stays the same word through the
+                pending state — a button that says "Add" then reports "Saved" is
+                two names for one thing. */}
+            {editing
+              ? (submitting ? "Saving…" : "Save Changes")
+              : (submitting ? "Adding…" : "Add Email(s)")}
           </Button>
         </DialogFooter>
       </DialogContent>

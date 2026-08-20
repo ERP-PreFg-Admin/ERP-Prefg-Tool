@@ -505,6 +505,19 @@ model entity_emails {
   /// row behaved before the column existed.
   recipient_type entity_emails_recipient_type @default(to)
   purpose     String?                   @db.VarChar(100)
+  /// COALESCE(legal_entity_code, ''), generated. Exists only so uq_entity_email
+  /// can treat "every entity" as one comparable value — MySQL counts NULLs as
+  /// distinct in a unique index, so indexing the nullable column would allow the
+  /// same address twice for the same warehouse. See
+  /// prisma/add_entity_email_unique.sql.
+  legal_entity_key String?               @db.VarChar(50)
+  /// Deactivating stops the mail without destroying the record of who used to
+  /// receive it. EVERY send path filters status = 'active' — see
+  /// lib/queries/entity-emails.ts. A status nothing filters on would be a lie.
+  status      entity_emails_status      @default(active)
+  /// users.id of whoever added the row. NULL on the rows that predate the
+  /// column. No FK: a user is deactivated, never deleted, so it cannot dangle.
+  created_by  Int?
   created_at  DateTime?                 @default(now()) @db.Timestamp(0)
 
   @@index([entity_type, entity_code, legal_entity_code], map: "idx_entity_emails_lookup")
@@ -1068,6 +1081,11 @@ enum page_permissions_access {
   none
   viewer
   editor
+}
+
+enum entity_emails_status {
+  active
+  inactive
 }
 
 enum entity_emails_entity_type {

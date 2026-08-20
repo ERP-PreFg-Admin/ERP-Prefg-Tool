@@ -10,10 +10,15 @@
  * rows of dropdowns meant horizontal scrolling to set one value. Read-only counts
  * scan fine across ~300 cells; ~300 controls do not.
  *
- * The vendor-code field is at the TOP, not buried, because it is the cell's
+ * The vendor code is at the TOP, not buried, because it is the cell's
  * precondition: `un_mfg_code` is NOT NULL on every row of the table, so until the
  * pair has a code there is nothing to write a SKU mapping with and the API returns
  * 409. That is also why a grey cell still opens this panel.
+ *
+ * It is DISPLAYED, never entered. One manufacturer has one Uniware vendor code —
+ * `master_mfgs.code` — and it is the same at every facility; the route resolves it
+ * and the client cannot send one. Registering is therefore a single button rather
+ * than a text field, and there is nothing to "update" afterwards.
  */
 
 import { useState } from "react"
@@ -21,7 +26,6 @@ import { Check, AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/toast"
 import {
@@ -88,16 +92,19 @@ function PanelBody({
   const [ticked, setTicked] = useState<Set<number>>(
     () => new Set(skus.filter(isMapped).map((s) => s.sku_id))
   )
-  const [vendorCode, setVendorCode] = useState(cell.un_mfg_code ?? "")
   const [saving, setSaving] = useState<"map" | "code" | "push" | null>(null)
 
   const hasCode = Boolean(cell.un_mfg_code)
-  const codeDirty = vendorCode.trim() !== (cell.un_mfg_code ?? "").trim()
+  /** What this manufacturer's code WILL be once registered: one per
+   *  manufacturer, identical at every facility, so it is knowable before the
+   *  write. `un_mfg_code` is only richer than mfg_code for legacy rows, which
+   *  were hand-typed per facility. */
+  const vendorCode = cell.un_mfg_code ?? cell.mfg_code ?? null
 
   // The state as it WOULD be once saved, so the header badge tracks the
   // checkboxes rather than the stale server value.
   const preview: MatrixCell = {
-    un_mfg_code: hasCode || vendorCode.trim() ? vendorCode.trim() || null : null,
+    un_mfg_code: cell.un_mfg_code,
     facility_code: cell.facility_code,
     total_skus: skus.length,
     mapped_skus: ticked.size,
@@ -153,20 +160,17 @@ function PanelBody({
     }
   }
 
-  async function saveVendorCode() {
+  /** Register this manufacturer as a Uniware vendor here. No code is sent — the
+   *  route resolves master_mfgs.code, the same value at every facility. */
+  async function registerVendor() {
     const ok = await post(
-      {
-        action: "set-vendor-code",
-        mfg_id: cell.mfg_id,
-        wh_id: cell.wh_id,
-        un_mfg_code: vendorCode.trim(),
-      },
+      { action: "set-vendor-code", mfg_id: cell.mfg_id, wh_id: cell.wh_id },
       "code"
     )
     if (ok) {
       toast({
-        title: "Vendor code saved",
-        description: `${cell.mfg_name} is ${vendorCode.trim()} at ${cell.wh_name}.`,
+        title: "Registered as Uniware vendor",
+        description: `${cell.mfg_name} is ${ok.un_mfg_code ?? vendorCode} at ${cell.wh_name}.`,
         variant: "success",
       })
     }
@@ -257,30 +261,22 @@ function PanelBody({
       <section className="mb-4">
         <div className="flex items-end gap-2">
           <div className="flex flex-1 flex-col gap-1.5">
-            <Label htmlFor="un_mfg_code">Uniware vendor code at this facility</Label>
-            <Input
-              id="un_mfg_code"
-              value={vendorCode}
-              placeholder="e.g. HYP_B2B_GGN's code for this manufacturer"
-              disabled={!canEdit || saving !== null}
-              onChange={(e) => setVendorCode(e.target.value)}
-            />
+            <Label>Uniware vendor code</Label>
+            {/* Read-only by design, not disabled-for-now: one manufacturer has one
+                code and a per-facility override is what this replaced. */}
+            <div className="flex h-9 items-center rounded-lg border border-input bg-muted/40 px-3 font-mono text-sm">
+              {vendorCode ?? <span className="font-sans text-muted-foreground">No manufacturer code</span>}
+            </div>
           </div>
-          {canEdit && (
-            <Button
-              size="sm"
-              variant={hasCode ? "outline" : "default"}
-              disabled={!codeDirty || !vendorCode.trim() || saving !== null}
-              onClick={saveVendorCode}
-            >
-              {saving === "code" ? "Saving…" : hasCode ? "Update" : "Set code"}
+          {canEdit && !hasCode && (
+            <Button size="sm" disabled={!vendorCode || saving !== null} onClick={registerVendor}>
+              {saving === "code" ? "Registering…" : "Register as Uniware vendor"}
             </Button>
           )}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
-          {/* Not cosmetic: this is why the codes cannot be normalised or guessed. */}
-          Uniware&apos;s own code for this manufacturer <em>at this facility</em> — it differs
-          per facility, so it is stored per facility rather than on the manufacturer.
+          One code per manufacturer, used at every facility — it is the
+          manufacturer&apos;s own code, so it cannot be edited here.
         </p>
       </section>
 
@@ -292,8 +288,8 @@ function PanelBody({
         </Callout>
       ) : !hasCode ? (
         <Callout variant="info" className="mb-4">
-          {cell.mfg_name} is not a Uniware vendor at this facility yet. Set the vendor code
-          above, then map the SKUs it supplies from here.
+          {cell.mfg_name} is not a Uniware vendor at this facility yet. Register it above,
+          then map the SKUs it supplies from here.
         </Callout>
       ) : skus.length === 0 ? (
         <Callout variant="info" className="mb-4">

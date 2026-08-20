@@ -104,18 +104,22 @@ export const setFacilityMapSchema = z.object({
 })
 
 /**
- * Set this (facility, mfg) pair's Uniware vendor code — the row that makes the
- * cell mappable at all.
+ * Register this manufacturer as a Uniware vendor at this facility — the row that
+ * makes the cell mappable at all.
  *
- * Upper-cased nowhere on purpose: Uniware's own codes are mixed-case and
- * inconsistent (`arovea`, `AROVEA_`, `ReVe Pharma`), and it is their string, not
- * ours, so normalising it would stop matching the export.
+ * **No `un_mfg_code`.** One manufacturer has ONE vendor code, the same at every
+ * facility, and it is `master_mfgs.code` resolved server-side by the route. The
+ * field is not merely hidden in the UI, it is not accepted: a schema that still
+ * took it would let a caller post a code the form stopped offering, which is
+ * exactly the per-facility divergence this replaced.
+ *
+ * Historic rows still hold hand-typed, mixed-case codes (`arovea`, `AROVEA_`,
+ * `ReVe Pharma`) — those are left as they are, so the table carries both shapes.
  */
 export const setFacilityVendorCodeSchema = z.object({
   action: z.literal("set-vendor-code"),
   mfg_id: z.coerce.number().int().positive(),
   wh_id: z.coerce.number().int().positive(),
-  un_mfg_code: z.string().trim().min(1, "Uniware vendor code is required").max(100),
   remarks: z.string().trim().max(500).nullable().optional(),
 })
 
