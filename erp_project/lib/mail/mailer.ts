@@ -101,7 +101,7 @@ function mailerCtx() {
   return { module: "MAILER", requestId: crypto.randomUUID() }
 }
 
-// Attachment ceiling lives in lib/mail-limits.ts so it can be unit-tested
+// Attachment ceiling lives in lib/mail/mail-limits.ts so it can be unit-tested
 // without importing this file's DB/PDF/Uniware dependencies.
 
 /**
@@ -674,7 +674,7 @@ export type InwardInvoiceMail = {
   facility: string | undefined
   /**
    * The legal entity billed on this invoice (master_entity.code), resolved from
-   * buyer_gstin in lib/invoice-inward.ts. Selects that entity's point of contact
+   * buyer_gstin in lib/invoice/invoice-inward.ts. Selects that entity's point of contact
    * at the warehouse on top of the shared addresses. Undefined only when Uniware
    * is unconfigured, in which case the shared addresses alone are used.
    */

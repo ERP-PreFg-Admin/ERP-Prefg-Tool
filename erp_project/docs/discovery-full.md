@@ -875,7 +875,7 @@ Flow: wizard opens (always mode `new-version` — confirmed in `useBomWizard.ts`
 
 **Close/short-close:** PO-not-found warn; close/statusChanged log; raw+processed event tagged `purchase_order_short_closed` [fix: rename to `PO_CLOSE`, UPPER_SNAKE, matching every other tag] → DB write status `short_closed`; **no `recordFailedEvent` call exists in that file at all** [NEW].
 
-**Dead-code note:** `PATCH [id]/route.ts:132-172` (attachment replace) has no UI caller anywhere in the app — the only invoker of `updatePoAttachment` is `lib/mailer.ts:95`, a server-side side effect inside `sendPoEmail()`. Treat as either dead code to remove, or intentionally server-only — don't design a UI flow for it without confirming which.
+**Dead-code note:** `PATCH [id]/route.ts:132-172` (attachment replace) has no UI caller anywhere in the app — the only invoker of `updatePoAttachment` is `lib/mail/mailer.ts:95`, a server-side side effect inside `sendPoEmail()`. Treat as either dead code to remove, or intentionally server-only — don't design a UI flow for it without confirming which.
 
 **Implementation checklist — PO:**
 1. Add success-path `logger.info` to Normal-create and Bulk-CSV paths.

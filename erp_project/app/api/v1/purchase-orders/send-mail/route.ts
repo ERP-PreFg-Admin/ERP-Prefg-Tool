@@ -23,7 +23,7 @@ import logger from "@/lib/logger"
 // raised split PO. A split is a re-issue of demand the manufacturer already holds
 // against an order they can be pointed back at, so it gets its own mail and its
 // own document rather than a table inside a "PO Update" — see partitionSplits and
-// sendSplitPoEmail in lib/mailer.ts.
+// sendSplitPoEmail in lib/mail/mailer.ts.
 //
 // What this does mutate is email_sent_at, and only for the manufacturers whose
 // mail actually went out. PO Tracking shows a raised-but-unmailed PO as Draft

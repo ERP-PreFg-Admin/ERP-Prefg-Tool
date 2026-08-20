@@ -13,10 +13,10 @@ Every other master (SKU, Vendor, Manufacturer, RM, PM, BOM) has a page under `/m
 | Consumer | Column | Where |
 |---|---|---|
 | Purchase orders | `purchase_orders.destination` (VARCHAR) | `lib/queries/purchase-orders.ts:486` — `LEFT JOIN master_warehouse wh ON wh.name = po.destination` |
-| Supplier invoices | `invoice_mfg.destination` (VARCHAR) | `lib/invoice-inward.ts` |
-| Warehouse mail routing | `entity_emails.entity_code` where `entity_type='warehouse'` | `lib/mailer.ts:320` `resolveRecipients("warehouse", destination)` |
+| Supplier invoices | `invoice_mfg.destination` (VARCHAR) | `lib/invoice/invoice-inward.ts` |
+| Warehouse mail routing | `entity_emails.entity_code` where `entity_type='warehouse'` | `lib/mail/mailer.ts:320` `resolveRecipients("warehouse", destination)` |
 | Per-user data scope | resolved id → **name** once per request | `lib/scope.ts:78-82`, `entityScopeSql.warehouseNamesByIds` |
-| Invoice OCR matching | fuzzy match on `name`/`location`/`zone` | `lib/invoice-mapping.ts:74` |
+| Invoice OCR matching | fuzzy match on `name`/`location`/`zone` | `lib/invoice/invoice-mapping.ts:74` |
 
 A rename silently orphans all of them. **Decision: `name` is immutable after create.** The Edit dialog disables it with an inline explanation; a genuinely renamed warehouse is deactivated and re-created. This is the whole reason the page is not just a generic CRUD screen.
 

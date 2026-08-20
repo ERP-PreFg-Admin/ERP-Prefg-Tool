@@ -46,7 +46,7 @@ Three things to know before writing a DB test:
 
 1. **Import style** — use relative imports (`../../lib/po/po-receive`), not `@/`, matching the `_check-*` scripts.
 2. **The env must be loaded by the runtime.** `lib/env.ts` reads `process.env` at module load, and your first `import` of anything under `lib/` evaluates it — so an `import "dotenv/config"` inside a test file runs too late. That's why `test:db` passes `--env-file-if-exists=.env`. Run DB tests via `npm run test:db`, never a bare `tsx --test`.
-3. **Only connection-taking code is testable this way.** `withRollback` owns the transaction, and MySQL implicitly commits on a nested `beginTransaction()` — so a route handler (which opens its own) cannot be rolled back. Test the helper the route calls. This is why the split math was extracted to `lib/po-split.ts`, mirroring `lib/po-receive.ts`; **follow that pattern when adding logic worth testing.**
+3. **Only connection-taking code is testable this way.** `withRollback` owns the transaction, and MySQL implicitly commits on a nested `beginTransaction()` — so a route handler (which opens its own) cannot be rolled back. Test the helper the route calls. This is why the split math was extracted to `lib/po-split.ts`, mirroring `lib/po/po-receive.ts`; **follow that pattern when adding logic worth testing.**
 
 ---
 
@@ -260,7 +260,7 @@ try {
 
 **Master edits require `remarks`.** SKU, vendor, manufacturer and material-master update schemas carry `remarks: z.string().trim().min(1)`, archived to `history_masters_edits.remarks`. Rate edits archive `remarks` + `changed_by` to `history_cost_ven` / `history_cost_mfg`.
 
-**Invoice inwarding** (`/po-tracking/po-inwarding` → Add Invoice) does **not** go through the approval flow — it commits directly through `lib/invoice-inward.ts`. See `docs/po-inwarding.md`.
+**Invoice inwarding** (`/po-tracking/po-inwarding` → Add Invoice) does **not** go through the approval flow — it commits directly through `lib/invoice/invoice-inward.ts`. See `docs/po-inwarding.md`.
 
 ---
 
@@ -349,14 +349,14 @@ This eliminates `any` type noise and gives full IntelliSense on `conn.execute`, 
 
 ## PO Tracking — the rules that bite
 
-**Displayed status ≠ stored status.** `DISPLAY_STATUS_EXPR` reads a stored-`raised` PO with no `email_sent_at` back as **Draft** — a PO the manufacturer hasn't been told about isn't really raised. That derived value is what the tabs filter on and what the table badges, so "is this a draft?" has one answer, `isDraftPo()` in `lib/po-rules.ts`, and both the UI and the API must use it. `raw_status` is the stored value, and only gates actions the API validates against it (the edit action).
+**Displayed status ≠ stored status.** `DISPLAY_STATUS_EXPR` reads a stored-`raised` PO with no `email_sent_at` back as **Draft** — a PO the manufacturer hasn't been told about isn't really raised. That derived value is what the tabs filter on and what the table badges, so "is this a draft?" has one answer, `isDraftPo()` in `lib/po/po-rules.ts`, and both the UI and the API must use it. `raw_status` is the stored value, and only gates actions the API validates against it (the edit action).
 
 | Rule | Where |
 |---|---|
 | **A draft cannot be split** — split divides an order the manufacturer already has; before the mail goes out there is nothing to divide, change the quantity instead. Covers raised-but-unmailed, not just stored `draft` | `PoDataRow.canSplit` + the 409 in `[id]/split/route.ts`. The UI hiding a button is never the guard — PO ids are guessable integers |
 | **No manual receive on the inwarding desk** — receipts there come from the invoice (Add Invoice), which books quantity, batch and document together | `PoDataRow.canReceive`, gated on `inwardingMode`. Procurement keeps its Receive |
 | **Tabs** — FG tracking leads with `all` then `open`; `open` is a pseudo-status spanning `raised` + `punched` + `partially_received`, expanded by `statusMatchValues()` and never stored. Its badge is summed client-side | `po-types.ts` `TABS` / `INWARD_TABS`, `po-procurement/page.tsx` |
-| **Split children** are never rows of their own — reached by expanding the master, and highlighted with it as one block. `IS_SPLIT_CHILD` exempts inward POs, so an inward PO's `reference_po` doesn't hide it from the list | `MASTERS_ONLY`, `lib/po-children.ts`, `PoDataRow` |
+| **Split children** are never rows of their own — reached by expanding the master, and highlighted with it as one block. `IS_SPLIT_CHILD` exempts inward POs, so an inward PO's `reference_po` doesn't hide it from the list | `MASTERS_ONLY`, `lib/po/po-children.ts`, `PoDataRow` |
 | **Row menus must be portalled.** The table sits in an `overflow-auto` wrapper, so an `absolute` dropdown is clipped — invisible on a full page, obvious on a one-row table | `PoActionMenu`, same pattern as `components/ui/FuzzySelect` |
 
 > `lib/po-split.ts` is a parallel implementation used only by its own DB test, and it has drifted (it still shrinks the parent's `qty`, which the split route deliberately stopped doing). **The route is the production path.**
@@ -464,17 +464,17 @@ it to `/api/v1/v2/` — a 404 that compiled, linted and type-checked.
 | `lib/pages.ts` | Canonical permission-controlled page slugs — the admin grid, sidebar locks and breadcrumbs all read this |
 | `lib/roles.ts` | The declared role taxonomy: `developer`, `admin`, and `{rm,pm,production,cost}_{head,lead,executive}`. Nothing branches on a role name — a role's only power is its `page_permissions` rows |
 | `lib/scope.ts` | Per-user entity scope. **Absence of rows = UNRESTRICTED.** `scopeClause`/`scopeParams` need `query()` (array expansion), `assertInScope` for anything addressed by id |
-| `lib/po-guard.ts` | `assertPoInScope` — required by every `/api/v1/purchase-orders/[id]/**` route |
+| `lib/po/po-guard.ts` | `assertPoInScope` — required by every `/api/v1/purchase-orders/[id]/**` route |
 | `lib/admin-guards.ts` | `assertNotSelfLockout` / `assertNotSelfScope` — no UI recovery path exists for either |
 | `lib/gateway/with-gateway.ts` | The route wrapper (auth, access, Zod, logging, `activity_log`) |
-| `lib/invoice-inward.ts` | Supplier invoice → inward POs: S3 → DB → Uniware → email, ordered least-reversible-last |
-| `lib/invoice-merge.ts` | `mergeInwardLinesBySku` — ONE inward PO per SKU, mirroring `mergeItemsBySku` in `lib/uniware.ts` so our POs and Uniware's items line up 1:1 |
-| `lib/recipients.ts` | `splitRecipients` — `entity_emails` rows → `{ to, cc }`, deduped with To winning over CC |
-| `lib/mail-limits.ts` | Outbound attachment size ceiling |
+| `lib/invoice/invoice-inward.ts` | Supplier invoice → inward POs: S3 → DB → Uniware → email, ordered least-reversible-last |
+| `lib/invoice/invoice-merge.ts` | `mergeInwardLinesBySku` — ONE inward PO per SKU, mirroring `mergeItemsBySku` in `lib/uniware.ts` so our POs and Uniware's items line up 1:1 |
+| `lib/mail/recipients.ts` | `splitRecipients` — `entity_emails` rows → `{ to, cc }`, deduped with To winning over CC |
+| `lib/mail/mail-limits.ts` | Outbound attachment size ceiling |
 | `lib/pdf/po-letterhead.ts` | Who a PO is FROM and where it ships: `sku_code → brand → entity`, with the fallback ladder. `po-document.tsx` renders every entity from it — there is no per-entity template |
-| `lib/po-rules.ts` | `poTolerance` (when a PO is closed out) and `isDraftPo` (draft **as PO Tracking means it** — stored `draft`, or `raised` with no `email_sent_at`) |
+| `lib/po/po-rules.ts` | `poTolerance` (when a PO is closed out) and `isDraftPo` (draft **as PO Tracking means it** — stored `draft`, or `raised` with no `email_sent_at`) |
 | `lib/brand-view.ts` / `lib/brand-guard.ts` | Brand as an access boundary: the GRANT (`user_entity_scope`) vs the currently-VIEWED set, kept apart — conflating them is privilege escalation. Reads filter in SQL, writes go through the guard |
-| `lib/po-receive.ts` | Shared goods-receipt logic (tolerance, auto-close, `history_pos`) — takes an open connection, never opens its own transaction |
+| `lib/po/po-receive.ts` | Shared goods-receipt logic (tolerance, auto-close, `history_pos`) — takes an open connection, never opens its own transaction |
 | `lib/costing/final-costing.ts` | The Agreed Final Costing formula, in one place |
 | `lib/queries/` | SQL strings grouped by domain (see table above) |
 | `lib/approvals/module-handlers.ts` | Strategy pattern — approval logic per module |

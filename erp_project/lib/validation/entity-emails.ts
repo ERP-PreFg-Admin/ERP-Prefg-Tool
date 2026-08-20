@@ -3,7 +3,7 @@ import { z } from "zod"
 export const entityEmailCreateSchema = z
   .object({
     // 'warehouse' is keyed by master_warehouse.name, which is what
-    // purchase_orders.destination stores — see resolveRecipients in lib/mailer.ts.
+    // purchase_orders.destination stores — see resolveRecipients in lib/mail/mailer.ts.
     // 'employee' is a person to loop in rather than an entity to write to —
     // ours or an outside party (3PL, CHA, consultant), so the address is typed,
     // not picked from `users`. entity_code is then the warehouse name or

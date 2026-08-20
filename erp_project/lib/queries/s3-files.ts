@@ -78,7 +78,7 @@ export const s3FilesSql = {
    *
    * It also protects the other meaning this column carries: an inward PO's
    * attachment_key points at the supplier invoice it came from (see
-   * lib/invoice-inward.ts). Guarding on NULL means the mail path can never
+   * lib/invoice/invoice-inward.ts). Guarding on NULL means the mail path can never
    * replace that.
    *
    * affectedRows tells the caller which happened: 1 = we claimed it, 0 = someone

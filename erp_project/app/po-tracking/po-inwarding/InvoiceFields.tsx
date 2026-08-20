@@ -136,7 +136,7 @@ export function InvoiceFields({
             {/* One entry per SITE here, not per (site, entity) — unlike the PO
                 list's destination filter. This is the invoice FORM: it writes
                 invoice_mfg.destination, and which entity's facility that resolves to
-                is decided by the invoice's own buyer GSTIN in lib/invoice-inward.ts,
+                is decided by the invoice's own buyer GSTIN in lib/invoice/invoice-inward.ts,
                 not by this dropdown. Offering both would ask the user to choose
                 something their choice cannot affect. Hence no facility code either. */}
             <option value="">— Select Warehouse —</option>

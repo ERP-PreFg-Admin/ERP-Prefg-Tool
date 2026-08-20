@@ -165,7 +165,7 @@ Why the three differ:
 - `execute()` uses prepared statements and does **not** expand array params, and an id arriving from a URL or request body needs a hard 403 rather than an empty result — hence `assertInScope`.
 - `lib/cached-reference-data.ts` uses `unstable_cache` with no user in the key, so it cannot filter internally — hence `filterByScope`.
 
-`lib/po-guard.ts`' `assertPoInScope(userId, poId)` exists separately to avoid an import cycle (`lib/queries/purchase-orders.ts` imports `scopeParams`, so `lib/scope.ts` must not import the query file back). **Every `/api/v1/purchase-orders/[id]/**` route needs it:** the PO list is filtered in SQL, but ids are sequential integers — without the guard, a user scoped to manufacturer 1 can still read, receive, cancel, split, mail or PDF-export manufacturer 7's PO by guessing its id.
+`lib/po/po-guard.ts`' `assertPoInScope(userId, poId)` exists separately to avoid an import cycle (`lib/queries/purchase-orders.ts` imports `scopeParams`, so `lib/scope.ts` must not import the query file back). **Every `/api/v1/purchase-orders/[id]/**` route needs it:** the PO list is filtered in SQL, but ids are sequential integers — without the guard, a user scoped to manufacturer 1 can still read, receive, cancel, split, mail or PDF-export manufacturer 7's PO by guessing its id.
 
 The sidebar drops out-of-scope manufacturers **entirely** rather than locking them — a lock icon would still disclose the name.
 
@@ -239,7 +239,7 @@ The feed (`lib/queries/activity.ts`) is a `UNION ALL` of `activity_log` (API mut
 | `lib/roles.ts` | The declared role taxonomy and its derived helpers |
 | `lib/pages.ts` | The canonical page-slug list (`PAGES`, `NAV_SLUGS`, `PAGE_LABELS`, `PAGE_SECTIONS`) |
 | `lib/scope.ts` | `getUserScope`, `scopeClause`/`scopeParams`, `inScope`/`assertInScope`, `filterByScope` |
-| `lib/po-guard.ts` | `assertPoInScope` — the by-id guard for every PO route |
+| `lib/po/po-guard.ts` | `assertPoInScope` — the by-id guard for every PO route |
 | `lib/admin-guards.ts` | `assertNotSelfLockout`, `assertNotSelfScope` |
 | `lib/queries/users.ts` | `users` + `user_roles` |
 | `lib/queries/entity-scope.ts` | `user_entity_scope` + the admin picker's entity lists |

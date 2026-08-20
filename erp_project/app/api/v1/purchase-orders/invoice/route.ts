@@ -11,7 +11,7 @@
 //   {"step":"email","status":"ok",...}
 //   {"done":true,"outcome":{...}}
 //
-// The sequence itself — and its rollback rules — lives in lib/invoice-inward.ts.
+// The sequence itself — and its rollback rules — lives in lib/invoice/invoice-inward.ts.
 // This file only translates HTTP to that.
 //
 // Note the response status is always 200 once streaming starts: headers are

@@ -2,7 +2,7 @@
  * One inward PO per SKU — the collapse that keeps our PO table and Uniware's
  * showing the same thing.
  *
- * Its own module, not part of lib/invoice-inward.ts, because that file imports
+ * Its own module, not part of lib/invoice/invoice-inward.ts, because that file imports
  * S3/mailer/db and so cannot be loaded by a credential-free unit test. Same
  * reason lib/po-split.ts is split out of the route it serves.
  */

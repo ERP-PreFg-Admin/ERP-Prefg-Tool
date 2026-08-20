@@ -1165,7 +1165,7 @@ Update the S3 attachment key on a PO. If a previous key exists it is deleted fro
 
 Split a PO into N child POs, each optionally destined for a different manufacturer and warehouse. Splittable statuses: `raised`, `punched`, `partially_received`.
 
-**A draft cannot be split.** A split divides an order the manufacturer already has; before the mail goes out there is nothing to divide — change the quantity instead. "Draft" here means what PO Tracking shows (`isDraftPo` in `lib/po-rules.ts`): a stored `draft`, **or** a `raised` PO with no `email_sent_at`. The table hides the Split button on exactly that set, and this route refuses the same set with a 409 — a looser API would let a draft be split by URL.
+**A draft cannot be split.** A split divides an order the manufacturer already has; before the mail goes out there is nothing to divide — change the quantity instead. "Draft" here means what PO Tracking shows (`isDraftPo` in `lib/po/po-rules.ts`): a stored `draft`, **or** a `raised` PO with no `email_sent_at`. The table hides the Split button on exactly that set, and this route refuses the same set with a 409 — a looser API would let a draft be split by URL.
 
 ```json
 // Request body
@@ -1278,7 +1278,7 @@ Fully cancel a PO — distinct from Short Close, which accepts partial fulfillme
 
 **File:** `app/api/v1/purchase-orders/send-mail/route.ts` (new — replaces the removed `POST /api/v1/purchase-orders/[id]/send-email`)
 
-Consolidated notification send from the PO Procurement table's checkbox selection: pick any set of POs (any status, any manufacturer), group them by manufacturer, and send **one email per manufacturer** (`sendMfgSelectionEmail` in `lib/mailer.ts`) listing all the selected POs for that manufacturer. Not gated by approval and does not mutate any PO's status — it only notifies; status changes (raise/split/cancel) already happened through their own flows before this step.
+Consolidated notification send from the PO Procurement table's checkbox selection: pick any set of POs (any status, any manufacturer), group them by manufacturer, and send **one email per manufacturer** (`sendMfgSelectionEmail` in `lib/mail/mailer.ts`) listing all the selected POs for that manufacturer. Not gated by approval and does not mutate any PO's status — it only notifies; status changes (raise/split/cancel) already happened through their own flows before this step.
 
 ```json
 // Request body
@@ -1639,7 +1639,7 @@ The contact list behind every outbound mail (`/po-tracking/po-procurement/entity
 { "error": "A legal entity can only be set on warehouse contacts.", "code": "validation_error", ... }
 ```
 
-**How these become a mail:** `resolveRecipients` (`lib/mailer.ts`) picks the query by shape — a warehouse takes its own rows plus employees at that site; a manufacturer takes its own plus employees attached to it, plus the `'*'` wildcard. Then `splitRecipients` (`lib/recipients.ts`) returns `{ to, cc }`. An address listed both ways is sent **once, in To**. `cc` is omitted from the message entirely when empty, because nodemailer throws on a blank `Cc`.
+**How these become a mail:** `resolveRecipients` (`lib/mail/mailer.ts`) picks the query by shape — a warehouse takes its own rows plus employees at that site; a manufacturer takes its own plus employees attached to it, plus the `'*'` wildcard. Then `splitRecipients` (`lib/mail/recipients.ts`) returns `{ to, cc }`. An address listed both ways is sent **once, in To**. `cc` is omitted from the message entirely when empty, because nodemailer throws on a blank `Cc`.
 
 ---
 

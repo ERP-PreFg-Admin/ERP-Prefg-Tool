@@ -1,7 +1,7 @@
 /**
  * Authorization for an S3 object key that arrived from the client.
  *
- * Same reason lib/po-guard.ts exists: withGateway proves *who* is asking, not
+ * Same reason lib/po/po-guard.ts exists: withGateway proves *who* is asking, not
  * *what* they may read. /api/v1/files/presign took the key straight from the query
  * string, and keys are enumerable — `attachment_key` and `csv_source_key` come
  * back in ordinary list responses — so any signed-in user could mint a presigned

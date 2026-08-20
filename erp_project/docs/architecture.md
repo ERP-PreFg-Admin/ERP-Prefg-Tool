@@ -23,7 +23,7 @@
 | Service | Module | Used for | Behaviour when unconfigured |
 |---------|--------|----------|----------------------------|
 | AWS S3 | `lib/s3.ts` | File uploads, PO attachments, invoice PDFs, event logs | Required — fails at boot |
-| Gmail SMTP | `lib/mailer.ts` | PO dispatch to manufacturers, inward-invoice notice to warehouses | Required — fails at boot |
+| Gmail SMTP | `lib/mail/mailer.ts` | PO dispatch to manufacturers, inward-invoice notice to warehouses | Required — fails at boot |
 | Nanonets | `lib/nanonets.ts` | Supplier-invoice field extraction (50–70s per PDF) | Required — fails at boot |
 | Uniware (Unicommerce) | `lib/uniware.ts` | Mirroring inward POs to the WMS | **Optional** — `uniwareEnabled()` false ⇒ the mirror step is skipped, not failed |
 
@@ -109,18 +109,18 @@ sequenceDiagram
 | `lib/pages.ts` | The canonical permission-controlled page-slug list — one source for the admin grid, sidebar locks, and breadcrumb labels |
 | `lib/roles.ts` | The declared role taxonomy (4 domains × 3 designations + `developer`/`admin`) and its derived helpers |
 | `lib/scope.ts` | Per-user entity scoping — `getUserScope`, `scopeClause`/`scopeParams`, `assertInScope`, `filterByScope`. Absence of rows = unrestricted |
-| `lib/po-guard.ts` | `assertPoInScope` — scope guard every `/api/v1/purchase-orders/[id]/**` route needs (ids are guessable) |
+| `lib/po/po-guard.ts` | `assertPoInScope` — scope guard every `/api/v1/purchase-orders/[id]/**` route needs (ids are guessable) |
 | `lib/admin-guards.ts` | `assertNotSelfLockout` / `assertNotSelfScope` — refuse admin changes with no UI recovery path |
 | `lib/gateway/with-gateway.ts` | The route wrapper: auth → access rule → Zod → handler → structured error shape, plus the `activity_log` write on every non-GET |
-| `lib/invoice-inward.ts` | The whole supplier-invoice → inward-PO sequence (S3 → DB → Uniware → email) and its compensation rules |
+| `lib/invoice/invoice-inward.ts` | The whole supplier-invoice → inward-PO sequence (S3 → DB → Uniware → email) and its compensation rules |
 | `lib/nanonets.ts` | Invoice field extraction wire format (`/extract/sync`, not `/parse/sync`) |
-| `lib/invoice-mapping.ts` | Fuzzy mapping from what an invoice prints to what the masters hold (Fuse.js) |
+| `lib/invoice/invoice-mapping.ts` | Fuzzy mapping from what an invoice prints to what the masters hold (Fuse.js) |
 | `lib/uniware.ts` | Unicommerce OAuth + purchase-order create/fetch |
-| `lib/po-receive.ts` | Shared goods-receipt logic — tolerance, auto-close, `history_pos` row. Used by both the manual and invoice paths |
+| `lib/po/po-receive.ts` | Shared goods-receipt logic — tolerance, auto-close, `history_pos` row. Used by both the manual and invoice paths |
 | `lib/costing/final-costing.ts` | The Agreed Final Costing formula, in one place: RM % of fill weight, PM per unit, per-side wastage, total |
 | `lib/masters/bom-version.ts` | `diffBomLines` — independent RM/PM version bumps behind the `<sku>RM<n>PM<n>` BOM code |
 | `lib/logger.ts` | Winston structured logger — console (pretty) + daily-rotate file transports. Import as `import logger from "@/lib/logger"` in any route or server-side file. |
-| `lib/mailer.ts` | PO email dispatch via Gmail SMTP (nodemailer). `fetchPoData()` shared between email send and PDF preview. |
+| `lib/mail/mailer.ts` | PO email dispatch via Gmail SMTP (nodemailer). `fetchPoData()` shared between email send and PDF preview. |
 | `lib/s3.ts` | S3 helpers: presigned URLs, file upload/download, fire-and-forget event writes |
 | `lib/events.ts` | Thin wrappers around `putEvent` — `recordRawEvent`, `recordProcessedEvent`, `recordFailedEvent` |
 | `lib/utils.ts` | `cn()` — Tailwind class name utility |

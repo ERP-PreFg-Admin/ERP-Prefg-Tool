@@ -1,7 +1,7 @@
 // The destination × legal-entity rule exists in TWO places, and they must agree:
 //
 //   warehousesForEntity()  — decides what the dropdown OFFERS   (po-utils.ts)
-//   destinationAllowed()   — decides what the API ACCEPTS       (lib/po-guard.ts)
+//   destinationAllowed()   — decides what the API ACCEPTS       (lib/po/po-guard.ts)
 //
 // Disagreement is worse than either being wrong alone. Stricter API: the dropdown
 // offers a destination the server then refuses, and the user has no way to act on

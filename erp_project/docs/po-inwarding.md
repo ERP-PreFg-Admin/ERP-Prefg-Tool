@@ -39,7 +39,7 @@ sequenceDiagram
 
 ### Step order is a rollback strategy, not a preference
 
-S3 objects, Uniware POs and sent email are not transactional resources — a DB rollback cannot undo any of them. `lib/invoice-inward.ts` therefore orders the steps **least-reversible-last** and compensates on the way out:
+S3 objects, Uniware POs and sent email are not transactional resources — a DB rollback cannot undo any of them. `lib/invoice/invoice-inward.ts` therefore orders the steps **least-reversible-last** and compensates on the way out:
 
 | Step | Reversible? | On failure |
 |------|-------------|-----------|
@@ -84,7 +84,7 @@ Two things that are easy to get wrong:
 
 **Extraction takes 50–70 seconds on a one-page invoice.** Every caller has to be built for that: no default fetch timeouts, and a UI that says so.
 
-## Fuzzy Mapping (`lib/invoice-mapping.ts`)
+## Fuzzy Mapping (`lib/invoice/invoice-mapping.ts`)
 
 A supplier writes "REVE PHARMA", "Guwahati" and "Mcaf407"; the masters hold a manufacturer row, a warehouse row and a `master_skus` row whose codes rarely match character-for-character. `matchMfg` / `matchWarehouse` / `matchSku` pick the most likely master record so the review form opens pre-filled.
 
@@ -180,7 +180,7 @@ The dialog used to report only problems, which left "nothing is wrong" and "noth
 | `invoice_mfg` | One header per invoice. `UNIQUE (mfg_id, invoice_no)` — re-submitting the same invoice is a DB error rather than a second round of credited `received_qty`. Keyed on both columns because two manufacturers can each legitimately issue "INV-001". |
 | `invoice_items_mfg` | One row per invoice line, carrying both the printed value (`parsed_sku_code`) and the mapped one (`sku_code`) |
 | `purchase_orders` | **One inward PO per SKU** (not per line — see below), `po_type = 'inward'`, numbered `<BRAND>-INW-<YYYYMM>-<NNN>`. `expected_on` is the **invoice's own date** (backdated on purpose: the goods have already shipped) |
-| `history_pos` | The audit row each receipt writes, via `lib/po-receive.ts` |
+| `history_pos` | The audit row each receipt writes, via `lib/po/po-receive.ts` |
 
 `invoice_items_mfg` holds two PO links, because a line can relate to two orders:
 
@@ -199,7 +199,7 @@ The inward PO is inserted one of two ways:
 
 Referenced lines take their brand from the parent PO's number rather than the SKU, because such a line needn't carry a SKU at all.
 
-### One inward PO per SKU — `lib/invoice-merge.ts`
+### One inward PO per SKU — `lib/invoice/invoice-merge.ts`
 
 Lines are written in two passes. Pass 1 credits each line's receipt against its referenced order (that allocation is genuinely per line). Pass 2 runs `mergeInwardLinesBySku` over the staged lines and writes **one inward PO per SKU**.
 
@@ -209,13 +209,13 @@ A single SKU reaches that point several times as a matter of course: the FIFO al
 - Descriptive fields take the first non-null.
 - `reference_po` is the **first** order settled. The column is `VARCHAR(50)` and holds one number — comma-joining three would overflow it. The complete mapping lives on `invoice_items_mfg` (still one row per printed line, with its own `received_against_po_id`) and in Uniware's `ReferenceOrder` field, which does comma-join.
 
-The merge is a pure function in its own module so a credential-free unit test can load it — importing `lib/invoice-inward.ts` pulls in `lib/s3`, which throws at import without an AWS region.
+The merge is a pure function in its own module so a credential-free unit test can load it — importing `lib/invoice/invoice-inward.ts` pulls in `lib/s3`, which throws at import without an AWS region.
 
 `mfg_date` / `expiry` are `VARCHAR`, not `DATE`: invoices often print them month-only (`Jun-2026`).
 
 Before any transaction opens, `resolveBrands` validates every mapped SKU — an unknown code is a `400 sku_not_found`, and a SKU that isn't `active` is a `400 sku_not_active`. Inward PO numbers use the same brand-code mapping as procurement's single-PO route, so an inward PO number is recognisable alongside the ones procurement raises.
 
-### Shared receive logic (`lib/po-receive.ts`)
+### Shared receive logic (`lib/po/po-receive.ts`)
 
 `receivePo(conn, poId, qty, userId)` credits `received_qty`, auto-closes the PO once the remainder falls inside `poTolerance`, and writes the `history_pos` row. It was extracted from the manual receive route so the automated path credits quantities exactly the same way — two copies of the tolerance/auto-close rule would eventually disagree, and the automated path is the one nobody watches.
 
@@ -256,7 +256,7 @@ Because one Uniware PO settles several of ours, it carries a **`ReferenceOrder`*
 Deliberately not `sendMfgSelectionEmail`: that one reports PO status *to the manufacturer* and attaches PO documents we generate. This one goes to the **receiving warehouse** — the manufacturer already knows the order and shipped the goods; it's the warehouse that needs the paperwork for stock arriving at their door.
 
 - Recipients: `entity_emails` rows with `entity_code` = the `master_warehouse.name` that `purchase_orders.destination` stores, and `entity_type` of either **`warehouse`** (the site's own contacts) or **`employee`** (a person looped in on that site — ours or an outside party). (The column was `ENUM('vendor','mfg')`, so inserting `'warehouse'` was silently coerced to `''` — widened by `prisma/add_warehouse_entity_email_type.sql`, then again by `add_entity_email_employee_cc.sql`.)
-- **To vs CC:** each row carries `recipient_type ENUM('to','cc')`. `resolveRecipients` returns `{ to, cc }` via `splitRecipients` (`lib/recipients.ts`), and the mail sets both headers. An address listed both ways is sent **once, in To** — the same person receiving a To and a CC copy of one mail is a duplicate in their inbox. `cc` is omitted entirely when empty; nodemailer throws on a blank `Cc`.
+- **To vs CC:** each row carries `recipient_type ENUM('to','cc')`. `resolveRecipients` returns `{ to, cc }` via `splitRecipients` (`lib/mail/recipients.ts`), and the mail sets both headers. An address listed both ways is sent **once, in To** — the same person receiving a To and a CC copy of one mail is a duplicate in their inbox. `cc` is omitted entirely when empty; nodemailer throws on a blank `Cc`.
 - Employee rows never carry a `legal_entity_code`, so the shared-address arm of `selectByWarehouseForEntity` already includes them for every entity.
 - Attachments: the original invoice PDF, plus the Uniware PO document when it can be fetched (best-effort — the goods are already booked).
 - Subject: `Create PO : <MFG NAME> || Invoice No : <no> || <D-MON-YY>`, left as the MIS team wrote it.
@@ -291,13 +291,13 @@ The document-shaped view of the same data: one row per supplier invoice, expandi
 
 | Path | Role |
 |------|------|
-| `lib/invoice-inward.ts` | The whole committed sequence and its compensation rules |
-| `lib/invoice-merge.ts` | `mergeInwardLinesBySku` — one inward PO per SKU. Pure, so a unit test can load it |
-| `lib/recipients.ts` | `splitRecipients` — entity_emails rows → `{ to, cc }`. Pure, same reason |
+| `lib/invoice/invoice-inward.ts` | The whole committed sequence and its compensation rules |
+| `lib/invoice/invoice-merge.ts` | `mergeInwardLinesBySku` — one inward PO per SKU. Pure, so a unit test can load it |
+| `lib/mail/recipients.ts` | `splitRecipients` — entity_emails rows → `{ to, cc }`. Pure, same reason |
 | `lib/nanonets.ts` | Extraction wire format |
-| `lib/invoice-mapping.ts` | Fuzzy invoice → masters mapping |
+| `lib/invoice/invoice-mapping.ts` | Fuzzy invoice → masters mapping |
 | `lib/uniware.ts` | OAuth + PO create/fetch |
-| `lib/po-receive.ts` | Shared receipt/tolerance/auto-close logic |
+| `lib/po/po-receive.ts` | Shared receipt/tolerance/auto-close logic |
 | `lib/queries/supplier-invoices.ts` | SQL for both invoice tables |
 | `types/invoice.ts` | `ParsedInvoice`, `ParsedLineItem`, `OpenPoOption`, invoice-history row types |
 | `prisma/add_supplier_invoices.sql`, `add_inward_po_type.sql`, `add_invoice_item_reference_po.sql`, `add_invoice_uniware_po_code.sql`, `add_po_uniware_code.sql`, `add_warehouse_entity_email_type.sql`, `add_entity_email_employee_cc.sql` | The migrations, in the order they were applied |

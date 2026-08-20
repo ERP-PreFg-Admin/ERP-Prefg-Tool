@@ -1,9 +1,9 @@
 /**
  * Turning entity_emails rows into a To list and a CC list.
  *
- * Its own module, not part of lib/mailer.ts, because that file imports
+ * Its own module, not part of lib/mail/mailer.ts, because that file imports
  * nodemailer and lib/env — a credential-free unit test cannot load it. Same
- * reason lib/invoice-merge.ts is split out of lib/invoice-inward.ts.
+ * reason lib/invoice/invoice-merge.ts is split out of lib/invoice/invoice-inward.ts.
  */
 
 export type RecipientRow = {

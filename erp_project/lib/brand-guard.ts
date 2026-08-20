@@ -12,7 +12,7 @@
  * PO against one, or attach a recipe to one — the list hides it, but the id is a
  * guessable integer and the write path never looked.
  *
- * Separate from lib/scope.ts to avoid an import cycle, exactly as lib/po-guard.ts
+ * Separate from lib/scope.ts to avoid an import cycle, exactly as lib/po/po-guard.ts
  * is: the query files import scopeParams from lib/scope.ts, so lib/scope.ts must
  * not import them back.
  *
@@ -87,7 +87,7 @@ export async function assertRecipeInBrandScope(
  *
  * One query for every code rather than one per row. Unknown codes are IGNORED
  * here rather than 404'd — the callers already validate existence themselves and
- * report it per row (resolveBrands in lib/invoice-inward.ts, poBulkHandler's
+ * report it per row (resolveBrands in lib/invoice/invoice-inward.ts, poBulkHandler's
  * skipReasons), so failing the whole batch on a typo would be worse than what
  * they already do.
  *

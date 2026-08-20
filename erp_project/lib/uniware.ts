@@ -178,7 +178,7 @@ export type UniwarePoInput = {
    *
    * The cost of omitting it is idempotency: Uniware rejects a duplicate code,
    * so supplying our own made a retry provably safe. Without one, a second
-   * attempt creates a second PO. See the note in lib/invoice-inward.ts for
+   * attempt creates a second PO. See the note in lib/invoice/invoice-inward.ts for
    * where that window actually is.
    */
   purchaseOrderCode?: string

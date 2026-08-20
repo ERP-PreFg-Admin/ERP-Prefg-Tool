@@ -102,7 +102,7 @@ export const warehouse = {
    * Matched on PAN, NOT on the full GSTIN. Kreative bills to its Mumbai
    * registration while shipping to Guwahati, Kolkata and the rest, so comparing
    * GSTINs or their state prefixes would reject almost every legitimate invoice.
-   * panOf() in lib/gstin.ts is the entity identity for exactly this reason.
+   * panOf() in lib/invoice/gstin.ts is the entity identity for exactly this reason.
    *
    * Returns the entity's `code` too, because the caller needs it for warehouse
    * mail routing (entity_emails.legal_entity_code) — one query rather than two,

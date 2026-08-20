@@ -61,7 +61,7 @@ So once `received_qty >= qty`, the effective status falls through to the stored 
 
 **Test:** `tests/db/po-split.test.ts` → *"CONFIRMED BUG: a split can strand a fully-received PO as permanently open"*.
 
-**Fix:** at the end of `splitPo`, re-apply the same rule `receivePo` uses — if `newQty - received_qty <= poTolerance(newQty)`, set status `received`. That reuses `lib/po-rules.ts` and keeps one tolerance policy.
+**Fix:** at the end of `splitPo`, re-apply the same rule `receivePo` uses — if `newQty - received_qty <= poTolerance(newQty)`, set status `received`. That reuses `lib/po/po-rules.ts` and keeps one tolerance policy.
 
 ### 4. `RM_RATE` approval loses the supersede date that `RM_VRM` keeps — LOW
 
@@ -107,7 +107,7 @@ The only validation is a `key.includes("..")` check, which does nothing here —
 
 **Fix:** two layers. (a) Add an `access` rule to each route. (b) Authorize the *object*, not just the session: resolve the key back to the row that owns it (`purchase_orders.attachment_key`, `invoice_mfg.attachment_key`, `approvals`' `s3_key` item) and run the existing `assertInScope` / `assertPoInScope` against it. For `upload`, derive the key server-side from the entity being uploaded against instead of accepting a caller-supplied path.
 
-**Fixed for `presign` and `upload`.** New `lib/s3-guard.ts` (mirrors `lib/po-guard.ts`):
+**Fixed for `presign` and `upload`.** New `lib/s3-guard.ts` (mirrors `lib/po/po-guard.ts`):
 
 - `assertKeyReadable(userId, key)` resolves the key through `s3FilesSql.selectKeyOwners` — a UNION over every column that stores one (`purchase_orders.attachment_key`/`csv_source_key`, `invoice_mfg.attachment_key`, `history_pos.s3_key`, the four `*_key` columns on `details_vendor` and `details_mfg`, `artifacts_recipe.s3_key`, `approval_items.old_value`/`new_value`) — then applies `inScope` to the owner's `mfg_id` / `destination`. **A key owned by nothing is refused**, which is what closes enumeration. Master and approval-queue documents resolve unscoped, matching the list pages that show their rows (`lib/scope.ts`).
 - `/api/v1/upload` now writes `${folder}/${field}-u<userId>-<12 hex>.${ext}`. The random token makes the `PutObject` overwrite impossible; the `-u<id>-` segment lets `presign` recognise a file the caller just uploaded but hasn't saved to any row yet — without it the document preview in the Add Vendor / Add Manufacturer dialogs (`components/ui/FileUpload.tsx` presigns straight after upload) would break.

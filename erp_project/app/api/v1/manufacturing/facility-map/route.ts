@@ -50,7 +50,7 @@ type FacilityRow = {
  * Resolve a facility id and check it against the caller's warehouse scope.
  *
  * `wh_id` arrives from the client as a small consecutive integer, so it is
- * guessable — the same reason lib/po-guard.ts exists for PO ids. And the scope's
+ * guessable — the same reason lib/po/po-guard.ts exists for PO ids. And the scope's
  * warehouse dimension is NAMES, not ids (purchase_orders.destination stores the
  * name), so the id has to be resolved before it can be checked at all. Without
  * this a warehouse-scoped user can map into any facility by incrementing a number.
@@ -241,7 +241,7 @@ export const POST = withGateway({
     // Deliberately OUTSIDE the transaction block above, on both counts:
     //   • after commit, because Unicommerce cannot delete a vendor item, so this
     //     is the least reversible step and must not be able to lose the local
-    //     mapping (least-reversible-last, as lib/invoice-inward.ts orders it);
+    //     mapping (least-reversible-last, as lib/invoice/invoice-inward.ts orders it);
     //   • outside that try, because its catch maps anything to a 500 — a Uniware
     //     failure must not fail a request whose database work already succeeded.
     // pushFacilityMap never throws for a business failure; the per-row

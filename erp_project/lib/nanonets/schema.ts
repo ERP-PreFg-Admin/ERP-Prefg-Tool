@@ -21,7 +21,7 @@ export const EXTRACTION_SCHEMA = {
     // defeats the duplicate guard and the same invoice can be inwarded twice.
     invoice_number:   { type: "string", description: "Invoice / bill number exactly as printed, including any series prefix and slashes, e.g. RP/L/26-27/482. Not the E-way Bill, IRN or Acknowledgement number." },
     eway_bill_number: { type: "string", description: "E-way bill number, usually 12 digits, labelled 'e-Way Bill No'" },
-    // matchMfg (lib/invoice-mapping.ts) tries registered_name before name,
+    // matchMfg (lib/invoice/invoice-mapping.ts) tries registered_name before name,
     // because the master holds the legal entity and the invoice header prints it.
     from:             { type: "string", description: "Seller / consignor registered legal name from the invoice header, with its entity suffix — not the short trade or brand name" },
     destination:      { type: "string", description: "Consignee / ship-to location" },

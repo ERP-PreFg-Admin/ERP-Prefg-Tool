@@ -8,7 +8,7 @@
 // forgetting to thread `po.facility` through at one of the two call sites, and
 // an assertion on authHeaders() would pass while that shipped — it is a private
 // function and both entry points reach it independently. fetchPurchaseOrderPdf
-// is the one most easily missed: its caller in lib/mailer.ts catches the failure
+// is the one most easily missed: its caller in lib/mail/mailer.ts catches the failure
 // and sends the mail anyway, so getting it wrong is silent.
 //
 // Env must be set BEFORE lib/uniware is imported: lib/env.ts reads process.env
@@ -96,7 +96,7 @@ test("the same destination under the other entity reaches a different facility",
 
 test("omitting facility falls back to UNIWARE_FACILITY", async () => {
   // The scripts/_check-* scripts pass nothing and must keep working. The
-  // inwarding path never relies on this: lib/invoice-inward.ts throws
+  // inwarding path never relies on this: lib/invoice/invoice-inward.ts throws
   // warehouse_facility_missing rather than let a real PO reach TEST_FACILITY.
   const { createPurchaseOrder } = await import("../../lib/uniware")
   const cap = stubFetch(okCreate)
@@ -122,7 +122,7 @@ test("facility is a header only — it never reaches the request body", async ()
 test("fetchPurchaseOrderPdf sends the facility it was given", async () => {
   // /po/show is Uniware's own web print view and is facility-scoped like the
   // REST endpoints. Fetching a PO minted in facility B while sending Facility: A
-  // 302s to /login, and the magic-byte guard then throws — which lib/mailer.ts
+  // 302s to /login, and the magic-byte guard then throws — which lib/mail/mailer.ts
   // catches, logging and sending the mail without the PDF. Silent forever.
   const { fetchPurchaseOrderPdf } = await import("../../lib/uniware")
   const cap = stubFetch(okPdf)

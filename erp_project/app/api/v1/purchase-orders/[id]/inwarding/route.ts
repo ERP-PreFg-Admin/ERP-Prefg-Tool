@@ -3,8 +3,8 @@
 // Everything inwarded against one PO, for the FG PO Tracking detail panel.
 //
 // ── Why `withoutInvoice` is a number and not a list ─────────────────────────
-// Both receipt paths funnel through receivePo() in lib/po-receive.ts — the manual
-// Receive dialog and the invoice flow in lib/invoice-inward.ts — and each writes an
+// Both receipt paths funnel through receivePo() in lib/po/po-receive.ts — the manual
+// Receive dialog and the invoice flow in lib/invoice/invoice-inward.ts — and each writes an
 // identical history_pos row (field_name='received_qty', s3_key always null). No
 // column distinguishes a desk receipt from an invoice receipt, so merging the
 // invoice lines with the receipt log would list every invoice-driven receipt twice,

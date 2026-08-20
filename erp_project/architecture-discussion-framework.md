@@ -274,7 +274,7 @@ These rules govern every discussion in this framework:
 | Entity tables | Hold live data; `status` column acts as a distributed lock (`in_review`) |
 | History tables | Immutable audit log of what was active before each approval |
 | `lib/events.ts` | Structured event logging (raw / processed / failed) |
-| `lib/mailer.ts` | Fire-and-forget PO email after approval |
+| `lib/mail/mailer.ts` | Fire-and-forget PO email after approval |
 
 ---
 
@@ -351,7 +351,7 @@ These rules govern every discussion in this framework:
 | E2 | `APPROVAL` raw event | `POST /api/approvals/[id]` | Before transaction opens | `{ approvalId, module, entityId, action, remarks }` | `lib/events.ts` log | Structured log entry | Non-blocking; logged to console if events system fails |
 | E3 | `APPROVAL` processed event | `POST /api/approvals/[id]` | After `conn.commit()` | `{ approvalId, module, entityId, action }` | `lib/events.ts` log | Marks event as successfully processed | Non-blocking |
 | E4 | `APPROVAL` failed event | `POST /api/approvals/[id]` | In `catch` block after rollback | `{ approvalId, module, action, error }` | `lib/events.ts` log | Marks event as failed with error message | Non-blocking |
-| E5 | PO email (fire-and-forget) | `POST /api/approvals/[id]` | After approve commit, only if `module === "PO"` | `po_id` | `lib/mailer.ts → sendPoEmail()` | Email sent to mfg; `email_sent_at` stamped | Error caught and logged; does **not** roll back the approval |
+| E5 | PO email (fire-and-forget) | `POST /api/approvals/[id]` | After approve commit, only if `module === "PO"` | `po_id` | `lib/mail/mailer.ts → sendPoEmail()` | Email sent to mfg; `email_sent_at` stamped | Error caught and logged; does **not** roll back the approval |
 
 **Ordering guarantees:**
 - E1 is fully synchronous and atomic — either all DB writes happen or none
@@ -507,7 +507,7 @@ graph TD
 
     subgraph SideEffects["Side Effects"]
         Events["lib/events.ts\n(structured log)"]
-        Mailer["lib/mailer.ts\n(PO email, fire-and-forget)"]
+        Mailer["lib/mail/mailer.ts\n(PO email, fire-and-forget)"]
         S3["AWS S3\n(bulk CSV storage)"]
     end
 

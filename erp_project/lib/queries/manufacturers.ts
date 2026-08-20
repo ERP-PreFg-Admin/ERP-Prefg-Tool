@@ -192,7 +192,7 @@ export const manufacturers = {
 
   /**
    * Seller GSTIN → manufacturer, for picking an extraction strategy from a
-   * PDF before the Nanonets call (lib/invoice-detect.ts).
+   * PDF before the Nanonets call (lib/invoice/invoice-detect.ts).
    *
    * Batched because an invoice carries several GSTINs — the real REVE sample
    * has three (seller, buyer, and a consignee). Only the seller is a

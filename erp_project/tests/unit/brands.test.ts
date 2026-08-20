@@ -1,5 +1,5 @@
 // brandCode/entityForBrand replaced three byte-identical BRAND_CODES maps
-// (lib/invoice-inward.ts, lib/approvals/handlers/purchase-orders.ts, and one
+// (lib/invoice/invoice-inward.ts, lib/approvals/handlers/purchase-orders.ts, and one
 // declared inside the handler body of app/api/v1/purchase-orders/route.ts).
 //
 // The codes are not cosmetic: they prefix po_no, and the per-month sequence is

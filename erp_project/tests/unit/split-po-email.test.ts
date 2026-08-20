@@ -13,7 +13,7 @@
 //
 // The partition is tested rather than the send: everything else in that path is a
 // transport, a database or a PDF renderer. lib/env.ts is read at module load and
-// warns about missing vars, so nothing here imports lib/mailer's transport side —
+// warns about missing vars, so nothing here imports lib/mail/mailer's transport side —
 // partitionSplits and poSection are pure.
 process.env.GMAIL_USER = "test@example.com"
 process.env.GMAIL_APP_PASSWORD = "test-pass"

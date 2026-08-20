@@ -41,7 +41,7 @@ test("poTolerance of NaN does not silently become a passing threshold", () => {
 })
 
 test("the auto-close decision at the exact boundary", () => {
-  // This mirrors lib/po-receive.ts: `newRemaining <= poTolerance(originalQty)`.
+  // This mirrors lib/po/po-receive.ts: `newRemaining <= poTolerance(originalQty)`.
   const closes = (qty: number, received: number) => qty - received <= poTolerance(qty)
 
   assert.equal(closes(1000, 900), true)  // remaining 100 == tolerance 100

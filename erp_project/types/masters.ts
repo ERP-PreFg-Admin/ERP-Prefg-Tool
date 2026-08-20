@@ -225,7 +225,7 @@ export type WarehouseEntity = {
   entity_name: string
   /** Sent as the Facility header on the Uniware PO create — see authHeaders() in
    *  lib/uniware.ts. Null means this entity cannot inward here, and
-   *  lib/invoice-inward.ts fails fast rather than falling back to the env var. */
+   *  lib/invoice/invoice-inward.ts fails fast rather than falling back to the env var. */
   facility_code: string | null
   /** "MWH" | "CWH" for THIS entity, overriding the location's. Null = use
    *  Warehouse.type. */
@@ -267,7 +267,7 @@ export type WarehouseEntity = {
 /** `master_entity` table — OUR own legal entities, not a counterparty's. Two
  *  rows: PEP and KREATIVE.
  *
- *  `pan` overlaps OUR_PANS in lib/gstin.ts, which stays the source of truth for
+ *  `pan` overlaps OUR_PANS in lib/invoice/gstin.ts, which stays the source of truth for
  *  invoice detection: it covers 9 registrations across 4 PANs and is deliberately
  *  broader than this table. Do not rewire isOurs() off these rows.
  *

@@ -460,7 +460,7 @@ flowchart TD
     classDef failEvtNew fill:#ef4444,color:#fff,stroke:#b91c1c,stroke-width:2px,stroke-dasharray:5 5;
 ```
 
-**PATCH `[id]/route.ts:132-172` (attachment replace) has no UI caller anywhere in the app** — the only invoker of the underlying `updatePoAttachment` query is `lib/mailer.ts:95`, a server-side side effect inside `sendPoEmail()` (auto-stamps `attachment_key` when a PO email is sent). Treat this route as either dead code to remove, or an intentionally server-only mechanism — don't design a "replace attachment" UI flow for it without confirming which.
+**PATCH `[id]/route.ts:132-172` (attachment replace) has no UI caller anywhere in the app** — the only invoker of the underlying `updatePoAttachment` query is `lib/mail/mailer.ts:95`, a server-side side effect inside `sendPoEmail()` (auto-stamps `attachment_key` when a PO email is sent). Treat this route as either dead code to remove, or an intentionally server-only mechanism — don't design a "replace attachment" UI flow for it without confirming which.
 
 **Implementation checklist — PO:**
 1. Add success-path `logger.info` to the Normal PO create path and the Bulk CSV path (both currently log only on failure).

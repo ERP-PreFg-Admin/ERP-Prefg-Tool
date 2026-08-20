@@ -63,7 +63,7 @@ export const NANONET_API_KEY = required("NANONET_API_KEY")
 // redeploying, with no code change. See ~/.claude/plans/ses-migration.md.
 //
 // Once SES has run clean for a full cycle of PO and inward mail, delete
-// MAIL_PROVIDER, GMAIL_USER and GMAIL_APP_PASSWORD — here, in lib/mailer.ts,
+// MAIL_PROVIDER, GMAIL_USER and GMAIL_APP_PASSWORD — here, in lib/mail/mailer.ts,
 // and from SSM /erp-app/{test,prod}.
 
 export const MAIL_PROVIDER = process.env.MAIL_PROVIDER === "ses" ? "ses" : "gmail"

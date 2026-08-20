@@ -1,4 +1,4 @@
-// Goods receipt against a PO — lib/po-receive.ts.
+// Goods receipt against a PO — lib/po/po-receive.ts.
 //
 // Every case runs inside a transaction that is rolled back, so nothing here
 // persists. receivePo() takes the connection, which is exactly why it can be

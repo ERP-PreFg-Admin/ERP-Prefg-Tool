@@ -27,7 +27,7 @@ const money = (v: string | number | null | undefined) => {
 
 /* `mrp` and `discount` have no column here: they're still parsed from the
  * invoice, still submitted, and still written to invoice_items_mfg (and mrp
- * still reaches Uniware as maxRetailPrice — see lib/invoice-inward.ts). They're
+ * still reaches Uniware as maxRetailPrice — see lib/invoice/invoice-inward.ts). They're
  * just not shown or edited on this screen. */
 
 export function InvoiceLineItems({

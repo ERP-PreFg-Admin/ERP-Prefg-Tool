@@ -5,7 +5,7 @@
 // SKU is unattributed, whose brand has no entity, or whose warehouse has no row
 // for that entity. fetchPoData then returns null, which surfaces as a 404 on the
 // PDF preview and as a SILENTLY missing attachment on the manufacturer email
-// (lib/mailer.ts catches, logs and sends anyway). Nothing type-checks that.
+// (lib/mail/mailer.ts catches, logs and sends anyway). Nothing type-checks that.
 //
 // The resolvers themselves are covered without a DB in tests/unit/po-letterhead
 // .test.ts; what can only be checked here is that the SQL actually delivers the

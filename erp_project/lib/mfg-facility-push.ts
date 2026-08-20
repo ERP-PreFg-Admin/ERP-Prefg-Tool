@@ -9,7 +9,7 @@
  * ── Ordering ─────────────────────────────────────────────────────────────────
  * This runs AFTER the local write has committed, never inside it. Unicommerce
  * exposes no delete for a vendor item, so the push is the least reversible step
- * and goes last — the same least-reversible-last ordering as lib/invoice-inward.ts.
+ * and goes last — the same least-reversible-last ordering as lib/invoice/invoice-inward.ts.
  * A push failure therefore never costs the local mapping; it leaves
  * `un_pushed_at` NULL and records why, and the panel offers a retry.
  *

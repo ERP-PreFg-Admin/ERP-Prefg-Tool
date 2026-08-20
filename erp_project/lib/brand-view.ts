@@ -94,7 +94,7 @@ export const getBrandView = cache(async (userId: number): Promise<number[] | nul
  * READ paths use this — list pages, counts, exports — so the switcher actually
  * narrows what you see.
  *
- * WRITE paths must NOT: lib/brand-guard.ts and lib/po-guard.ts deliberately call
+ * WRITE paths must NOT: lib/brand-guard.ts and lib/po/po-guard.ts deliberately call
  * getUserScope, because narrowing your view is not meant to revoke your ability to
  * edit. Someone viewing only Hyphen must still be able to save an mCaffeine SKU
  * they hold — otherwise the picker becomes a foot-gun that silently 403s writes.
