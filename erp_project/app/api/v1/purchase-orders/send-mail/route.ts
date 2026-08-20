@@ -6,7 +6,7 @@ import {
 } from "@/lib/mail/mailer"
 import { poSendMailSchema } from "@/lib/validation/purchase-orders"
 import { withGateway } from "@/lib/gateway/with-gateway"
-import { assertPoInScope } from "@/lib/po-guard"
+import { assertPoInScope } from "@/lib/po/po-guard"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 

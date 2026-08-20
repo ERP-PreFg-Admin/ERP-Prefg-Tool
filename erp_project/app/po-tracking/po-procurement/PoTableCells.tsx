@@ -5,7 +5,7 @@ import { TableHead } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import { fmtInt, num } from "./po-utils"
 
-export { poTolerance } from "@/lib/po-rules"
+export { poTolerance } from "@/lib/po/po-rules"
 
 /**
  * Fulfilment of one PO, as a single track with two segments.

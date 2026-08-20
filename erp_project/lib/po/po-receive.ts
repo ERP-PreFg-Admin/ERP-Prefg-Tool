@@ -7,7 +7,7 @@
 import type { PoolConnection } from "mysql2/promise"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { ApiError } from "@/lib/gateway/errors"
-import { poTolerance } from "@/lib/po-rules"
+import { poTolerance } from "@/lib/po/po-rules"
 
 /** Statuses a receipt can be booked against. `punched` is included because the
  *  manual desk flow has always allowed it. */

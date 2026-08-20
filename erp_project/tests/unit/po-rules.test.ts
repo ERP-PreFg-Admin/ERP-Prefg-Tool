@@ -3,7 +3,7 @@
 // forever over a rounding remainder — so every boundary is pinned here.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { isDraftPo, poTolerance } from "../../lib/po-rules"
+import { isDraftPo, poTolerance } from "../../lib/po/po-rules"
 
 test("poTolerance is 10% of qty, floored", () => {
   assert.equal(poTolerance(50), 5)

@@ -12,7 +12,7 @@ import { purchaseOrdersSql, buildFilterParams, buildStatusCountParams } from "@/
 import { getPoDropdownOptions } from "@/lib/cached-reference-data"
 import { filterByScope } from "@/lib/scope"
 import { getViewScope } from "@/lib/brand-view"
-import { fetchChildrenByParent } from "@/lib/po-children"
+import { fetchChildrenByParent } from "@/lib/po/po-children"
 import type { PoRow } from "../po-procurement/po-types"
 import PoProcurementClient from "../po-procurement/PoProcurementClient"
 

@@ -8,7 +8,7 @@ import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { withGateway } from "@/lib/gateway/with-gateway"
-import { assertPoInScope } from "@/lib/po-guard"
+import { assertPoInScope } from "@/lib/po/po-guard"
 import { ApiError } from "@/lib/gateway/errors"
 import type { PoHistoryRow } from "@/app/po-tracking/po-procurement/po-types"
 

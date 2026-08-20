@@ -5,8 +5,8 @@
 // tested this way (see tests/helpers/db.ts for the constraint that implies).
 import { test, after } from "node:test"
 import assert from "node:assert/strict"
-import { receivePo, RECEIVABLE } from "../../lib/po-receive"
-import { poTolerance } from "../../lib/po-rules"
+import { receivePo, RECEIVABLE } from "../../lib/po/po-receive"
+import { poTolerance } from "../../lib/po/po-rules"
 import {
   withRollback, anchors, makePo, readPo, readPoHistory, closePool, num,
 } from "../helpers/db"

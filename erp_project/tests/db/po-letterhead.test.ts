@@ -19,7 +19,7 @@ import type { PoolConnection, ResultSetHeader } from "mysql2/promise"
 import { withRollback, closePool, anchors, makePo } from "../helpers/db"
 import { purchaseOrdersSql } from "../../lib/queries/purchase-orders"
 import { resolveLetterhead, resolveShipTo, type PoEmailRow } from "../../lib/pdf/po-letterhead"
-import { destinationAllowed, type DestinationEntityRow } from "../../lib/po-guard"
+import { destinationAllowed, type DestinationEntityRow } from "../../lib/po/po-guard"
 
 // node:test won't exit while the pool holds sockets.
 after(closePool)

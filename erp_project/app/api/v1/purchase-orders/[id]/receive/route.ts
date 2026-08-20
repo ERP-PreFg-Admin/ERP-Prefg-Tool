@@ -9,10 +9,10 @@ import { pool } from "@/lib/db"
 import logger from "@/lib/logger"
 import { recordFailedEvent, recordRawEvent, makeEventId, recordProcessedEvent } from "@/lib/events"
 import { withGateway } from "@/lib/gateway/with-gateway"
-import { assertPoInScope } from "@/lib/po-guard"
+import { assertPoInScope } from "@/lib/po/po-guard"
 import { ApiError } from "@/lib/gateway/errors"
 import { poIdParamSchema, poReceiveSchema } from "@/lib/validation/purchase-order-detail"
-import { receivePo } from "@/lib/po-receive"
+import { receivePo } from "@/lib/po/po-receive"
 
 export const POST = withGateway({
   paramsSchema: poIdParamSchema,

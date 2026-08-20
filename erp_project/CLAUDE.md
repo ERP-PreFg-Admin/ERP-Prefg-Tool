@@ -44,7 +44,7 @@ Next.js 16 App Router · React 19 · TypeScript · Tailwind CSS v4 · Prisma 7 (
 
 Three things to know before writing a DB test:
 
-1. **Import style** — use relative imports (`../../lib/po-receive`), not `@/`, matching the `_check-*` scripts.
+1. **Import style** — use relative imports (`../../lib/po/po-receive`), not `@/`, matching the `_check-*` scripts.
 2. **The env must be loaded by the runtime.** `lib/env.ts` reads `process.env` at module load, and your first `import` of anything under `lib/` evaluates it — so an `import "dotenv/config"` inside a test file runs too late. That's why `test:db` passes `--env-file-if-exists=.env`. Run DB tests via `npm run test:db`, never a bare `tsx --test`.
 3. **Only connection-taking code is testable this way.** `withRollback` owns the transaction, and MySQL implicitly commits on a nested `beginTransaction()` — so a route handler (which opens its own) cannot be rolled back. Test the helper the route calls. This is why the split math was extracted to `lib/po-split.ts`, mirroring `lib/po-receive.ts`; **follow that pattern when adding logic worth testing.**
 

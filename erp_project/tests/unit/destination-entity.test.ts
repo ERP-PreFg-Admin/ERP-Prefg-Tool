@@ -11,7 +11,7 @@
 // So most of this file is a parity check driven off one set of fixtures.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { destinationAllowed, type DestinationEntityRow } from "../../lib/po-guard"
+import { destinationAllowed, type DestinationEntityRow } from "../../lib/po/po-guard"
 import { warehousesForEntity } from "../../app/po-tracking/po-procurement/po-utils"
 import type { WarehouseOption } from "../../app/po-tracking/po-procurement/po-types"
 
