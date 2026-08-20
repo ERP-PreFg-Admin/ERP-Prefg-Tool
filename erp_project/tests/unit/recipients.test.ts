@@ -4,7 +4,7 @@
 // two copies of the same PO update — so every rule is pinned.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { splitRecipients } from "../../lib/recipients"
+import { splitRecipients } from "../../lib/mail/recipients"
 
 test("a row with no recipient_type is a To — the pre-CC behaviour", () => {
   // Every row written before the column existed backfills to 'to'; NULL from an

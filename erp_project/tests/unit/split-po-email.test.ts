@@ -20,7 +20,7 @@ process.env.GMAIL_APP_PASSWORD = "test-pass"
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { partitionSplits, poSection, type SelectedPoLine } from "../../lib/mailer"
+import { partitionSplits, poSection, type SelectedPoLine } from "../../lib/mail/mailer"
 
 const line = (over: Partial<SelectedPoLine> = {}): SelectedPoLine => ({
   id: 1, po_no: "PEP-2608-001", sku_code: "SKU-A", sku_name: "Face Wash",

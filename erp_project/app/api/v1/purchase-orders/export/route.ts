@@ -56,11 +56,19 @@ export const GET = withGateway({
     const sortDir     = sp.get("sortDir") === "asc" ? "asc" : "desc"
     const excludeInward = sp.get("excludeInward") === "1"
 
+    // destEntity was missing here, so an export taken while the destination
+    // filter named a legal entity returned BOTH entities' rows — Pep's Mumbai
+    // facility and Kreative's are different places to send goods, and
+    // purchase_orders.destination stores only the shared name. The file then
+    // disagreed with the table it was downloaded from.
+    const destEntity = sp.get("destEntity") ?? ""
+
     const filterParams = buildFilterParams(
       search || null, status || null, mfgCode || null, poType || null,
       dateFrom || null, dateTo || null, sku || null, destination || null,
       excludeInward,
       await getViewScope(Number(session.user.id)),
+      destEntity || null,
     )
     // Uniware only ever mirrors inward POs, so the column is empty in an export
     // that has none. Filtered rather than kept as a second column config.

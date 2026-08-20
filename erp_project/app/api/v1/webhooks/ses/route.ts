@@ -21,7 +21,7 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { execute } from "@/lib/db"
 import { emailSuppressionsSql } from "@/lib/queries/email-suppressions"
-import { isAllowedSigningCertUrl, verifySnsSignature } from "@/lib/sns-verify"
+import { isAllowedSigningCertUrl, verifySnsSignature } from "@/lib/mail/sns-verify"
 import logger from "@/lib/logger"
 import crypto from "crypto"
 

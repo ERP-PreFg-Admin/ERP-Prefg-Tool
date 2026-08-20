@@ -5,7 +5,7 @@ export const runtime = "nodejs"
 
 import { query } from "@/lib/db"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
-import { fetchPoData } from "@/lib/mailer"
+import { fetchPoData } from "@/lib/mail/mailer"
 import { generatePoPdf } from "@/lib/pdf/po-document"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { assertPoInScope } from "@/lib/po-guard"

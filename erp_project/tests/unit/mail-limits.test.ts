@@ -4,7 +4,7 @@
 // fine — and the POs silently don't reach the manufacturer.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { assertAttachmentsWithinLimit, MAX_ATTACHMENT_BYTES } from "../../lib/mail-limits"
+import { assertAttachmentsWithinLimit, MAX_ATTACHMENT_BYTES } from "../../lib/mail/mail-limits"
 
 const att = (bytes: number, filename = "PO-1.pdf") =>
   ({ filename, content: Buffer.alloc(bytes) })

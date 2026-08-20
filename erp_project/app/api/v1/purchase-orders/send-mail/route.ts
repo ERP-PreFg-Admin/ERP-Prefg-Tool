@@ -3,7 +3,7 @@ import { query, execute } from "@/lib/db"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import {
   sendMfgSelectionEmail, sendSplitPoEmail, partitionSplits, type SelectedPoLine,
-} from "@/lib/mailer"
+} from "@/lib/mail/mailer"
 import { poSendMailSchema } from "@/lib/validation/purchase-orders"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { assertPoInScope } from "@/lib/po-guard"

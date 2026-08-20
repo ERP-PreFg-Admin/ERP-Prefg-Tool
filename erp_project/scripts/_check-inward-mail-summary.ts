@@ -4,7 +4,7 @@
 //   npx tsx scripts/_check-inward-mail-summary.ts
 import "dotenv/config"
 import assert from "node:assert"
-import { poSection } from "../lib/mailer"
+import { poSection } from "../lib/mail/mailer"
 
 const html = poSection("Items Inwarded", [
   { po_no: "MCAFF-INW-202608-001", sku_code: "MCaf407", sku_name: "Coffee Scrub", qty: 1200 },

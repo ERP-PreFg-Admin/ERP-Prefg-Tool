@@ -10,7 +10,7 @@
 import "dotenv/config"
 import { writeFileSync } from "node:fs"
 import { query } from "../lib/db"
-import { fetchPoData } from "../lib/mailer"
+import { fetchPoData } from "../lib/mail/mailer"
 import { generateSplitPoPdf } from "../lib/pdf/split-po-document"
 
 // Wrapped rather than top-level await: scripts here compile as CJS, where a

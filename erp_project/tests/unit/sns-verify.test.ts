@@ -8,7 +8,7 @@ import {
   isAllowedSigningCertUrl,
   canonicalMessage,
   verifySnsSignature,
-} from "../../lib/sns-verify"
+} from "../../lib/mail/sns-verify"
 
 // ── SSRF guard ───────────────────────────────────────────────────────────────
 
