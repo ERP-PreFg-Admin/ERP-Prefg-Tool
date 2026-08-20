@@ -289,6 +289,17 @@ export default function PoProcurementClient({
             </span>
           )}
         </ToggleButton>
+        {/* Both modes. DownloadButton reads the current URL params itself, so the
+            file always reflects the active filters and sort — not just this page.
+            excludeInward is the one filter that isn't in the URL: it is FG PO
+            Tracking's standing filter, and it also decides whether the export
+            carries the Uniware column. */}
+        <DownloadButton
+          endpoint="/api/v1/purchase-orders/export"
+          label={isInwarding ? "Inward POs" : "POs"}
+          extraParams={isInwarding ? undefined : { excludeInward: "1" }}
+        />
+
         {isInwarding && (
           <>
             <Button size="lg" onClick={() => setShowAddInvoice(true)} className="sm:ml-auto">

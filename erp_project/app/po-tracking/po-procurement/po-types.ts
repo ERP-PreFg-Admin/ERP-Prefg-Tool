@@ -36,6 +36,14 @@ export type PoRow = {
   /** This PO's receipts plus all its children's. The figure the table shows. */
   received_total: string | number
   invoice_no: string | null
+  /** The rate the supplier's invoice stated, as parsed — for reconciling against
+   *  `unit_price` on the inwarding desk. Null when no invoice line points at this
+   *  PO, which is every PO that wasn't raised from one. */
+  invoice_rate: string | number | null
+  /** 1 when the invoice's lines for this PO carry more than one distinct rate, so
+   *  `invoice_rate` is the lowest of several rather than the rate. Comes back as
+   *  0/1 from MySQL, not a boolean. */
+  invoice_rate_mixed: number | null
   /** Unicommerce's PO code for this row — inward POs only, null everywhere else. */
   uniware_po_code: string | null
   /** What Unicommerce last reported for that code. Null when the PO was never

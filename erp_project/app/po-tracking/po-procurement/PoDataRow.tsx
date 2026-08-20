@@ -222,9 +222,41 @@ export default function PoDataRow({
 
       <TableCell className="text-xs tabular-nums whitespace-nowrap">{fmtMoney(r.total_amount)}</TableCell>
 
-      <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
-        {r.invoice_no ?? "—"}
-      </TableCell>
+      {/* Inwarding only — see the matching header in PoTable. */}
+      {inwardingMode && (
+        <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
+          {r.invoice_no ?? "—"}
+        </TableCell>
+      )}
+
+      {/* What the invoice billed, against `unit_price` two columns left. Amber
+          when they disagree — this column exists to make that visible, so it
+          should not need reading two numbers to notice. */}
+      {inwardingMode && (
+        <TableCell className="text-xs tabular-nums whitespace-nowrap">
+          {r.invoice_rate == null ? (
+            <span className="text-muted-foreground">—</span>
+          ) : (
+            <span
+              className={
+                num(r.invoice_rate) !== num(r.unit_price)
+                  ? "text-amber-700 dark:text-amber-400 font-medium"
+                  : "text-muted-foreground"
+              }
+              title={
+                num(r.invoice_rate) !== num(r.unit_price)
+                  ? `Invoice billed ${fmtRate(r.invoice_rate)} against a PO rate of ${fmtRate(r.unit_price)}`
+                  : undefined
+              }
+            >
+              {fmtRate(r.invoice_rate)}
+              {r.invoice_rate_mixed ? (
+                <span className="ml-1 text-amber-700 dark:text-amber-400" title="This invoice's lines for this PO carry more than one rate — the lowest is shown">+</span>
+              ) : null}
+            </span>
+          )}
+        </TableCell>
+      )}
 
       {showUniwareCode && (
         <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">

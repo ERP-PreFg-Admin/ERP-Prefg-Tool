@@ -7,7 +7,7 @@ import { purchaseOrdersSql, buildFilterParams, buildStatusCountParams } from "@/
 import { getPoDropdownOptions } from "@/lib/cached-reference-data"
 import { filterByScope } from "@/lib/scope"
 import { getViewScope } from "@/lib/brand-view"
-import { fetchChildrenByParent } from "@/lib/po-children"
+import { fetchChildrenByParent } from "@/lib/po/po-children"
 import type { PoRow } from "./po-types"
 import PoProcurementClient from "./PoProcurementClient"
 
@@ -48,7 +48,13 @@ export default async function PoProcurementPage({
   // they distort every tab count and summary card on this page. PO Inwarding is
   // where they live.
   const scope = await getViewScope(userId)
-  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poType  || null, skuFilter || null, dateFrom || null, dateTo|| null, destFilter || null, true, scope, destEntity || null)
+  // Argument order is dateFrom, dateTo, sku — matching the signature and the
+  // buildStatusCountParams call below. It read (sku, dateFrom, dateTo) until
+  // 2026-08-20, so those three filters were cross-wired: a SKU was applied as
+  // dateFrom, dateFrom as dateTo, dateTo as sku. All three are `string | null`,
+  // so nothing type-checked it, and the tab counts stayed right while the rows
+  // went wrong — which is the symptom to look for if this ever regresses.
+  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poType  || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, true, scope, destEntity || null)
   const statusCountParams = buildStatusCountParams(search || null, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, true, scope, destEntity || null)
 
   const pageStart = performance.now()
