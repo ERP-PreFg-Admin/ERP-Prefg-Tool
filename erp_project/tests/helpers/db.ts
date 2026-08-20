@@ -61,6 +61,14 @@ function assertNotProd(): void {
  * The rollback is not conditional on success — there is no code path that
  * commits. If `fn` throws (including an assertion failure), the error propagates
  * after the rollback has already happened.
+ *
+ * ⚠️ ROLLBACK ISOLATES A FILE FROM THE DATABASE, NOT FROM OTHER TEST FILES.
+ * Every file here runs against the same schema, and several pick their fixture as
+ * "the lowest-id warehouse / manufacturer / SKU" — so two files running at once
+ * take out locks on the same rows and one of them blocks or fails. That is why
+ * `npm run test:db` passes `--test-concurrency=1`: DB test files must run one at a
+ * time. It looks like a performance knob and is actually a correctness one; drop it
+ * and the suite starts failing a different pair of tests on each run.
  */
 export async function withRollback<T>(fn: (conn: PoolConnection) => Promise<T>): Promise<T> {
   assertNotProd()

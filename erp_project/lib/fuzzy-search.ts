@@ -13,6 +13,6 @@ import Fuse from "fuse.js"
 
 export function fuzzyRank<T>(rows: T[], term: string, keys: string[]): T[] {
   if (!term.trim()) return rows
-  const fuse = new Fuse(rows, { keys, threshold: 0.4, ignoreLocation: true })
+  const fuse = new Fuse(rows, { keys, threshold: 0.25, ignoreLocation: true })
   return fuse.search(term).map((r) => r.item)
 }

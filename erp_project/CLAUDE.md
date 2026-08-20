@@ -142,6 +142,41 @@ users read became "Recipe". Renaming the code needs a matching
 > which silently zeroed JW/Shrink/Shipper/Wastage on Agreed Final Costing and in
 > the PO rate quote.
 
+### `un_code_mfg_sku_wh_map` — the grain is not what the name says
+
+In Unicommerce a **manufacturer is a vendor**, and a vendor's item catalog is scoped
+to a **facility**. This table is that catalog:
+
+**ONE ROW PER `(wh_id, mfg_id, sku_id)`**, enforced by `uq_wh_mfg_sku`. Three things
+about it trip people up:
+
+- **`wh_id` is `details_warehouse_entity.id` — a FACILITY** (location × legal
+  entity), **not** `master_warehouse.id`. 18 active facilities over ~10 locations,
+  because every site runs under both Pep and Kreative with a different Unicommerce
+  facility *and a different vendor code*. Gurgaon is `GGN_WAREHOUSE` under Pep and
+  `HYP_B2B_GGN` under Kreative.
+- **`sku_id IS NULL` is the vendor-code row**: "this manufacturer is a Uniware vendor
+  at this facility, under code X, with no SKUs mapped yet." Its existence is what
+  makes a matrix cell mappable at all. **Every count over this table must exclude it**
+  (`sku_id IS NOT NULL`), or each configured cell reads one SKU too high.
+- **`un_mfg_code` repeats across a pair's rows**, on purpose — it mirrors a Vendor
+  Item Master export row (`vendorCode`, `facility`, `itemTypeSku` on one line), so
+  ingest is an upsert with no reshaping. Read it with `MAX()`; write it to every one
+  of the pair's rows or the copies drift.
+
+> ⚠️ `uq_wh_code (wh_id, un_mfg_code)` **used to be UNIQUE and was dropped** by
+> `prisma/alter_un_code_mfg_sku_wh_map.sql` — it is incompatible with the per-SKU
+> grain. It was the only thing stopping two manufacturers from claiming one Uniware
+> vendor code at one facility, which makes POs and inwards land against the wrong
+> ledger. That check now lives in application code only —
+> `mfgFacilityMap.selectVendorCodeConflict`, called by
+> `app/api/v1/manufacturing/facility-map/route.ts` — and is pinned by
+> `tests/db/mfg-facility-map.test.ts`. Delete either and the hazard returns unguarded.
+
+Reads go through the matrix on `/po-tracking/mfg-overview`; writes are **direct, with
+no approval flow**, matching the parent relation (`master_recipe_mfg`, see
+`app/api/v1/manufacturing/lines/route.ts:5`).
+
 ### ENUM columns
 
 Status columns are `ENUM` in MySQL. Inserting an unknown value **silently fails** (or errors in strict mode) and rolls back the transaction. When adding a new status value (e.g. `in_review`, `draft`) you must:
@@ -339,6 +374,7 @@ This eliminates `any` type noise and gives full IntelliSense on `conn.execute`, 
 | `lib/queries/history.ts` | Generic per-module audit trail — `history_masters_edits` |
 | `lib/queries/manufacturers.ts` | Manufacturer master — master_mfgs + details_mfg |
 | `lib/queries/manufacturing.ts` | MFG Cost Manager — lines, misc costs, costing inputs |
+| `lib/queries/mfg-facility-map.ts` | `un_code_mfg_sku_wh_map` — the MFG × facility × SKU catalog mirrored to Uniware (see the note below) |
 | `lib/queries/packing-materials.ts` | PM master — master_pm, cost_master_pm_mfg, cost_master_pm_ven |
 | `lib/queries/permissions.ts` | Page access — page_permissions, user_page_permissions |
 | `lib/queries/purchase-orders.ts` | Purchase orders — full CRUD, split, receive, email, PDF, bulk CSV, scope predicates |
@@ -396,6 +432,7 @@ it to `/api/v1/v2/` — a 404 that compiled, linted and type-checked.
 | `app/api/v1/masters/vendors/` | Vendor CRUD + export |
 | `app/api/v1/masters/manufacturers/` | Manufacturer CRUD + export |
 | `app/api/v1/masters/recipe-master/` | Recipe CRUD + export — **does** use the approval flow (module code `BOM`) |
+| `app/api/v1/manufacturing/facility-map/route.ts` | MFG × facility SKU mapping — `set-map` replaces one cell's SKU set, `set-vendor-code` sets the pair's Uniware vendor code. Direct write, no approval |
 | `app/api/v1/approvals/route.ts` | List pending approvals |
 | `app/api/v1/approvals/[id]/route.ts` | Approve / reject handler |
 | `app/api/v1/approvals/entity/route.ts` | GET rejection info for edit dialogs |
