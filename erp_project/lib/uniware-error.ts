@@ -50,14 +50,10 @@ const clip = (s: string) =>
  */
 export function uniwareStatusFallback(subject: string, status: number): string {
   if (status === 401 || status === 403) {
-    // The case that was being mislabelled — and deliberately WITHOUT the subject.
-    // A refused account is refused for every record, so naming one implies the
-    // record is at fault and, worse, makes five identical failures look like five
-    // different problems (see failureReasons in app/po-tracking/sync-summary.ts,
-    // which groups by reason). Both causes are named because the endpoint is
-    // facility-scoped: the right credentials asking about the wrong facility fail
-    // exactly like the wrong credentials.
-    return "Not authorised — check the Uniware credentials, and that the record's facility matches the one being asked."
+    // The case that was being mislabelled. Both causes are worth naming: the
+    // endpoint is facility-scoped, so the right credentials asking about the
+    // wrong facility fail exactly like the wrong credentials.
+    return `Not authorised to read ${subject} — check the Uniware credentials, and that its facility matches the one being asked.`
   }
   if (status === 404) return `Uniware has no ${subject}.`
   if (status === 429) return `Uniware is rate-limiting this account — retry in a moment.`
@@ -105,7 +101,8 @@ export function uniwareErrorReasons(raw: string | null | undefined): string[] {
   }
 
   if (!rest) {
-    return [status ? `Uniware returned nothing (HTTP ${status}).` : "Uniware returned nothing."]
+    return [status ? `Uni
+      ware returned nothing (HTTP ${status}).` : "Uniware returned nothing."]
   }
 
   // A web page where JSON belongs is always infrastructure, and the markup tells
