@@ -15,6 +15,7 @@
 import { useEffect, useState } from "react"
 import { useUrlFilters } from "@/lib/useUrlFilters"
 import { Pencil, History as HistoryIcon, Layers, AlertTriangle } from "lucide-react"
+import { Callout } from "@/components/ui/callout"
 import { Card, CardContent } from "@/components/ui/card"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import {
@@ -38,6 +39,7 @@ import { DownloadButton } from "@/components/masters/DownloadButton"
 import { StatusBadge } from "@/components/masters/StatusBadge"
 import { EntityHistoryDialog } from "@/components/masters/EntityHistoryDialog"
 import { EmptyState } from "@/components/ui/empty-state"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { EditSkuDialog } from "./EditSkuDialog"
 import { SkuVariantsDialog } from "./SkuVariantsDialog"
 import type { Sku, CostingGap } from "@/types/masters"
@@ -54,6 +56,14 @@ function missingFieldsFor(row: Sku): string[] {
   if (row.gst == null) missing.push("GST")
   return missing
 }
+
+/**
+ * A recipe with lines, but nobody making it — so nothing about this SKU can be
+ * costed. Shared by the per-row warning and the page-level banner above the
+ * table, so the two can never disagree about which SKUs count.
+ */
+const isRecipeUnmapped = (gap: CostingGap | undefined) =>
+  !!gap && gap.mfg_count === 0 && gap.rm_line_count + gap.pm_line_count > 0
 
 /**
  * Why this SKU can't be costed — the same reasons the Agreed Final Costing tab
@@ -73,7 +83,7 @@ function costingReasonsFor(row: Sku, gap: CostingGap | undefined): string[] {
   if (gap.rm_line_count > 0 && row.filling == null) {
     reasons.push("No fill weight — every RM line costs 0 until it is set")
   }
-  if (gap.mfg_count === 0) {
+  if (isRecipeUnmapped(gap)) {
     // With no manufacturer mapped there is no rate to look up, so the
     // without-rate counts below would flag every line and mean nothing.
     reasons.push("Recipe not mapped to any manufacturer")
@@ -128,6 +138,9 @@ export default function SkusClient({
   const refresh = () => router.refresh()
 
   const gapBySkuId = new Map(costingGaps.map((g) => [g.sku_id, g]))
+  // costingGaps covers this page's SKUs only (see the prop), so the banner says
+  // "on this page" rather than implying a count across the whole master.
+  const unmappedRecipeCount = costingGaps.filter(isRecipeUnmapped).length
 
   // Filter panel open/close.
   const filterPanel = useFilterPanel()
@@ -284,7 +297,23 @@ export default function SkusClient({
         </FilterField>
       </FilterPanel>
 
+      {/* Raised out of the per-row hover tooltip: an uncostable SKU is worth
+          seeing before you go looking for it. */}
+      {unmappedRecipeCount > 0 && (
+        <Callout variant="warning" className="mb-5 flex items-start gap-2">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            {unmappedRecipeCount === 1
+              ? "1 SKU on this page has a Recipe but no manufacturer mapped, so it cannot be costed."
+              : `${unmappedRecipeCount} SKUs on this page have a Recipe but no manufacturer mapped, so they cannot be costed.`}
+            {" "}The warning beside the SKU code says which.
+          </span>
+        </Callout>
+      )}
+
       {/* ── Table card ── */}
+      {/* One Provider for the whole table rather than one per row. */}
+      <TooltipProvider delayDuration={150}>
       <Card>
         <RecordCountHeader total={total} onClearFilters={hasFilters ? clearAllFilters : undefined} />
         <CardContent className="p-0">
@@ -323,17 +352,29 @@ export default function SkusClient({
                         <div className="flex items-center gap-1.5">
                           {row.sku_code}
                           {(missing.length > 0 || costingReasons.length > 0) && (
-                            <span className="group relative inline-flex items-center">
-                              <AlertTriangle className="h-3.5 w-3.5 cursor-help text-amber-500" />
-                              <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-1 hidden w-64 -translate-x-1/2 space-y-1 rounded-md border border-border bg-popover p-2 text-left text-[11px] leading-relaxed text-foreground shadow-md group-hover:block">
+                            // Portalled, not an absolute child: this cell sits in
+                            // the table's overflow-auto wrapper, which clipped the
+                            // old hand-rolled tooltip against the left edge —
+                            // same reason PoActionMenu portals.
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="inline-flex items-center">
+                                  <AlertTriangle className="h-3.5 w-3.5 cursor-help text-amber-500" />
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent
+                                side="right"
+                                align="start"
+                                className="max-w-[280px] space-y-1 border border-border bg-popover p-2 text-left text-[11px] leading-relaxed text-foreground shadow-md"
+                              >
                                 {missing.length > 0 && <span className="block">Missing: {missing.join(", ")}</span>}
                                 {costingReasons.map((reason) => (
                                   <span key={reason} className="block text-amber-700 dark:text-amber-400">
                                     {reason}
                                   </span>
                                 ))}
-                              </span>
-                            </span>
+                              </TooltipContent>
+                            </Tooltip>
                           )}
                         </div>
                       </TableCell>
@@ -402,6 +443,7 @@ export default function SkusClient({
           <PaginationBar total={total} page={page} pageSize={pageSize} />
         </CardContent>
       </Card>
+      </TooltipProvider>
 
       <EditSkuDialog
         sku={editSku}

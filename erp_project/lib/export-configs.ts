@@ -16,7 +16,6 @@
  */
 
 import type { ExportColumn } from "@/lib/export"
-
 // ── Material Master — Raw Material (base record, no rates) ───────────────────
 
 export const RM_BASE_EXPORT_COLUMNS: ExportColumn[] = [
@@ -402,6 +401,11 @@ export const INVOICE_LINE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "mfg_name",               label: "Manufacturer",     type: "text"   },
   { key: "destination",            label: "Destination",      type: "text"   },
   { key: "line_no",                label: "Line",             type: "number" },
+  {key : "invoice_total" ,         label: "Invoice Total" ,   type:"number"  },
+  {key : "eway_bill_no" ,          label : "E-way Bill No." , type : "text"} ,
+  {key: "vehicle_no" ,             label:"Vehicle No." ,      type:"text"}, 
+  {key:"created_by_name" , label:"Entered By" , type:"text"},
+  {key :"created_at" , label:"Entered On" , type:"date"},
   { key: "sku_code",               label: "SKU",              type: "text"   },
   // Kept beside the mapped code: when they differ, the invoice printed
   // something our master doesn't know, and that is what needs correcting.

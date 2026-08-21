@@ -15,6 +15,7 @@ import type { Approval } from "../approvals-types"
 import { DiffTable } from "./DiffTable"
 import { DIFF_OLD_TEXT_CLASS, DIFF_OLD_CELL_CLASS, DIFF_NEW_CELL_CLASS } from "./FieldDiff"
 import type { DiffRow, MaterialMap } from "./types"
+import { DocViewButton } from "./DocViewButton"
 
 const TYPE_TAG_COLOR: Record<"RM" | "PM", string> = {
   RM: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/30 dark:text-rose-400 dark:border-rose-900/40",
@@ -113,8 +114,35 @@ function parseBomApprovalItems(items: Approval["items"]) {
     if (field === "__removed__") entry.removed = true
     else if (field !== "__present__") entry.fields[field] = { old: it.old_value, new: it.new_value }
   }
-  return { mode, reason, changeTypes, lines: [...lineMap.values()] }
+  const artifactRows: DiffRow[] = []
+  for (const it of items) {
+    if (it.field_name.startsWith("artifact:add:")) {
+      // A malformed value must not blank the whole approvals page.
+      try {
+        const { s3_key, file_name } = JSON.parse(it.new_value) as { s3_key: string; file_name: string }
+        artifactRows.push({
+          key: it.field_name,
+          label: file_name,
+          old: "",
+          new: <DocViewButton s3Key={s3_key} variant="new" />,
+        })
+      } catch { /* skip unparseable artifact item */ }
+      continue
+    }
+    const rm = it.field_name.match(/^artifact:remove:(\d+)$/)
+    if (rm) {
+      artifactRows.push({
+        key: it.field_name,
+        label: `#${rm[1]}`,
+        old: "",
+        new: "",
+        fullWidth: <span className={cn(DIFF_OLD_TEXT_CLASS, "font-medium line-through")}>Artifact removed</span>,
+      })
+    }
+  }
+  return { mode, reason, changeTypes, lines: [...lineMap.values()], artifactRows }
 }
+
 
 /** No RM/PM prefix here — the two are already split into their own labeled
  *  columns below, so repeating the tag on every row would be redundant. */
@@ -173,7 +201,7 @@ export function RecipeLineDiffTable({ items, materialMap, hideReason, compact }:
    *  instead of side-by-side columns — used by the entity History table. */
   compact?: boolean
 }) {
-  const { mode, reason, changeTypes, lines } = parseBomApprovalItems(items)
+  const { mode, reason, changeTypes, lines , artifactRows} = parseBomApprovalItems(items)
   // A line with no field diffs is just the "__present__" bookkeeping marker
   // (update-existing carries one for every unchanged line so applyAndArchive
   // knows to keep it) — not an actual change, so it's excluded from display.
@@ -229,6 +257,12 @@ export function RecipeLineDiffTable({ items, materialMap, hideReason, compact }:
               <DiffTable rows={pmRows} newOnly={newOnly} />
             </div>
           )}
+        </div>
+      )}
+      {artifactRows.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Artifacts</p>
+          <DiffTable rows={artifactRows} newOnly={newOnly}/>
         </div>
       )}
     </div>

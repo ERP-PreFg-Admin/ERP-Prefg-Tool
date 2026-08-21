@@ -22,6 +22,7 @@ import {
   UNIWARE_SANDBOX, UNIWARE_SANDBOX_FACILITY, UNIWARE_SANDBOX_VENDOR,
 } from "@/lib/env"
 import logger from "@/lib/logger"
+import { uniwareStatusFallback } from "@/lib/uniware-error"
 
 const BASE = UNIWARE_BASE_URL.replace(/\/+$/, "")
 const TIMEOUT_MS = 30_000
@@ -733,9 +734,16 @@ export async function fetchPurchaseOrderStatus(code: string, facility?: string):
 
   // HTTP 200 with successful:false is how this API reports a business failure —
   // res.ok is not a success check here (see the module header).
+  //
+  // Which is exactly why the fallback must not say "no purchase order": if we are
+  // here on a 401/403 the account was refused, and on a 5xx Uniware broke. Only a
+  // 200-with-errors, or a 404, is genuinely about this PO. Saying otherwise sent
+  // people hunting for a PO that was there all along.
   if (!data.successful) {
     const msgs = (data.errors ?? []).map((e) => e.description || e.message).filter(Boolean)
-    throw new Error(msgs.join("; ") || `Uniware returned no purchase order ${code} (HTTP ${res.status})`)
+    throw new Error(
+      msgs.join("; ") || uniwareStatusFallback(`purchase order ${code}`, res.status)
+    )
   }
   if (!data.statusCode) throw new Error(`Uniware returned no statusCode for ${code}`)
   return data.statusCode

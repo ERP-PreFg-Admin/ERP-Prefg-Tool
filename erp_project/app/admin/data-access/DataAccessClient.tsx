@@ -29,6 +29,7 @@ import { Callout } from "@/components/ui/callout"
 import { SegmentedToggle } from "@/components/ui/segmented-toggle"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { useToast } from "@/components/ui/toast"
+import { EmptyState } from "@/components/ui/empty-state"
 import type { EntityType } from "@/lib/scope"
 import type { EntityOption, ScopeCount } from "./page"
 

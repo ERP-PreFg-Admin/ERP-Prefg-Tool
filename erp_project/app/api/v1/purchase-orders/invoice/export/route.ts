@@ -66,10 +66,10 @@ export const GET = withGateway({
         })
       }
 
-      const invoices = await query<Record<string, unknown>>(supplierInvoicesSql.listInvoicesForExport, params)
-      logger.info({ ...ctx, invoices: invoices.length, message: "Invoice export served (csv)" })
+    const lines = await query<Record<string, unknown>>(supplierInvoicesSql.listInvoiceItemsForExport, params)
+    logger.info({ ...ctx, lines: lines.length, message: "Invoice export served (csv)" })
 
-      const csv = buildCsv(INVOICE_EXPORT_COLUMNS, invoices)
+    const csv = buildCsv(INVOICE_LINE_EXPORT_COLUMNS, lines)
       return new NextResponse(csv, {
         status: 200,
         headers: {

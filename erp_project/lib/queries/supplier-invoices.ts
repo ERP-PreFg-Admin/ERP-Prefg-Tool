@@ -232,7 +232,9 @@ export const supplierInvoicesSql = {
    * Parameters: buildInvoiceParams(...) (15)
    */
   listInvoiceItemsForExport: `
-    SELECT si.invoice_no, si.invoice_date, si.destination,
+     SELECT si.invoice_no, si.invoice_date, si.destination,
+           si.invoice_total, si.eway_bill_no, si.vehicle_no,
+           u.name AS created_by_name, si.created_at,
            m.code AS mfg_code, m.name AS mfg_name,
            sii.line_no, sii.sku_code, sii.parsed_sku_code, sii.sku_name,
            sii.batch, sii.mfg_date, sii.expiry, sii.hsn,
@@ -242,7 +244,8 @@ export const supplierInvoicesSql = {
            ref.po_no AS received_against_po_no
     FROM invoice_mfg si
     INNER JOIN master_mfgs m ON m.id = si.mfg_id
-    INNER JOIN invoice_items_mfg sii ON sii.invoice_id = si.id
+    LEFT  JOIN users u ON u.id = si.created_by
+    LEFT  JOIN invoice_items_mfg sii ON sii.invoice_id = si.id
     LEFT JOIN purchase_orders inw ON inw.id = sii.po_id
     LEFT JOIN purchase_orders ref ON ref.id = sii.received_against_po_id
     ${INVOICE_WHERE}

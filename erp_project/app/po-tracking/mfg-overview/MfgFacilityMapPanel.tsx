@@ -26,12 +26,16 @@ import { Check, AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
+import { EmptyState } from "@/components/ui/empty-state"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { SegmentedToggle } from "@/components/ui/segmented-toggle"
 import { useToast } from "@/components/ui/toast"
 import {
   SidePanel, SidePanelContent, SidePanelHeader, SidePanelTitle,
 } from "@/components/ui/side-panel"
 import { cn } from "@/lib/utils"
+import { uniwareErrorReasons, uniwareErrorMessage } from "@/lib/uniware-error"
 import { DIFF_NEW_CELL_CLASS } from "@/app/approvals/approval-card/diff-colors"
 import { cellState, MAP_STATE_CELL, MAP_STATE_LABEL, type MatrixCell } from "./mapping-state"
 import type { MfgFacilityCell, MfgFacilitySkuRow } from "@/types/masters"
@@ -39,9 +43,26 @@ import type { MfgFacilityCell, MfgFacilitySkuRow } from "@/types/masters"
 /** A SKU is mapped here when it has a row and that row is active. */
 const isMapped = (s: MfgFacilitySkuRow) => s.map_id !== null && s.map_status === "active"
 
+/** Every distinct reason across the pair's rows, cleaned, first-seen order. */
+function dedupeReasons(raws: (string | null)[]): string[] {
+  const seen = new Set<string>()
+  for (const raw of raws) {
+    for (const reason of uniwareErrorReasons(raw)) seen.add(reason)
+  }
+  return [...seen]
+}
+
 /** Mapped, but Uniware has neither acknowledged our push nor reported it. */
 const isUnconfirmed = (s: MfgFacilitySkuRow) =>
   isMapped(s) && s.un_pushed_at === null && s.un_seen_at === null
+
+const MAP_FILTER_OPTIONS = [
+  { key: "all",      label: "All" },
+  { key: "mapped",   label: "Mapped" },
+  { key: "unmapped", label: "Not mapped" },
+] as const
+
+type MapFilter = (typeof MAP_FILTER_OPTIONS)[number]["key"]
 
 export function MfgFacilityMapPanel({
   cell,
@@ -93,6 +114,8 @@ function PanelBody({
     () => new Set(skus.filter(isMapped).map((s) => s.sku_id))
   )
   const [saving, setSaving] = useState<"map" | "code" | "push" | null>(null)
+  const [filter, setFilter] = useState<MapFilter>("all")
+  const [q, setQ] = useState("")
 
   const hasCode = Boolean(cell.un_mfg_code)
   /** What this manufacturer's code WILL be once registered: one per
@@ -117,8 +140,22 @@ function PanelBody({
   const added = [...ticked].filter((id) => !initial.has(id))
   const mapDirty = added.length > 0
   const unconfirmed = skus.filter(isUnconfirmed).length
-  /** Uniware's own reason for the last failure, if it gave one. */
-  const firstError = skus.find((s) => s.un_push_error)?.un_push_error ?? null
+  /** Uniware's own reasons, cleaned — the raw string can be 300 characters of
+   *  their load balancer's HTML or a stringified JSON envelope. Distinct only:
+   *  forty SKUs refused for one missing price is one sentence. */
+  const pushReasons = dedupeReasons(skus.map((s) => s.un_push_error))
+
+  // Filtered on the SERVER state (`initial`), not `ticked`: filtering on the
+  // live tick would drop a SKU out of "Not mapped" the instant you tick it,
+  // reflowing the list under the cursor mid-selection.
+  const needle = q.trim().toLowerCase()
+  const visible = skus.filter((s) => {
+    if (filter === "mapped"   && !initial.has(s.sku_id)) return false
+    if (filter === "unmapped" &&  initial.has(s.sku_id)) return false
+    if (!needle) return true
+    return s.sku_code.toLowerCase().includes(needle)
+      || (s.sku_name ?? "").toLowerCase().includes(needle)
+  })
 
   /** Already-mapped SKUs are locked: Unicommerce has no un-map, so retracting one
    *  here would leave the two systems disagreeing with nothing to surface it. */
@@ -316,11 +353,16 @@ function PanelBody({
                 {unconfirmed} mapped {unconfirmed === 1 ? "SKU is" : "SKUs are"} not yet in
                 Uniware. They stay mapped here either way.
               </p>
-              {/* The most common reason by far, so name it rather than making
-                  someone hover each row: Uniware requires a unitPrice and costing
-                  reaches a SKU only through a recipe. */}
-              {firstError && (
-                <p className="mt-1 text-[11px] opacity-80">{firstError}</p>
+              {/* Named rather than left to a hover on each row: the most common
+                  reason by far is that Uniware requires a unitPrice and costing
+                  reaches a SKU only through a recipe. At normal size — this is
+                  the actionable half, and 11px at 80% opacity buried it. */}
+              {pushReasons.length > 0 && (
+                <ul className="mt-1.5 space-y-0.5">
+                  {pushReasons.map((r) => (
+                    <li key={r} className="break-words">{r}</li>
+                  ))}
+                </ul>
               )}
             </div>
             {canEdit && (
@@ -339,8 +381,22 @@ function PanelBody({
       )}
 
       {/* ── The SKU list ── */}
+      {skus.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <SegmentedToggle options={MAP_FILTER_OPTIONS} active={filter} onSelect={setFilter} size="xs" />
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search SKU code or name…"
+            className="h-8 flex-1 sm:max-w-xs"
+          />
+          <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+            {visible.length} of {skus.length}
+          </span>
+        </div>
+      )}
       <div className="space-y-2">
-        {skus.map((sku) => {
+        {visible.map((sku) => {
             const on = ticked.has(sku.sku_id)
             // Locked once mapped — see toggle(). Genuinely `disabled`, not just
             // styled that way, so keyboard and pointer both refuse.
@@ -384,7 +440,11 @@ function PanelBody({
                   </div>
                 </div>
                 {isUnconfirmed(sku) && (
-                  <Badge variant="warning" className="shrink-0" title={sku.un_push_error ?? undefined}>
+                  <Badge
+                    variant="warning"
+                    className="shrink-0"
+                    title={uniwareErrorMessage(sku.un_push_error) ?? undefined}
+                  >
                     Not in Uniware
                   </Badge>
                 )}
@@ -396,6 +456,11 @@ function PanelBody({
           )
         })}
       </div>
+      {skus.length > 0 && visible.length === 0 && (
+        <div className="py-6 text-center text-sm">
+          <EmptyState hasFilters filteredMessage="No SKUs match this filter." />
+        </div>
+      )}
 
       {/* ── Save ── */}
       {hasCode && skus.length > 0 && (

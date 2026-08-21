@@ -14,58 +14,37 @@
 import { useState } from "react"
 import { Loader2, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
-
-type SyncResult = {
-  total: number
-  synced: number
-  failed: number
-  failures?: { code: string; error: string }[]
-  truncated?: boolean
-  limit?: number
-}
-
-/** One line for the toast — says what the run did, including what it skipped. */
-function summarise(r: SyncResult): string {
-  if (r.total === 0) return "No mirrored POs to sync yet."
-  const parts = [`${r.synced} of ${r.total} synced`]
-  if (r.failed) {
-    parts.push(`${r.failed} failed`)
-    // The first one's reason, since "3 failed" alone leaves nothing to act on.
-    if (r.failures?.[0]) parts.push(`first: ${r.failures[0].code} — ${r.failures[0].error}`)
-  }
-  // Never let a cap pass unmentioned: "40 of 40 synced" would otherwise read as
-  // the whole list when it was the newest 40 of 300.
-  if (r.truncated) parts.push(`only the newest ${r.limit} were checked`)
-  return parts.join(" · ")
-}
+import { apiErrorMessage } from "@/lib/api-error-message"
+import { summariseSync, type SyncResult, type SyncSummary } from "./sync-summary"
 
 export default function SyncUniwareButton({ onDone }: { onDone?: () => void }) {
   const [busy, setBusy]       = useState(false)
-  const [result, setResult]   = useState("")
-  const [failed, setFailed]   = useState(false)
+  const [summary, setSummary] = useState<SyncSummary | null>(null)
 
   async function sync() {
     setBusy(true)
-    setResult("")
-    setFailed(false)
+    setSummary(null)
     try {
       const res  = await fetch("/api/v1/purchase-orders/uniware-status", { method: "POST" })
       const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.error ?? "Couldn't reach Uniware.")
-      setResult(summarise(data as SyncResult))
-      // Partial failure still refreshes: the ones that worked are worth showing.
-      setFailed(Number(data.failed) > 0)
+      // apiErrorMessage rather than `data.error`: withGateway puts the useful
+      // half in `details`, and reading only `error` threw it away.
+      if (!res.ok) throw new Error(apiErrorMessage(data, "Couldn't reach Uniware."))
+      setSummary(summariseSync(data as SyncResult))
       onDone?.()
     } catch (e: unknown) {
-      setResult(e instanceof Error ? e.message : "Couldn't reach Uniware.")
-      setFailed(true)
+      setSummary({
+        counts: "Sync failed",
+        reasons: [e instanceof Error ? e.message : "Couldn't reach Uniware."],
+        failed: true,
+      })
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-start gap-2">
       <Button variant="outline" size="lg" onClick={() => void sync()} disabled={busy}>
         {busy
           ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -73,11 +52,23 @@ export default function SyncUniwareButton({ onDone }: { onDone?: () => void }) {
         {busy ? "Syncing…" : "Sync Uniware"}
       </Button>
       {/* Inline rather than a toast: the run takes seconds and the reader is
-          already looking at this row of the toolbar. */}
-      {result && (
-        <span className={failed ? "text-destructive text-xs" : "text-muted-foreground text-xs"}>
-          {result}
-        </span>
+          already looking at this row of the toolbar.
+
+          Counts and reasons are separate lines because they are separate
+          questions — "did it work" reads at a glance, "why not" is for the
+          person who then has to do something about it. The counts stay muted
+          even on failure: "0 of 5 synced" is a fact, not an error. */}
+      {summary && (
+        <div className="min-w-0 max-w-md text-xs leading-relaxed">
+          <div className="text-muted-foreground">{summary.counts}</div>
+          {summary.reasons.length > 0 && (
+            <ul className={summary.failed ? "text-destructive" : "text-muted-foreground"}>
+              {summary.reasons.map((r) => (
+                <li key={r} className="break-words">{r}</li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
     </div>
   )
