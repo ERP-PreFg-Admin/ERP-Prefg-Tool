@@ -86,6 +86,9 @@ export type SkuVariantRow = {
   filling_uom: string | null
   mrp: number | null
   status: string | null
+  /** Owns this family's RM formulation. Only selected by
+   *  selectVariantsByBrandAndSno; TINYINT(1) arrives as 0/1. */
+  is_base_sku?: number | null
 }
 
 /**

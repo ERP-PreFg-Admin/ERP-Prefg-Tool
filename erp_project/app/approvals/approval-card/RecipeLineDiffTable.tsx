@@ -140,7 +140,17 @@ function parseBomApprovalItems(items: Approval["items"]) {
       })
     }
   }
-  return { mode, reason, changeTypes, lines: [...lineMap.values()], artifactRows }
+  // Variant siblings this approval will ALSO re-version — one
+  // variant_child:<sku_id> item per sibling, staged when a base SKU's RM
+  // changed (see create-full). The reviewer has to see the blast radius:
+  // approving this creates a recipe version for each of these SKUs too.
+  const variantChildren: string[] = []
+  for (const it of items) {
+    const m = it.field_name.match(/^variant_child:(\d+)$/)
+    if (m) variantChildren.push(it.new_value || `#${m[1]}`)
+  }
+
+  return { mode, reason, changeTypes, lines: [...lineMap.values()], artifactRows, variantChildren }
 }
 
 
@@ -201,7 +211,7 @@ export function RecipeLineDiffTable({ items, materialMap, hideReason, compact }:
    *  instead of side-by-side columns — used by the entity History table. */
   compact?: boolean
 }) {
-  const { mode, reason, changeTypes, lines , artifactRows} = parseBomApprovalItems(items)
+  const { mode, reason, changeTypes, lines , artifactRows, variantChildren } = parseBomApprovalItems(items)
   // A line with no field diffs is just the "__present__" bookkeeping marker
   // (update-existing carries one for every unchanged line so applyAndArchive
   // knows to keep it) — not an actual change, so it's excluded from display.
@@ -231,6 +241,13 @@ export function RecipeLineDiffTable({ items, materialMap, hideReason, compact }:
         ))}
       </div>
       {reason && !hideReason && <p className="text-xs text-muted-foreground">{reason}</p>}
+      {variantChildren.length > 0 && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          <span className="font-medium">Variant family:</span> approving this also creates a new RM
+          version for {variantChildren.join(", ")} — the other pack sizes of this product. Each keeps
+          its own PM lines, which are read at approval time and so are not listed here.
+        </p>
+      )}
       {compact ? (
         <ConsolidatedDiffTable
           rows={[

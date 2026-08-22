@@ -20,9 +20,13 @@ import { isRmTotalValid } from "@/lib/validation/recipe"
 import { rmTotal, type RecipeLineRow, type RecipeMaterialOption } from "./RecipeLineEditorGrid"
 import { parseBomCsv } from "./recipe-csv"
 import { uploadPendingArtifacts } from "./recipe-artifact-upload"
+import type { RmLock } from "@/lib/masters/variant-rm-lock"
 
 export type WizardStep = 1 | 2 | 3 | 4 | 5
 export type EntryMethod = "manual" | "csv"
+
+/** A sibling variant that a base-SKU RM change will re-version on approval. */
+export type PropagationTarget = { sku_id: number; sku_code: string; bom_code: string | null }
 
 export function useBomWizard({
   rmMaterials,
@@ -57,6 +61,13 @@ export function useBomWizard({
   // edit to an established recipe. Not required for a SKU's very first Recipe.
   const [reason, setReason] = useState("")
   const [changeType, setChangeType] = useState<("rm" | "pm")[]>([])
+  // Variant-family RM rule, resolved server-side by check-existing the moment a
+  // SKU is picked. Advisory here — create-full re-resolves it and rejects an
+  // altered RM regardless of what this client did.
+  const [rmLock, setRmLock] = useState<RmLock | null>(null)
+  const [propagationTargets, setPropagationTargets] = useState<PropagationTarget[]>([])
+
+  const rmLocked = rmLock?.locked === true
 
   const isDirty = skuId != null || rmRows.length > 0 || pmRows.length > 0 || pendingArtifactFiles.length > 0
 
@@ -76,6 +87,8 @@ export function useBomWizard({
     setPendingArtifactFiles([])
     setReason("")
     setChangeType([])
+    setRmLock(null)
+    setPropagationTargets([])
     setLoading(false)
   }
 
@@ -102,9 +115,30 @@ export function useBomWizard({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Failed to check existing Recipes")
 
+      setRmLock(data.rm_lock ?? null)
+      setPropagationTargets(data.propagation_targets ?? [])
+
+      // A locked SKU's RM is not its own to enter — seed the read-only grid from
+      // the family's owner so the submitter sees the formulation they're
+      // packaging, and so an untouched submit matches what the server expects.
+      if (data.rm_lock?.locked && (data.inherited_rm_lines ?? []).length > 0) {
+        setRmRows(
+          (data.inherited_rm_lines as { mtrl_id: number; amount: number; uom: string | null }[]).map((l) => ({
+            mtrl_type: "rm" as const,
+            mtrl_id: l.mtrl_id,
+            amount: String(l.amount),
+            uom: l.uom ?? "",
+          }))
+        )
+      }
+
       if (data.hasActive) {
         setExistingBomId(data.recipe_id)
         setExistingBomCode(data.bom_code)
+        setStep(2)
+      } else if (data.rm_lock?.locked) {
+        // No recipe of its own, but the family already owns an RM — Step 2 is
+        // still where that has to be explained, before any lines are entered.
         setStep(2)
       } else {
         setStep(3)
@@ -140,18 +174,27 @@ export function useBomWizard({
         setCsvErrors(errors)
         return
       }
-      setRmRows(rows.filter((r) => r.mtrl_type === "rm"))
+      // A locked SKU keeps its inherited RM even if the CSV carries RM rows —
+      // importing them would propose an RM change create-full then rejects,
+      // with the user left guessing which half of their file was the problem.
+      // Only the PM half of the file is theirs to set; the RM section renders
+      // locked with the inherited values, which is where that reads.
+      if (!rmLocked) setRmRows(rows.filter((r) => r.mtrl_type === "rm"))
       setPmRows(rows.filter((r) => r.mtrl_type === "pm"))
       setCsvParsed(true)
     })
   }
 
+  // Step 2 is shown for either reason: this SKU already has a Recipe, or its
+  // variant family already owns the RM this one must inherit.
+  const step2Shown = existingBomId != null || rmLocked
+
   function goBack() {
     setError(null)
-    // Step 3's "back" skips Step 2 if it was never shown (SKU had no existing
-    // active Recipe, so existingBomId is still null) — otherwise every other
-    // step just steps back by 1. Step 1 is the first step, so it has no back target.
-    if (step === 3) setStep(existingBomId != null ? 2 : 1)
+    // Step 3's "back" skips Step 2 if it was never shown — otherwise every
+    // other step just steps back by 1. Step 1 is the first step, so it has no
+    // back target.
+    if (step === 3) setStep(step2Shown ? 2 : 1)
     else setStep((s) => (s - 1) as WizardStep)
   }
 
@@ -252,6 +295,10 @@ export function useBomWizard({
     setReason,
     changeType,
     setChangeType,
+    rmLock,
+    rmLocked,
+    propagationTargets,
+    step2Shown,
     requestClose,
     closeWizard,
     handleSelectSku,

@@ -3,7 +3,7 @@
 // genuinely different recipe — and the bom_code is what production quotes.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { diffBomLines, type DiffableLine } from "../../lib/masters/recipe-version"
+import { diffBomLines, resolveRecipeVersions, type DiffableLine } from "../../lib/masters/recipe-version"
 
 const rm = (id: number, amount: number | string, uom = "kg"): DiffableLine =>
   ({ mtrl_type: "rm", mtrl_id: id, amount, uom })
@@ -113,4 +113,97 @@ test("a non-numeric amount falls back to the raw value rather than becoming NaN"
 test("an empty prior BOM against any lines is a change on the populated sides", () => {
   assert.deepEqual(diffBomLines([], [rm(1, 30)]), { rmChanged: true, pmChanged: false })
   assert.deepEqual(diffBomLines([], []), { rmChanged: false, pmChanged: false })
+})
+
+// ── resolveRecipeVersions ───────────────────────────────────────────────────
+// RM counts on the variant FAMILY's lineage, PM on the SKU's own. The bug this
+// replaced numbered both per SKU, so a variant's first recipe was stamped RM1
+// even when the family formulation was already at RM2 — one formulation wearing
+// two version numbers, which is the one thing the version exists to prevent.
+
+test("with no family, versions count on the SKU's own lineage", () => {
+  assert.deepEqual(
+    resolveRecipeVersions({ prior: null, priorLines: [], newLines: BASE, familyRm: null }),
+    { rmVersion: 1, pmVersion: 1 }
+  )
+  // An RM-only change bumps only RM, exactly as before.
+  assert.deepEqual(
+    resolveRecipeVersions({
+      prior: { rm_version: 1, pm_version: 1 },
+      priorLines: BASE,
+      newLines: [rm(1, 35), rm(2, 65), pm(10, 1), pm(11, 2)],
+      familyRm: null,
+    }),
+    { rmVersion: 2, pmVersion: 1 }
+  )
+})
+
+test("a variant's FIRST recipe joins the family's RM version, it does not restart at 1", () => {
+  // THE REPORTED BUG. Base went RM1 -> RM2 while the variant had no recipe at
+  // all; the variant's first recipe must be RM2, because the RM it carries IS
+  // revision 2 of the formulation. PM is its own, so PM starts at 1.
+  const familyRmLines = [rm(1, 35), rm(2, 65)]
+  assert.deepEqual(
+    resolveRecipeVersions({
+      prior: null,                             // this variant has no prior recipe
+      priorLines: [],
+      newLines: [...familyRmLines, pm(99, 1)], // inherited RM + its own PM
+      familyRm: { version: 2, lines: familyRmLines },
+    }),
+    { rmVersion: 2, pmVersion: 1 }
+  )
+})
+
+test("a variant re-submitting the family RM unchanged keeps the RM version", () => {
+  // A PM-only revision on a locked variant must not mint an RM version — the
+  // formulation did not move.
+  const familyRmLines = [rm(1, 100)]
+  assert.deepEqual(
+    resolveRecipeVersions({
+      prior: { rm_version: 3, pm_version: 4 },
+      priorLines: [...familyRmLines, pm(99, 1)],
+      newLines: [...familyRmLines, pm(99, 2)],  // PM amount changed only
+      familyRm: { version: 3, lines: familyRmLines },
+    }),
+    { rmVersion: 3, pmVersion: 5 }
+  )
+})
+
+test("the base changing RM bumps from the FAMILY's version, not its own", () => {
+  // A base whose own last recipe lags the family (its siblings carried the
+  // formulation forward) must still continue the family's lineage, or two
+  // different formulations end up sharing a version number.
+  assert.deepEqual(
+    resolveRecipeVersions({
+      prior: { rm_version: 1, pm_version: 1 },
+      priorLines: [rm(1, 100), pm(10, 1)],
+      newLines: [rm(2, 100), pm(10, 1)],       // new formulation
+      familyRm: { version: 4, lines: [rm(1, 100)] },
+    }),
+    { rmVersion: 5, pmVersion: 1 }
+  )
+})
+
+test("PM version is never taken from the family — it is genuinely per pack size", () => {
+  // Same RM, wildly different PM histories. A 100ml carton revision must not
+  // renumber the 50ml's PM.
+  const familyRmLines = [rm(1, 100)]
+  assert.deepEqual(
+    resolveRecipeVersions({
+      prior: { rm_version: 2, pm_version: 7 },
+      priorLines: [...familyRmLines, pm(50, 1)],
+      newLines: [...familyRmLines, pm(50, 1)],  // nothing changed at all
+      familyRm: { version: 2, lines: familyRmLines },
+    }),
+    { rmVersion: 2, pmVersion: 7 }
+  )
+})
+
+test("a family at version 0 (no recipe yet) behaves like no family", () => {
+  // familyRm is null when nobody in the family has a recipe — the first member
+  // to create one seeds the lineage at 1.
+  assert.deepEqual(
+    resolveRecipeVersions({ prior: null, priorLines: [], newLines: BASE, familyRm: null }),
+    { rmVersion: 1, pmVersion: 1 }
+  )
 })

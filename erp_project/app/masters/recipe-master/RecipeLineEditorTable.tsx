@@ -7,7 +7,7 @@
  * a long scroll of repeated card chrome.
  */
 
-import { Plus, Trash2 } from "lucide-react"
+import { Lock, Plus, Trash2 } from "lucide-react"
 import {
   Table,
   TableBody,
@@ -30,11 +30,15 @@ function LineTable({
   rows,
   materials,
   onChange,
+  locked,
+  lockNote,
 }: {
   mtrlType: "rm" | "pm"
   rows: RecipeLineRow[]
   materials: RecipeMaterialOption[]
   onChange: (rows: RecipeLineRow[]) => void
+  locked?: boolean
+  lockNote?: string
 }) {
   const total = mtrlType === "rm" ? rmTotal(rows) : null
   const balanced = total != null && rows.length > 0 && isRmTotalValid(total)
@@ -56,7 +60,10 @@ function LineTable({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">{mtrlType === "rm" ? "Raw Materials (RM)" : "Packing Materials (PM)"}</p>
+        <p className="flex items-center gap-1.5 text-sm font-medium">
+          {mtrlType === "rm" ? "Raw Materials (RM)" : "Packing Materials (PM)"}
+          {locked && <Lock className="h-3.5 w-3.5 text-muted-foreground" />}
+        </p>
         {total != null && rows.length > 0 && (
           <Badge variant={balanced ? "success" : "warning"} className="font-mono">
             {total.toFixed(2)}%
@@ -64,7 +71,11 @@ function LineTable({
         )}
       </div>
 
-      {total != null && rows.length > 0 && !balanced && (
+      {locked && lockNote && <Callout variant="info">{lockNote}</Callout>}
+
+      {/* Suppressed while locked — the total is the source recipe's to fix, not
+          reachable from here. */}
+      {!locked && total != null && rows.length > 0 && !balanced && (
         <Callout variant="warning">
           RM percentages must total between 99.9% and 100.1% (currently {total.toFixed(2)}%).
         </Callout>
@@ -92,7 +103,22 @@ function LineTable({
                 </TableCell>
               </TableRow>
             ) : (
-              rows.map((row, i) => (
+              rows.map((row, i) => locked ? (
+                // Plain text, not disabled inputs: an inherited formulation is
+                // not this screen's to edit, which a greyed-out control reads as
+                // merely "off right now".
+                <TableRow key={i} className="bg-muted/40">
+                  <TableCell>
+                    <p className="text-sm">{materials.find((m) => m.id === row.mtrl_id)?.name ?? `ID ${row.mtrl_id ?? "—"}`}</p>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      {materials.find((m) => m.id === row.mtrl_id)?.code ?? "—"}
+                    </p>
+                  </TableCell>
+                  <TableCell className="tabular-nums text-sm">{row.amount || "—"}</TableCell>
+                  <TableCell className="text-sm uppercase text-muted-foreground">{row.uom || "—"}</TableCell>
+                  <TableCell />
+                </TableRow>
+              ) : (
                 <TableRow key={i}>
                   <TableCell>
                     <FuzzySelect
@@ -142,14 +168,16 @@ function LineTable({
         </Table>
       </div>
 
-      <button
-        type="button"
-        onClick={addRow}
-        className="rounded-lg border border-dashed border-muted-foreground/40 px-3 py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors flex items-center gap-1.5"
-      >
-        <Plus className="h-3.5 w-3.5" />
-        Add {mtrlType.toUpperCase()} line
-      </button>
+      {!locked && (
+        <button
+          type="button"
+          onClick={addRow}
+          className="rounded-lg border border-dashed border-muted-foreground/40 px-3 py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors flex items-center gap-1.5"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add {mtrlType.toUpperCase()} line
+        </button>
+      )}
     </div>
   )
 }
@@ -161,6 +189,8 @@ export function RecipeLineEditorTable({
   onChangePm,
   rmMaterials,
   pmMaterials,
+  rmLocked,
+  rmLockNote,
 }: {
   rmRows: RecipeLineRow[]
   pmRows: RecipeLineRow[]
@@ -168,10 +198,21 @@ export function RecipeLineEditorTable({
   onChangePm: (rows: RecipeLineRow[]) => void
   rmMaterials: RecipeMaterialOption[]
   pmMaterials: RecipeMaterialOption[]
+  /** Non-base variant: RM is inherited from the family's base and only editable
+   *  there. See lib/masters/variant-rm-lock.ts. */
+  rmLocked?: boolean
+  rmLockNote?: string
 }) {
   return (
     <div className="space-y-6">
-      <LineTable mtrlType="rm" rows={rmRows} materials={rmMaterials} onChange={onChangeRm} />
+      <LineTable
+        mtrlType="rm"
+        rows={rmRows}
+        materials={rmMaterials}
+        onChange={onChangeRm}
+        locked={rmLocked}
+        lockNote={rmLockNote}
+      />
       <LineTable mtrlType="pm" rows={pmRows} materials={pmMaterials} onChange={onChangePm} />
     </div>
   )

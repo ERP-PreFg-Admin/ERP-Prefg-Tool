@@ -250,6 +250,8 @@ export default function RecipeMasterComponent({
         onChangePendingArtifactFiles={panel.setPendingArtifactFiles}
         pendingArtifactRemoveIds={panel.pendingArtifactRemoveIds}
         onChangePendingArtifactRemoveIds={panel.setPendingArtifactRemoveIds}
+        rmLock={panel.rmLock}
+        propagationTargets={panel.propagationTargets}
       />
 
       <EntityHistoryDialog

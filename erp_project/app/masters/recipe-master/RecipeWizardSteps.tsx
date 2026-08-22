@@ -6,14 +6,25 @@
  * nav — each step here is pure presentation over useBomWizard's state.
  */
 
+import { Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Callout } from "@/components/ui/callout"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { RecipeLineEditorGrid, rmTotal, type RecipeLineRow, type RecipeMaterialOption } from "./RecipeLineEditorGrid"
 import { RecipeArtifactsEditor } from "./RecipeArtifactsEditor"
 import { ChangeTypeCheckboxes } from "./ChangeTypeCheckboxes"
 import { CSV_HEADER, buildBomCsvTemplate } from "./recipe-csv"
-import type { EntryMethod } from "./useRecipeWizard"
+import type { EntryMethod, PropagationTarget } from "./useRecipeWizard"
+import type { RmLock } from "@/lib/masters/variant-rm-lock"
 import type { Sku } from "@/types/masters"
+
+/** The RM-section note shown on the line-entry step of a locked variant. */
+export function rmLockNote(lock: RmLock | null): string | undefined {
+  if (!lock?.locked) return undefined
+  return lock.baseDesignated
+    ? `Inherited from the base SKU ${lock.ownerSkuCode} — change it there and every variant updates together.`
+    : `Inherited from ${lock.ownerSkuCode}. Designate a base SKU in SKU Master → Variants to change RM.`
+}
 
 export function Step1SkuSelect({
   skus,
@@ -48,25 +59,67 @@ export function Step1SkuSelect({
 
 export function Step2ExistingBom({
   existingBomCode,
+  rmLock,
   onUpdateExisting,
   onCreateNewVersion,
 }: {
   existingBomCode: string | null
+  /** Resolved by check-existing. When locked, this SKU is a non-base variant and
+   *  its RM comes from the family — the one thing the user must understand
+   *  before entering any lines. */
+  rmLock: RmLock | null
   onUpdateExisting: () => void
   onCreateNewVersion: () => void
 }) {
+  const locked = rmLock?.locked === true
   return (
     <div className="space-y-4 py-2">
-      <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2.5 text-sm text-amber-800 dark:bg-amber-900/20 dark:border-amber-900 dark:text-amber-400">
-        A Recipe already exists for this SKU ({existingBomCode}). Would you like to update the
-        existing Recipe or create a new version?
-      </div>
+      {existingBomCode && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2.5 text-sm text-amber-800 dark:bg-amber-900/20 dark:border-amber-900 dark:text-amber-400">
+          A Recipe already exists for this SKU ({existingBomCode}). Would you like to update the
+          existing Recipe or create a new version?
+        </div>
+      )}
+
+      {locked && rmLock.locked && (
+        <div className="rounded-md bg-blue-50 border border-blue-200 px-3 py-2.5 text-sm text-blue-800 dark:bg-blue-950/30 dark:border-blue-900 dark:text-blue-300 space-y-1.5">
+          <p className="flex items-center gap-1.5 font-medium">
+            <Lock className="h-3.5 w-3.5" />
+            This SKU is a variant — its RM is shared
+          </p>
+          <p>
+            <span className="font-mono">{rmLock.ownerSkuCode}</span> in this variant family already
+            has a recipe
+            {rmLock.ownerBomCode ? <> (<span className="font-mono">{rmLock.ownerBomCode}</span>)</> : null}.
+            These SKUs are the same formulation in different pack sizes, so the RM comes from there
+            and you can only set <strong>PM</strong> here.
+          </p>
+          <p>
+            {rmLock.baseDesignated ? (
+              <>
+                To change the RM, create the recipe from the base SKU{" "}
+                <span className="font-mono">{rmLock.ownerSkuCode}</span> — every variant is then
+                updated together.
+              </>
+            ) : (
+              <>
+                No base SKU is designated for this family yet, so the RM is being inherited from the
+                most recent recipe. To change RM, mark a base SKU first in{" "}
+                <strong>SKU Master → Variants</strong>.
+              </>
+            )}
+          </p>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row gap-2">
-        <Button variant="outline" size="sm" onClick={onUpdateExisting}>
-          Update Existing Recipe
-        </Button>
+        {existingBomCode && (
+          <Button variant="outline" size="sm" onClick={onUpdateExisting}>
+            Update Existing Recipe
+          </Button>
+        )}
         <Button size="sm" onClick={onCreateNewVersion}>
-          Create New Recipe Version →
+          {existingBomCode ? "Create New Recipe Version →" : "Continue →"}
         </Button>
       </div>
     </div>
@@ -126,6 +179,8 @@ export function Step4LineEntry({
   onChangeReason,
   changeType,
   onChangeChangeType,
+  rmLock,
+  propagationTargets,
 }: {
   effectiveFrom: string
   onChangeEffectiveFrom: (v: string) => void
@@ -148,7 +203,10 @@ export function Step4LineEntry({
   onChangeReason: (v: string) => void
   changeType: ("rm" | "pm")[]
   onChangeChangeType: (v: ("rm" | "pm")[]) => void
+  rmLock: RmLock | null
+  propagationTargets: PropagationTarget[]
 }) {
+  const rmLocked = rmLock?.locked === true
   return (
     <div className="space-y-4 py-2">
       <div className="grid grid-cols-2 gap-3">
@@ -174,9 +232,21 @@ export function Step4LineEntry({
         </div>
       </div>
 
+      {/* A base SKU's RM change is not confined to this recipe — say so before
+          the lines are entered, not after submit. */}
+      {!rmLocked && propagationTargets.length > 0 && (
+        <Callout variant="warning">
+          Changing RM here also creates a new RM version for{" "}
+          {propagationTargets.length} variant{propagationTargets.length === 1 ? "" : "s"} of this
+          product ({propagationTargets.map((t) => t.sku_code).join(", ")}), each keeping its own PM.
+          A PM-only change affects this SKU alone.
+        </Callout>
+      )}
+
       {entryMethod === "csv" && !csvParsed ? (
         <div className="space-y-3">
           <p className="text-3sm text-muted-foreground">
+            {rmLocked && "RM lines in the file are ignored — RM is inherited for this variant. "}
             Columns required (all mandatory):{" "}
             <code className="text-3sm">{CSV_HEADER.join(", ")}</code>
             {" · "}
@@ -208,6 +278,8 @@ export function Step4LineEntry({
           onChangePm={onChangePm}
           rmMaterials={rmMaterials}
           pmMaterials={pmMaterials}
+          rmLocked={rmLocked}
+          rmLockNote={rmLockNote(rmLock)}
         />
       )}
 
@@ -227,6 +299,7 @@ export function Step4LineEntry({
             onChangeReason={onChangeReason}
             changeType={changeType}
             onChangeChangeType={onChangeChangeType}
+            hideRm={rmLocked}
           />
         </div>
       )}
@@ -293,6 +366,8 @@ export function Step5Review({
   isRevision,
   reason,
   changeType,
+  rmLock,
+  propagationTargets,
 }: {
   skus: Sku[]
   skuId: number | null
@@ -304,7 +379,11 @@ export function Step5Review({
   isRevision: boolean
   reason: string
   changeType: ("rm" | "pm")[]
+  rmLock: RmLock | null
+  propagationTargets: PropagationTarget[]
 }) {
+  const rmLocked = rmLock?.locked === true
+  const willPropagate = !rmLocked && propagationTargets.length > 0 && changeType.includes("rm")
   return (
     <div className="space-y-4 py-2 text-sm">
       <div className="grid grid-cols-3 gap-3">
@@ -323,16 +402,30 @@ export function Step5Review({
       </div>
 
       <SummaryLineList
-        title="Raw Materials (RM)"
+        title={rmLocked ? "Raw Materials (RM) — inherited" : "Raw Materials (RM)"}
         rows={rmRows}
         materials={rmMaterials}
         totalBadge={`${rmTotal(rmRows).toFixed(2)}%`}
       />
+      {rmLocked && rmLock.locked && (
+        <Callout variant="info">
+          RM comes from <span className="font-mono">{rmLock.ownerSkuCode}</span> and is submitted
+          unchanged. Only the PM lines below are yours.
+        </Callout>
+      )}
       <SummaryLineList
         title="Packing Materials (PM)"
         rows={pmRows}
         materials={pmMaterials}
       />
+
+      {willPropagate && (
+        <Callout variant="warning">
+          On approval this also creates a new RM version for{" "}
+          {propagationTargets.map((t) => t.sku_code).join(", ")} — each keeping its own PM lines, so
+          the whole variant family moves to the new formulation together.
+        </Callout>
+      )}
 
       {isRevision && (
         <div>

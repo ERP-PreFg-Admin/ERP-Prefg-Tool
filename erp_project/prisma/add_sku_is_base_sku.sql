@@ -1,0 +1,47 @@
+-- WHAT: adds master_skus.is_base_sku — marks which member of a variant family
+-- (the SKUs sharing one brand + base_sku_sno) owns the RM formulation.
+--
+-- WHY: a variant family is the same product in different pack sizes, so its RM
+-- is physically identical across every member and only PM differs. Nothing in
+-- the app knew that, so each variant carried an independent recipe and RM could
+-- drift silently between pack sizes of one product — which then prices and
+-- manufactures wrong. Recipe Master now locks RM on a non-base variant and only
+-- lets it change from the base SKU, fanning the change out to every sibling.
+--
+-- The base could not be derived: base_sku_sno is a value every family member
+-- SHARES, not a pointer to one of them, and the app never writes it (values
+-- arrive from upstream ETL). sku_variants.parent_sku_id would have been the
+-- natural home but that table is dead — zero rows read or written by app code.
+-- So the base is picked by a human, in SKU Master -> Variants.
+--
+-- "At most one base per family" is enforced BY CONSTRUCTION, not by an index:
+-- every write is skus.clearBaseForFamily + skus.setBaseSku inside one
+-- transaction (app/api/v1/masters/skus/route.ts, action "set-base"). MySQL has
+-- no filtered unique index, and a unique index on (brand, base_sku_sno,
+-- is_base_sku) would wrongly forbid two NON-base members too.
+--
+-- NOT re-runnable: this is real MySQL 8.0, which has no
+-- ADD COLUMN IF NOT EXISTS. Run once per schema (DB_NAME_TEST and DB_NAME_PROD).
+--
+-- ⚠️ STATE AS OF 2026-08-21, surveyed before writing this file:
+--   mcaff_prefg_dev   is_base_sku ALREADY EXISTS as tinyint(1) NOT NULL DEFAULT 0
+--                     — identical to the statement below, so DO NOT run it there;
+--                     it will fail with "Duplicate column name 'is_base_sku'".
+--   mcaff_prefg_prod  column ABSENT. This file is for prod.
+-- Verify with:
+--   SELECT TABLE_SCHEMA, COLUMN_TYPE FROM information_schema.COLUMNS
+--    WHERE TABLE_NAME='master_skus' AND COLUMN_NAME='is_base_sku';
+--
+-- The same survey found, on dev: 306 SKUs, 302 carrying a base_sku_sno, 56
+-- multi-member variant families, and ZERO with a base marked. That zero is why
+-- resolveRmLock has to work un-designated (rule 4) instead of demanding a base
+-- up front — otherwise all 56 families would be blocked on day one.
+--
+-- No backfill. Families work un-designated: with no base marked, RM is still
+-- inherited from whichever sibling already has a recipe (resolveRmLock rule 4
+-- in lib/masters/variant-rm-lock.ts), and designating a base is forced only
+-- when someone actually needs to CHANGE the RM. Guessing a base — smallest
+-- filling, lowest id — would silently hand RM ownership to the wrong SKU.
+
+ALTER TABLE master_skus
+  ADD COLUMN is_base_sku TINYINT(1) NOT NULL DEFAULT 0;

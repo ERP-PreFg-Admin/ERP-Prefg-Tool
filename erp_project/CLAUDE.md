@@ -177,6 +177,69 @@ Reads go through the matrix on `/po-tracking/mfg-overview`; writes are **direct,
 no approval flow**, matching the parent relation (`master_recipe_mfg`, see
 `app/api/v1/manufacturing/lines/route.ts:5`).
 
+### SKU variant families — RM is family-scoped, PM is SKU-scoped
+
+Two SKUs are variants iff they share **both** `master_skus.brand` and
+`master_skus.base_sku_sno`. That key is **symmetric** — every member holds the
+*same* `base_sku_sno`; it is not a pointer to a base row. `base_sku_sno` is
+never written by app code (upstream ETL owns it), and `sku_variants`
+(which *does* have `parent_sku_id`) is dead: zero reads, zero writes.
+
+A family is the same formulation in different pack sizes, so **RM is identical
+across the family and only PM differs**. Recipe Master enforces that:
+
+- `master_skus.is_base_sku` marks the one member that owns the family's RM.
+  Picked by a human in SKU Master → Variants (`action: "set-base"`), a direct
+  write with no approval flow. **At most one base per family holds by
+  construction, not by an index** — every write is
+  `skus.clearBaseForFamily` then `skus.setBaseSku`, in that order, in one
+  transaction. Split them and a family gets two bases.
+- `resolveRmLock` in **`lib/masters/variant-rm-lock.ts`** is the single answer to
+  "may this SKU's recipe change RM?" — base ⇒ yes; any other member of a family
+  where someone already has a recipe ⇒ no. With **no base marked** it still locks
+  and inherits from the newest recipe in the family, because 0 of the 56 live
+  families have a base marked and demanding one would block every recipe.
+- `create-full` re-resolves it server-side and 400s `rm_locked` on an altered RM.
+  The greyed-out RM grid is never the guard — `sku_id` is a guessable integer.
+
+**THE INVARIANT: every active recipe in a variant family carries the same
+`rm_version`.** No DB constraint can express it (it spans every active recipe of
+every SKU sharing a grouping key), so it is enforced in application code at all
+four doors that can activate a recipe — miss one and it is only a convention:
+
+| Door | Guard |
+|---|---|
+| `create-full` (wizard/edit) | resolves `resolveRmLock`, 400s `rm_locked` |
+| `createRecipeVersion` (CSV bulk **and** the fan-out) | refuses a variant RM that differs from the family, and refuses an RM change that would strand live siblings |
+| `propagateRmToVariants` | **atomic** — a failed sibling throws, rolling the base's own version back with it, then re-asserts `describeRmDrift` before returning |
+| `update-status` → active | 409 `variant_rm_drift` if activating that version would split the family |
+
+`rmDrift` / `describeRmDrift` (`lib/masters/variant-rm-lock.ts`) is the predicate;
+`recipeSql.selectVariantFamiliesWithRmDrift` audits the whole schema for
+violations and should always return zero rows.
+
+**`rm_version` is family-scoped; `pm_version` is SKU-scoped.** Both are decided
+by `resolveRecipeVersions` in `lib/masters/recipe-version.ts`, and RM counts
+against the family's **RM lineage head** (`rmLineageHead` — highest
+`rm_version`, newest recipe as tie-break), not the SKU's own prior. Counting RM
+per SKU meant a variant whose first recipe came *after* the base had moved to
+RM2 was stamped `RM1` — one formulation wearing two version numbers, which is
+what the version exists to prevent. The lock and the numbering read the *same*
+head, so they cannot disagree about which recipe they mean.
+
+**One approval fans out to several recipes.** When the base's RM changes,
+`create-full` stages one `variant_child:<sku_id>` approval_item per sibling that
+has a recipe. Only the sku_id — each sibling's PM lines are read *at approval
+time* by `propagateRmToVariants`, so a PM edit landing between submit and approve
+survives, and a rejection needs no cleanup because no sibling rows exist yet.
+`createRecipeVersion` is the shared "make one approved version" step, used by
+both this fan-out and `bomBulkHandler`; a sibling that fails is logged and
+skipped rather than taking the whole approval down.
+
+> The Recipe Archive covers `status IN ('inactive','discontinued')`. `discontinued`
+> was added because that is what supersession stamps — scoping it to `inactive`
+> alone meant approving a new version left its predecessor in no list at all.
+
 ### ENUM columns
 
 Status columns are `ENUM` in MySQL. Inserting an unknown value **silently fails** (or errors in strict mode) and rolls back the transaction. When adding a new status value (e.g. `in_review`, `draft`) you must:
@@ -478,6 +541,7 @@ it to `/api/v1/v2/` — a 404 that compiled, linted and type-checked.
 | `lib/costing/final-costing.ts` | The Agreed Final Costing formula, in one place |
 | `lib/queries/` | SQL strings grouped by domain (see table above) |
 | `lib/approvals/module-handlers.ts` | Strategy pattern — approval logic per module |
+| `lib/masters/variant-rm-lock.ts` | `resolveRmLock` / `rmPropagationTargets` — RM belongs to the variant family, PM to the SKU. Pure; the route must re-resolve it server-side |
 | `lib/master-routes/edit-match.ts` | "Is this CSV row an edit?" — exact business-code match only |
 | `app/api/v1/approvals/[id]/route.ts` | Approve / reject handler (uses MODULE_HANDLERS) |
 | `app/api/v1/approvals/entity/route.ts` | GET rejection info for edit dialogs |

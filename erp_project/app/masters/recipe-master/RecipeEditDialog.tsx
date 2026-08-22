@@ -13,13 +13,17 @@
 
 import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Callout } from "@/components/ui/callout"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select } from "@/components/ui/select"
 import { RecipeLineEditorTable } from "./RecipeLineEditorTable"
 import { ChangeTypeCheckboxes } from "./ChangeTypeCheckboxes"
 import { RecipeArtifactsAddButton, RecipeArtifactsList } from "./RecipeArtifactsEditor"
+import { rmLockNote } from "./RecipeWizardSteps"
 import { RECIPE_STATUS_VALUES } from "@/lib/validation/recipe"
 import type { RecipeLineRow, RecipeMaterialOption } from "./RecipeLineEditorGrid"
+import type { PropagationTarget } from "./useRecipeWizard"
+import type { RmLock } from "@/lib/masters/variant-rm-lock"
 import type { RecipeArtifact } from "@/types/masters"
 
 const STATUS_LABELS: Record<string, string> = {
@@ -60,6 +64,8 @@ export function RecipeEditDialog({
   onChangePendingArtifactFiles,
   pendingArtifactRemoveIds,
   onChangePendingArtifactRemoveIds,
+  rmLock,
+  propagationTargets,
 }: {
   open: boolean
   bomCode: string | null
@@ -95,7 +101,14 @@ export function RecipeEditDialog({
   onChangePendingArtifactFiles: (files: File[]) => void
   pendingArtifactRemoveIds: number[]
   onChangePendingArtifactRemoveIds: (ids: number[]) => void
+  /** Variant-family RM rule for this recipe's SKU — locked means RM is
+   *  inherited and only editable from the family's base. */
+  rmLock: RmLock | null
+  /** Siblings a base-SKU RM change will re-version on approval. */
+  propagationTargets: PropagationTarget[]
 }) {
+  const rmLocked = rmLock?.locked === true
+  const willPropagate = !rmLocked && propagationTargets.length > 0 && changeType.includes("rm")
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onCancel() }}>
       <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
@@ -176,7 +189,16 @@ export function RecipeEditDialog({
             changeType={changeType}
             onChangeChangeType={onChangeChangeType}
             disabled={saving}
+            hideRm={rmLocked}
           />
+
+          {willPropagate && (
+            <Callout variant="warning">
+              On approval this also creates a new RM version for{" "}
+              {propagationTargets.map((t) => t.sku_code).join(", ")} — the other pack sizes of this
+              product — each keeping its own PM lines.
+            </Callout>
+          )}
         </div>
 
         <div className="overflow-y-auto flex-1 min-h-0 py-1">
@@ -187,6 +209,8 @@ export function RecipeEditDialog({
             onChangePm={onChangePm}
             rmMaterials={rmMaterials}
             pmMaterials={pmMaterials}
+            rmLocked={rmLocked}
+            rmLockNote={rmLockNote(rmLock)}
           />
         </div>
 

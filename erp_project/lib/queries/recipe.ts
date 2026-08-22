@@ -228,7 +228,7 @@ export const bom = {
    * without a second round-trip. Params: [id]
    */
   selectBomHeaderRawById: `
-    SELECT id, bom_code, sku_id, status, created_by, effective_from
+    SELECT id, bom_code, sku_id, status, created_by, effective_from, rm_version, pm_version
     FROM master_recipe
     WHERE id = ?
   `,
@@ -476,6 +476,38 @@ export const bom = {
     HAVING COUNT(*) > 1
   `,
 
+  /**
+   * INVARIANT CHECK: variant families whose ACTIVE recipes disagree on
+   * rm_version. Should always return zero rows — every write path that can
+   * activate a recipe refuses to break it (see rmDrift in
+   * lib/masters/variant-rm-lock.ts). A row here means one pack size of a product
+   * is live on a formulation its siblings are not, which prices and manufactures
+   * wrong without anything else reporting it.
+   *
+   * Exists because the invariant spans rows (every active recipe of every SKU
+   * sharing a brand + base_sku_sno) and so no DB constraint can express it —
+   * enforcement is application-side, and this is how you audit that enforcement
+   * actually held, plus find drift predating it. No params.
+   */
+  selectVariantFamiliesWithRmDrift: `
+    SELECT
+      s.brand, s.base_sku_sno,
+      COUNT(*) AS active_recipe_count,
+      MIN(b.rm_version) AS min_rm_version,
+      MAX(b.rm_version) AS max_rm_version,
+      GROUP_CONCAT(
+        CONCAT(s.sku_code, '=RM', b.rm_version)
+        ORDER BY s.sku_code SEPARATOR ', '
+      ) AS members
+    FROM master_recipe b
+    INNER JOIN master_skus s ON s.id = b.sku_id
+    WHERE b.status = 'active'
+      AND s.brand IS NOT NULL AND s.base_sku_sno IS NOT NULL
+    GROUP BY s.brand, s.base_sku_sno
+    HAVING COUNT(*) > 1 AND MIN(b.rm_version) <> MAX(b.rm_version)
+    ORDER BY s.brand ASC, s.base_sku_sno ASC
+  `,
+
   /** Same as selectSkusWithMultipleLiveBoms, restricted to Recipes this manufacturer produces. Params: [mfg_id] */
   selectSkusWithMultipleLiveBomsByMfg: `
     SELECT
@@ -496,11 +528,17 @@ export const bom = {
   // lib/approvals/module-handlers.ts) at approval time for EVERY approved Recipe
   // version (new-version and the legacy update-existing in-place edit alike)
   // — a Recipe with no history_recipe rows has never been through an approval yet.
-  // The archive is scoped to status = 'inactive' ONLY — fully retired
-  // versions. A 'discontinued' Recipe (superseded by a newer version, per
-  // discontinueOverlappingActiveBomsForSku) is still considered "live" per
-  // selectSkusWithMultipleLiveBoms's own comment, so it deliberately does NOT
-  // show here until someone manually flips it to inactive via update-status.
+  // The archive covers status IN ('inactive', 'discontinued') — every retired
+  // version. 'discontinued' was ADDED: it is the status
+  // discontinueOverlappingActiveBomsForSku stamps on a version the moment a
+  // newer one supersedes it, so scoping the archive to 'inactive' alone meant
+  // the ordinary act of approving a new version left its predecessor in no
+  // list at all — gone from the Recipe list (which excludes non-active) and
+  // absent from the Archive until someone remembered to flip it to inactive by
+  // hand via update-status. Note this is a WIDER net than
+  // selectSkusWithMultipleLiveBoms, which still counts a 'discontinued' recipe
+  // as producible; a superseded version being both "still live in production"
+  // and "in the archive" is intended, not a contradiction.
   // Grouped SKU-wise: every version of a SKU's Recipe sorts together, oldest
   // first, so the full edit lineage reads top-to-bottom per SKU.
 
@@ -526,7 +564,7 @@ export const bom = {
     LEFT JOIN users cu ON cu.id = b.created_by
     LEFT JOIN users uu ON uu.id = b.updated_by
     LEFT JOIN users au ON au.id = h.approved_by
-    WHERE b.status = 'inactive'
+    WHERE b.status IN ('inactive', 'discontinued')
       AND (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
     GROUP BY b.id, b.bom_code, b.sku_id, s.sku_code, s.name, b.status,
              b.created_at, b.created_by, b.updated_at, b.updated_by
@@ -556,7 +594,7 @@ export const bom = {
     LEFT JOIN users cu ON cu.id = b.created_by
     LEFT JOIN users uu ON uu.id = b.updated_by
     LEFT JOIN users au ON au.id = h.approved_by
-    WHERE b.status = 'inactive'
+    WHERE b.status IN ('inactive', 'discontinued')
       AND (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
     GROUP BY b.id, b.bom_code, b.sku_id, s.sku_code, s.name, b.status,
              b.created_at, b.created_by, b.updated_at, b.updated_by
@@ -569,7 +607,7 @@ export const bom = {
     FROM history_recipe AS h
     INNER JOIN master_recipe AS b ON b.id = h.recipe_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
-    WHERE b.status = 'inactive'
+    WHERE b.status IN ('inactive', 'discontinued')
       AND (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
   `,
 

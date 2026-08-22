@@ -12,7 +12,7 @@
  * PM section has no percentage concept, per the Recipe's RM(%) vs PM split.
  */
 
-import { Plus, Trash2 } from "lucide-react"
+import { Lock, Plus, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Callout } from "@/components/ui/callout"
 import { isRmTotalValid } from "@/lib/validation/recipe"
@@ -56,16 +56,37 @@ function LineRowCard({
   materials,
   onChange,
   onRemove,
+  locked,
 }: {
   row: RecipeLineRow
   index: number
   materials: RecipeMaterialOption[]
   onChange: (row: RecipeLineRow) => void
   onRemove: () => void
+  /** Read-only: the value is inherited and may only change at its source. */
+  locked?: boolean
 }) {
   function selectMaterial(id: number) {
     const mat = materials.find((m) => m.id === id)
     onChange({ ...row, mtrl_id: id, uom: row.uom || mat?.uom || "" })
+  }
+
+  // A locked row renders as plain text, not a disabled input: a greyed-out
+  // FuzzySelect still reads as "a control that happens to be off right now",
+  // whereas an inherited formulation is not this screen's to edit at all.
+  if (locked) {
+    const mat = materials.find((m) => m.id === row.mtrl_id)
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-dashed bg-muted/40 p-2">
+        <div className="flex-1 min-w-0">
+          <p className="truncate text-sm">{mat?.name ?? `ID ${row.mtrl_id ?? "—"}`}</p>
+          <p className="truncate font-mono text-xs text-muted-foreground">{mat?.code ?? "—"}</p>
+        </div>
+        <p className="w-24 shrink-0 text-sm tabular-nums">{row.amount || "—"}</p>
+        <p className="w-20 shrink-0 text-sm uppercase text-muted-foreground">{row.uom || "—"}</p>
+        <span className="w-[26px] shrink-0" />
+      </div>
+    )
   }
 
   return (
@@ -112,11 +133,16 @@ function LineSection({
   rows,
   materials,
   onChange,
+  locked,
+  lockNote,
 }: {
   mtrlType: "rm" | "pm"
   rows: RecipeLineRow[]
   materials: RecipeMaterialOption[]
   onChange: (rows: RecipeLineRow[]) => void
+  locked?: boolean
+  /** Explains where the locked values come from and how to change them. */
+  lockNote?: string
 }) {
   const total = mtrlType === "rm" ? rmTotal(rows) : null
   const balanced = total != null && rows.length > 0 && isRmTotalValid(total)
@@ -134,7 +160,10 @@ function LineSection({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">{mtrlType === "rm" ? "Raw Materials (RM)" : "Packing Materials (PM)"}</p>
+        <p className="flex items-center gap-1.5 text-sm font-medium">
+          {mtrlType === "rm" ? "Raw Materials (RM)" : "Packing Materials (PM)"}
+          {locked && <Lock className="h-3.5 w-3.5 text-muted-foreground" />}
+        </p>
         {total != null && rows.length > 0 && (
           <Badge variant={balanced ? "success" : "warning"} className="font-mono">
             {total.toFixed(2)}%
@@ -142,7 +171,12 @@ function LineSection({
         )}
       </div>
 
-      {total != null && rows.length > 0 && !balanced && (
+      {locked && lockNote && <Callout variant="info">{lockNote}</Callout>}
+
+      {/* A locked section's total is not the submitter's problem to fix — it is
+          whatever the source recipe says, so nagging about it here would be
+          pointing at a control they cannot reach. */}
+      {!locked && total != null && rows.length > 0 && !balanced && (
         <Callout variant="warning">
           RM percentages must total between 99.9% and 100.1% (currently {total.toFixed(2)}%).
         </Callout>
@@ -168,19 +202,22 @@ function LineSection({
               materials={materials}
               onChange={(next) => updateRow(i, next)}
               onRemove={() => removeRow(i)}
+              locked={locked}
             />
           ))}
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={addRow}
-        className="w-full rounded-lg border border-dashed border-muted-foreground/40 py-2 text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors flex items-center justify-center gap-1.5"
-      >
-        <Plus className="h-3.5 w-3.5" />
-        Add {mtrlType.toUpperCase()} line
-      </button>
+      {!locked && (
+        <button
+          type="button"
+          onClick={addRow}
+          className="w-full rounded-lg border border-dashed border-muted-foreground/40 py-2 text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors flex items-center justify-center gap-1.5"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add {mtrlType.toUpperCase()} line
+        </button>
+      )}
     </div>
   )
 }
@@ -192,6 +229,8 @@ export function RecipeLineEditorGrid({
   onChangePm,
   rmMaterials,
   pmMaterials,
+  rmLocked,
+  rmLockNote,
 }: {
   rmRows: RecipeLineRow[]
   pmRows: RecipeLineRow[]
@@ -199,10 +238,22 @@ export function RecipeLineEditorGrid({
   onChangePm: (rows: RecipeLineRow[]) => void
   rmMaterials: RecipeMaterialOption[]
   pmMaterials: RecipeMaterialOption[]
+  /** This SKU is a non-base variant, so its RM is inherited from the family's
+   *  base and can only change there — see lib/masters/variant-rm-lock.ts. PM is
+   *  always editable; that's the half that legitimately differs per pack size. */
+  rmLocked?: boolean
+  rmLockNote?: string
 }) {
   return (
     <div className="space-y-6">
-      <LineSection mtrlType="rm" rows={rmRows} materials={rmMaterials} onChange={onChangeRm} />
+      <LineSection
+        mtrlType="rm"
+        rows={rmRows}
+        materials={rmMaterials}
+        onChange={onChangeRm}
+        locked={rmLocked}
+        lockNote={rmLockNote}
+      />
       <LineSection mtrlType="pm" rows={pmRows} materials={pmMaterials} onChange={onChangePm} />
     </div>
   )

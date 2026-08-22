@@ -289,6 +289,54 @@ export const POST = withGateway({
       return NextResponse.json({ skus: rows })
     }
 
+    // ── set-base: designate this SKU as its variant family's RM owner ────────────
+    // Direct write, NO approval flow — this is a mapping (same call as the MFG x
+    // facility vendor code in app/api/v1/manufacturing/facility-map/route.ts),
+    // not a master field edit. It does move real money, though: it decides which
+    // SKU's recipe dictates RM for the whole family, so it is brand-guarded and
+    // logged like any other write.
+    if (body.action === "set-base") {
+      const { sku_id } = body
+      await assertSkuIdInBrandScope(userId, sku_id)
+
+      const eventId = makeEventId("SKU", "set-base", sku_id)
+      const logCtx = { ...ctx, eventId, module: "SKU" }
+
+      const conn = await pool.getConnection()
+      await conn.beginTransaction()
+      try {
+        const [keyRows] = await conn.execute(skuSql.selectFamilyKeyById, [sku_id])
+        const family = (keyRows as { brand: string | null; base_sku_sno: number | null }[])[0]
+        if (!family) throw new ApiError(404, "not_found", "SKU not found.")
+        // No grouping key means no family, so there is nothing to be the base
+        // OF — and clearBaseForFamily would match on NULL (i.e. nothing) while
+        // setBaseSku still flagged this row, leaving a base with no family.
+        if (!family.brand || family.base_sku_sno == null) {
+          throw new ApiError(400, "no_variant_family", "This SKU is not part of a variant family, so it cannot be a base SKU.")
+        }
+
+        // Clear THEN set, in this order, in one transaction — that ordering is
+        // the only thing enforcing "at most one base per family". See
+        // skus.clearBaseForFamily's comment.
+        await conn.execute(skuSql.clearBaseForFamily, [family.brand, family.base_sku_sno])
+        await conn.execute(skuSql.setBaseSku, [sku_id])
+
+        await conn.commit()
+        logger.info({ ...logCtx, skuId: sku_id, brand: family.brand, baseSkuSno: family.base_sku_sno, message: "Variant family base SKU set" })
+        recordProcessedEvent("SKU", eventId, { skuId: sku_id, brand: family.brand, baseSkuSno: family.base_sku_sno })
+        return NextResponse.json({ ok: true })
+      } catch (err: unknown) {
+        await conn.rollback()
+        const message = err instanceof Error ? err.message : String(err)
+        recordFailedEvent("SKU", eventId, { skuId: sku_id }, message)
+        logger.error({ ...logCtx, skuId: sku_id, error: message, message: "Set base SKU failed" })
+        if (err instanceof ApiError) throw err
+        throw new ApiError(500, "internal", "Database error")
+      } finally {
+        conn.release()
+      }
+    }
+
     logger.warn({...ctx , message: "Invalid action"})
     return NextResponse.json({ error: "Invalid action" }, { status: 400 })
   }

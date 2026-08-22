@@ -748,6 +748,24 @@ model master_skus {
   /// Free text, and the grouping key for variant families alongside
   /// base_sku_sno. Kept for display; `brand_id` is the access boundary.
   brand                                          String?                   @db.VarChar(100)
+  /// The other half of the variant-family grouping key: SKUs sharing one
+  /// (brand, base_sku_sno) are the same product in different pack sizes. A
+  /// value every family member SHARES — NOT a pointer to a base row, and never
+  /// written by app code (it arrives from upstream ETL).
+  base_sku_sno                                   Int?
+  /// Which member of that family owns the RM formulation. RM is family-scoped
+  /// (identical across pack sizes) and PM is SKU-scoped, so Recipe Master locks
+  /// RM on a non-base variant and only lets it change from the base — fanning
+  /// the change out to every sibling. Picked by a human in SKU Master ->
+  /// Variants; see prisma/add_sku_is_base_sku.sql and
+  /// lib/masters/variant-rm-lock.ts. At most one per family, enforced by the
+  /// clear-then-set transaction in skus.clearBaseForFamily/setBaseSku, NOT by
+  /// an index.
+  is_base_sku                                    Boolean                   @default(false) @db.TinyInt
+  /// NOTE: this model is still missing sku_type, subcategory, filling,
+  /// filling_uom, mrp, gst, active_bom_id, updated_by and updated_on, all of
+  /// which are real columns SKU_COLUMNS selects (lib/queries/skus.ts). Prisma
+  /// is schema-only here so nothing breaks; that drift is its own cleanup.
   /// master_brand.id — the ACCESS BOUNDARY key. NULL = unattributed, which means
   /// visible to every brand-scoped user. See prisma/add_master_brand.sql.
   brand_id                                       Int?

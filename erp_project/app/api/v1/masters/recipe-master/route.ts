@@ -37,10 +37,15 @@ import { STATUS } from "@/lib/constants"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { stageBulkUploadApproval, uploadRowsAsCsv } from "@/lib/master-routes/bulk-approval"
-import { diffBomLines, type DiffableLine } from "@/lib/masters/recipe-version"
+import { diffBomLines, resolveRecipeVersions, type DiffableLine } from "@/lib/masters/recipe-version"
+import { describeRmDrift, resolveRmLock, rmLineageHead, rmPropagationTargets, type FamilyMember } from "@/lib/masters/variant-rm-lock"
 import { monthIST } from "@/lib/date"
 
-type RecipeHeaderRow = { id: number; bom_code: string; sku_id: number; status: string; created_by: number; effective_from: string | null }
+type RecipeHeaderRow = {
+  id: number; bom_code: string; sku_id: number; status: string; created_by: number
+  effective_from: string | null
+  rm_version: number; pm_version: number
+}
 type MostRecentBomRow = { id: number; bom_code: string; rm_version: number; pm_version: number }
 type RecipeDetailLineRow = {
   id: number; recipe_id: number; mtrl_type: string; mtrl_id: number
@@ -58,20 +63,47 @@ export const POST = withGateway({
     const userId = Number(session.user.id)
 
     // ── check-existing: dry-run, no mutation ──────────────────────────────
+    // Answers two questions in one round-trip, both asked the instant a SKU is
+    // picked in the wizard: does THIS SKU have a recipe, and does its variant
+    // family already own an RM formulation this SKU must inherit? The second is
+    // advisory only — create-full re-resolves the lock server-side, since a
+    // greyed-out RM grid is not a guard.
     if (body.action === "check-existing") {
-      const [rows, allBoms] = await Promise.all([
+      const [rows, allBoms, family] = await Promise.all([
         query<{ recipe_id: number; bom_code: string; status: string }>(
           recipeSql.selectActiveBomBySkuId,
           [body.sku_id]
         ),
         query(recipeSql.selectBomsBySkuId, [body.sku_id]),
+        query<FamilyMember>(skuSql.selectVariantFamilyBySkuId, [body.sku_id]),
       ])
       const active = rows[0] ?? null
+      const rmLock = resolveRmLock(body.sku_id, family)
+
+      // The RM lines the locked SKU must inherit, so the wizard can seed its
+      // read-only RM grid without a second request.
+      let inheritedRmLines: { mtrl_type: string; mtrl_id: number; amount: number; uom: string | null }[] = []
+      if (rmLock.locked) {
+        const ownerLines = await query<RecipeDetailLineRow>(
+          recipeSql.selectDetailLinesRawByBomId,
+          [rmLock.ownerRecipeId]
+        )
+        inheritedRmLines = ownerLines
+          .filter((l) => l.mtrl_type === "rm")
+          .map((l) => ({ mtrl_type: "rm", mtrl_id: l.mtrl_id, amount: Number(l.amount), uom: l.uom }))
+      }
+
       return NextResponse.json({
         hasActive: !!active,
         recipe_id: active?.recipe_id ?? null,
         bom_code: active?.bom_code ?? null,
         bom_count: allBoms.length,
+        rm_lock: rmLock,
+        inherited_rm_lines: inheritedRmLines,
+        // Siblings a base-SKU RM change would fan out to — shown on the review
+        // step so the submitter knows the blast radius before submitting.
+        propagation_targets: rmPropagationTargets(body.sku_id, family)
+          .map((m) => ({ sku_id: m.id, sku_code: m.sku_code, bom_code: m.bom_code })),
       })
     }
 
@@ -86,11 +118,68 @@ export const POST = withGateway({
       logger.info({ ...logCtx, skuId: body.sku_id, mode: body.mode, lineCount: body.rm_lines.length + body.pm_lines.length, message: "Recipe submit started" })
       recordRawEvent("BOM", eventId, { skuId: body.sku_id, mode: body.mode, lineCount: body.rm_lines.length + body.pm_lines.length, source: body.source })
 
+      // ── Variant-family RM rule ────────────────────────────────────────────
+      // RM is family-scoped (the same formulation in different pack sizes) and
+      // PM is SKU-scoped. So a non-base variant may never change RM, and a
+      // change made FROM the base must reach every sibling. Resolved here, on
+      // the server, before anything is written — the wizard's read-only RM grid
+      // is a convenience, not the guard (sku_id is a guessable integer).
+      const family = await query<FamilyMember>(skuSql.selectVariantFamilyBySkuId, [body.sku_id])
+      const rmLock = resolveRmLock(body.sku_id, family)
+      const submittedLines: DiffableLine[] = [...body.rm_lines, ...body.pm_lines].map((l) => ({
+        mtrl_type: l.mtrl_type, mtrl_id: l.mtrl_id, amount: l.amount, uom: l.uom,
+      }))
+
+      // The family's current RM and the version it sits at. Needed whether or
+      // not this SKU is locked: a locked variant is validated AND numbered
+      // against it, and the base is numbered against it so its bump continues
+      // the family's lineage instead of restarting its own.
+      const lineageHead = rmLineageHead(family)
+      let familyRm: { version: number; lines: DiffableLine[] } | null = null
+      if (lineageHead?.active_recipe_id != null) {
+        const headLines = await query<RecipeDetailLineRow>(
+          recipeSql.selectDetailLinesRawByBomId, [lineageHead.active_recipe_id]
+        )
+        familyRm = {
+          version: Number(lineageHead.rm_version ?? 0),
+          lines: headLines.map((r) => ({
+            mtrl_type: r.mtrl_type as "rm" | "pm", mtrl_id: r.mtrl_id, amount: r.amount, uom: r.uom,
+          })),
+        }
+      }
+
+      if (rmLock.locked && familyRm) {
+        // diffBomLines compares the RM sides independently and already
+        // normalises DECIMAL strings, uom case and line order — reusing it here
+        // means the lock can't disagree with the version-bump logic about what
+        // "the RM changed" means. resolveRecipeVersions diffs against the same
+        // familyRm.lines, so a submission that passes this check is numbered
+        // with the family's existing RM version rather than a fresh one.
+        if (diffBomLines(familyRm.lines, submittedLines).rmChanged) {
+          throw new ApiError(
+            400,
+            "rm_locked",
+            rmLock.baseDesignated
+              ? `RM for this variant family is set on ${rmLock.ownerSkuCode}. Change it there and every variant updates together.`
+              : `RM for this variant family comes from ${rmLock.ownerSkuCode}. Designate a base SKU in SKU Master → Variants to change it.`
+          )
+        }
+      }
+
+      // A base-SKU RM change fans out to every sibling that already has a
+      // recipe. Computed here, staged as sentinel approval_items below, and
+      // actually applied at approval time (see bomHandler.applyAndArchive).
+      const propagationTargets = rmLock.locked ? [] : rmPropagationTargets(body.sku_id, family)
+
       const conn: PoolConnection = await pool.getConnection()
       await conn.beginTransaction()
       try {
         let bomId: number
         let bomCode: string | undefined
+        // Set by the new-version branch; drives whether the propagation items
+        // are staged at all — a PM-only edit on the base must not re-version
+        // the siblings, whose PM is their own.
+        let rmChangedVsPrior = false
 
         if (body.mode === "new-version") {
           const [skuRows] = await conn.execute(skuSql.selectById, [body.sku_id])
@@ -110,9 +199,14 @@ export const POST = withGateway({
           const newLines: DiffableLine[] = [...body.rm_lines, ...body.pm_lines].map((l) => ({
             mtrl_type: l.mtrl_type, mtrl_id: l.mtrl_id, amount: l.amount, uom: l.uom,
           }))
-          const { rmChanged, pmChanged } = diffBomLines(priorLines, newLines)
-          const rmVersion = !prior || rmChanged ? (prior?.rm_version ?? 0) + 1 : prior.rm_version
-          const pmVersion = !prior || pmChanged ? (prior?.pm_version ?? 0) + 1 : prior.pm_version
+          // RM numbers off the FAMILY's lineage, PM off this SKU's own — see
+          // resolveRecipeVersions. rmChangedVsPrior stays a diff against this
+          // SKU's own prior, because it drives the sibling fan-out: what has to
+          // reach the family is a change to the formulation THIS recipe carried.
+          rmChangedVsPrior = diffBomLines(priorLines, newLines).rmChanged
+          const { rmVersion, pmVersion } = resolveRecipeVersions({
+            prior, priorLines, newLines, familyRm,
+          })
           bomCode = `${skuRow.sku_code}-RM${rmVersion}-PM${pmVersion}`
 
           // A prior Recipe exists for this SKU — this submission is really an
@@ -173,6 +267,22 @@ export const POST = withGateway({
         }
         if (body.change_type?.length) {
           await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "__change_type__", "", body.change_type.join(",")])
+        }
+
+        // Variant-family fan-out. One sentinel item per sibling that must get a
+        // matching new RM version when this approval lands. ONLY the sku_id is
+        // staged — each sibling's PM lines and version numbers are read fresh
+        // at approval time, so a PM edit that lands on a sibling in the
+        // meantime isn't clobbered by a stale snapshot taken here. Same posture
+        // as bomBulkHandler, which also creates its headers in applyAndArchive
+        // rather than at submit: nothing exists to clean up if this is rejected.
+        if (rmChangedVsPrior && propagationTargets.length > 0) {
+          for (const target of propagationTargets) {
+            await conn.execute(approvalsSql.insertApprovalItem, [
+              approvalId, `variant_child:${target.id}`, "", target.sku_code,
+            ])
+          }
+          logger.info({ ...logCtx, bomId, skuId: body.sku_id, targets: propagationTargets.map((t) => t.sku_code), message: "Variant RM change staged to fan out to siblings" })
         }
 
         const allLines = [...body.rm_lines, ...body.pm_lines]
@@ -261,6 +371,36 @@ export const POST = withGateway({
         const [rows] = await conn.execute(recipeSql.selectBomHeaderRawById, [recipe_id])
         const cur = (rows as RecipeHeaderRow[])[0]
         if (!cur) throw new ApiError(404, "not_found", "Recipe not found.")
+
+        // Activating an OLD version by hand is the quiet way to break "every
+        // active recipe in a variant family carries the same rm_version" —
+        // reverting one pack size to a superseded formulation while its siblings
+        // stay on the current one. Checked BEFORE the write, against the family
+        // as it would look afterwards. Deactivating is always allowed: a member
+        // with no active recipe has nothing to be out of step with.
+        if (status === STATUS.ACTIVE && cur.sku_id) {
+          const [familyRows] = await conn.execute(skuSql.selectVariantFamilyBySkuId, [cur.sku_id])
+          const family = familyRows as FamilyMember[]
+          if (family.length > 1) {
+            // This SKU's entry replaced by the recipe about to become active;
+            // its other versions are discontinued by the same write below.
+            const hypothetical: FamilyMember[] = family.map((m) =>
+              m.id === cur.sku_id
+                ? { ...m, active_recipe_id: recipe_id, rm_version: cur.rm_version }
+                : m
+            )
+            const drift = describeRmDrift(hypothetical)
+            if (drift) {
+              throw new ApiError(
+                409,
+                "variant_rm_drift",
+                `Activating ${cur.bom_code} would mean ${drift}. Variants of one product must ` +
+                "share one RM formulation — submit the RM change from Recipe Master, which " +
+                "updates the whole family in one approval."
+              )
+            }
+          }
+        }
 
         await conn.execute(recipeSql.setBomStatusWithUpdater, [status, userId, recipe_id])
 

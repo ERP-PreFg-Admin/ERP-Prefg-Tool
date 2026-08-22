@@ -43,12 +43,14 @@
 // in the same file still proceed (file-level partial success), matching the
 // existing inserted/skipped counter convention used by rmBulkHandler/pmBulkHandler.
 
+import type { PoolConnection, ResultSetHeader } from "mysql2/promise"
 import { skus as skuSql } from "@/lib/queries/skus"
 import { rawMaterials as rmSql } from "@/lib/queries/raw-materials"
 import { packingMaterials as pmSql } from "@/lib/queries/packing-materials"
 import { bom as recipeSql } from "@/lib/queries/recipe"
 import { approvalsSql } from "@/lib/queries/approvals"
-import { diffBomLines, type DiffableLine } from "@/lib/masters/recipe-version"
+import { diffBomLines, resolveRecipeVersions, type DiffableLine } from "@/lib/masters/recipe-version"
+import { describeRmDrift, rmLineageHead, resolveRmLock, type FamilyMember } from "@/lib/masters/variant-rm-lock"
 import { isRmTotalValid } from "@/lib/validation/recipe"
 import { deleteFile } from "@/lib/s3"
 import { parseS3Import } from "@/lib/import-s3"
@@ -102,6 +104,297 @@ function parseBomLineItems(items: DiffItem[]): {
   return { mode, lines: [...lineMap.values()], artifactAdds, artifactRemoveIds }
 }
 
+type RecipeLine = { mtrl_type: "rm" | "pm"; mtrl_id: number; amount: number; uom: string | null }
+
+/** A details_recipe row as read back — amount is DECIMAL, so a string. */
+type StoredRecipeLine = { mtrl_type: "rm" | "pm"; mtrl_id: number; amount: string | number; uom: string | null }
+
+/**
+ * This SKU's variant family's current RM and the version it sits at, or null
+ * when the SKU is in no family (or nobody in it has a recipe yet).
+ *
+ * The write-side counterpart of the same lookup the submit route does — RM is
+ * family-scoped, so its version has to be read from the family, not the SKU.
+ */
+async function readFamily(conn: PoolConnection, skuId: number | null): Promise<FamilyMember[]> {
+  if (skuId == null) return []
+  const [rows] = await conn.execute(skuSql.selectVariantFamilyBySkuId, [skuId])
+  return rows as FamilyMember[]
+}
+
+async function resolveFamilyRm(
+  conn: PoolConnection,
+  skuId: number
+): Promise<{ version: number; lines: DiffableLine[] } | null> {
+  const head = rmLineageHead(await readFamily(conn, skuId))
+  if (!head?.active_recipe_id) return null
+
+  const [headLines] = await conn.execute(recipeSql.selectDetailLinesRawByBomId, [head.active_recipe_id])
+  return {
+    version: Number(head.rm_version ?? 0),
+    lines: (headLines as StoredRecipeLine[]).map((r) => ({
+      mtrl_type: r.mtrl_type, mtrl_id: r.mtrl_id, amount: r.amount, uom: r.uom,
+    })),
+  }
+}
+
+/**
+ * Create ONE new, already-approved Recipe version for a SKU: header + lines +
+ * history snapshot + active_bom_id + a synthetic resolved 'BOM' approval, then
+ * supersede whatever it replaces.
+ *
+ * Extracted because two callers need the identical sequence and a third copy
+ * would be where they silently drift:
+ *   - bomBulkHandler, one version per sku_code group in an uploaded CSV
+ *   - bomHandler's variant fan-out, one version per sibling of a base SKU whose
+ *     RM just changed
+ *
+ * Exported so tests/db/recipe-variant-propagation.test.ts can drive the
+ * numbering against real SQL — the submit route owns its own transaction and so
+ * cannot run under withRollback (see tests/helpers/db.ts).
+ *
+ * The synthetic approval is not bookkeeping for its own sake — the Recipe list's
+ * change_reason/change_type columns and the row-level History dialog both read
+ * module='BOM' approval_items (see CHANGE_REASON_SUBQUERY in
+ * lib/queries/recipe.ts), so a version created without one shows up blank.
+ *
+ * Takes an ALREADY-OPEN connection and never opens a transaction of its own —
+ * a nested beginTransaction() implicitly COMMITs in MySQL, which would make the
+ * approve route's rollback a no-op. Throws on a rule violation so a caller that
+ * processes many SKUs (bulk) can catch per item and keep going.
+ */
+export async function createRecipeVersion(
+  conn: PoolConnection,
+  opts: {
+    skuId: number
+    skuCode: string
+    lines: RecipeLine[]
+    effectiveFrom: string
+    /** Credited as the author of this version (master_recipe.created_by). */
+    createdBy: number
+    approverId: number
+    /** Raiser of the synthetic approval — the original submitter, where known. */
+    raisedBy: number
+    reason: string | null
+    changeType: ("rm" | "pm")[]
+    /** Explicit bom_code (bulk CSV only); otherwise <sku>-RM<n>-PM<n>. */
+    bomCode?: string | null
+    /** Appended to the "Recipe discontinued" log line, e.g. "bulk upload". */
+    supersededBy: string
+  }
+): Promise<{ recipeId: number; bomCode: string; linesInserted: number }> {
+  const { skuId, skuCode, lines, effectiveFrom, createdBy, approverId, raisedBy } = opts
+
+  const [priorRows] = await conn.execute(recipeSql.selectMostRecentBomForSku, [skuId])
+  const prior = (priorRows as { id: number; rm_version: number; pm_version: number }[])[0] ?? null
+  let priorLines: DiffableLine[] = []
+  if (prior) {
+    const [priorLineRows] = await conn.execute(recipeSql.selectDetailLinesRawByBomId, [prior.id])
+    priorLines = (priorLineRows as StoredRecipeLine[]).map((r) => ({
+      mtrl_type: r.mtrl_type, mtrl_id: r.mtrl_id, amount: r.amount, uom: r.uom,
+    }))
+  }
+  const newLines: DiffableLine[] = lines.map((l) => ({
+    mtrl_type: l.mtrl_type, mtrl_id: l.mtrl_id, amount: l.amount, uom: l.uom,
+  }))
+
+  // RM numbers off the variant FAMILY's lineage, PM off this SKU's own — see
+  // resolveRecipeVersions. Resolved here rather than passed in so every caller
+  // gets it: the sibling fan-out (where the parent's just-activated recipe IS
+  // the lineage head, so a sibling lands on the parent's exact rm_version) and
+  // the CSV bulk path alike. Numbering RM per SKU is what once stamped a
+  // variant's first recipe RM1 while its family was already on RM2.
+  const family = await readFamily(conn, skuId)
+  const familyRm = await resolveFamilyRm(conn, skuId)
+
+  // Keep the family in step. create-full has its own copy of this check for the
+  // wizard, but the CSV bulk path reaches active recipes through HERE and had no
+  // check at all — an upload could hand one pack size a formulation none of its
+  // siblings had. Both directions are refused, and a throw becomes that group's
+  // skip reason in bulk's per-group catch.
+  if (familyRm && diffBomLines(familyRm.lines, newLines).rmChanged) {
+    const lock = resolveRmLock(skuId, family)
+    if (lock.locked) {
+      throw new Error(
+        `RM for this variant family is set on ${lock.ownerSkuCode} — a variant cannot change it. ` +
+        "Only the PM lines may differ per pack size."
+      )
+    }
+    // Not locked, so this SKU may legitimately change RM — but siblings are
+    // already live on the old formulation and a CSV cannot fan out to them
+    // (that needs the reviewed approval flow, which stages one variant_child
+    // item per sibling). Refuse rather than leave the family split.
+    const others = family.filter((m) => m.id !== skuId && m.active_recipe_id != null)
+    if (others.length > 0) {
+      throw new Error(
+        `changing RM here would leave its variants (${others.map((m) => m.sku_code).join(", ")}) ` +
+        "on the old formulation. Submit the RM change from Recipe Master instead, which updates " +
+        "the whole variant family in one approval."
+      )
+    }
+  }
+
+  const { rmVersion, pmVersion } = resolveRecipeVersions({ prior, priorLines, newLines, familyRm })
+  const bomCode = opts.bomCode?.trim() || `${skuCode}-RM${rmVersion}-PM${pmVersion}`
+
+  // Same "reason/change_type required once a prior Recipe exists" rule the
+  // single-Recipe wizard enforces — a bulk upload or a fanned-out variant
+  // version is a faster way to submit the SAME kind of change, not a different
+  // one. Thrown rather than returned so bulk's per-group catch reports it as a
+  // skip reason unchanged.
+  if (prior && (!opts.reason || opts.changeType.length === 0)) {
+    throw new Error("reason and type of change are required — a Recipe already exists for this SKU")
+  }
+
+  const [headerResult] = await conn.execute(recipeSql.insertBomHeaderWithVersions, [
+    bomCode, skuId, createdBy, STATUS.ACTIVE, effectiveFrom, rmVersion, pmVersion,
+  ])
+  const recipeId = (headerResult as ResultSetHeader).insertId
+
+  // Keep master_skus.active_bom_id in sync, or the SKU master list's bom_code
+  // column (resolved from it) goes stale the moment this version lands.
+  await conn.execute(skuSql.setActiveBomId, [recipeId, skuId])
+
+  // The synthetic, already-resolved 'BOM' approval described above.
+  const [approvalResult] = await conn.execute(approvalsSql.insertApproval, [raisedBy, "BOM", recipeId, "create"])
+  const approvalId = (approvalResult as ResultSetHeader).insertId
+  await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "__mode__", "", "new-version"])
+  if (opts.reason) await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "__reason__", "", opts.reason])
+  if (opts.changeType.length > 0) {
+    await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "__change_type__", "", opts.changeType.join(",")])
+  }
+
+  let linesInserted = 0
+  for (const line of lines) {
+    await conn.execute(recipeSql.insertDetailLine, [
+      recipeId, line.mtrl_type, line.mtrl_id, line.amount, line.uom, "active", approverId,
+    ])
+    // Per-line history_recipe archive, same as bomHandler's own new-version
+    // path — keeps the History page's SKU-wise lineage complete regardless of
+    // which path created the version.
+    await conn.execute(recipeSql.archiveDetailLineToHistory, [
+      recipeId, line.mtrl_type, line.mtrl_id, line.amount, line.uom, null,
+      "active", createdBy, approverId,
+    ])
+    // Line-level diff items for the synthetic approval: every field is "new"
+    // (old_value "") since a brand-new header has no prior state, same as
+    // create-full's own new-version mode.
+    await conn.execute(approvalsSql.insertApprovalItem, [approvalId, `line:${line.mtrl_type}:${line.mtrl_id}:__present__`, "1", "1"])
+    await conn.execute(approvalsSql.insertApprovalItem, [approvalId, `line:${line.mtrl_type}:${line.mtrl_id}:amount`, "", String(line.amount)])
+    await conn.execute(approvalsSql.insertApprovalItem, [approvalId, `line:${line.mtrl_type}:${line.mtrl_id}:uom`, "", line.uom ?? ""])
+    linesInserted++
+  }
+  // Applied already, so resolve it — otherwise it sits pending forever.
+  await conn.execute(approvalsSql.markApproved, [approverId, approvalId])
+
+  // "Only one active Recipe per SKU", gated on effective_from overlap so a
+  // future-dated version doesn't prematurely discontinue the one it hasn't
+  // superseded yet. Sibling ids are read FIRST — MySQL's UPDATE has no
+  // RETURNING, so this is the only way to emit one event per superseded recipe.
+  const [supersededRows] = await conn.execute(recipeSql.selectOtherActiveBomsForSku, [skuId, recipeId])
+  const supersededIds = (supersededRows as { id: number }[]).map((r) => r.id)
+  if (supersededIds.length > 0) {
+    await conn.execute(recipeSql.discontinueOverlappingActiveBomsForSku, [skuId, recipeId, effectiveFrom])
+    for (const oldId of supersededIds) {
+      const deactivateEventId = makeEventId("BOM", "deactivate", oldId)
+      logger.info({ module: "BOM", eventId: deactivateEventId, bomId: oldId, skuId, supersededBy: recipeId, message: `Recipe discontinued (superseded by ${opts.supersededBy})` })
+      recordProcessedEvent("BOM", deactivateEventId, { bomId: oldId, skuId, supersededBy: recipeId })
+    }
+  }
+
+  return { recipeId, bomCode, linesInserted }
+}
+
+/**
+ * Fan a base SKU's approved RM change out to its variant family: every sibling
+ * named by a `variant_child:<sku_id>` approval_item gets a new Recipe version
+ * carrying the base's NEW RM lines and its OWN existing PM lines.
+ *
+ * Only the sku_id was staged at submit time (see create-full) — each sibling's
+ * PM lines are read fresh here, so a PM edit that landed on a sibling between
+ * submit and approve survives instead of being reverted to a stale snapshot.
+ *
+ * ATOMIC: a sibling that fails aborts the whole approval. The invariant is that
+ * every active recipe in a family carries the same rm_version (see rmDrift), and
+ * a partial fan-out breaks exactly that — one pack size manufactured against a
+ * formulation nobody approved for it, silently, until someone reconciles two
+ * costing sheets. Since this runs inside the approve route's transaction,
+ * throwing rolls the base's own new version back too: the family moves together
+ * or not at all, and the approval stays pending to be retried.
+ *
+ * A sibling with NO active recipe is still skipped rather than failed — it has
+ * nothing to be out of step with, and inherits the RM when it first gets one.
+ */
+async function propagateRmToVariants(
+  conn: PoolConnection,
+  opts: {
+    items: DiffItem[]
+    parentRecipeId: number
+    parentSkuId: number | null
+    rmLines: RecipeLine[]
+    effectiveFrom: string
+    createdBy: number
+    approverId: number
+    reason: string | null
+  }
+): Promise<void> {
+  const targets: { skuId: number; skuCode: string }[] = []
+  for (const it of opts.items) {
+    const m = it.field_name.match(/^variant_child:(\d+)$/)
+    if (m) targets.push({ skuId: Number(m[1]), skuCode: it.new_value ?? `#${m[1]}` })
+  }
+  if (targets.length === 0) return
+
+  for (const target of targets) {
+    try {
+      // The sibling's own PM lines, from whatever its current active Recipe is.
+      const [priorRows] = await conn.execute(recipeSql.selectMostRecentBomForSku, [target.skuId])
+      const prior = (priorRows as { id: number }[])[0] ?? null
+      if (!prior) {
+        logger.warn({ module: "BOM", bomId: opts.parentRecipeId, skuId: target.skuId, message: "Variant RM fan-out skipped — sibling has no Recipe to version" })
+        continue
+      }
+      const [siblingLineRows] = await conn.execute(recipeSql.selectDetailLinesRawByBomId, [prior.id])
+      const siblingPm: RecipeLine[] = (siblingLineRows as StoredRecipeLine[])
+        .filter((r) => r.mtrl_type === "pm")
+        .map((r) => ({ mtrl_type: "pm", mtrl_id: r.mtrl_id, amount: Number(r.amount), uom: r.uom }))
+
+      const { recipeId, bomCode } = await createRecipeVersion(conn, {
+        skuId: target.skuId,
+        skuCode: target.skuCode,
+        // The whole point: base's new RM + sibling's own PM.
+        lines: [...opts.rmLines, ...siblingPm],
+        effectiveFrom: opts.effectiveFrom,
+        createdBy: opts.createdBy,
+        approverId: opts.approverId,
+        raisedBy: opts.createdBy,
+        reason: opts.reason ?? `RM inherited from variant base (recipe #${opts.parentRecipeId})`,
+        changeType: ["rm"],
+        supersededBy: "variant RM change on the base SKU",
+      })
+
+      const eventId = makeEventId("BOM", "variant-propagate", recipeId)
+      logger.info({ module: "BOM", eventId, bomId: recipeId, bomCode, skuId: target.skuId, parentRecipeId: opts.parentRecipeId, parentSkuId: opts.parentSkuId, message: "Variant sibling re-versioned with inherited RM" })
+      recordProcessedEvent("BOM", eventId, { bomId: recipeId, bomCode, skuId: target.skuId, parentRecipeId: opts.parentRecipeId })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      logger.error({ module: "BOM", bomId: opts.parentRecipeId, skuId: target.skuId, err: message, message: "Variant RM fan-out failed — aborting the whole approval to keep the family in step" })
+      // Rethrown, not swallowed: see this function's docblock. The approve
+      // route's transaction rolls the base's version back with it.
+      throw new Error(
+        `Could not apply this RM change to variant ${target.skuCode}: ${message}. ` +
+        "No part of the change was applied — the whole variant family must move together."
+      )
+    }
+  }
+
+  // Belt and braces: prove the family actually ended up in step rather than
+  // trusting that every branch above did its job. Cheap (one query) next to what
+  // it catches — a silent split formulation that only surfaces in costing.
+  const drift = describeRmDrift(await readFamily(conn, opts.parentSkuId))
+  if (drift) throw new Error(`Refusing to complete this approval: ${drift}.`)
+}
+
 export const bomHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
     await conn.execute(recipeSql.setBomStatus, [status, entityId])
@@ -134,12 +427,20 @@ export const bomHandler: ModuleHandler = {
       await conn.execute(recipeSql.deleteDetailLinesByBomId, [entityId])
     }
 
+    // Collected as they're inserted so the variant fan-out below can hand each
+    // sibling the RM lines EXACTLY as approved here — resolved values, after the
+    // currentByKey fallback, not the raw approval_items.
+    const approvedRmLines: RecipeLine[] = []
+
     for (const line of lines) {
       if (line.removed) continue // update-existing only: line dropped, don't reinsert
       const key = `${line.mtrlType}:${line.mtrlId}`
       const cur = currentByKey.get(key)
       const amount = Number(line.fields.amount ?? cur?.amount ?? 0)
       const uom = line.fields.uom ?? cur?.uom ?? null
+      if (line.mtrlType === "rm") {
+        approvedRmLines.push({ mtrl_type: "rm", mtrl_id: line.mtrlId, amount, uom })
+      }
       await conn.execute(recipeSql.insertDetailLine, [
         entityId, line.mtrlType, line.mtrlId, amount, uom, "active", approverId,
       ])
@@ -206,6 +507,24 @@ export const bomHandler: ModuleHandler = {
         }
       }
     }
+
+    // 5. Variant-family fan-out. RM is family-scoped, so a base SKU's approved
+    //    RM change has to reach every sibling that already has a recipe — one
+    //    approval, the whole family. Staged as variant_child:<sku_id> items at
+    //    submit time; a no-op when there are none (every recipe that isn't a
+    //    base-SKU RM change). Runs LAST, after this recipe is fully applied and
+    //    activated, so a sibling can never be re-versioned off a half-written
+    //    parent.
+    await propagateRmToVariants(conn, {
+      items,
+      parentRecipeId: entityId,
+      parentSkuId: header.sku_id ?? null,
+      rmLines: approvedRmLines,
+      effectiveFrom: header.effective_from,
+      createdBy: header.created_by,
+      approverId,
+      reason: items.find((i) => i.field_name === "__reason__")?.new_value ?? null,
+    })
   },
 }
 
@@ -273,105 +592,33 @@ export const bomBulkHandler: ModuleHandler = {
           continue
         }
 
-        // Auto-generate bom_code when not supplied — same <sku_code>-RM<n>-PM<n>
-        // independent-version scheme the single-Recipe wizard path uses (see
-        // lib/masters/bom-version.ts), so a bulk-uploaded Recipe's code format
-        // never differs from a manually-created one.
-        const providedCode = groupRows[0].bom_code?.trim()
-        const [priorRows] = await conn.execute(recipeSql.selectMostRecentBomForSku, [sku.id])
-        const prior = (priorRows as { id: number; rm_version: number; pm_version: number }[])[0] ?? null
-        let priorLines: DiffableLine[] = []
-        if (prior) {
-          const [priorLineRows] = await conn.execute(recipeSql.selectDetailLinesRawByBomId, [prior.id])
-          priorLines = (priorLineRows as any[]).map((r) => ({
-            mtrl_type: r.mtrl_type, mtrl_id: r.mtrl_id, amount: r.amount, uom: r.uom,
-          }))
-        }
-        const newLines: DiffableLine[] = lines.map((l) => ({
-          mtrl_type: l.mtrl_type, mtrl_id: l.mtrl_id, amount: l.amount, uom: l.uom,
-        }))
-        const { rmChanged, pmChanged } = diffBomLines(priorLines, newLines)
-        const rmVersion = !prior || rmChanged ? (prior?.rm_version ?? 0) + 1 : prior.rm_version
-        const pmVersion = !prior || pmChanged ? (prior?.pm_version ?? 0) + 1 : prior.pm_version
-        const bomCode = providedCode || `${skuCode}-RM${rmVersion}-PM${pmVersion}`
-
-        // Same "reason/change_type required once a prior Recipe exists" rule the
-        // single-Recipe path enforces — bulk upload is just a faster way to
-        // submit the SAME kind of change, not a different one, so it carries
-        // the same requirement (checked here again, authoritatively, even
-        // though check_duplicates already warned about it in the preview).
-        const reason = groupRows[0].reason?.trim() || null
         const changeTypeRaw = groupRows[0].change_type?.trim().toLowerCase()
         const changeType: ("rm" | "pm")[] =
           changeTypeRaw === "both" ? ["rm", "pm"] : changeTypeRaw === "rm" || changeTypeRaw === "pm" ? [changeTypeRaw] : []
-        if (prior && (!reason || changeType.length === 0)) {
-          groupsSkipped++
-          skipReasons.push(`${skuCode}: reason and type of change are required — a Recipe already exists for this SKU`)
-          continue
-        }
 
-        const [headerResult] = await conn.execute(recipeSql.insertBomHeaderWithVersions, [
-          bomCode, sku.id, approverId, STATUS.ACTIVE, effectiveFrom, rmVersion, pmVersion,
-        ])
-        const bomId = (headerResult as any).insertId
-
-        // Keep master_skus.active_bom_id in sync — same as bomHandler's
-        // single-Recipe path does on approval, otherwise a bulk-created Recipe
-        // never shows up as the SKU's current recipe on the SKU master list.
-        await conn.execute(skuSql.setActiveBomId, [bomId, sku.id])
-
-        // Mirror the SAME "BOM" module approval record the single-Recipe path
-        // raises at submit time (see app/api/v1/masters/recipe-master/route.ts) —
-        // already resolved/approved, since the data write above already
-        // happened. This is what makes a bulk-created version show up
-        // identically to a manual one in the row-level History dialog and
-        // the SKU-linked audit trail (both key off module='BOM' approvals).
-        const [approvalResult] = await conn.execute(approvalsSql.insertApproval, [raisedBy ?? approverId, "BOM", bomId, "create"])
-        const approvalId = (approvalResult as any).insertId
-        await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "__mode__", "", "new-version"])
-        if (reason) await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "__reason__", "", reason])
-        if (changeType.length > 0) await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "__change_type__", "", changeType.join(",")])
-
-        for (const line of lines) {
-          await conn.execute(recipeSql.insertDetailLine, [
-            bomId, line.mtrl_type, line.mtrl_id, line.amount, line.uom,
-            "active", approverId,
-          ])
-          // Same per-line history_recipe archive bomHandler writes for the
-          // single-Recipe new-version path — keeps the History page's SKU-wise
-          // lineage complete regardless of upload path.
-          await conn.execute(recipeSql.archiveDetailLineToHistory, [
-            bomId, line.mtrl_type, line.mtrl_id, line.amount, line.uom, null,
-            "active", approverId, approverId,
-          ])
-          // Line-level diff items for the synthetic approval above — every
-          // field is "new" (old_value "") since there's no prior state for a
-          // brand-new Recipe header, same as create-full's own new-version mode.
-          await conn.execute(approvalsSql.insertApprovalItem, [approvalId, `line:${line.mtrl_type}:${line.mtrl_id}:__present__`, "1", "1"])
-          await conn.execute(approvalsSql.insertApprovalItem, [approvalId, `line:${line.mtrl_type}:${line.mtrl_id}:amount`, "", String(line.amount)])
-          await conn.execute(approvalsSql.insertApprovalItem, [approvalId, `line:${line.mtrl_type}:${line.mtrl_id}:uom`, "", line.uom ?? ""])
-          linesInserted++
-        }
-        // Already applied above — mark this synthetic approval resolved so
-        // it reads as "approved" in the audit trail rather than sitting
-        // pending forever.
-        await conn.execute(approvalsSql.markApproved, [approverId, approvalId])
-
-        // Enforce "only one active Recipe per SKU" — same invariant bomHandler
-        // applies for the single-Recipe path, gated the same way on effective_from
-        // overlap so a future-dated bulk-uploaded recipe doesn't prematurely
-        // discontinue the one it hasn't superseded yet.
-        const [siblingRows] = await conn.execute(recipeSql.selectOtherActiveBomsForSku, [sku.id, bomId])
-        const siblingIds = (siblingRows as any[]).map((r) => r.id)
-        if (siblingIds.length > 0) {
-          await conn.execute(recipeSql.discontinueOverlappingActiveBomsForSku, [sku.id, bomId, effectiveFrom])
-          for (const siblingId of siblingIds) {
-            const deactivateEventId = makeEventId("BOM", "deactivate", siblingId)
-            logger.info({ module: "BOM", eventId: deactivateEventId, bomId: siblingId, skuId: sku.id, supersededBy: bomId, message: "Recipe discontinued (superseded by bulk upload)" })
-            recordProcessedEvent("BOM", deactivateEventId, { bomId: siblingId, skuId: sku.id, supersededBy: bomId })
-          }
-        }
-
+        // Everything from here — version numbers, header, lines, history,
+        // active_bom_id, the synthetic approval, supersession — is the same
+        // sequence the variant fan-out needs, so it lives in
+        // createRecipeVersion. A rule violation (e.g. a missing reason when the
+        // SKU already has a Recipe) throws and is caught below as this group's
+        // skip reason, exactly as when the check was inline here.
+        const created = await createRecipeVersion(conn, {
+          skuId: sku.id,
+          skuCode,
+          lines,
+          effectiveFrom,
+          createdBy: approverId,
+          approverId,
+          raisedBy: raisedBy ?? approverId,
+          reason: groupRows[0].reason?.trim() || null,
+          changeType,
+          // An explicit code from the CSV wins; otherwise the same
+          // <sku_code>-RM<n>-PM<n> scheme the wizard path uses, so a
+          // bulk-uploaded Recipe's code format never differs from a manual one.
+          bomCode: groupRows[0].bom_code?.trim() || null,
+          supersededBy: "bulk upload",
+        })
+        linesInserted += created.linesInserted
         bomsCreated++
       } catch (err: any) {
         groupsSkipped++

@@ -22,6 +22,8 @@ import { rmTotal, type RecipeLineRow } from "./RecipeLineEditorGrid"
 import { uploadPendingArtifacts } from "./recipe-artifact-upload"
 import type { RecipeDetailResponse } from "@/types/masters"
 import { todayIST } from "@/lib/date"
+import type { RmLock } from "@/lib/masters/variant-rm-lock"
+import type { PropagationTarget } from "./useRecipeWizard"
 
 export function useBomDetailPanel() {
   const router       = useRouter()
@@ -62,6 +64,13 @@ export function useBomDetailPanel() {
   // submission — see RecipeArtifactsEditor.tsx and bom-artifact-upload.ts.
   const [pendingArtifactFiles, setPendingArtifactFiles] = useState<File[]>([])
   const [pendingArtifactRemoveIds, setPendingArtifactRemoveIds] = useState<number[]>([])
+
+  // Variant-family RM rule for the recipe being edited, from the same
+  // check-existing action the wizard uses. Advisory — create-full re-resolves it
+  // server-side and rejects an altered RM whatever this client rendered.
+  const [rmLock, setRmLock] = useState<RmLock | null>(null)
+  const [propagationTargets, setPropagationTargets] = useState<PropagationTarget[]>([])
+  const rmLocked = rmLock?.locked === true
 
   // In-memory cache of fetched Recipe details, keyed by recipe_id, so re-opening a
   // Recipe already seen this session (or one warmed by hover-prefetch) is
@@ -165,6 +174,30 @@ export function useBomDetailPanel() {
     setEditSeededFor(detail.recipe_id)
   }, [editMode, detail, editSeededFor])
 
+  // Resolve the variant-family RM rule for this recipe's SKU as soon as edit
+  // mode opens. Deliberately does NOT re-seed editRmRows: on this surface the
+  // existing lines ARE the family's RM (a locked recipe can only have been
+  // created with the inherited set), so overwriting them would be a no-op at
+  // best and would clobber the seeding effect above at worst.
+  useEffect(() => {
+    const skuId = detail?.sku_id
+    if (!editMode || skuId == null) return
+    let cancelled = false
+    fetch("/api/v1/masters/recipe-master", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "check-existing", sku_id: skuId }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return
+        setRmLock(data.rm_lock ?? null)
+        setPropagationTargets(data.propagation_targets ?? [])
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [editMode, detail?.sku_id])
+
   // RM lines are expected to add up to a full 100% formulation.
   const rmLines      = detail?.lines.filter((l) => l.mtrl_type === "rm") ?? []
   const pmLines      = detail?.lines.filter((l) => l.mtrl_type === "pm") ?? []
@@ -193,6 +226,8 @@ export function useBomDetailPanel() {
     setPendingArtifactRemoveIds([])
     setEditReason("")
     setEditChangeType([])
+    setRmLock(null)
+    setPropagationTargets([])
     setSelectedBomId(null)
     const params = new URLSearchParams(searchParams.toString())
     params.delete("bomId")
@@ -277,7 +312,11 @@ export function useBomDetailPanel() {
       }
     }
     if (!editReason.trim() || editChangeType.length === 0) {
-      setSaveError("A reason and at least one type of change (RM/PM) are required.")
+      setSaveError(
+        rmLocked
+          ? "A reason and a PM change are required."
+          : "A reason and at least one type of change (RM/PM) are required."
+      )
       return
     }
 
@@ -388,6 +427,9 @@ export function useBomDetailPanel() {
     setEditReason,
     editChangeType,
     setEditChangeType,
+    rmLock,
+    rmLocked,
+    propagationTargets,
     saving,
     saveError,
     editStatus,

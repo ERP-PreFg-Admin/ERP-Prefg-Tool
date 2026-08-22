@@ -166,10 +166,40 @@ export const skus = {
    * Params: [brand, base_sku_sno]
    */
   selectVariantsByBrandAndSno: `
-    SELECT id, sku_code, name, sku_type, category, subcategory, filling, filling_uom, mrp, status
+    SELECT id, sku_code, name, sku_type, category, subcategory, filling, filling_uom, mrp, status,
+      is_base_sku
     FROM master_skus
     WHERE brand = ? AND base_sku_sno = ?
     ORDER BY sku_code ASC
+  `,
+
+  /**
+   * The whole variant family for ONE SKU id, with each member's active Recipe —
+   * the input to resolveRmLock (lib/masters/variant-rm-lock.ts), which decides
+   * whether that SKU's recipe may change RM and whose RM it inherits.
+   *
+   * Self-joins on the (brand, base_sku_sno) grouping key, so the result
+   * INCLUDES the SKU asked about. A SKU with a NULL brand or base_sku_sno
+   * returns ZERO rows — the grouping key doesn't exist for it, so it is in no
+   * family, which resolveRmLock reads as "RM unlocked". That degenerate answer
+   * is load-bearing: NULL = NULL is never true in SQL, so without the explicit
+   * IS NOT NULL guards every unfamilied SKU would still self-match on id and
+   * look like a one-member family (same answer, by luck rather than intent).
+   *
+   * Params: [sku_id]
+   */
+  selectVariantFamilyBySkuId: `
+    SELECT
+      v.id, v.sku_code, v.name, v.status, v.is_base_sku,
+      v.brand, v.base_sku_sno,
+      r.id AS active_recipe_id, r.bom_code, r.rm_version, r.created_at AS recipe_created_at
+    FROM master_skus s
+    INNER JOIN master_skus v
+      ON v.brand = s.brand AND v.base_sku_sno = s.base_sku_sno
+    LEFT JOIN master_recipe r
+      ON r.sku_id = v.id AND r.status = 'active'
+    WHERE s.id = ? AND s.brand IS NOT NULL AND s.base_sku_sno IS NOT NULL
+    ORDER BY v.sku_code ASC
   `,
 
   /**
@@ -291,6 +321,32 @@ export const skus = {
    * Parameters: [sku_id, recipe_id]
    */
   clearActiveBomIdIfMatches: `UPDATE master_skus SET active_bom_id = NULL WHERE id = ? AND active_bom_id = ?`,
+
+  /**
+   * Designate the base SKU of a variant family — the member whose recipe owns
+   * the family's RM. ALWAYS run as this pair, in one transaction:
+   *
+   *   clearBaseForFamily [brand, base_sku_sno]
+   *   setBaseSku         [sku_id]
+   *
+   * "At most one base per family" holds BY CONSTRUCTION because of that order —
+   * there is no unique index behind it (MySQL has no filtered unique index, and
+   * one on (brand, base_sku_sno, is_base_sku) would wrongly forbid two NON-base
+   * members). Run them apart, or in the other order, and a family can end up
+   * with two bases — after which resolveRmLock's `family.find(isBase)` silently
+   * picks whichever sorts first by sku_code. See
+   * app/api/v1/masters/skus/route.ts, action "set-base".
+   *
+   * Parameters: [brand, base_sku_sno]
+   */
+  clearBaseForFamily: `UPDATE master_skus SET is_base_sku = 0 WHERE brand = ? AND base_sku_sno = ?`,
+
+  /** Second half of the pair above. Parameters: [sku_id] */
+  setBaseSku: `UPDATE master_skus SET is_base_sku = 1 WHERE id = ?`,
+
+  /** The family grouping key for one SKU, needed before clearBaseForFamily.
+   *  Parameters: [sku_id] */
+  selectFamilyKeyById: `SELECT brand, base_sku_sno FROM master_skus WHERE id = ? LIMIT 1`,
 
   /** Fetch SKU status by sku_code — used to gate PO creation. Parameters: [sku_code] */
   selectStatusByCode: `SELECT status FROM master_skus WHERE sku_code = ? LIMIT 1`,

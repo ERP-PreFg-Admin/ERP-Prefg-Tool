@@ -99,6 +99,7 @@ export function RecipeCreationWizard({
                 {step === 2 && (
                   <Step2ExistingBom
                     existingBomCode={wizard.existingBomCode}
+                    rmLock={wizard.rmLock}
                     onUpdateExisting={wizard.handleUpdateExisting}
                     onCreateNewVersion={wizard.handleCreateNewVersion}
                   />
@@ -127,6 +128,8 @@ export function RecipeCreationWizard({
                     onChangeReason={wizard.setReason}
                     changeType={wizard.changeType}
                     onChangeChangeType={wizard.setChangeType}
+                    rmLock={wizard.rmLock}
+                    propagationTargets={wizard.propagationTargets}
                   />
                 )}
 
@@ -142,6 +145,8 @@ export function RecipeCreationWizard({
                     isRevision={wizard.existingBomId != null}
                     reason={wizard.reason}
                     changeType={wizard.changeType}
+                    rmLock={wizard.rmLock}
+                    propagationTargets={wizard.propagationTargets}
                   />
                 )}
               </div>

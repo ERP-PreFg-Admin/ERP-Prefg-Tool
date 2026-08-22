@@ -39,6 +39,17 @@ export const skuVariantsSchema = z.object({
   base_sku_sno: z.union([z.number(), z.string()]),
 })
 
+/**
+ * Designate this SKU as the base of its variant family — the member whose
+ * recipe owns the family's RM. Deliberately NOT an approval-flow edit: it's a
+ * mapping, like the MFG x facility vendor code
+ * (app/api/v1/manufacturing/facility-map/route.ts), not a master field.
+ */
+export const skuSetBaseSchema = z.object({
+  action: z.literal("set-base"),
+  sku_id: z.coerce.number().int().positive(),
+})
+
 export const skuBulkFromS3Schema = z.object({
   action: z.literal("bulk_from_s3"),
   key: z.string().trim().min(1),
@@ -50,6 +61,7 @@ export const skuActionSchema = z.discriminatedUnion("action", [
   skuUpdateSchema,
   skuBulkFromS3Schema,
   skuVariantsSchema,
+  skuSetBaseSchema,
 ])
 
 export type SkuAction = z.infer<typeof skuActionSchema>

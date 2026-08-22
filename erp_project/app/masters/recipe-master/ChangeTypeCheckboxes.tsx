@@ -19,13 +19,19 @@ export function ChangeTypeCheckboxes({
   changeType,
   onChangeChangeType,
   disabled,
+  hideRm,
 }: {
   reason: string
   onChangeReason: (v: string) => void
   changeType: ("rm" | "pm")[]
   onChangeChangeType: (v: ("rm" | "pm")[]) => void
   disabled?: boolean
+  /** RM is inherited from this variant family's base and can't change here, so
+   *  offering "RM change" would be offering something the server rejects. */
+  hideRm?: boolean
 }) {
+  const options = hideRm ? OPTIONS.filter((o) => o.key !== "rm") : OPTIONS
+
   function toggle(key: "rm" | "pm") {
     onChangeChangeType(
       changeType.includes(key) ? changeType.filter((t) => t !== key) : [...changeType, key]
@@ -51,7 +57,7 @@ export function ChangeTypeCheckboxes({
         <span className="text-xs font-medium">
           Type of change <span className="text-destructive">*</span>
         </span>
-        {OPTIONS.map((opt) => (
+        {options.map((opt) => (
           <label key={opt.key} className="flex items-center gap-1.5 text-sm">
             <input
               type="checkbox"
