@@ -83,9 +83,17 @@ export function SkuVariantsDialog({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "variants", brand: brand.brand, base_sku_sno: brand.base_sku_sno }),
     })
-      .then((r) => r.json())
+      .then(async (r) => {
+        // The gateway answers a 403 with JSON too, so r.json() resolving is not
+        // success. Without this check `data.skus ?? []` turned every refusal
+        // into "No other variants found" — a permission problem reading as a
+        // fact about the SKU, with nothing on screen to act on.
+        const data = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(data.error || `Failed to load variants (HTTP ${r.status})`)
+        return data
+      })
       .then((data) => setVariants(data.skus ?? []))
-      .catch(() => setError("Failed to load variants"))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load variants"))
       .finally(() => setLoading(false))
   }, [brand])
 
