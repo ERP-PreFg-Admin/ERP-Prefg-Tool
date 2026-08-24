@@ -15,6 +15,9 @@ import type { Recipe, RecipeArtifact, RecipeDetailResponse } from "@/types/maste
 export const GET = withGateway({
   paramsSchema: bomIdParamSchema,
   access: { pageSlug: "/masters/recipe-master", level: "viewer" },
+  // Same brand boundary as ../../[id] — an archived formulation is no less
+  // sensitive than the live one.
+  scope: { type: "recipe", from: ({ params }) => params.id },
   handler: async ({ params }) => {
     // Artifacts are current-state, not archived — same set the live detail
     // route (../[id]/route.ts) returns, since artifacts_recipe rows are never

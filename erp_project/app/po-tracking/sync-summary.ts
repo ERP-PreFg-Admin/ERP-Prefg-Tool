@@ -14,7 +14,7 @@
  * implies five different problems when five identical 403s are one problem.
  */
 
-import { uniwareErrorReasons } from "@/lib/uniware-error"
+import { uniwareErrorReasons } from "@/lib/uniware/errors"
 
 export type SyncFailure = { code: string; error: string }
 

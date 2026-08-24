@@ -1,0 +1,47 @@
+-- WHAT: adds 'brand' to user_entity_scope.entity_type.
+--
+-- WHY THIS FILE EXISTS AT ALL: it was missing. The value is already live on
+-- mcaff_prefg_dev — enum('mfg','vendor','warehouse','brand') — but NO migration
+-- in prisma/ ever added it (`grep "'brand'" prisma/*.sql` finds nothing). It was
+-- applied to dev by hand during the brand-scope work and never written down, so
+-- prod still has enum('mfg','vendor','warehouse') and the two schemas have
+-- silently diverged. This file is that missing step, written after the fact.
+--
+-- WHY IT MATTERS: brand is an ACCESS BOUNDARY (see add_master_brand.sql and
+-- lib/brand-guard.ts). The admin Data Access screen writes a
+-- (user, entity_type, entity_id) row per grant via
+-- app/api/v1/admin/entity-scope/route.ts. On prod, saving a BRAND grant inserts
+-- entity_type='brand' into a column whose ENUM has no such member — which in
+-- strict mode errors and rolls the request back, and without it stores '' and
+-- silently grants nothing. Either way brand scoping cannot be configured on prod
+-- until this runs.
+--
+-- SAFETY: purely additive. Adding a member to the END of an ENUM does not
+-- renumber the existing ones, so no stored row changes meaning. Existing values
+-- ('mfg','vendor','warehouse') keep their ordinals 1-3; 'brand' becomes 4. The
+-- member order below deliberately matches dev's live definition exactly, so the
+-- two schemas converge rather than differing by ordinal.
+--
+-- NOT NULL and the absence of a default are preserved from the current
+-- definition on both schemas — a bare MODIFY would otherwise drop them.
+--
+-- RE-RUNNABLE: yes. MODIFY to a definition the column already has is a no-op,
+-- so this is safe to run on dev (where 'brand' is already present) as well as
+-- prod. That is the intended way to prove the two schemas now agree.
+--
+-- STATE AS OF 2026-08-22 (surveyed, not applied):
+--   mcaff_prefg_dev   enum('mfg','vendor','warehouse','brand')  -- already correct
+--   mcaff_prefg_prod  enum('mfg','vendor','warehouse')          -- needs this
+--   prod user_entity_scope row count: 0 — so nothing to backfill or re-map,
+--   and no existing grant can be invalidated by running it.
+--
+-- prisma/schema.prisma is ALREADY in sync — enum user_entity_scope_type at
+-- :292 already lists brand. It was updated when dev was changed by hand; only
+-- the migration file and prod were left behind. Nothing to change there.
+--
+-- Verify after running:
+--   SELECT TABLE_SCHEMA, COLUMN_TYPE FROM information_schema.COLUMNS
+--    WHERE TABLE_NAME = 'user_entity_scope' AND COLUMN_NAME = 'entity_type';
+
+ALTER TABLE user_entity_scope
+  MODIFY COLUMN entity_type ENUM('mfg', 'vendor', 'warehouse', 'brand') NOT NULL;

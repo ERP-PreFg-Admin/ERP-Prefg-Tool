@@ -512,7 +512,15 @@ it to `/api/v1/v2/` — a 404 that compiled, linted and type-checked.
 
 **All routes go through `withGateway`** (`lib/gateway/with-gateway.ts`): session → `access: { pageSlug, level }` → Zod → handler, error shape `{ error, code, details?, requestId }`, plus an `activity_log` row on every non-GET. Throw `ApiError(status, code, message)` for user-facing failures.
 
-**Entity scope is opt-in per route**, not part of `access`. A route that takes an id must call `assertInScope(scope, type, id)` — or `assertPoInScope(userId, poId)` for POs, since PO ids are guessable integers.
+**Entity scope is declared per route**, next to `access` and separate from it — `access` is "may you open this screen", scope is "is THIS record yours". Any route addressed by an id needs it, because ids are guessable integers and the list query being filtered protects nothing:
+
+```ts
+scope: { type: "invoice", from: ({ params }) => params.id },
+```
+
+`type` is one of `mfg` / `vendor` / `warehouse` / `brand` (checked directly as a scope entity) or `po` / `invoice` / `recipe` / `sku` (a record resolved to its dimensions first, delegating to `assertPoInScope`, `assertInvoiceInScope`, `assertRecipeInBrandScope`, `assertSkuIdInBrandScope`). Add a subject by adding one line to `RESOLVERS` in `lib/gateway/scope-rules.ts`. Calling a guard inside the handler still works and is what the `/purchase-orders/[id]/**` routes do.
+
+`tests/unit/route-scope.test.ts` fails the build if an `/api/v1/**/[id]/**` route has neither — this was a repeat bug (the invoice detail route and both Recipe read routes each shipped with a filtered list and an unfiltered by-id sibling). An exception goes in that file's `EXEMPT` map **with a reason**.
 
 ---
 
@@ -528,6 +536,8 @@ it to `/api/v1/v2/` — a 404 that compiled, linted and type-checked.
 | `lib/roles.ts` | The declared role taxonomy: `developer`, `admin`, and `{rm,pm,production,cost}_{head,lead,executive}`. Nothing branches on a role name — a role's only power is its `page_permissions` rows |
 | `lib/scope.ts` | Per-user entity scope. **Absence of rows = UNRESTRICTED.** `scopeClause`/`scopeParams` need `query()` (array expansion), `assertInScope` for anything addressed by id |
 | `lib/po/po-guard.ts` | `assertPoInScope` — required by every `/api/v1/purchase-orders/[id]/**` route |
+| `lib/gateway/scope-rules.ts` | The `scope` option on `withGateway` — the resolver table behind `{ type, from }`. One line per subject, each pointing at the guard that already owns that rule |
+| `lib/invoice/invoice-guard.ts` | `assertInvoiceInScope` — mfg + destination + per-line brand, mirroring `INVOICE_WHERE`. `selectInvoiceById` returns `si.*` (GSTINs, bill-to, rates) and must never run unguarded |
 | `lib/admin-guards.ts` | `assertNotSelfLockout` / `assertNotSelfScope` — no UI recovery path exists for either |
 | `lib/gateway/with-gateway.ts` | The route wrapper (auth, access, Zod, logging, `activity_log`) |
 | `lib/invoice/invoice-inward.ts` | Supplier invoice → inward POs: S3 → DB → Uniware → email, ordered least-reversible-last |

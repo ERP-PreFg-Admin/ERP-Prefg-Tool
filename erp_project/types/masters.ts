@@ -89,6 +89,13 @@ export type SkuVariantRow = {
   /** Owns this family's RM formulation. Only selected by
    *  selectVariantsByBrandAndSno; TINYINT(1) arrives as 0/1. */
   is_base_sku?: number | null
+  /** This SKU's ACTIVE Recipe, or null when it has none. Only selected by
+   *  selectVariantsByBrandAndSno. `bom_code` is `<sku>-RM<n>-PM<n>`, so the
+   *  version numbers the family must agree on are readable off the code. */
+  active_recipe_id?: number | null
+  bom_code?: string | null
+  rm_version?: number | null
+  pm_version?: number | null
 }
 
 /**

@@ -114,9 +114,9 @@ assert.equal(
 // matches on `name`, so a two-entity site has two candidates with identical names —
 // deliberately kept here, since that is exactly what the live query returns.
 const WAREHOUSES: WarehouseOption[] = [
-  { id: 1, name: "Bhiwandi MWH", location: "Bhiwandi", zone: "West", type: "MWH", entity_code: "PEP",      facility_code: "BHW_PEP" },
-  { id: 1, name: "Bhiwandi MWH", location: "Bhiwandi", zone: "West", type: "MWH", entity_code: "KREATIVE", facility_code: "BHW_KRE" },
-  { id: 2, name: "Guwahati CWH", location: "Guwahati", zone: "East", type: "CWH", entity_code: "PEP",      facility_code: "GHY_PEP" },
+  { id: 1, name: "Bhiwandi MWH", location: "Bhiwandi", zone: "West", type: "MWH", entity_code: "PEP",      facility_code: "BHW_PEP", ship_to_pincode: "421302", bill_to_address: "Unit 1, Andheri East, Mumbai, Maharashtra - 400059" },
+  { id: 1, name: "Bhiwandi MWH", location: "Bhiwandi", zone: "West", type: "MWH", entity_code: "KREATIVE", facility_code: "BHW_KRE", ship_to_pincode: "421302", bill_to_address: "Unit 7, Sector 44, Gurgaon, Haryana - 122003" },
+  { id: 2, name: "Guwahati CWH", location: "Guwahati", zone: "East", type: "CWH", entity_code: "PEP",      facility_code: "GHY_PEP", ship_to_pincode: "781017", bill_to_address: "Unit 1, Andheri East, Mumbai, Maharashtra - 400059" },
 ]
 assert.equal(matchWarehouse("Guwahati", WAREHOUSES)?.name, "Guwahati CWH")
 // Unrecognised destinations fall back to the Mother Warehouse, never to null:

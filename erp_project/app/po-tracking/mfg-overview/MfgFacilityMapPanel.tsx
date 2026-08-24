@@ -35,7 +35,7 @@ import {
   SidePanel, SidePanelContent, SidePanelHeader, SidePanelTitle,
 } from "@/components/ui/side-panel"
 import { cn } from "@/lib/utils"
-import { uniwareErrorReasons, uniwareErrorMessage } from "@/lib/uniware-error"
+import { uniwareErrorReasons, uniwareErrorMessage } from "@/lib/uniware/errors"
 import { DIFF_NEW_CELL_CLASS } from "@/app/approvals/approval-card/diff-colors"
 import { cellState, MAP_STATE_CELL, MAP_STATE_LABEL, type MatrixCell } from "./mapping-state"
 import type { MfgFacilityCell, MfgFacilitySkuRow } from "@/types/masters"

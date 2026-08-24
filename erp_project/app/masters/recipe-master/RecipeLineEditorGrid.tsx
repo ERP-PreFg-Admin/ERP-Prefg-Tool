@@ -34,14 +34,22 @@ export type RecipeMaterialOption = {
 }
 
 /** RM lines default to "%" (they express a formulation percentage), PM lines
- *  default to "pcs" (a per-unit packing quantity) — both editable per row. */
+ *  default to "1 pcs" (one piece per unit is the overwhelming case) — both
+ *  editable per row. RM's amount is left blank on purpose: there is no sensible
+ *  default percentage, and a prefilled one would quietly break the 100% total. */
 export function emptyBomLine(mtrlType: "rm" | "pm"): RecipeLineRow {
   return {
     mtrl_type: mtrlType,
     mtrl_id: null,
-    amount: "",
+    amount: mtrlType === "rm" ? "" : "1",
     uom: mtrlType === "rm" ? "%" : "pcs",
   }
+}
+
+/** The uom a line of this type carries unless the user says otherwise — also
+ *  the input's placeholder, so an emptied box still reads as what belongs there. */
+export function defaultUom(mtrlType: "rm" | "pm"): string {
+  return mtrlType === "rm" ? "%" : "pcs"
 }
 
 export function rmTotal(rows: RecipeLineRow[]): number {
@@ -68,7 +76,11 @@ function LineRowCard({
 }) {
   function selectMaterial(id: number) {
     const mat = materials.find((m) => m.id === id)
-    onChange({ ...row, mtrl_id: id, uom: row.uom || mat?.uom || "" })
+    // RM's amount IS the percentage (see bomLineSchema), so the material's own
+    // uom ("kg") must never win here — it would read as kilograms of a line
+    // that is really 45.5% of the batch.
+    const uom = row.mtrl_type === "rm" ? "%" : row.uom || mat?.uom || defaultUom("pm")
+    onChange({ ...row, mtrl_id: id, uom })
   }
 
   // A locked row renders as plain text, not a disabled input: a greyed-out
@@ -113,7 +125,7 @@ function LineRowCard({
       <input
         type="text"
         className={cn(inputCls, "w-20 shrink-0")}
-        placeholder="kg"
+        placeholder={defaultUom(row.mtrl_type)}
         value={row.uom}
         onChange={(e) => onChange({ ...row, uom: e.target.value })}
       />

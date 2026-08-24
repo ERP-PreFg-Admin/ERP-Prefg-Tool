@@ -17,6 +17,10 @@ const paramsSchema = z.object({ id: z.coerce.number().int().positive() })
 export const GET = withGateway({
   paramsSchema,
   access: { pageSlug: "/po-tracking", level: "viewer" },
+  // selectInvoiceById is a bare `WHERE si.id = ?` returning si.* — GSTINs,
+  // bill-to address, line rates. The LIST applies mfg + destination + brand
+  // scope; this must too, or the scope is one incremented id away from nothing.
+  scope: { type: "invoice", from: ({ params }) => params.id },
   handler: async ({ params }) => {
     const [headers, items] = await Promise.all([
       query<InvoiceHistoryHeader>(supplierInvoicesSql.selectInvoiceById, [params.id]),

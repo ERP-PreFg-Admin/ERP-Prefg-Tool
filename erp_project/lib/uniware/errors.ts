@@ -1,6 +1,24 @@
 /**
  * Making Unicommerce's failures readable.
  *
+ * ── THIS FILE MUST IMPORT NOTHING ───────────────────────────────────────────
+ * It is the only part of lib/uniware/ that CLIENT components use —
+ * MfgFacilityMapPanel.tsx and SyncUniwareButton.tsx (via
+ * app/po-tracking/sync-summary.ts) are both "use client". Every other file in
+ * this folder reaches @/lib/env, and so UNIWARE_PASSWORD / UNIWARE_USER_NAME;
+ * one import here would open a path that drags those into a client bundle.
+ *
+ * Zero imports is what makes that impossible rather than merely discouraged.
+ * Two things hold the line, because a convention would not:
+ *   - `tests/unit/uniware-error.test.ts` asserts this file has no imports.
+ *   - eslint.config.mjs stops app/** (outside app/api) importing the
+ *     "@/lib/uniware" barrel at all — UI reaches for @/lib/uniware/errors.
+ * It is deliberately NOT re-exported from index.ts, for the same reason.
+ *
+ * Being pure is also why it is the one part of the integration testable with no
+ * credentials: the four transport tests need `await import(...)` inside the test
+ * body because @/lib/env reads process.env at module load.
+ *
  * Two problems this solves, both visible on screen before it existed:
  *
  *  1. **The wrong story.** Uniware reports BUSINESS failures as HTTP 200 with
@@ -47,13 +65,30 @@ const clip = (s: string) =>
  *
  * `subject` reads inside the sentence, so pass the noun phrase — "purchase order
  * 0020", not just the code.
+ *
+ * It is deliberately NOT used by every branch. Only a failure that is genuinely
+ * about the record names it (404, and the catch-all); an account or
+ * infrastructure failure must not, for the two reasons in the 401/403 branch
+ * below. `tests/unit/uniware-error.test.ts` pins both halves of that split —
+ * re-adding the subject to an account/outage message breaks three tests.
  */
 export function uniwareStatusFallback(subject: string, status: number): string {
   if (status === 401 || status === 403) {
-    // The case that was being mislabelled. Both causes are worth naming: the
-    // endpoint is facility-scoped, so the right credentials asking about the
-    // wrong facility fail exactly like the wrong credentials.
-    return `Not authorised to read ${subject} — check the Uniware credentials, and that its facility matches the one being asked.`
+    // Deliberately WITHOUT the subject, for two reasons:
+    //
+    //   1. A refused account is refused for EVERY record, so naming one implies
+    //      that record is at fault. This is the exact regression from the
+    //      2026-08-21 screenshot — "returned no purchase order 0020 (HTTP 403)"
+    //      sent people hunting a PO that was there all along, when the real
+    //      cause was the EC2 egress IP not being allowlisted by Unicommerce.
+    //   2. It breaks grouping. failureReasons() in app/po-tracking/sync-summary.ts
+    //      groups by reason, so five POs refused by one token only read as one
+    //      problem while the five messages are byte-identical.
+    //
+    // Both causes are named because the endpoint is facility-scoped: the right
+    // credentials asking about the wrong facility fail exactly like the wrong
+    // credentials.
+    return "Not authorised — check the Uniware credentials, and that the record's facility matches the one being asked."
   }
   if (status === 404) return `Uniware has no ${subject}.`
   if (status === 429) return `Uniware is rate-limiting this account — retry in a moment.`

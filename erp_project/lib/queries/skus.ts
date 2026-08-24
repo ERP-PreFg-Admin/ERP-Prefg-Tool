@@ -163,14 +163,24 @@ export const skus = {
   /**
    * Sibling SKUs sharing one SKU's brand + base_sku_sno — feeds the per-row
    * "variants" popup (simple row list, not the JSON-packed report above).
+   *
+   * Each member's ACTIVE Recipe rides along, the same LEFT JOIN
+   * selectVariantFamilyBySkuId uses. The popup is where the family's RM owner is
+   * designated, and `bom_code` is `<sku>-RM<n>-PM<n>` — so the codes side by side
+   * are what make "is this family in step on RM" answerable on the screen where
+   * you act on it. LEFT, because a member with no recipe is normal and must not
+   * drop out of its own family.
+   *
    * Params: [brand, base_sku_sno]
    */
   selectVariantsByBrandAndSno: `
-    SELECT id, sku_code, name, sku_type, category, subcategory, filling, filling_uom, mrp, status,
-      is_base_sku
-    FROM master_skus
-    WHERE brand = ? AND base_sku_sno = ?
-    ORDER BY sku_code ASC
+    SELECT s.id, s.sku_code, s.name, s.sku_type, s.category, s.subcategory,
+           s.filling, s.filling_uom, s.mrp, s.status, s.is_base_sku,
+           r.id AS active_recipe_id, r.bom_code, r.rm_version, r.pm_version
+    FROM master_skus s
+    LEFT JOIN master_recipe r ON r.sku_id = s.id AND r.status = 'active'
+    WHERE s.brand = ? AND s.base_sku_sno = ?
+    ORDER BY s.sku_code ASC
   `,
 
   /**

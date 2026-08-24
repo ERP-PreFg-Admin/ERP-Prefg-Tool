@@ -33,6 +33,17 @@ const approvalIdParamSchema = z.object({
 export const POST = withGateway({
   paramsSchema: approvalIdParamSchema,
   access: { pageSlug: "/approvals", level: "editor" },
+  // scope-exempt: approving is a global authority, not a per-entity one — an
+  // approver with /approvals editor may action any pending record regardless of
+  // their user_entity_scope grants. This records the behaviour that has always
+  // been in force; it was previously just unstated, which is why the audit could
+  // not tell it apart from the three routes that had genuinely forgotten.
+  //
+  // ⚠ UNCONFIRMED with the business. If an approver must NOT action another
+  // brand's or manufacturer's records, this becomes a real gap: replace this
+  // marker with a `scope` rule keyed on the approval's (module, entity_id),
+  // which needs one resolver per module in lib/gateway/scope-rules.ts. See
+  // docs/module-boundaries-and-tally-plan.md §3.3.
   handler: async ({ req, params, session, ctx }) => {
   const approvalId = params.id
   logger.info({ ...ctx, message: "Approval API request received" })

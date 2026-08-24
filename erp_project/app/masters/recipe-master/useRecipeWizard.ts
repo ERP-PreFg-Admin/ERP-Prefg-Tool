@@ -199,8 +199,11 @@ export function useBomWizard({
   }
 
   const rmValid = rmRows.length > 0 && isRmTotalValid(rmTotal(rmRows))
-  const allRmFieldsFilled = rmRows.every((r) => r.mtrl_id && r.amount)
-  const allPmFieldsFilled = pmRows.every((r) => r.mtrl_id && r.amount)
+  // Number(), not truthiness: r.amount is a STRING, and "0" is truthy — a line
+  // left at 0 sailed past this check and only died on the server's
+  // z.coerce.number().positive() as a generic 400.
+  const allRmFieldsFilled = rmRows.every((r) => r.mtrl_id && Number(r.amount) > 0)
+  const allPmFieldsFilled = pmRows.every((r) => r.mtrl_id && Number(r.amount) > 0)
   // effective_from is deliberately absent: it's optional, so a recipe can be
   // drafted before its start date is decided.
   const canProceedFromLines =
@@ -217,8 +220,8 @@ export function useBomWizard({
       return
     }
     for (const r of [...rmRows, ...pmRows]) {
-      if (!r.mtrl_id || !r.amount) {
-        setError("Every line requires a material and an amount.")
+      if (!r.mtrl_id || !(Number(r.amount) > 0)) {
+        setError("Every line requires a material and an amount greater than 0.")
         return
       }
     }

@@ -24,15 +24,28 @@
  * body needs a hard 403 rather than an empty result:
  *     assertInScope(scope, "mfg", mfgId)
  *
+ * A route addressed by an id should DECLARE that instead of remembering to call
+ * it, so the omission is visible where the route's contract is read:
+ *     scope: { type: "invoice", from: ({ params }) => params.id }
+ * See lib/gateway/scope-rules.ts; tests/unit/route-scope.test.ts fails any
+ * /api/v1/**\/[id] route that has neither.
+ *
  * Globally cached lists (lib/cached-reference-data.ts uses `unstable_cache`
  * with no user in the key, so it cannot filter internally) post-filter:
  *     filterByScope(mfgOptions, "id", scope.mfgIds)
  *
  * ── Deliberately NOT scoped yet ─────────────────────────────────────────────
- * The approvals queue (`approvalsSql.listPending` stores only module +
- * entity_id, and bulk modules store entity_id = user_id), Recipe master (no
- * mfg_id — linkage is via master_recipe_mfg) and the supplier-invoice list. Don't
- * assume a screen is scoped because this file exists; grep for the call.
+ * The approvals queue: `approvalsSql.listPending` stores only module +
+ * entity_id, the module decides what that points at, and every *_BULK module
+ * stores the uploader's user id. It is the one entry in route-scope.test.ts's
+ * EXEMPT map.
+ *
+ * Recipe master has no mfg_id (linkage is via master_recipe_mfg) but IS brand-
+ * scoped, on the list, the export, the writes and — since the by-id read routes
+ * were found leaking whole formulations to any guessable id — the reads too.
+ * The supplier-invoice list is scoped by mfg + destination + brand.
+ *
+ * Don't assume a screen is scoped because this file exists; grep for the call.
  */
 
 import { cache } from "react"

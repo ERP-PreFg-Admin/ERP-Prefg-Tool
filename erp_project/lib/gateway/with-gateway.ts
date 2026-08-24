@@ -9,6 +9,7 @@ import { createRequestContext } from "@/lib/request-context"
 import logger from "@/lib/logger"
 import { ApiError, toErrorResponse } from "./errors"
 import { acquire , type RateLimitRule } from "./rate-limit"
+import { enforceScope, type ScopeRule } from "./scope-rules"
 
 type AccessRule = { pageSlug: string; level: Exclude<AccessLevel, "none"> }
 
@@ -40,10 +41,34 @@ function logActivity(
   )
 }
 
+/**
+ * Zod issues → one human-readable line. Clients render `data.error` verbatim,
+ * so "Invalid request" alone left the user hunting for which field was wrong.
+ * `details` still carries the full structure for anything that wants it.
+*/
+function describeZodIssues(error: z.ZodError): string {
+  const lines = [...new Set(error.issues.map((i) => {
+    const path = i.path.join(".")
+    return path ? `${path}: ${i.message}` : i.message
+  }))]
+  const shown = lines.slice(0, 5)
+  return shown.join("; ") + (lines.length > shown.length ? ` (+${lines.length - shown.length} more)` : "")
+}
+
+
 export function withGateway<TBody = unknown, TParams = Record<string, string>>(opts: {
   schema?: z.ZodType<TBody>
   paramsSchema?: z.ZodType<TParams>
   access?: AccessRule
+  /**
+   * Per-user entity scope for a route addressed by an id. `access` answers "can
+   * you open this screen"; this answers "is THIS record yours to see". Runs
+   * after validation and before the handler — see lib/gateway/scope-rules.ts.
+   *
+   * Any route whose params or body carry an entity id needs one. Ids are
+   * guessable integers, and the list query being filtered protects nothing.
+   */
+  scope?: ScopeRule<TParams, TBody>
   handler: (args: {
     req: NextRequest
     body: TBody
@@ -111,7 +136,7 @@ export function withGateway<TBody = unknown, TParams = Record<string, string>>(o
         const rawParams = routeCtx?.params ? await routeCtx.params : {}
         const parsed = opts.paramsSchema.safeParse(rawParams)
         if (!parsed.success) {
-          throw new ApiError(400, "validation_error", "Invalid route parameters", parsed.error.flatten())
+          throw new ApiError(400, "validation_error", `Invalid route parameters — ${describeZodIssues(parsed.error)}`, parsed.error.flatten())
         }
         params = parsed.data
       }
@@ -121,10 +146,14 @@ export function withGateway<TBody = unknown, TParams = Record<string, string>>(o
         const json = await req.json().catch(() => ({}))
         const parsed = opts.schema.safeParse(json)
         if (!parsed.success) {
-          throw new ApiError(400, "validation_error", "Invalid request", parsed.error.flatten())
+          throw new ApiError(400, "validation_error", `Invalid request — ${describeZodIssues(parsed.error)}`, parsed.error.flatten())
         }
         body = parsed.data
       }
+
+      // After validation (the id is a number by now), before the handler — so a
+      // handler can never see an id the caller isn't scoped to.
+      if (opts.scope) await enforceScope(opts.scope, ctx.userId, params, body)
 
       let res: Response
       try {

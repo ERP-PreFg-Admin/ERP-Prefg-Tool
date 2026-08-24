@@ -9,11 +9,13 @@
 
 import test from "node:test"
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import {
   uniwareStatusFallback,
   uniwareErrorReasons,
   uniwareErrorMessage,
-} from "../../lib/uniware-error"
+} from "../../lib/uniware/errors"
 
 // ── The status fallback ─────────────────────────────────────────────────────────
 
@@ -165,4 +167,38 @@ test("uniwareErrorMessage joins reasons and honours the fallback", () => {
   assert.equal(uniwareErrorMessage("a; b"), "a · b")
   assert.equal(uniwareErrorMessage(null), null)
   assert.equal(uniwareErrorMessage(null, "No reason given."), "No reason given.")
+})
+
+// ── The purity constraint ──────────────────────────────────────────────────────
+
+test("lib/uniware/errors.ts imports nothing", () => {
+  // This is the file's whole reason for living where it does. It is the only part
+  // of lib/uniware/ that client components use — MfgFacilityMapPanel.tsx and
+  // SyncUniwareButton.tsx (via app/po-tracking/sync-summary.ts) are both
+  // "use client". Every sibling reaches @/lib/env, and so UNIWARE_PASSWORD; a
+  // single import here opens a path that drags credentials into a client bundle.
+  //
+  // Zero imports makes that impossible rather than discouraged, and being pure is
+  // also why this suite can import it statically while the four transport tests
+  // need `await import(...)` inside the test body.
+  //
+  // eslint.config.mjs guards the other half: app/** outside app/api cannot import
+  // the "@/lib/uniware" barrel at all.
+  const src = readFileSync(
+    join(process.cwd(), "lib", "uniware", "errors.ts"),
+    "utf8",
+  ).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")
+
+  const offenders = [
+    ...src.matchAll(/^\s*import\s.+$/gm),
+    ...src.matchAll(/\brequire\s*\(/g),
+    ...src.matchAll(/\bfrom\s+["'][^"']+["']/g),
+  ].map((m) => m[0].trim())
+
+  assert.deepEqual(
+    offenders,
+    [],
+    "lib/uniware/errors.ts must stay dependency-free — see its header:\n  " +
+      offenders.join("\n  "),
+  )
 })

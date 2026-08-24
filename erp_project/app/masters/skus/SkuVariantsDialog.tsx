@@ -13,13 +13,15 @@
  * sane home for that pick.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Layers, Loader2, Star } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { StatusBadge } from "@/components/masters/StatusBadge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Callout } from "@/components/ui/callout"
 import { useToast } from "@/components/ui/toast"
+import { describeRmDrift, rmDrift, type FamilyMember } from "@/lib/masters/variant-rm-lock"
 import {
   Table,
   TableBody,
@@ -43,6 +45,33 @@ export function SkuVariantsDialog({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [savingBaseId, setSavingBaseId] = useState<number | null>(null)
+
+  /**
+   * THE INVARIANT, checked on the screen where you act on it: every active
+   * recipe in a variant family carries the same rm_version.
+   *
+   * Runs the SAME predicate as the four write paths that can activate a recipe
+   * (lib/masters/variant-rm-lock.ts) rather than re-deriving "out of step" here
+   * — a display that disagreed with the guards would be worse than no display.
+   *
+   * `recipe_created_at` is deliberately not fetched: it only breaks ties for
+   * WHICH member is the lineage head, and every member at the top version
+   * yields the same headVersion, so the outlier set is identical without it.
+   */
+  const { drift, outlierIds } = useMemo(() => {
+    const family: FamilyMember[] = variants.map((v) => ({
+      id: v.id,
+      sku_code: v.sku_code,
+      is_base_sku: v.is_base_sku ?? 0,
+      active_recipe_id: v.active_recipe_id ?? null,
+      bom_code: v.bom_code ?? null,
+      rm_version: v.rm_version ?? null,
+    }))
+    return {
+      drift: describeRmDrift(family),
+      outlierIds: new Set(rmDrift(family).outliers.map((o) => o.id)),
+    }
+  }, [variants])
 
   useEffect(() => {
     if (!brand) return
@@ -84,7 +113,9 @@ export function SkuVariantsDialog({
 
   return (
     <Dialog open={brand !== null} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+      {/* 5xl, not 4xl: the Recipe column made nine, and the dialog only scrolls
+          vertically — a tenth would need overflow-x on the wrapper, not a wider box. */}
+      <DialogContent className="max-w-5xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Layers className="h-4 w-4" /> Variants of {brand?.sku_code}
@@ -110,6 +141,22 @@ export function SkuVariantsDialog({
                 every other variant can only change its PM.
                 {!variants.some((v) => v.is_base_sku) && " No base is set yet, so RM is inherited from whichever variant last got a recipe."}
               </p>
+
+              {/* Should never fire — recipeSql.selectVariantFamiliesWithRmDrift
+                  audits for exactly this and should always return zero rows. It
+                  is surfaced anyway because no DB constraint can express the
+                  invariant (it spans every active recipe of every SKU sharing a
+                  grouping key), so the only thing standing behind it is
+                  application code at four separate doors. */}
+              {drift && (
+                <Callout variant="warning" className="mb-2">
+                  {/* describeRmDrift returns a lower-case clause built to be embedded
+                      ("Activating X would mean {drift}"), so it gets sentence-cased
+                      here rather than the helper growing a second wording. */}
+                  {drift.charAt(0).toUpperCase() + drift.slice(1)}. Submit the RM change
+                  from Recipe Master, which re-versions the whole family in one approval.
+                </Callout>
+              )}
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -120,6 +167,7 @@ export function SkuVariantsDialog({
                     <TableHead>Filling</TableHead>
                     <TableHead>MRP</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Active Recipe</TableHead>
                     <TableHead>RM Owner</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -137,6 +185,18 @@ export function SkuVariantsDialog({
                         {v.mrp != null ? `₹${v.mrp}` : "—"}
                       </TableCell>
                       <TableCell><StatusBadge status={v.status} /></TableCell>
+                      {/* The code carries its own RM/PM versions, so reading the
+                          column top to bottom is how you spot a family that has
+                          drifted apart on RM. */}
+                      <TableCell className="font-mono text-xs">
+                        {v.bom_code ? (
+                          <span className={outlierIds.has(v.id) ? "text-amber-600 dark:text-amber-500 font-semibold" : undefined}>
+                            {v.bom_code}
+                          </span>
+                        ) : (
+                          <span className="font-sans text-muted-foreground">No recipe</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         {v.is_base_sku ? (
                           <Badge variant="secondary" className="gap-1 text-[10px]">

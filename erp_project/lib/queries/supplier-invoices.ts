@@ -264,6 +264,32 @@ export const supplierInvoicesSql = {
     ${INVOICE_WHERE}
   `,
 
+  /**
+   * The scope facts for one invoice — the same dimensions INVOICE_WHERE filters
+   * the list on, minus brand (per LINE, see selectInvoiceLineBrandIds below).
+   * Used by assertInvoiceInScope; selectInvoiceById returns si.* including
+   * GSTINs and bill-to addresses, so it must never run unguarded.
+   * Parameters: [id]
+   */
+  selectInvoiceScopeById: `
+    SELECT si.id, si.mfg_id, si.destination
+    FROM invoice_mfg si
+    WHERE si.id = ?
+  `,
+
+  /**
+   * The distinct brands this invoice's lines resolve to, unattributed lines
+   * excluded — the JS-side equivalent of INVOICE_WHERE's EXISTS/NOT EXISTS pair.
+   * Zero rows means nothing attributable, which is visible to everyone, exactly
+   * as the NOT EXISTS arm decides. Parameters: [id]
+   */
+  selectInvoiceLineBrandIds: `
+    SELECT DISTINCT ms.brand_id
+    FROM invoice_items_mfg ii
+    JOIN master_skus ms ON ms.sku_code = ii.sku_code
+    WHERE ii.invoice_id = ? AND ms.brand_id IS NOT NULL
+  `,
+
   /** Header for one invoice. Parameters: [id] */
   selectInvoiceById: `
     SELECT si.*, m.code AS mfg_code, m.name AS mfg_name, u.name AS created_by_name

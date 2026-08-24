@@ -1,8 +1,12 @@
 // GET /api/v1/masters/recipe-master/[id]
 //
 // Returns a single Recipe's header + all material lines for the detail side-panel.
-// Gated by the same "/masters" viewer permission as the listing page — guards
-// against a user reaching another Recipe's details by editing the id in the URL.
+//
+// TWO gates, and they are not the same thing. The "/masters/recipe-master"
+// viewer permission decides whether you may open this screen at all; `scope`
+// decides whether THIS recipe is yours to read. Page permission alone was what
+// used to guard this route, which guarded nothing: the payload is the full
+// formulation, and the id is a guessable integer.
 
 import { NextResponse } from "next/server"
 import { withGateway } from "@/lib/gateway/with-gateway"
@@ -15,6 +19,9 @@ import type { Recipe, RecipeArtifact, RecipeDetailResponse } from "@/types/maste
 export const GET = withGateway({
   paramsSchema: bomIdParamSchema,
   access: { pageSlug: "/masters/recipe-master", level: "viewer" },
+  // Brand is the boundary here, same as the list (recipe.ts s.brand_id IN (?))
+  // and the write path (assertSkuIdInBrandScope in ../route.ts).
+  scope: { type: "recipe", from: ({ params }) => params.id },
   handler: async ({ params }) => {
     // Header, lines, and artifacts are independent reads — run them
     // concurrently instead of paying three sequential round-trips to the DB.

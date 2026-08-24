@@ -566,7 +566,12 @@ export const purchaseOrdersSql = {
       w.id, w.name, w.location, w.zone,
       COALESCE(dwe.type, w.type) AS type,
       e.code            AS entity_code,
-      dwe.facility_code AS facility_code
+      dwe.facility_code AS facility_code,
+      -- Feeds matchWarehouse's PIN-code pass (lib/invoice/invoice-mapping.ts):
+      -- an invoice prints an address, not our internal site label, so the PIN is
+      -- the only exact key the two sides share.
+      dwe.ship_to_pincode,
+      dwe.bill_to_address
     FROM master_warehouse w
     LEFT JOIN details_warehouse_entity dwe
            ON dwe.warehouse_id = w.id AND dwe.status = 'active'

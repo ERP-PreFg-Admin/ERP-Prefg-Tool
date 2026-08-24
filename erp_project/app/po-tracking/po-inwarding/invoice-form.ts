@@ -129,7 +129,12 @@ export function formFromParsed(
     vehicleNo:     s(p.vehicle_number),
     poRef:         s(p.purchase_order),
     mfgId:         s(matchMfg(p.from, mfgOptions)?.id),
-    destination:   s(matchWarehouse(p.destination, warehouseOptions)?.name),
+    // The PIN in the printed ship-to block outranks the free-text destination
+    // label; bill-to's PIN separates the two legal entities at one site.
+    destination:   s(matchWarehouse(p.destination, warehouseOptions, {
+                     shipTo: p.ship_to_address,
+                     billTo: p.bill_to_address,
+                   })?.name),
     sellerGstin:   s(p.seller_gstin),
     // The bill-to block's GSTIN is the same number on most invoices, so it's a
     // reasonable fallback when the top-level field didn't come through.

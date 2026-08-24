@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/badge"
 import { Callout } from "@/components/ui/callout"
 import { isRmTotalValid } from "@/lib/validation/recipe"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
-import { emptyBomLine, rmTotal, type RecipeLineRow, type RecipeMaterialOption } from "./RecipeLineEditorGrid"
+import { defaultUom, emptyBomLine, rmTotal, type RecipeLineRow, type RecipeMaterialOption } from "./RecipeLineEditorGrid"
 
 const cellInputCls =
   "w-full rounded border border-input bg-background px-2 py-1 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -54,7 +54,10 @@ function LineTable({
   }
   function selectMaterial(i: number, id: number) {
     const mat = materials.find((m) => m.id === id)
-    updateRow(i, { mtrl_id: id, uom: rows[i].uom || mat?.uom || "" })
+    // RM's amount IS the percentage, so the material's own uom ("kg") must
+    // never win here — same rule as RecipeLineEditorGrid's selectMaterial.
+    const uom = mtrlType === "rm" ? "%" : rows[i].uom || mat?.uom || defaultUom("pm")
+    updateRow(i, { mtrl_id: id, uom })
   }
 
   return (
@@ -146,7 +149,7 @@ function LineTable({
                     <input
                       type="text"
                       className={cellInputCls}
-                      placeholder="kg"
+                      placeholder={defaultUom(mtrlType)}
                       value={row.uom}
                       onChange={(e) => updateRow(i, { uom: e.target.value })}
                     />

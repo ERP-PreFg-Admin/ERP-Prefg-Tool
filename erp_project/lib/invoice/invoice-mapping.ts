@@ -92,15 +92,83 @@ export function matchMfg(from: string | null | undefined, options: MfgOption[]):
 }
 
 /**
- * Map the invoice's ship-to to a warehouse. Falls back to the first Mother
- * Warehouse — the same default ImpromptuPODialog uses — because a destination
- * is mandatory and MWH is where unrecognised inbound stock lands.
+ * The Indian PIN code in a free-text address line, or null.
+ *
+ * Six digits with a non-zero lead, not glued to further digits — which is what
+ * rules out the 10-digit phone number and the long invoice reference that share
+ * an address block. Indian addresses write it "400001" and "400 001" about
+ * equally often, so one internal space or hyphen is tolerated.
+ *
+ * The LAST match wins: the PIN closes an Indian address, while a plot or door
+ * number earlier in the same line can also be six digits.
+ */
+export function extractPincode(text: string | null | undefined): string | null {
+  const s = text?.trim()
+  if (!s) return null
+  // (?<!\d) is load-bearing — without it "9876543210" yields "543210". A
+  // PRECEDING hyphen must still pass, because "Bhiwandi - 421302" is the single
+  // most common way this is printed.
+  const matches = [...s.matchAll(/(?<!\d)([1-9]\d{2})[ -]?(\d{3})(?!\d)/g)]
+  const last = matches[matches.length - 1]
+  return last ? `${last[1]}${last[2]}` : null
+}
+
+/** CHAR(6) — MySQL pads rather than rejects, so never compare it raw. */
+const normalizePincode = (v: string | null | undefined) => (v ?? "").trim()
+
+/**
+ * The site whose delivery address carries the PIN the invoice's ship-to block
+ * printed, or null when the PIN is absent, unknown, or ambiguous.
+ *
+ * An exact 6-digit key beats any amount of fuzzy matching on a location label:
+ * a supplier writes "Bhiwandi", "Bhiwandi (Thane)" or the landlord's name, and
+ * two of our sites can share a city. Returning null on ambiguity is deliberate —
+ * this picks a value on the user's behalf, so falling through to the name is
+ * better than a confident wrong site.
+ */
+function matchWarehouseByPincode(
+  addresses: { shipTo?: string | null; billTo?: string | null } | undefined,
+  options: WarehouseOption[]
+): WarehouseOption | null {
+  const shipPin = extractPincode(addresses?.shipTo)
+  if (!shipPin) return null
+
+  const hits = options.filter((o) => normalizePincode(o.ship_to_pincode) === shipPin)
+  if (hits.length === 0) return null
+
+  // One site runs under BOTH legal entities, so a PIN normally hits two rows
+  // with the same w.name. The bill-to PIN is what separates them — that block
+  // prints the entity's registered address, not the warehouse's.
+  const billPin = extractPincode(addresses?.billTo)
+  if (billPin) {
+    const byEntity = hits.find((o) => extractPincode(o.bill_to_address) === billPin)
+    if (byEntity) return byEntity
+  }
+
+  // Same site under several entities is fine — they share the name, which is
+  // all `destination` stores. Two DIFFERENT sites on one PIN is a master-data
+  // problem, and guessing between them is exactly what this must not do.
+  return new Set(hits.map((h) => h.name)).size === 1 ? hits[0] : null
+}
+
+/**
+ * Map the invoice's ship-to to a warehouse.
+ *
+ * PIN code first (the only exact key an invoice and our master share), then the
+ * fuzzy location label, then the first Mother Warehouse — the same default
+ * ImpromptuPODialog uses — because a destination is mandatory and MWH is where
+ * unrecognised inbound stock lands.
+ *
+ * `addresses` is optional so the existing two-argument callers keep working;
+ * without it this behaves exactly as it did before the PIN pass existed.
  */
 export function matchWarehouse(
   destination: string | null | undefined,
-  options: WarehouseOption[]
+  options: WarehouseOption[],
+  addresses?: { shipTo?: string | null; billTo?: string | null }
 ): WarehouseOption | null {
-  return bestMatch(destination, options, ["name", "location", "zone"])
+  return matchWarehouseByPincode(addresses, options)
+    ?? bestMatch(destination, options, ["name", "location", "zone"])
     ?? options.find((w) => w.type === "MWH")
     ?? null
 }

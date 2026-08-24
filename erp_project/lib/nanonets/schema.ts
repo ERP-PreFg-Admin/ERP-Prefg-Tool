@@ -30,11 +30,16 @@ export const EXTRACTION_SCHEMA = {
     seller_gstin:     { type: "string", description: "Seller / consignor GSTIN" },
     buyer_gstin:      { type: "string", description: "Buyer / consignee GSTIN" },
     bill_to_name:     { type: "string", description: "Buyer / Bill-to party name, from the 'Buyer (Bill to)' block, however it is labelled ('Billed To', 'Sold To')" },
-    bill_to_address:  { type: "string", description: "Buyer / Bill-to full postal address as one line, from the 'Buyer (Bill to)' block. Exclude the GSTIN and party name." },
+    // The 6-digit PIN is the only exact key this block shares with our
+    // warehouse master, so matchWarehouse reads it back out (extractPincode in
+    // lib/invoice/invoice-mapping.ts). Dropping it costs the entity match.
+    bill_to_address:  { type: "string", description: "Buyer / Bill-to full postal address as one line, from the 'Buyer (Bill to)' block, ENDING with the 6-digit PIN code exactly as printed. Exclude the GSTIN and party name." },
     bill_to_gstin:    { type: "string", description: "GSTIN printed inside the 'Buyer (Bill to)' block" },
     bill_to_state:    { type: "string", description: "State name printed inside the 'Buyer (Bill to)' block" },
     ship_to_name:     { type: "string", description: "Consignee / Ship-to party name, from the 'Consignee (Ship to)' block, however it is labelled ('Shipped To', 'Delivery Address')" },
-    ship_to_address:  { type: "string", description: "Consignee / Ship-to full postal address as one line. Exclude the GSTIN and party name." },
+    // Same as bill_to_address: the PIN here is what resolves the destination
+    // warehouse, ahead of the fuzzy `destination` label above.
+    ship_to_address:  { type: "string", description: "Consignee / Ship-to full postal address as one line, ENDING with the 6-digit PIN code exactly as printed. Exclude the GSTIN and party name." },
     purchase_order:   { type: "string", description: "Buyer's purchase order / order reference printed in the header, labelled 'PO No', 'Order No' or 'Buyer's Order No'. Return the reference only, without the label." },
     total_amount:     { type: "number", description: "Grand total of the invoice, including tax" },
     line_items: {

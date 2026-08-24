@@ -17,7 +17,12 @@ import type { WarehouseOption } from "../../app/po-tracking/po-procurement/po-ty
 
 const wh = (
   id: number, name: string, entity_code: string | null, facility_code: string | null = null
-): WarehouseOption => ({ id, name, location: name, zone: null, type: "CWH", entity_code, facility_code })
+): WarehouseOption => ({
+  id, name, location: name, zone: null, type: "CWH", entity_code, facility_code,
+  // Addresses play no part in destinationAllowed — see invoice-mapping.test.ts
+  // for the PIN-code matching they exist for.
+  ship_to_pincode: null, bill_to_address: null,
+})
 
 // Mumbai runs under both; Guwahati under Pep only; Kolkata is not set up yet.
 const OPTIONS: WarehouseOption[] = [

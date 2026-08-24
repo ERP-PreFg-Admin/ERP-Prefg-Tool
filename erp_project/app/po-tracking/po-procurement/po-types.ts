@@ -100,6 +100,15 @@ export type WarehouseOption = {
   entity_code: string | null
   /** The Unicommerce facility this entity inwards into at this site. */
   facility_code: string | null
+  /** details_warehouse_entity.ship_to_pincode — the structured 6-digit PIN of
+   *  this site's delivery address. Lets matchWarehouse identify the destination
+   *  from what the invoice's ship-to block actually printed, instead of fuzzy-
+   *  matching a free-text location label. CHAR(6), so MySQL may pad it. */
+  ship_to_pincode: string | null
+  /** details_warehouse_entity.bill_to_address — free text, no structured PIN
+   *  column. Its PIN is what separates the two legal entities at one site, so
+   *  matchWarehouse extracts it rather than the master storing it twice. */
+  bill_to_address: string | null
 }
 
 export type BadgeVariant = "default" | "secondary" | "success" | "warning" | "info" | "destructive" | "outline"

@@ -24,7 +24,12 @@ const wh = (
   entity_code: string | null,
   facility_code: string | null = null,
   type: "MWH" | "CWH" = "CWH"
-): WarehouseOption => ({ id, name, location: name, zone: "West", type, entity_code, facility_code })
+): WarehouseOption => ({
+  id, name, location: name, zone: "West", type, entity_code, facility_code,
+  // Not used by warehousesForEntity — see invoice-mapping.test.ts for the
+  // PIN-code matching these two carry.
+  ship_to_pincode: null, bill_to_address: null,
+})
 
 // What the query returns: one row per (site, entity). Mumbai runs under both,
 // Guwahati only under Pep, and Kolkata has no per-entity row yet.

@@ -102,6 +102,24 @@ export async function getFileBuffer(key: string): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
+/** The object's bytes as a web stream plus what S3 says it is — for
+ *  /api/v2/files/view, which proxies the object rather than handing the browser
+ *  a presigned URL. Streams instead of buffering: a 20 MB invoice PDF shouldn't
+ *  sit in the app server's heap on the way past. */
+export async function getFileStream(key: string): Promise<{
+  body: ReadableStream
+  contentType: string
+  contentLength?: number
+}> {
+  const res = await getClient().send(new GetObjectCommand({ Bucket: FILES_BUCKET, Key: key }))
+  return {
+    body:          (res.Body as { transformToWebStream(): ReadableStream }).transformToWebStream(),
+    contentType:   res.ContentType ?? "application/octet-stream",
+    contentLength: res.ContentLength,
+  }
+}
+
+
 // ── Events bucket (raw-events, processed-events, failed-events) ──────────────
 
 export async function putEvent(key: string, payload: unknown): Promise<void> {

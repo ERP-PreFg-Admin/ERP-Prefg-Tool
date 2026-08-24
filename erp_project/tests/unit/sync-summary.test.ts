@@ -13,7 +13,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { summariseSync, type SyncResult } from "../../app/po-tracking/sync-summary"
-import { uniwareStatusFallback } from "../../lib/uniware-error"
+import { uniwareStatusFallback } from "../../lib/uniware/errors"
 
 const result = (over: Partial<SyncResult> = {}): SyncResult => ({
   total: 5, synced: 0, failed: 0, ...over,
