@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/toast"
 import { CostImpactAlert } from "@/components/masters/CostImpactAlert"
@@ -11,6 +12,14 @@ import { RejectionBanner, type RejectionInfo } from "@/components/masters/Approv
 import { RemarksField, RATE_REMARK_PRESETS } from "@/components/masters/RemarksField"
 import { Select } from "@/components/ui/select"
 import type { RMByMfg } from "@/types/masters"
+
+/** Module scope, not inside the component: it uses no state, and declaring it
+ *  below the effect that calls it tripped the no-use-before-declare rule. */
+function toDateStr(val: unknown): string {
+  if (!val) return ""
+  if (val instanceof Date) return val.toISOString().slice(0, 10)
+  return String(val).slice(0, 10)
+}
 
 export function EditRmMfgRateDialog({
   row,
@@ -66,12 +75,6 @@ export function EditRmMfgRateDialog({
 
   const isDraft = row.rate_status === "rejected"
   const canEdit = !isDraft || currentUserId === null || rejection === null || currentUserId === rejection.raised_by
-
-  function toDateStr(val: unknown): string {
-    if (!val) return ""
-    if (val instanceof Date) return val.toISOString().slice(0, 10)
-    return String(val).slice(0, 10)
-  }
 
   function set(key: string, value: string) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -161,7 +164,7 @@ export function EditRmMfgRateDialog({
             </div>
             <div className="grid gap-1 col-span-2">
               <Label>Effective From</Label>
-              <Input type="date" value={form.effective_from} onChange={(e) => set("effective_from", e.target.value)} disabled={!canEdit} />
+              <DatePicker value={form.effective_from} onChange={(v) => set("effective_from", v)} disabled={!canEdit} />
             </div>
           </div>
 

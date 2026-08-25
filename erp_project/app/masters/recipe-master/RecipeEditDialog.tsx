@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select } from "@/components/ui/select"
+import { DatePicker } from "@/components/ui/date-picker"
 import { RecipeLineEditorTable } from "./RecipeLineEditorTable"
 import { ChangeTypeCheckboxes } from "./ChangeTypeCheckboxes"
 import { RecipeArtifactsAddButton, RecipeArtifactsList } from "./RecipeArtifactsEditor"
@@ -132,11 +133,10 @@ export function RecipeEditDialog({
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
               <label className="text-xs font-medium text-muted-foreground shrink-0">Effective From</label>
-              <input
-                type="date"
-                className="rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              <DatePicker
+                className="w-40 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm"
                 value={effectiveFrom}
-                onChange={(e) => onChangeEffectiveFrom(e.target.value)}
+                onChange={onChangeEffectiveFrom}
                 disabled={saving}
               />
             </div>

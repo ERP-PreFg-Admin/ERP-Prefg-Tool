@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
 import { useToast } from "@/components/ui/toast"
@@ -108,9 +109,10 @@ function PoLineRow({
         {rateLoading ? "Calculating…" : rate != null ? `₹${rate.toFixed(2)}` : "—"}
       </td>
       <td className="px-2 py-1.5 align-top">
-        <Input
-          type="date" min={today} value={row.expected_on}
-          onChange={(e) => onChange("expected_on", e.target.value)}
+        <DatePicker
+          min={today}
+          value={row.expected_on}
+          onChange={(v) => onChange("expected_on", v)}
           className="h-8 w-36 text-xs"
         />
       </td>

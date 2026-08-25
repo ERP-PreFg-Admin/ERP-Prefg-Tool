@@ -10,6 +10,7 @@ import { Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
+import { DatePicker } from "@/components/ui/date-picker"
 import { RecipeLineEditorGrid, rmTotal, type RecipeLineRow, type RecipeMaterialOption } from "./RecipeLineEditorGrid"
 import { RecipeArtifactsEditor } from "./RecipeArtifactsEditor"
 import { ChangeTypeCheckboxes } from "./ChangeTypeCheckboxes"
@@ -223,11 +224,11 @@ export function Step4LineEntry({
           <label className="block text-xs font-medium mb-1">
             Effective From <span className="font-normal text-muted-foreground">(optional)</span>
           </label>
-          <input
-            type="date"
-            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          <DatePicker
+            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
             value={effectiveFrom}
-            onChange={(e) => onChangeEffectiveFrom(e.target.value)}
+            onChange={onChangeEffectiveFrom}
+            placeholder="Optional"
           />
         </div>
       </div>

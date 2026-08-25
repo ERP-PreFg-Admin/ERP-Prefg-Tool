@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/table"
 import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import { PaginationBar } from "@/components/ui/pagination-bar"
+import { DatePicker } from "@/components/ui/date-picker"
 import {
   MasterToolbar,
   MasterToolbarActions,
@@ -468,11 +469,11 @@ export function MaterialRateTable({
 
                   <div className="grid gap-1.5">
                     <Label className="text-xs">Effective From</Label>
-                    <input
-                      type="date"
+                    <DatePicker
                       value={draftEffectiveFrom}
-                      onChange={(e) => setDraftEffectiveFrom(e.target.value)}
+                      onChange={setDraftEffectiveFrom}
                       className={inputCls}
+                      placeholder="Any date"
                     />
                   </div>
                 </>
@@ -517,11 +518,11 @@ export function MaterialRateTable({
 
                   <div className="grid gap-1.5">
                     <Label className="text-xs">Effective From</Label>
-                    <input
-                      type="date"
+                    <DatePicker
                       value={draftMfgEffectiveFrom}
-                      onChange={(e) => setDraftMfgEffectiveFrom(e.target.value)}
+                      onChange={setDraftMfgEffectiveFrom}
                       className={inputCls}
+                      placeholder="Any date"
                     />
                   </div>
                 </>

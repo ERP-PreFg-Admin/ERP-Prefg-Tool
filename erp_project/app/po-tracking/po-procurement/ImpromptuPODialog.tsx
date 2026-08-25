@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { Select } from "@/components/ui/select"
@@ -275,10 +276,11 @@ export default function ImpromptuPODialog({
           {/* Expected Dispatch — no backdating */}
           <div className="grid gap-1.5">
             <Label htmlFor="ipo-dispatch">Expected Dispatch <span className="text-destructive">*</span></Label>
-            <Input
-              id="ipo-dispatch" type="date"
+            <DatePicker
+              id="ipo-dispatch"
               min={today}
-              value={form.expected_on} onChange={(e) => set("expected_on", e.target.value)}
+              value={form.expected_on}
+              onChange={(v) => set("expected_on", v)}
             />
             {errors.expected_on && <p className="text-xs text-destructive">{errors.expected_on}</p>}
           </div>

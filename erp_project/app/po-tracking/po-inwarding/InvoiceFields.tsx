@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
@@ -35,13 +36,23 @@ function Field({
       <Label className="text-xs">
         {label}{required && <span className="text-destructive"> *</span>}
       </Label>
-      <Input
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className={cn("h-9 text-sm", mono && "font-mono tabular-nums")}
-      />
+      {/* Branching here rather than at the call site: `type="date"` is how this
+          form already asks for a date, so the one caller needs no change. */}
+      {type === "date" ? (
+        <DatePicker
+          value={value}
+          onChange={onChange}
+          className={cn("h-9 text-sm", mono && "font-mono tabular-nums")}
+        />
+      ) : (
+        <Input
+          type={type}
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          className={cn("h-9 text-sm", mono && "font-mono tabular-nums")}
+        />
+      )}
     </div>
   )
 }

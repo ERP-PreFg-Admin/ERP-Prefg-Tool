@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Stepper, type StepperStep } from "@/components/ui/stepper"
 import { Callout } from "@/components/ui/callout"
 import {
@@ -606,11 +607,10 @@ export function AddRawMaterialWizard({
                         >
                           {UOM_OPTIONS.map((u) => <option key={u} value={u}>{u}</option>)}
                         </Select>
-                        <input
-                          type="date"
+                        <DatePicker
                           className={inputCls}
                           value={entry.effective_from}
-                          onChange={(e) => updateMfgEntry(i, "effective_from", e.target.value)}
+                          onChange={(v) => updateMfgEntry(i, "effective_from", v)}
                         />
                         <button
                           type="button"
