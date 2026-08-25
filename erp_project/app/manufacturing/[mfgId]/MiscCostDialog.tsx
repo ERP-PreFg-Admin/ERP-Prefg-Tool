@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { DateRangePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { Select } from "@/components/ui/select"
@@ -182,21 +183,21 @@ export default function MiscCostDialog({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-1.5">
-              <Label htmlFor="mc-from">Effective From <span className="text-destructive">*</span></Label>
-              <Input
-                id="mc-from" type="date"
-                value={form.effective_from} onChange={(e) => set("effective_from", e.target.value)}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="mc-till">Effective Till</Label>
-              <Input
-                id="mc-till" type="date"
-                value={form.effective_till} onChange={(e) => set("effective_till", e.target.value)}
-              />
-            </div>
+          {/* One window, not two dates. Till stays optional via
+              allowOpenEnded — a misc cost that hasn't been superseded yet has
+              no end date, and "Ongoing" says that better than a blank field. */}
+          <div className="grid gap-1.5">
+            <Label>Effective Period <span className="text-destructive">*</span></Label>
+            <DateRangePicker
+              from={form.effective_from}
+              to={form.effective_till}
+              onChange={(f, t) => {
+                set("effective_from", f)
+                set("effective_till", t)
+              }}
+              allowOpenEnded
+              placeholder="Select effective period"
+            />
           </div>
 
           <div className="grid gap-1.5">

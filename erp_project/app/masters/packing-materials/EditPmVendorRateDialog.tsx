@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { DateRangePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/toast"
 import { CostImpactAlert } from "@/components/masters/CostImpactAlert"
@@ -12,6 +13,14 @@ import { RemarksField, RATE_REMARK_PRESETS } from "@/components/masters/RemarksF
 import { Select } from "@/components/ui/select"
 import type { PMVendor } from "@/types/masters"
 import { todayIST } from "@/lib/date"
+
+/** Module scope, not inside the component: it uses no state, and declaring it
+ *  below the effect that calls it tripped the no-use-before-declare rule. */
+function toDateStr(val: unknown): string {
+  if (!val) return ""
+  if (val instanceof Date) return val.toISOString().slice(0, 10)
+  return String(val).slice(0, 10)
+}
 
 export function EditPmVendorRateDialog({
   row,
@@ -72,12 +81,6 @@ export function EditPmVendorRateDialog({
   const today    = todayIST()
   const isDraft  = row.status === "rejected"
   const canEdit  = !isDraft || currentUserId === null || rejection === null || currentUserId === rejection.raised_by
-
-  function toDateStr(val: unknown): string {
-    if (!val) return ""
-    if (val instanceof Date) return val.toISOString().slice(0, 10)
-    return String(val).slice(0, 10)
-  }
 
   function set(key: string, value: string) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -172,16 +175,25 @@ export function EditPmVendorRateDialog({
                 ))}
               </Select>
             </div>
-            <div className="grid gap-1">
-              <Label>Effective From</Label>
-              <Input type="date" min={today} value={form.effective_from} onChange={(e) => set("effective_from", e.target.value)} disabled={!canEdit} />
+            <div className="grid gap-1 col-span-2">
+              <Label>Effective Period</Label>
+              <DateRangePicker
+                from={form.effective_from}
+                to={form.effective_to}
+                onChange={(f, t) => {
+                  set("effective_from", f)
+                  set("effective_to", t)
+                }}
+                min={today}
+                allowOpenEnded
+                disabled={!canEdit}
+                placeholder="Select effective period"
+              />
+              {/* `min` stops you PICKING a past date; it says nothing about a
+                  record that was loaded already holding one. */}
               {form.effective_from && form.effective_from < today && (
                 <p className="text-xs text-destructive">Date cannot be in the past.</p>
               )}
-            </div>
-            <div className="grid gap-1">
-              <Label>Effective To</Label>
-              <Input type="date" value={form.effective_to} onChange={(e) => set("effective_to", e.target.value)} disabled={!canEdit} />
             </div>
           </div>
 
