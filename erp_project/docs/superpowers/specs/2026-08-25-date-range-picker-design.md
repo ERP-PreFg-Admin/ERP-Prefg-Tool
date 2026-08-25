@@ -61,27 +61,42 @@ of pure `classNames` overrides — more code written to fight an API than to dra
 month grid. `radix-ui` is already a dependency and already provides the hard parts
 (portalling, focus trap, dismiss, ARIA wiring).
 
-## Files added
+## Files added and extended
 
-### `lib/date-range.ts` — pure date math, no React
+### `lib/date.ts` — **extended**, not a new file
 
-Separate file because `AGENTS.md` restricts unit tests to **pure** modules; anything
-reaching `lib/db`, `lib/s3` or `lib/mail/mailer` throws at import without
-credentials. This split is what makes the logic testable in CI.
+The calendar grid math is appended to the existing `lib/date.ts`, which already
+owns every "what does today mean in IST" question (`todayIST`, `monthIST`,
+`SQL_TODAY_IST`) and is already pure — `Intl` only, nothing touching `lib/db`.
+
+A second date module would mean two answers to "what is today", which is exactly
+the bug `lib/date.ts`'s header warns about. **`todayIST()` is reused as-is; no new
+today-function is written.**
+
+Added exports:
 
 ```ts
-monthMatrix(year, month): (string | null)[][]   // 6×7 grid of ISO dates, null = padding
-parseIso(iso): { y, m, d } | null
-formatDisplay(iso): string                       // "25 Aug 2026"
-isInRange(iso, from, to): boolean                // inclusive both ends
-addMonths(year, month, delta): { year, month }
+parseIso(iso): { y, m, d } | null                // null for "" and malformed input
+toIso(y, m, d): string
+daysInMonth(y, m): number
+monthMatrix(y, m): (string | null)[][]           // 6×7 ISO grid, null = padding
+addMonths(y, m, delta): { y, m }
+anchorMonth(...candidates): { y, m }             // first parseable, else today IST
+monthLabel(y, m): string                         // "Aug 2026"
+formatDisplay(iso): string                       // "25 Aug 2026"; "" for ""
 isBefore(a, b): boolean
+isInRange(iso, from, to): boolean                // inclusive both ends
+isDisabledDate(iso, min?, max?): boolean
+WEEKDAYS: readonly string[]                      // Monday-first
 ```
 
-**Critical:** `parseIso` splits on `-`. It must never call `new Date("2026-08-25")` —
-a bare ISO date string parses as **UTC midnight**, and every display path in this app
-is IST. That is the classic silent off-by-one-day bug, and the reason this is a
-function rather than an inline expression at 17 call sites.
+**Critical:** `parseIso` splits on `-` with a regex. It must never call
+`new Date("2026-08-25")` — a bare ISO date string parses as **UTC midnight**, and
+every display path in this app is IST. That is the same off-by-one-day bug
+`lib/date.ts` was created to kill, and the reason this is one function rather than
+an inline expression at 17 call sites. Where a `Date` is unavoidable
+(`daysInMonth`) it is built from explicit `Date.UTC` components and read with
+`getUTCDate()`, never parsed from a string.
 
 ### `components/ui/date-picker.tsx` — the reusable component
 
@@ -178,8 +193,10 @@ stays optional via `allowOpenEnded`.
 
 ## Testing
 
-`tests/unit/date-range.test.ts` — `node:test` + `node:assert/strict`, pure, runs in
-CI under `npm test`:
+`tests/unit/date-calendar.test.ts` — `node:test` + `node:assert/strict`, pure, runs
+in CI under `npm test`. A new file rather than an addition to the existing
+`tests/unit/date-ist.test.ts`, which is specifically the witness for the IST
+today-boundary bug and shouldn't be diluted with grid math:
 
 1. `monthMatrix` on a leap February (2028-02) and a month starting Sunday.
 2. `parseIso("2026-08-25")` returns day 25 — the IST/UTC off-by-one guard.
