@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { PaginationBar } from "@/components/ui/pagination-bar"
+import { DateRangePicker } from "@/components/ui/date-picker"
 import { Select } from "@/components/ui/select"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import { MasterToolbar } from "@/components/masters/MasterToolbar"
@@ -63,14 +64,25 @@ export default function ActivityClient({
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  /** Any filter change resets to page 1 — the old offset won't mean anything. */
-  function setFilter(key: string, value: string) {
+  /**
+   * Any filter change resets to page 1 — the old offset won't mean anything.
+   *
+   * Takes every key at once because `searchParams` is a snapshot: two
+   * sequential single-key calls both build from the *same* snapshot, so the
+   * second push silently drops the first one's value. The date range sets two
+   * keys from one interaction, which is exactly that case.
+   */
+  function setFilters(updates: Record<string, string>) {
     const params = new URLSearchParams(searchParams.toString())
-    if (value) params.set(key, value)
-    else params.delete(key)
+    for (const [key, value] of Object.entries(updates)) {
+      if (value) params.set(key, value)
+      else params.delete(key)
+    }
     params.delete("page")
     router.push(`/admin/activity?${params.toString()}`)
   }
+
+  const setFilter = (key: string, value: string) => setFilters({ [key]: value })
 
   const hasFilters = Object.values(filters).some(Boolean)
 
@@ -99,19 +111,12 @@ export default function ActivityClient({
           ))}
         </Select>
 
-        <Input
-          type="date"
-          value={filters.from}
-          onChange={(e) => setFilter("from", e.target.value)}
-          className="sm:w-40"
-          aria-label="From date"
-        />
-        <Input
-          type="date"
-          value={filters.to}
-          onChange={(e) => setFilter("to", e.target.value)}
-          className="sm:w-40"
-          aria-label="To date"
+        <DateRangePicker
+          from={filters.from}
+          to={filters.to}
+          onChange={(from, to) => setFilters({ from, to })}
+          placeholder="Date range"
+          className="sm:w-64"
         />
         <Input
           defaultValue={filters.q}

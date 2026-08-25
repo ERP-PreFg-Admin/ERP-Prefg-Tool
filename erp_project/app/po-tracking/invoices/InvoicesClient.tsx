@@ -4,8 +4,8 @@ import { useState } from "react"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
+import { DateRangePicker } from "@/components/ui/date-picker"
 import { SearchInput } from "@/components/masters/SearchInput"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import type { MfgOption } from "../po-procurement/po-types"
@@ -81,13 +81,15 @@ export default function InvoicesClient({
           </Select>
           {/* Native date inputs — the invoice date, not the date it was entered:
               that's the number finance reconciles against. */}
-          <Input
-            type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-            className="h-9 w-36 text-sm" title="Invoice date from" aria-label="Invoice date from"
-          />
-          <Input
-            type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-            className="h-9 w-36 text-sm" title="Invoice date to" aria-label="Invoice date to"
+          <DateRangePicker
+            from={dateFrom}
+            to={dateTo}
+            onChange={(f, t) => {
+              setDateFrom(f)
+              setDateTo(t)
+            }}
+            placeholder="Invoice date range"
+            className="w-64 text-sm"
           />
           {filterQuery && (
             <Button variant="ghost" size="sm" onClick={clearFilters}>

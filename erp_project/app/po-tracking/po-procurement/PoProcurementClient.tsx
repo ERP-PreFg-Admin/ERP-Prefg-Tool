@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { ToggleButton } from "@/components/ui/toggle-button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
+import { DateRangePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import { PaginationBar } from "@/components/ui/pagination-bar"
@@ -373,20 +373,14 @@ export default function PoProcurementClient({
                 </Select>
               </div>
               <div className="grid gap-1.5">
-                <Label className="text-xs">Date From</Label>
-                <Input
-                  type="date"
-                  value={draftDateFrom}
-                  onChange={(e) => setDraftDateFrom(e.target.value)}
-                  className="h-9 text-sm"
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label className="text-xs">Date To</Label>
-                <Input
-                  type="date"
-                  value={draftDateTo}
-                  onChange={(e) => setDraftDateTo(e.target.value)}
+                <Label className="text-xs">Date Range</Label>
+                <DateRangePicker
+                  from={draftDateFrom}
+                  to={draftDateTo}
+                  onChange={(f, t) => {
+                    setDraftDateFrom(f)
+                    setDraftDateTo(t)
+                  }}
                   className="h-9 text-sm"
                 />
               </div>
