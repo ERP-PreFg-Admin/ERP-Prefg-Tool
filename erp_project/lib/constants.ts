@@ -84,6 +84,39 @@ export function entityForBrand(brand: string | null | undefined) : string | null
   return BRANDS[brandKey(brand)]?.entity ?? null;
 }
 
+/**
+ * The leading letter of an ERP-minted Uniware PO code — M/MUM1/2627/01234.
+ *
+ * Keyed on master_entity.code, not on brand: one Uniware PO carries every SKU on
+ * an invoice and can therefore span brands, while the facility it is raised at is
+ * (location x legal entity) and so has exactly one entity. Derived rather than
+ * stored per facility so the two rows of one site cannot disagree about it.
+ *
+ * Matches the live tenant, which uses these two letters already: over 4,683 codes
+ * carrying one, H never appeared in a Pep facility nor M in a Kreative one.
+ *
+ * Lives here beside BRANDS because this file is already the authority for PO
+ * prefixes — see prisma/add_master_brand.sql:34-35, where master_brand is the
+ * authority for scoping and this map is the authority for prefixes.
+ */
+const ENTITY_PO_LETTER: Record<string, string> = {
+  PEP: "M",        // mCaffeine
+  KREATIVE: "H",   // Hyphen
+}
+
+/**
+ * PO-code letter for a legal entity, or null when the entity is unmapped.
+ *
+ * Null is deliberate and must not be defaulted: a guessed letter would mint a
+ * plausible-looking code in the wrong series, which is worse than not minting one
+ * at all. Callers treat null the same as an unconfigured facility and let Uniware
+ * number the PO.
+ */
+export function poLetterForEntity(entityCode: string | null | undefined): string | null {
+  if (!entityCode) return null
+  return ENTITY_PO_LETTER[entityCode.trim().toUpperCase()] ?? null
+}
+
 
 
 

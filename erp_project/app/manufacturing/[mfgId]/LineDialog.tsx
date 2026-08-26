@@ -5,9 +5,13 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { DatePicker, DateRangePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
+import { Select } from "@/components/ui/select"
 import { useToast } from "@/components/ui/toast"
+import { formatDisplay, isoDate } from "@/lib/date"
 import type { MfgLine, MfgLineStatus } from "@/types/masters"
 
 export type RecipeOption = { id: number; bom_code: string; sku_code: string | null; sku_name: string | null }
@@ -56,11 +60,13 @@ export default function LineDialog({
       setForm({
         recipe_ids: [String(editData.recipe_id)],
         status: editData.status,
-        effective_from: editData.effective_from ?? "",
-        effective_to: editData.effective_to ?? "",
+        // isoDate, not `?? ""`: these arrive from mysql2 as Date objects even
+        // though MfgLine types them `string | null`.
+        effective_from: isoDate(editData.effective_from),
+        effective_to: isoDate(editData.effective_to),
         monthly_capacity: editData.monthly_capacity != null ? String(editData.monthly_capacity) : "",
         this_month_plan: editData.this_month_plan != null ? String(editData.this_month_plan) : "",
-        last_batch_date: editData.last_batch_date ?? "",
+        last_batch_date: isoDate(editData.last_batch_date),
         remarks: editData.remarks ?? "",
       })
     } else {
@@ -168,7 +174,18 @@ export default function LineDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-1">
-          {!editData && (
+          {/* Edit mode resolves to exactly one line and the SKU is not editable
+              — pointing a line at a different SKU is a different line. So the
+              picker becomes a read-out of which line this is, which the title
+              alone never said. */}
+          {editData ? (
+            <div className="rounded-md border bg-muted/40 px-3 py-2">
+              <div className="font-mono text-xs">{editData.sku_code ?? "—"}</div>
+              <div className="truncate text-xs text-muted-foreground">
+                {editData.sku_name ?? editData.bom_code ?? "—"}
+              </div>
+            </div>
+          ) : (
             <div className="grid gap-1.5">
               <Label htmlFor="ml-bom">
                 SKU / Recipe <span className="text-destructive">*</span>
@@ -208,6 +225,94 @@ export default function LineDialog({
                 </div>
               )}
             </div>
+          )}
+
+          {/* effective_from is create-only (updateMfgLineSchema has no such
+              field), so editing offers the end of the window, not both ends. */}
+          {editData ? (
+            <div className="grid gap-1.5">
+              <Label>Effective To</Label>
+              <DatePicker
+                value={form.effective_to}
+                onChange={(v) => set("effective_to", v)}
+                min={form.effective_from || undefined}
+                placeholder="Ongoing — no end date"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {/* formatDisplay, not the raw field: it is a Date object at
+                    runtime, which React refuses to render. */}
+                Running since {formatDisplay(form.effective_from) || "—"}. Leave empty while the line is open-ended.
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-1.5">
+              <Label>Effective Period <span className="text-destructive">*</span></Label>
+              <DateRangePicker
+                from={form.effective_from}
+                to={form.effective_to}
+                onChange={(f, t) => { set("effective_from", f); set("effective_to", t) }}
+                allowOpenEnded
+                placeholder="Select effective period"
+              />
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="ml-capacity">Monthly Capacity</Label>
+              {/* step 1: the schema coerces to an int, so a decimal is rejected
+                  server-side rather than rounded. */}
+              <Input
+                id="ml-capacity" type="number" min={0} step="1" placeholder="e.g. 50000"
+                value={form.monthly_capacity} onChange={(e) => set("monthly_capacity", e.target.value)}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="ml-plan">This Month&apos;s Plan</Label>
+              <Input
+                id="ml-plan" type="number" min={0} step="1" placeholder="e.g. 12000"
+                value={form.this_month_plan} onChange={(e) => set("this_month_plan", e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label>Last Batch Date</Label>
+            <DatePicker
+              value={form.last_batch_date}
+              onChange={(v) => set("last_batch_date", v)}
+              placeholder="Not produced yet"
+            />
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="ml-status">Status</Label>
+            <Select
+              id="ml-status" value={form.status}
+              onChange={(e) => set("status", e.target.value as MfgLineStatus)}
+              className="w-full"
+            >
+              {/* The three mfgLineStatusSchema accepts. 'discontinued' still
+                  counts as live for costing and PO-raising; only 'inactive'
+                  drops out — see selectLiveLinesByMfg. */}
+              <option value="active">Active</option>
+              <option value="discontinued">Discontinued</option>
+              <option value="inactive">Inactive</option>
+            </Select>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="ml-remarks">Remarks</Label>
+            <Input
+              id="ml-remarks" maxLength={255} placeholder="Optional note"
+              value={form.remarks} onChange={(e) => set("remarks", e.target.value)}
+            />
+          </div>
+
+          {!editData && picked.length > 1 && (
+            <p className="text-[11px] text-muted-foreground">
+              These values apply to all {picked.length} lines. Adjust a line individually after adding it.
+            </p>
           )}
         </div>
 

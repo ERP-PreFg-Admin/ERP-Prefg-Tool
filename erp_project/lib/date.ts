@@ -63,7 +63,7 @@ export const SQL_TODAY_IST = "DATE(CONVERT_TZ(NOW(), '+00:00', '+05:30'))"
 /** Monday-first: the picker is for an Indian business week. */
 export const WEEKDAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] as const
 
-const MONTH_NAMES = [
+export const MONTH_NAMES = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ] as const
@@ -89,6 +89,31 @@ export function parseIso(iso: string): { y: number; m: number; d: number } | nul
 
 export function toIso(y: number, m: number, d: number): string {
   return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+}
+
+/**
+ * A date as it arrives FROM THE DATABASE, as the `YYYY-MM-DD` string every
+ * helper in this file and every date input expects. `""` when there is none.
+ *
+ * mysql2 hands a DATE/DATETIME column back as a JS `Date`, not a string. Every
+ * row type in `types/masters.ts` declares those columns `string | null` and is
+ * wrong about it, and `query<T>` is an unchecked cast so nothing catches the
+ * lie. It stayed hidden for as long as dates only ever reached `fmtDate`, which
+ * accepts either — but:
+ *
+ *   - seeding a DatePicker with one makes `parseIso` fail its regex, so the
+ *     picker silently shows nothing for a row that has a date;
+ *   - rendering one as a React child throws "Objects are not valid as a React
+ *     child (found: [object Date])".
+ *
+ * UTC getters, not local ones: `lib/db.ts` sets `timezone: "+00:00"`, so mysql2
+ * builds a DATE as UTC midnight. Local getters would return the previous day
+ * for anyone west of Greenwich — the trap documented at the top of this file.
+ */
+export function isoDate(v: string | Date | null | undefined): string {
+  if (v == null) return ""
+  if (typeof v === "string") return v.slice(0, 10)
+  return v instanceof Date && !Number.isNaN(v.getTime()) ? v.toISOString().slice(0, 10) : ""
 }
 
 /**
@@ -146,6 +171,27 @@ export function anchorMonth(...candidates: string[]): { y: number; m: number } {
 
 export function monthLabel(y: number, m: number): string {
   return `${MONTH_NAMES[m - 1]} ${y}`
+}
+
+/** Years offered when the picker's min/max leave them unbounded. Rate masters
+ *  carry effective dates a few years either side of today, so 10 covers the real
+ *  range without anyone configuring it. */
+const YEAR_SPAN = 10
+
+/**
+ * The years a calendar's year picker should offer, ascending.
+ *
+ * Bounded by `min`/`max` when the caller gave them — offering a year whose every
+ * day is disabled is a dead end. `viewYear` is always included even when the
+ * bounds exclude it: a `<select>` whose value matches no option renders showing
+ * the FIRST option, so the header would claim a year the grid isn't showing.
+ */
+export function calendarYears(viewYear: number, min?: string, max?: string): number[] {
+  const lo = min ? Number(min.slice(0, 4)) : viewYear - YEAR_SPAN
+  const hi = max ? Number(max.slice(0, 4)) : viewYear + YEAR_SPAN
+  const from = Math.min(lo, viewYear)
+  const to = Math.max(hi, viewYear)
+  return Array.from({ length: to - from + 1 }, (_, i) => from + i)
 }
 
 /** `"2026-08-25"` → `"25 Aug 2026"`. `""` for anything unparseable — a trigger

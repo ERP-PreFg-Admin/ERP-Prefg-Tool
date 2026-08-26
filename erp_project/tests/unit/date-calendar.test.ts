@@ -9,7 +9,32 @@ import assert from "node:assert/strict"
 import {
   WEEKDAYS, parseIso, toIso, daysInMonth, monthMatrix, addMonths,
   anchorMonth, monthLabel, formatDisplay, isBefore, isInRange, isDisabledDate,
+  calendarYears,
 } from "../../lib/date"
+
+test("calendarYears spans a decade either side when nothing bounds it", () => {
+  const years = calendarYears(2026)
+  assert.equal(years[0], 2016)
+  assert.equal(years[years.length - 1], 2036)
+  assert.equal(years.length, 21)
+})
+
+test("calendarYears stops at min and max", () => {
+  // Offering a year whose every day is disabled is a dead end.
+  assert.deepEqual(calendarYears(2026, "2025-06-01", "2027-03-31"), [2025, 2026, 2027])
+})
+
+test("calendarYears always offers the year on screen", () => {
+  // A <select> whose value matches no option renders the FIRST one, so the
+  // header would claim a year the grid below it is not showing.
+  assert.ok(calendarYears(2030, "2024-01-01", "2026-12-31").includes(2030))
+  assert.ok(calendarYears(2020, "2024-01-01", "2026-12-31").includes(2020))
+})
+
+test("calendarYears is ascending with no gaps", () => {
+  const years = calendarYears(2026, "2020-01-01", "2030-01-01")
+  assert.deepEqual(years, years.map((_, i) => years[0] + i))
+})
 
 test("parseIso reads the calendar day, not a UTC instant", () => {
   // The witness for what this replaces: `new Date("2026-08-25")` is UTC

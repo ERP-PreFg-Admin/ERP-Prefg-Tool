@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { Select } from "@/components/ui/select"
 import { useToast } from "@/components/ui/toast"
+import { isoDate } from "@/lib/date"
 import type { MfgLineOption, MiscCostLine, MiscCostType } from "@/types/masters"
 
 const TYPE_LABEL: Record<MiscCostType, string> = {
@@ -67,8 +68,12 @@ export default function MiscCostDialog({
         type: editData.type,
         recipe_id: String(editData.recipe_id),
         cost: editData.cost != null ? String(editData.cost) : "",
-        effective_from: editData.effective_from ?? "",
-        effective_till: editData.effective_till ?? "",
+        // isoDate, not `?? ""`: mysql2 returns these as Date objects despite
+        // MiscCostLine typing them `string | null`, and DateRangePicker's
+        // parseIso then fails its regex — so editing an existing misc cost
+        // showed an EMPTY Effective Period and silently re-submitted it blank.
+        effective_from: isoDate(editData.effective_from),
+        effective_till: isoDate(editData.effective_till),
         status: (editData.status as FormState["status"]) ?? "active",
         remarks: "",
       })

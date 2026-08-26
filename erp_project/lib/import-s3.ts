@@ -1,6 +1,6 @@
 import { getFileBuffer } from "@/lib/s3"
 import ExcelJS from "exceljs"
-import { parseCsvObjects, normalizeCell, normalizeHeader } from "@/lib/csv"
+import { parseCsvObjects, normalizeCell, normalizeHeader, excelCellText } from "@/lib/csv"
 
 export type ImportRow = Record<string, string>
 
@@ -41,28 +41,41 @@ async function parseXlsxBuffer(buffer: Buffer): Promise<ImportRow[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await wb.xlsx.load(buffer as any)
 
-  const ws = wb.worksheets[0]
+  // First sheet WITH DATA, not first sheet: a cover or instructions sheet in
+  // front of the data is common enough that `worksheets[0]` reported an empty
+  // file for a workbook that plainly had rows. Mirrors the browser importer.
+  const ws = wb.worksheets.find((s) => s.rowCount > 1) ?? wb.worksheets[0]
   if (!ws) return []
 
   const rows: ImportRow[] = []
   let headers: string[] = []
 
-  ws.eachRow((row, rowNumber) => {
-    // normalizeCell, not trim: an Excel cell can hold newlines too (alt+enter,
-    // or text wrapped when pasted), and those must not survive into a name.
-    const values = (row.values as (string | number | null)[]).slice(1).map((v) =>
-      v == null ? "" : normalizeCell(String(v))
+  ws.eachRow((row) => {
+    // excelCellText, not String(v): a formula, rich-text, hyperlink or date cell
+    // is an OBJECT in ExcelJS, and String() renders it "[object Object]" — see
+    // the comment on excelCellText. This is the path that writes the rows when
+    // a staged *_BULK approval is approved, so it must read a cell exactly as
+    // the uploader's preview did.
+    //
+    // normalizeCell on top: an Excel cell can hold newlines (alt+enter, or text
+    // wrapped when pasted), and those must not survive into a name.
+    const values = (row.values as unknown[]).slice(1).map((v) =>
+      normalizeCell(excelCellText(v))
     )
-    if (rowNumber === 1) {
-      // Same normalisation as parseCsvBuffer above — an .xlsx re-upload of the
+    if (values.every((v) => !v)) return
+    if (headers.length === 0) {
+      // The header is the first NON-EMPTY row, not literally row 1 — `eachRow`
+      // skips empty rows, so a blank leading row otherwise took the header with
+      // it. Matches parseCsvBuffer, which filters blank rows before rows[0].
+      //
+      // normalizeHeader, not `.toLowerCase()` — an .xlsx re-upload of the
       // Material Master export is the path that actually hit this in prod.
       headers = values.map(normalizeHeader)
-    } else {
-      if (values.every((v) => !v)) return
-      const obj: ImportRow = {}
-      headers.forEach((h, idx) => { obj[h] = values[idx] ?? "" })
-      rows.push(obj)
+      return
     }
+    const obj: ImportRow = {}
+    headers.forEach((h, idx) => { obj[h] = values[idx] ?? "" })
+    rows.push(obj)
   })
   return rows
 }

@@ -11,7 +11,12 @@ import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { DatePicker } from "@/components/ui/date-picker"
-import { RecipeLineEditorGrid, rmTotal, type RecipeLineRow, type RecipeMaterialOption } from "./RecipeLineEditorGrid"
+import {
+  RecipeLineEditorGrid, rmTotal,
+  type RecipeLineRow, type RecipeMaterialOption, type RecipeSku,
+} from "./RecipeLineEditorGrid"
+// skuOf lives here (not in the wizard) because Step1SkuSelect and Step5Review
+// already do this same skus/skuId lookup — one place for all three.
 import { RecipeArtifactsEditor } from "./RecipeArtifactsEditor"
 import { ChangeTypeCheckboxes } from "./ChangeTypeCheckboxes"
 import { CSV_HEADER, buildBomCsvTemplate } from "./recipe-csv"
@@ -20,6 +25,13 @@ import type { RmLock } from "@/lib/masters/variant-rm-lock"
 import type { Sku } from "@/types/masters"
 
 /** The RM-section note shown on the line-entry step of a locked variant. */
+/** The picked SKU as the line editors' heading wants it, or undefined before a
+ *  pick — Step 4 is only reachable after Step 1, so undefined means "not yet". */
+export function skuOf(skus: Sku[], skuId: number | null): RecipeSku | undefined {
+  const sku = skus.find((s) => s.id === skuId)
+  return sku ? { code: sku.sku_code, name: sku.name } : undefined
+}
+
 export function rmLockNote(lock: RmLock | null): string | undefined {
   if (!lock?.locked) return undefined
   return lock.baseDesignated

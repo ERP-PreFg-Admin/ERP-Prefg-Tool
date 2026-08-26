@@ -9,6 +9,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
   parseCsvRows, parseCsvObjects, normalizeCell, isBlankRow, normalizeHeader, describeCsvShape,
+  excelCellText,
 } from "../../lib/csv"
 
 test("a newline inside a quoted cell does not start a new row", () => {
@@ -175,6 +176,65 @@ test("a well-formed file is not flagged", () => {
   assert.equal(describeCsvShape(csv, parseCsvRows(csv)), null)
   // A genuinely single-column CSV is legal and must not be mistaken for one.
   assert.equal(describeCsvShape("name\nWater\nGlycerin", parseCsvRows("name\nWater\nGlycerin")), null)
+})
+
+// ── Excel cells: the "[object Object]" class of bug ────────────────────────
+// Both importers read .xlsx cells with String(v). ExcelJS returns an OBJECT for
+// several everyday cell kinds, so String() produced the literal
+// "[object Object]" — which passed the required-field check, showed "OK" in the
+// preview's Remarks column, and was stored as the value. The shapes below are
+// ExcelJS's, verbatim.
+
+test("a formula cell reads as its computed value, not [object Object]", () => {
+  // How half of any rate sheet is built: =B2*C2.
+  assert.equal(excelCellText({ formula: "B2*C2", result: 148.5 }), "148.5")
+  // A shared formula carries `result` the same way.
+  assert.equal(excelCellText({ sharedFormula: "D2", result: "Kgs" }), "Kgs")
+})
+
+test("a broken formula reads as empty, so the row is flagged instead of storing #N/A", () => {
+  assert.equal(excelCellText({ formula: "VLOOKUP(A2,X,2,0)", result: { error: "#N/A" } }), "")
+  assert.equal(excelCellText({ error: "#REF!" }), "")
+  // Never cached by the writing tool — no value to read.
+  assert.equal(excelCellText({ formula: "A1+A2" }), "")
+})
+
+test("a rich-text cell reads as its joined text", () => {
+  // One bolded word, or a colour pasted along with the value, is enough.
+  assert.equal(
+    excelCellText({ richText: [{ text: "Ceramide " }, { text: "AP, NP" }] }),
+    "Ceramide AP, NP",
+  )
+})
+
+test("an auto-linked email or URL reads as what the cell displays", () => {
+  assert.equal(
+    excelCellText({ text: "sales@croda.com", hyperlink: "mailto:sales@croda.com" }),
+    "sales@croda.com",
+  )
+  // Nothing shown but the link: use the target, without Excel's mailto:.
+  assert.equal(excelCellText({ hyperlink: "mailto:ops@basf.com", text: "" }), "ops@basf.com")
+})
+
+test("a date cell reads as a date, not as a JS Date toString", () => {
+  // String(new Date(...)) is "Mon Aug 26 2026 00:00:00 GMT+0530 (India …)",
+  // which is what an effective_from column was receiving.
+  assert.equal(excelCellText(new Date("2026-08-26T00:00:00.000Z")), "2026-08-26")
+  assert.equal(excelCellText(new Date("2026-08-26T09:30:00.000Z")), "2026-08-26 09:30:00")
+  assert.equal(excelCellText(new Date("nonsense")), "")
+})
+
+test("scalars, blanks and booleans agree with what a CSV re-save of the sheet would say", () => {
+  assert.equal(excelCellText("Glycerin"), "Glycerin")
+  assert.equal(excelCellText(0), "0", "a real zero must survive — it is not a blank")
+  assert.equal(excelCellText(null), "")
+  assert.equal(excelCellText(undefined), "")
+  assert.equal(excelCellText(true), "TRUE")
+  assert.equal(excelCellText(false), "FALSE")
+})
+
+test("an unrecognised cell shape reads as empty rather than as a stored placeholder", () => {
+  assert.equal(excelCellText({ something: "new in exceljs" }), "")
 })
 
 test("the default mapper still lower-cases only — the Uniware sync depends on it", () => {

@@ -101,3 +101,21 @@ export const warehouseActionSchema = z.discriminatedUnion("action", [
 
 export type WarehouseAction = z.infer<typeof warehouseActionSchema>
 export type WarehouseEntityRow = z.infer<typeof warehouseEntityRowSchema>
+
+
+/** The v2 PO-code config write. */
+
+export const facilityPoCodeSchema = z.object({
+  facility_id: z.coerce.number().int().positive(),
+  po_short_code: z
+    .string()
+    .trim()
+    .transform((s) => s.toUpperCase())
+    .refine((s) => s === "" || /^[A-Z0-9]{2,12}$/.test(s),
+      "Short code must be 2-12 upper-case letters or digits, with no separators")
+    .nullable()
+    .optional(),
+  po_seq_seed: z.coerce.number().int().nonnegative().nullable().optional(),
+})
+
+export type facilityPoCode = z.infer<typeof facilityPoCodeSchema>

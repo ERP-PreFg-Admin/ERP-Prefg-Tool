@@ -2,11 +2,11 @@
 
 import { useState, type KeyboardEvent, type ReactNode } from "react"
 import { Popover } from "radix-ui"
-import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react"
+import { ChevronLeft, ChevronRight, ChevronDown, CalendarDays } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
-  WEEKDAYS, monthMatrix, addMonths, anchorMonth, monthLabel,
-  formatDisplay, isBefore, isInRange, isDisabledDate,
+  WEEKDAYS, MONTH_NAMES, monthMatrix, addMonths, anchorMonth, monthLabel,
+  calendarYears, formatDisplay, isBefore, isInRange, isDisabledDate,
 } from "@/lib/date"
 
 /**
@@ -36,6 +36,20 @@ const NAV_CLASS =
 
 const FOOTER_BTN_CLASS =
   "rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+
+/** Reads as the month/year label it replaced — no border, no chrome — and shows
+ *  it is a control on hover and focus. A native <select>, so the keyboard and
+ *  the mobile wheel picker come free. */
+const HEADER_SELECT_CLASS =
+  "appearance-none rounded-md bg-transparent py-0.5 pl-1 pr-4 text-sm font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+
+/**
+ * The dropped-open list is drawn by the OS, not by us: padding, radius, hover
+ * and font are all ignored on <option>. Colour is the one thing that lands
+ * (Chrome and Firefox honour it), and without it the list opens white inside a
+ * dark app. Set from the same tokens as the popover it drops out of.
+ */
+const HEADER_OPTION_CLASS = "bg-popover text-popover-foreground"
 
 function MonthGrid({
   y, m, selected, from, to, min, max, onPick, onHover,
@@ -152,9 +166,42 @@ function CalendarBody({
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
-        <div className="flex flex-1 justify-around text-sm font-medium">
-          <span>{monthLabel(view.y, view.m)}</span>
-          {months === 2 && <span>{monthLabel(right.y, right.m)}</span>}
+        <div className="flex flex-1 items-center justify-around">
+          {/* Selectable, not a label: reaching an effective date three years back
+              was 36 chevron clicks. */}
+          <div className="flex items-center">
+            {/* One chevron for the pair, on the year — two would read as two
+                separate controls when they are one "which month am I on". */}
+            <div className="relative flex items-center">
+              <select
+                className={HEADER_SELECT_CLASS}
+                aria-label="Month"
+                value={view.m}
+                onChange={(e) => onView({ y: view.y, m: Number(e.target.value) })}
+              >
+                {MONTH_NAMES.map((name, i) => (
+                  <option key={name} value={i + 1} className={HEADER_OPTION_CLASS}>{name}</option>
+                ))}
+              </select>
+              <select
+                className={HEADER_SELECT_CLASS}
+                aria-label="Year"
+                value={view.y}
+                onChange={(e) => onView({ y: Number(e.target.value), m: view.m })}
+              >
+                {calendarYears(view.y, grid.min, grid.max).map((y) => (
+                  <option key={y} value={y} className={HEADER_OPTION_CLASS}>{y}</option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-0.5 h-3 w-3 text-muted-foreground" />
+            </div>
+          </div>
+          {/* The right month stays derived from the left, so the two are always
+              adjacent — a second pair of selects is exactly the "August next to
+              next March" the single chevron pair exists to prevent. */}
+          {months === 2 && (
+            <span className="text-sm font-medium">{monthLabel(right.y, right.m)}</span>
+          )}
         </div>
         <button
           type="button"

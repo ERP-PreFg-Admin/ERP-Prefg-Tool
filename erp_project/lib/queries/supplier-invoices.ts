@@ -223,7 +223,28 @@ export const supplierInvoicesSql = {
    * Parameters: buildInvoiceParams(...) (15)
    */
   listInvoicesForExport: INVOICE_LIST_BODY,
+  /**
+   * Highest serial already minted in one ERP PO-code series.
+   *
+   * Params: ['M/MUM1/2627/%'] — the prefix from poPrefix() plus '/%'.
+   *
+   * The prefix carries the FY, so this is (facility, FY)-scoped and the series
+   * restarts each April by construction rather than by a reset step.
+   *
+   * SUBSTRING_INDEX(.., '/', -1) takes the segment after the last slash and CAST
+   * ... UNSIGNED reads its leading digits; a code with no numeric tail casts to 0
+   * and is ignored rather than throwing. LIKE is anchored by the literal prefix,
+   * so no other facility's or year's codes are in range.
+   *
+   * MAX and not COUNT(*): see lib/uniware/po-serial.ts for why counting reissues
+   * a used number.
+   */
 
+  maxUniwarePoSerial: `
+    SELECT MAX(CAST(SUBSTRING_INDEX(uniware_po_code, '/', -1) AS UNSIGNED)) AS max_serial
+      FROM invoice_mfg
+     WHERE uniware_po_code LIKE ?
+  `,
   /**
    * Every line of every invoice the same filter matches, flattened with its
    * invoice header — the sheet finance actually reconciles against. Both PO

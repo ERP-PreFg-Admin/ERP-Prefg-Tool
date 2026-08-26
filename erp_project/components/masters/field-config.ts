@@ -159,6 +159,39 @@ export function buildRows(rawRows: Record<string, string>[], fields: MasterField
   return rows
 }
 
+/**
+ * Why these headers are not the file the importer wants — or null when at least
+ * one column was recognised. Headers must already be `normalizeHeader`-ed.
+ *
+ * Wrong-header files used to parse "successfully": every field lookup missed,
+ * so the preview filled with rows of empty cells, each flagged
+ * "Missing required: …", and nothing said the real problem was the header row.
+ * The usual causes are an .xlsx whose data is on a different sheet, and an
+ * export from another system whose column names we have no alias for.
+ *
+ * Shared by `parseCSV` and the Excel path in CsvImportDialog — same defect on
+ * both sides, so it is checked in one place.
+ */
+export function describeHeaderMismatch(headers: string[], fields: MasterField[]): string | null {
+  const found = headers.filter(Boolean)
+  if (found.length === 0) return "No header row found — the first row of this file is empty."
+
+  const cols = csvFields(fields)
+  const known = new Set(
+    cols.flatMap((f) => [f.key, ...(f.aliases ?? [])]).map(normalizeHeader),
+  )
+  if (found.some((h) => known.has(h))) return null
+
+  // Capped at 8 each: the point is to show the reader that the two lists are
+  // different things, not to print a 40-column schema into an error toast.
+  return (
+    `None of the columns in this file were recognised. ` +
+    `Found: ${found.slice(0, 8).join(", ")}${found.length > 8 ? ", …" : ""}. ` +
+    `Expected columns like: ${cols.slice(0, 8).map((f) => f.key).join(", ")}. ` +
+    `Download the template and use its header row.`
+  )
+}
+
 /** Parse CSV text into rows keyed by field. Invalid rows carry `_error` and/or `_remarks`. */
 export function parseCSV(text: string, fields: MasterField[]): ParsedRow[] {
   // Read through lib/csv.ts rather than splitting on "\n" then ",". A cell may
@@ -173,6 +206,9 @@ export function parseCSV(text: string, fields: MasterField[]): ParsedRow[] {
   }
 
   const headers = rows[0].map((h) => normalizeHeader(normalizeCell(h)))
+  const mismatch = describeHeaderMismatch(headers, fields)
+  if (mismatch) throw new Error(mismatch)
+
   const rawRows = rows.slice(1).map((cells) => {
     const raw: Record<string, string> = {}
     headers.forEach((h, i) => { raw[h] = normalizeCell(cells[i] ?? "") })

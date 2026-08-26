@@ -24,9 +24,9 @@ import {
   rowRemark,
   buildFlaggedCsv,
   normalizeHeader,
+  describeHeaderMismatch,
 } from "./field-config"
-import { monthIST } from "@/lib/date"
-import { normalizeCell } from "@/lib/csv"
+import { normalizeCell, excelCellText } from "@/lib/csv"
 import { useEditGuard } from "@/components/AccessContext"
 
 export function CsvImportDialog({
@@ -38,7 +38,6 @@ export function CsvImportDialog({
   fields,
   onSuccess,
   enableDuplicateCheck,
-  previewExcel,
   requireAllValid,
 }: {
   /** Singular label, e.g. "SKU". */
@@ -56,11 +55,6 @@ export function CsvImportDialog({
    *  parsing and merges the response into each row's remarks. The endpoint
    *  must support that action (see app/api/v1/masters/manufacturers/route.ts). */
   enableDuplicateCheck?: boolean
-  /** When true, .xlsx files are also parsed client-side (via ExcelJS) into the
-   *  same preview/remarks/duplicate-check pipeline as CSV, and only the valid
-   *  rows are submitted (via the "bulk" action) — instead of the default
-   *  upload-to-S3-then-insert-everything "bulk_from_s3" flow. */
-  previewExcel?: boolean
   /** When true, ANY flagged row blocks the Upload button entirely — no
    *  partial upload of just the valid rows. Defaults to false (existing
    *  behavior: valid rows upload, invalid rows are silently excluded). */
@@ -78,14 +72,8 @@ export function CsvImportDialog({
   const [loading, setLoading] = useState(false)
   const [checkingDuplicates, setCheckingDuplicates] = useState(false)
   const [parsingExcel, setParsingExcel] = useState(false)
-  // Track whether the chosen file is Excel (needs S3 server-side processing
-  // unless previewExcel is enabled — see useClientRows below).
-  const [isExcel, setIsExcel] = useState(false)
-  const [s3Key,   setS3Key]   = useState<string | null>(null)
-
-  // Excel files get the same client-side preview as CSV when previewExcel is on;
-  // otherwise they go through the legacy upload-to-S3-then-insert-everything path.
-  const useClientRows = !isExcel || !!previewExcel
+  /** Which sheet of a multi-sheet workbook was read. Shown, not silent. */
+  const [sheetNote, setSheetNote] = useState("")
 
   const valid = rows.filter((r) => !isFlagged(r))
   const invalid = rows.filter(isFlagged)
@@ -113,18 +101,21 @@ export function CsvImportDialog({
     setFilename(file.name)
     setError("")
     setRows([])
-    setS3Key(null)
+    setSheetNote("")
 
-    const excel = file.name.toLowerCase().endsWith(".xlsx")
-    setIsExcel(excel)
-
-    if (excel && previewExcel) {
-      // Excel with client-side preview: parse in-browser via ExcelJS, same
-      // validation/remarks/duplicate pipeline as CSV. No S3 round-trip needed.
+    // .xlsx and .csv take the SAME path: parsed here, previewed row by row with
+    // a Remarks column, edits split from new records, and only the valid rows
+    // submitted. Excel used to have a second route — upload to S3, then let the
+    // server insert every row — which skipped all of that, so a bad Excel row
+    // was only discovered after it was already written. There is deliberately
+    // no unreviewed path left; a file we cannot parse is an error, not a
+    // silent fallback.
+    if (file.name.toLowerCase().endsWith(".xlsx")) {
       setParsingExcel(true)
       parseExcelFile(file)
-        .then((parsed) => {
+        .then(({ rows: parsed, note }) => {
           setRows(parsed)
+          setSheetNote(note)
           if (enableDuplicateCheck && parsed.length > 0) checkDuplicates(parsed)
         })
         .catch((err) => {
@@ -132,68 +123,89 @@ export function CsvImportDialog({
           setRows([])
         })
         .finally(() => setParsingExcel(false))
-    } else if (excel) {
-      // Excel (legacy path): upload to S3 first, then process server-side.
-      setLoading(true)
-      const module = endpoint.split('/').pop() ?? "imports"
-      const yyyymm = monthIST()
-      const form = new FormData()
-      form.append("file",   file)
-      form.append("folder", `imports/${module}/${yyyymm}`)
-      form.append("field",  `${templateFilename.replace(/\.[^.]+$/, "")}_${Date.now()}`)
-      fetch("/api/v1/upload", { method: "POST", body: form })
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.key) { setS3Key(data.key) }
-          else { setError(data.error ?? "Upload to S3 failed") }
-        })
-        .catch(() => setError("Upload to S3 failed"))
-        .finally(() => setLoading(false))
-    } else {
-      // CSV: parse client-side for immediate preview
-      const reader = new FileReader()
-      reader.onload = (ev) => {
-        try {
-          const parsed = parseCSV(ev.target?.result as string, fields)
-          setRows(parsed)
-          if (enableDuplicateCheck && parsed.length > 0) checkDuplicates(parsed)
-        } catch (err) {
-          setError(err instanceof Error ? err.message : "Failed to parse CSV")
-          setRows([])
-        }
-      }
-      reader.readAsText(file)
+      return
     }
+
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      try {
+        const parsed = parseCSV(ev.target?.result as string, fields)
+        setRows(parsed)
+        if (enableDuplicateCheck && parsed.length > 0) checkDuplicates(parsed)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to parse CSV")
+        setRows([])
+      }
+    }
+    reader.onerror = () => setError("Could not read that file.")
+    reader.readAsText(file)
   }
 
-  async function parseExcelFile(file: File): Promise<ParsedRow[]> {
+  /**
+   * Parse an .xlsx in the browser into the same ParsedRows a CSV produces, so
+   * both go through one validation/remarks/duplicate pipeline.
+   *
+   * ExcelJS is imported dynamically — it is a large dependency and only the
+   * people who actually pick an .xlsx should pay for it.
+   *
+   * ponytail: parsed in the browser, which is fine for the few-thousand-row
+   * masters sheets people upload. If a genuinely large workbook ever shows up,
+   * parse it server-side (lib/import-s3.ts already does, identically) and
+   * return rows to this same preview — do NOT reintroduce an insert path that
+   * skips the preview.
+   */
+  async function parseExcelFile(file: File): Promise<{ rows: ParsedRow[]; note: string }> {
     const ExcelJS = (await import("exceljs")).default
-    const buffer = await file.arrayBuffer()
     const wb = new ExcelJS.Workbook()
-    await wb.xlsx.load(buffer)
+    await wb.xlsx.load(await file.arrayBuffer())
 
-    const ws = wb.worksheets[0]
-    if (!ws) return []
+    // First sheet WITH DATA, not simply the first sheet: a cover or
+    // instructions tab in front of the data is common, and reading sheet 1
+    // blindly reported "no data rows" for a workbook that plainly had them.
+    const ws = wb.worksheets.find((s) => s.rowCount > 1)
+    if (!ws) {
+      throw new Error("This workbook has no sheet with a header row and at least one data row.")
+    }
 
     let headers: string[] = []
     const rawRows: Record<string, string>[] = []
-    ws.eachRow((row, rowNumber) => {
-      // normalizeCell, not trim: an Excel cell can hold newlines (alt+enter, or
-      // wrapped text pasted in), and those must not survive into a value.
-      const values = (row.values as (string | number | null)[]).slice(1).map((v) =>
-        v == null ? "" : normalizeCell(String(v))
-      )
-      if (rowNumber === 1) {
+    ws.eachRow((row) => {
+      // excelCellText, not String(v): a formula, rich-text, hyperlink or date
+      // cell is an OBJECT in ExcelJS and String() renders it "[object Object]".
+      // normalizeCell on top, because an Excel cell can hold newlines (alt+enter,
+      // or wrapped text pasted in) that must not survive into a value.
+      const values = (row.values as unknown[]).slice(1).map((v) => normalizeCell(excelCellText(v)))
+      if (values.every((v) => !v)) return
+      // The header is the first NON-EMPTY row, not literally row 1: a blank or
+      // formatting-only leading row is common, and `eachRow` skips empty rows
+      // entirely — so keying on rowNumber === 1 lost the header row completely
+      // and every column then read as unrecognised. parseCSV filters blank rows
+      // before taking rows[0] for the same reason; the two must agree.
+      if (headers.length === 0) {
         headers = values.map(normalizeHeader)
         return
       }
-      if (values.every((v) => !v)) return
       const raw: Record<string, string> = {}
       headers.forEach((h, i) => { raw[h] = values[i] ?? "" })
       rawRows.push(raw)
     })
 
-    return buildRows(rawRows, fields)
+    // Same two refusals CSV gets: unrecognised headers and no data rows. Both
+    // otherwise reach the preview as a grid of empty cells, every row flagged
+    // "Missing required: …" with nothing pointing at the actual cause.
+    const mismatch = describeHeaderMismatch(headers, fields)
+    if (mismatch) throw new Error(mismatch)
+    if (rawRows.length === 0) {
+      throw new Error(`Sheet "${ws.name}" has a header row but no data rows.`)
+    }
+
+    const others = wb.worksheets.length - 1
+    return {
+      rows: buildRows(rawRows, fields),
+      note: others > 0
+        ? `Read sheet "${ws.name}" — the other ${others} sheet${others !== 1 ? "s were" : " was"} ignored.`
+        : "",
+    }
   }
 
   async function checkDuplicates(parsed: ParsedRow[]) {
@@ -280,28 +292,20 @@ export function CsvImportDialog({
     setLoading(true)
     setError("")
     try {
-      let res: Response
-      if (useClientRows) {
-        // CSV, or Excel with previewExcel: send the already-validated rows as JSON
-        if (valid.length === 0) { setError("No valid rows to upload."); setLoading(false); return }
-        res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "bulk", rows: valid }),
-        })
-      } else {
-        // Excel legacy path: server fetches from S3, parses, inserts
-        if (!s3Key) { setLoading(false); return }
-        res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "bulk_from_s3", key: s3Key }),
-        })
-      }
+      if (valid.length === 0) { setError("No valid rows to upload."); setLoading(false); return }
+      // One action for both file types — the rows have already been parsed and
+      // reviewed here, so the server stages them the same way either way (see
+      // uploadRowsAsCsv in lib/master-routes/bulk-approval.ts, which writes them
+      // to S3 exactly as the .xlsx path used to).
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bulk", rows: valid }),
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Upload failed")
 
-      // The bulk/bulk_from_s3 routes return 200 + ok:true even when EVERY row
+      // The bulk route returns 200 + ok:true even when EVERY row
       // was skipped (bad data, duplicates, missing remarks on an edit, …) —
       // an approval with nothing staged still gets created. Treat that as a
       // failure on the client: no toast, no auto-close, so the user sees the
@@ -383,7 +387,7 @@ export function CsvImportDialog({
                   />
                   <span className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline">
                     <Upload className="h-4 w-4" />
-                    {filename || "Choose CSV file"}
+                    {filename || "Choose CSV or Excel file"}
                   </span>
                 </label>
                 <span className="text-muted-foreground text-sm">·</span>
@@ -407,23 +411,18 @@ export function CsvImportDialog({
                   </>
                 )}
               </div>
-              {filename && isExcel && !useClientRows && s3Key && (
-                <p className="text-xs text-emerald-600">
-                  Excel file uploaded — ready to import
-                </p>
-              )}
-              {filename && isExcel && !useClientRows && !s3Key && !loading && (
-                <p className="text-xs text-destructive">S3 upload failed — try again</p>
-              )}
-              {filename && isExcel && parsingExcel && (
+              {parsingExcel && (
                 <p className="text-xs text-muted-foreground">Parsing Excel file…</p>
               )}
-              {filename && useClientRows && checkingDuplicates && (
+              {sheetNote && (
+                <p className="text-xs text-muted-foreground">{sheetNote}</p>
+              )}
+              {filename && checkingDuplicates && (
                 <p className="text-xs text-muted-foreground">
                   Checking for duplicates against existing records…
                 </p>
               )}
-              {filename && useClientRows && rows.length > 0 && (
+              {filename && rows.length > 0 && (
                 <p className="text-xs text-muted-foreground">
                   {rows.length} rows parsed
                   {invalid.length > 0 && (
@@ -610,17 +609,15 @@ export function CsvImportDialog({
               Cancel
             </Button>
             <Button
-              disabled={(useClientRows ? valid.length === 0 : !s3Key) || loading || parsingExcel || blockedByInvalid}
+              disabled={valid.length === 0 || loading || parsingExcel || blockedByInvalid}
               onClick={handleUpload}
             >
               {loading
                 ? "Uploading…"
                 : parsingExcel
                 ? "Parsing…"
-                : useClientRows && valid.length > 0
+                : valid.length > 0
                 ? `Upload ${valid.length} ${valid.length !== 1 ? plural : entityLabel}`
-                : isExcel && s3Key
-                ? `Import Excel`
                 : "Upload"}
             </Button>
           </DialogFooter>

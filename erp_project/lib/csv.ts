@@ -116,6 +116,84 @@ export function isBlankRow(cells: string[]): boolean {
 }
 
 /**
+ * One ExcelJS cell as text — what Excel SHOWS in that cell.
+ *
+ * `String(cell)` is not enough, and the way it fails is silent: ExcelJS returns
+ * an OBJECT for several everyday cell kinds, and `String()` turns every one of
+ * them into the literal "[object Object]" — which then passes the
+ * required-field check, shows "OK" in the preview's Remarks column, and is
+ * stored as the value.
+ *
+ *   - a FORMULA cell is `{ formula, result }`. Half of any rate sheet is built
+ *     this way (`=B2*C2`), so this is the common case, not the exotic one.
+ *   - any inline styling — one bolded word, a colour pasted along with the text
+ *     — makes the cell `{ richText: [...] }`
+ *   - an email or URL Excel auto-linked is `{ text, hyperlink }`
+ *   - a DATE is a real `Date`, and `String(date)` is
+ *     "Mon Aug 26 2026 00:00:00 GMT+0530 (India Standard Time)"
+ *   - a broken formula is `{ error: "#N/A" }`
+ *
+ * Shared by both importers — the browser one in
+ * components/masters/CsvImportDialog.tsx and the server one in
+ * lib/import-s3.ts — for the same reason `normalizeHeader` below is shared: the
+ * two must not disagree about what a cell said. The server path is the one that
+ * runs when a staged *_BULK approval is applied, so a difference between them
+ * is a difference between what the approver reviewed and what got written.
+ *
+ * An error cell reads as "" on purpose. It has no value, so the row fails the
+ * required-field check and says so in the Remarks column, which the uploader
+ * can act on — "#N/A" stored as text is not. A formula whose `result` was never
+ * cached by the writing tool reads as "" for the same reason.
+ */
+export function excelCellText(value: unknown): string {
+  if (value == null) return ""
+  if (typeof value === "string") return value
+  if (typeof value === "number") return String(value)
+  // Excel displays a boolean as TRUE/FALSE, and TRUE/FALSE is what the same
+  // cell becomes if the sheet is re-saved as CSV. Match that, so a file
+  // uploaded as .xlsx and the same file uploaded as .csv read identically.
+  if (typeof value === "boolean") return value ? "TRUE" : "FALSE"
+  if (value instanceof Date) return excelDateText(value)
+
+  if (typeof value === "object") {
+    const v = value as Record<string, unknown>
+    // A formula's value is what the reader sees; the formula text is not data.
+    // Shared-formula cells carry `result` the same way, so this covers both.
+    if ("result" in v) return excelCellText(v.result)
+    if ("error" in v) return ""
+    if (Array.isArray(v.richText)) {
+      return v.richText.map((r) => excelCellText((r as { text?: unknown })?.text)).join("")
+    }
+    // Auto-linked email/URL: `text` is the display value. Fall back to the
+    // target (minus the mailto: Excel prepends) when the cell shows nothing.
+    if ("hyperlink" in v || "text" in v) {
+      const text = excelCellText(v.text)
+      return text || excelCellText(v.hyperlink).replace(/^mailto:/i, "")
+    }
+  }
+
+  // Anything unrecognised reads as empty rather than as "[object Object]" —
+  // a blank flagged by the required-field check beats a stored placeholder.
+  return ""
+}
+
+/**
+ * A date cell as text: date-only at midnight, otherwise "YYYY-MM-DD HH:MM:SS".
+ * An Excel date column is a date, and "2026-08-26" is what both our DATE
+ * columns and a CSV export of the same sheet carry.
+ *
+ * ponytail: read in UTC, which is how ExcelJS parses a date-only cell. A
+ * workbook carrying the legacy 1904 date system, or one written in a far-off
+ * timezone, can still land a day out; thread the sheet's epoch through if that
+ * ever turns up in a real file.
+ */
+function excelDateText(d: Date): string {
+  if (Number.isNaN(d.getTime())) return ""
+  const iso = d.toISOString()
+  return iso.endsWith("T00:00:00.000Z") ? iso.slice(0, 10) : iso.slice(0, 19).replace("T", " ")
+}
+
+/**
  * A header (or a field key / alias / label) reduced to a comparable form:
  * lower-cased, runs of non-alphanumerics collapsed to one underscore. So the
  * label our own exports write — "PM Code", "HSN Code", "Pantone Color" — lands

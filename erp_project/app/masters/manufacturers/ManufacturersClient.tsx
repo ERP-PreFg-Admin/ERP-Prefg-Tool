@@ -142,7 +142,6 @@ export default function ManufacturersClient({
             fields={MFG_CSV_FIELDS}
             onSuccess={refresh}
             enableDuplicateCheck
-            previewExcel
           />
           <AddMfgDialog onSuccess={refresh} />
         </MasterToolbarActions>

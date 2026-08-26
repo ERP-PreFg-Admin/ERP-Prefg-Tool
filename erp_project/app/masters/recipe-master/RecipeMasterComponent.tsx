@@ -220,10 +220,18 @@ export default function RecipeMasterComponent({
       </div>
 
       {/* ── Edit dialog — opened via "Update Existing Recipe" or the table's
-             per-row Edit button, kept separate from the detail panel above ── */}
+             per-row Edit button, kept separate from the detail panel above ──
+
+         `sku`: the code comes from the detail response, but the NAME only exists
+         on the SKU list this page already holds. Resolved inline rather than via
+         skuOf() so a SKU missing from that list still shows its code. */}
       <RecipeEditDialog
         open={panel.editMode}
         bomCode={panel.detail?.bom_code ?? null}
+        sku={panel.detail ? {
+          code: panel.detail.sku_code,
+          name: skus.find((s) => s.id === panel.detail?.sku_id)?.name ?? null,
+        } : undefined}
         rmRows={panel.editRmRows}
         pmRows={panel.editPmRows}
         onChangeRm={panel.setEditRmRows}

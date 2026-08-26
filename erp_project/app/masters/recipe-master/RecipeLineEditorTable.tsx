@@ -20,7 +20,10 @@ import { Badge } from "@/components/ui/badge"
 import { Callout } from "@/components/ui/callout"
 import { isRmTotalValid } from "@/lib/validation/recipe"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
-import { defaultUom, emptyBomLine, rmTotal, type RecipeLineRow, type RecipeMaterialOption } from "./RecipeLineEditorGrid"
+import {
+  defaultUom, emptyBomLine, rmTotal, RecipeSkuHeading,
+  type RecipeLineRow, type RecipeMaterialOption, type RecipeSku,
+} from "./RecipeLineEditorGrid"
 
 const cellInputCls =
   "w-full rounded border border-input bg-background px-2 py-1 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -194,6 +197,7 @@ export function RecipeLineEditorTable({
   pmMaterials,
   rmLocked,
   rmLockNote,
+  sku,
 }: {
   rmRows: RecipeLineRow[]
   pmRows: RecipeLineRow[]
@@ -205,9 +209,12 @@ export function RecipeLineEditorTable({
    *  there. See lib/masters/variant-rm-lock.ts. */
   rmLocked?: boolean
   rmLockNote?: string
+  /** Whose recipe these lines belong to, shown above them. */
+  sku?: RecipeSku
 }) {
   return (
     <div className="space-y-6">
+      {sku && <RecipeSkuHeading sku={sku} />}
       <LineTable
         mtrlType="rm"
         rows={rmRows}

@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
+import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { useToast } from "@/components/ui/toast"
 import { RemarksField, PO_REASON_PRESETS } from "@/components/masters/RemarksField"
 import type { RecipeChoice, MfgOption, MfgSkuOption, WarehouseOption } from "./po-types"
@@ -45,6 +46,24 @@ function defaultDestination(options: WarehouseOption[]): string {
     ?? options.find((w) => w.type === "MWH")?.name
     ?? ""
   )
+}
+
+/** A picked SKU as an empty order line. */
+function makeRow(s: MfgSkuOption, warehouseOptions: WarehouseOption[]): PoLineRowState {
+  return {
+    sku_code: s.sku_code,
+    sku_name: s.sku_name,
+    boms: s.boms ?? [],
+    // The API sorts active recipes first, so the default is the live one
+    // whenever there is a choice to make.
+    recipe_id: s.boms?.[0] ? String(s.boms[0].recipe_id) : "",
+    qty: "",
+    expected_on: "",
+    entity_code: s.entity_code ?? null,
+    // Defaulted from THIS row's entity's warehouses, so the preselected
+    // destination is always one the row can actually be sent to.
+    destination: defaultDestination(warehousesForEntity(warehouseOptions, s.entity_code)),
+  }
 }
 
 // One SKU row — the quoted rate is fetched independently per row (display
@@ -163,6 +182,12 @@ export default function AddPODialog({
 }) {
   const [poType, setPoType]         = useState<PoType>("normal")
   const [mfgId, setMfgId]           = useState("")
+  // The manufacturer's catalog, and the lines actually being ordered. These used
+  // to be the same thing: picking a manufacturer seeded a row per SKU, so
+  // ordering two SKUs meant scrolling ~30 rows of empty inputs that submission
+  // then filtered out again. The catalog is now search options; a row exists
+  // because someone asked for it.
+  const [skuOptions, setSkuOptions] = useState<MfgSkuOption[]>([])
   const [rows, setRows]             = useState<PoLineRowState[]>([])
   const [loadingSkus, setLoadingSkus] = useState(false)
   const [skusError, setSkusError]   = useState("")
@@ -179,6 +204,7 @@ export default function AddPODialog({
       // eslint-disable-next-line react-hooks/set-state-in-effect -- resets form state each time the dialog is opened
       setPoType("normal")
       setMfgId("")
+      setSkuOptions([])
       setRows([])
       setReason("")
       setRowErrors({})
@@ -189,34 +215,34 @@ export default function AddPODialog({
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- clears rows when the dialog closes or the manufacturer selection is cleared
-    if (!open || !mfgId) { setRows([]); return }
+    if (!open || !mfgId) { setSkuOptions([]); setRows([]); return }
     setLoadingSkus(true)
     setSkusError("")
     setRowErrors({})
+    // Changing manufacturer drops the lines: a SKU's recipe, rate and entity are
+    // all per-manufacturer, so a row carried across would price against the
+    // wrong one.
+    setRows([])
     fetch(`/api/v1/purchase-orders/mfg-skus?mfg_id=${mfgId}`)
       .then((r) => r.json())
-      .then((data: { skus?: MfgSkuOption[] }) => {
-        setRows(
-          (data.skus ?? []).map((s) => ({
-            sku_code: s.sku_code,
-            sku_name: s.sku_name,
-            boms: s.boms ?? [],
-            // The API sorts active recipes first, so the default is the live
-            // one whenever there is a choice to make.
-            recipe_id: s.boms?.[0] ? String(s.boms[0].recipe_id) : "",
-            qty: "",
-            expected_on: "",
-            entity_code: s.entity_code ?? null,
-            // Defaulted from THIS row's entity's warehouses, so the preselected
-            // destination is always one the row can actually be sent to.
-            destination: defaultDestination(warehousesForEntity(warehouseOptions, s.entity_code)),
-          }))
-        )
-      })
+      .then((data: { skus?: MfgSkuOption[] }) => setSkuOptions(data.skus ?? []))
       .catch(() => setSkusError("Failed to load SKUs for this manufacturer."))
       .finally(() => setLoadingSkus(false))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mfgId])
+
+  // Already-ordered SKUs leave the picker — rows are keyed by sku_code, so the
+  // same SKU twice would edit one row from two places.
+  const unpicked = useMemo(
+    () => skuOptions.filter((s) => !rows.some((r) => r.sku_code === s.sku_code)),
+    [skuOptions, rows]
+  )
+
+  function addSku(skuCode: string) {
+    const sku = skuOptions.find((s) => s.sku_code === skuCode)
+    if (!sku) return
+    setRows((prev) => [...prev, makeRow(sku, warehouseOptions)])
+    setApiError("")
+  }
 
   function setRowField(sku_code: string, field: keyof PoLineRowState, value: string) {
     setRows((prev) => prev.map((r) => (r.sku_code === sku_code ? { ...r, [field]: value } : r)))
@@ -228,17 +254,20 @@ export default function AddPODialog({
     setApiError("")
     if (!mfgId) { setApiError("Select a manufacturer."); return }
 
-    const filled = rows.filter((r) => Number(r.qty) > 0)
-    if (filled.length === 0) { setApiError("Enter a quantity for at least one SKU."); return }
+    if (rows.length === 0) { setApiError("Add at least one SKU."); return }
 
     if (poType === "impromptu" && !reason.trim()) {
       setApiError("Remarks are required for Impromptu POs.")
       return
     }
 
+    // Every row is now here because someone searched for it, so a missing
+    // quantity is a mistake to report — not a row to quietly skip, which is what
+    // the old pre-seeded-every-SKU list needed.
     const errs: Record<string, string> = {}
-    for (const r of filled) {
-      if (!r.recipe_id) errs[r.sku_code] = "No Recipe on this manufacturer's line for this SKU — it can't be ordered."
+    for (const r of rows) {
+      if (!(Number(r.qty) > 0)) errs[r.sku_code] = "Enter a quantity, or remove this SKU."
+      else if (!r.recipe_id) errs[r.sku_code] = "No Recipe on this manufacturer's line for this SKU — it can't be ordered."
       else if (!r.expected_on) errs[r.sku_code] = "Expected dispatch date is required."
       else if (r.expected_on < today) errs[r.sku_code] = "Backdating is not allowed."
     }
@@ -247,7 +276,7 @@ export default function AddPODialog({
     setSubmitting(true)
     const outcomes: { sku_code: string; ok: boolean; message: string }[] = []
 
-    for (const r of filled) {
+    for (const r of rows) {
       try {
         const rateRes = await fetch(
           `/api/v1/purchase-orders/quote-rate?sku_code=${encodeURIComponent(r.sku_code)}&mfg_id=${mfgId}`
@@ -299,13 +328,13 @@ export default function AddPODialog({
       return
     }
 
-    // Partial failure — clear the successful rows' quantities, keep the
-    // dialog open with per-row errors on the failed ones so the user can fix
-    // and retry just those instead of resubmitting everything.
-    setRows((prev) => prev.map((r) => {
-      const o = outcomes.find((x) => x.sku_code === r.sku_code)
-      return o?.ok ? { ...r, qty: "" } : r
-    }))
+    // Partial failure — DROP the rows that succeeded and keep the dialog open
+    // with per-row errors on the rest, so a retry resubmits only what failed.
+    //
+    // Dropped, not blanked: their POs exist now, and a blanked row would fail
+    // the "enter a quantity" check above and block the retry it is meant to
+    // allow.
+    setRows((prev) => prev.filter((r) => !outcomes.some((o) => o.ok && o.sku_code === r.sku_code)))
     const errMap: Record<string, string> = {}
     for (const f of failed) errMap[f.sku_code] = f.message
     setRowErrors(errMap)
@@ -348,18 +377,45 @@ export default function AddPODialog({
             </Select>
           </div>
 
-          {/* SKU rows — one line per SKU: qty, rate, dispatch, destination */}
+          {/* Search to add a SKU, then one line per added SKU: qty, rate,
+              dispatch, destination. */}
+          {mfgId && !loadingSkus && !skusError && skuOptions.length > 0 && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="apo-sku">
+                Add SKU
+                {rows.length > 0 && (
+                  <span className="ml-1 font-normal text-muted-foreground">({rows.length} added)</span>
+                )}
+              </Label>
+              {/* value="" always: this is a search box, not a display of the
+                  current pick — the picks are the rows below. */}
+              <FuzzySelect
+                options={unpicked}
+                value=""
+                onChange={(v) => v && addSku(v)}
+                getValue={(s) => s.sku_code}
+                getLabel={(s) => `${s.sku_code} — ${s.sku_name}`}
+                searchKeys={["sku_code", "sku_name"]}
+                placeholder="Search SKU code or name…"
+              />
+            </div>
+          )}
+
           {!mfgId ? (
             <p className="text-xs text-muted-foreground py-4 text-center">
-              Select a manufacturer to see the SKUs it produces.
+              Select a manufacturer to order its SKUs.
             </p>
           ) : loadingSkus ? (
             <p className="text-xs text-muted-foreground py-4 text-center">Loading SKUs…</p>
           ) : skusError ? (
             <p className="text-xs text-destructive py-4 text-center">{skusError}</p>
-          ) : rows.length === 0 ? (
+          ) : skuOptions.length === 0 ? (
             <p className="text-xs text-muted-foreground py-4 text-center">
               This manufacturer has no active SKUs to order.
+            </p>
+          ) : rows.length === 0 ? (
+            <p className="text-xs text-muted-foreground py-4 text-center">
+              Search a SKU above to add it to this PO.
             </p>
           ) : (
             <div className="rounded-lg border border-border overflow-x-auto">

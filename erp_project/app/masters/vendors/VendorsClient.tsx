@@ -166,7 +166,6 @@ export default function VendorsClient({
             fields={VENDOR_CSV_FIELDS}
             onSuccess={refresh}
             enableDuplicateCheck
-            previewExcel
           />
           <AddVendorDialog onSuccess={refresh} />
         </MasterToolbarActions>

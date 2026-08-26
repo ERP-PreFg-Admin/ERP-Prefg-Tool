@@ -56,6 +56,20 @@ export function rmTotal(rows: RecipeLineRow[]): number {
   return rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
 }
 
+/** Whose recipe this is. Both editors sit in a dialog with a lot of controls
+ *  above the lines — the wizard's title says "New Recipe" and the edit dialog's
+ *  says a recipe CODE, so neither answers "which SKU am I editing". */
+export type RecipeSku = { code: string | null; name: string | null }
+
+export function RecipeSkuHeading({ sku }: { sku: RecipeSku }) {
+  return (
+    <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-border pb-2">
+      <span className="font-mono text-sm font-medium">{sku.code ?? "—"}</span>
+      <span className="min-w-0 truncate text-sm text-muted-foreground">{sku.name ?? "—"}</span>
+    </div>
+  )
+}
+
 const inputCls =
   "w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 

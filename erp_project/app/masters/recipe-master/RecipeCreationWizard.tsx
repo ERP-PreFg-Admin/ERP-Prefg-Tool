@@ -26,6 +26,7 @@ import {
   Step3EntryMethod,
   Step4LineEntry,
   Step5Review,
+  skuOf,
 } from "./RecipeWizardSteps"
 import type { Sku } from "@/types/masters"
 
@@ -44,6 +45,7 @@ export function RecipeCreationWizard({
 }) {
   const wizard = useBomWizard({ rmMaterials, pmMaterials, onSuccess, onEditExisting })
   const { step, loading, canProceedFromLines } = wizard
+  const picked = skuOf(skus, wizard.skuId)
 
   return (
     <>
@@ -56,6 +58,16 @@ export function RecipeCreationWizard({
         <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Create Recipe — Step {step} of 5</DialogTitle>
+            {/* Whose recipe this is, from the moment Step 1 picks it — every
+                later step is about a SKU whose name is otherwise off-screen.
+                Here rather than above the line editor because it then holds for
+                all five steps, including the CSV upload and the review. */}
+            {picked && (
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span className="font-mono text-sm font-medium">{picked.code ?? "—"}</span>
+                <span className="min-w-0 truncate text-sm text-muted-foreground">{picked.name ?? "—"}</span>
+              </div>
+            )}
           </DialogHeader>
 
           {wizard.showCloseConfirm ? (

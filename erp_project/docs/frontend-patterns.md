@@ -123,10 +123,17 @@ For entities that need custom forms (like Raw Materials' multi-step wizard), bui
 
 `components/masters/CsvImportDialog.tsx` is the shared bulk-upload dialog, reused across vendors, manufacturers, RM/PM rates, material master, and BOM master. It takes a declarative `fields: MasterField[]` (same shape as the single-record form fields) plus an `endpoint`, and handles:
 
-1. Client-side CSV parsing and preview (with per-row validation/remarks), or optional client-side `.xlsx` parsing via `previewExcel` (large Excel files fall back to an upload-to-S3-then-server-parses path)
+1. Client-side parsing and preview with per-row validation/remarks. **`.csv` and `.xlsx` take the same path** — an Excel file is parsed in-browser via ExcelJS (dynamically imported) into the same `ParsedRow[]` a CSV produces, so both get the Remarks column, the edits/new split and the "only valid rows are submitted" rule. There is deliberately **no unreviewed import path**: Excel used to have a second route (upload to S3 → `bulk_from_s3` → server inserts every row) that skipped the whole preview, so a bad Excel row was only discovered once it had been written. A file that cannot be parsed is an error now, not a silent fallback.
 2. An optional `enableDuplicateCheck` round-trip that POSTs `{ action: "check_duplicates", rows }` to `endpoint` and merges warnings into the preview
 3. Downloadable CSV template (`downloadTemplate`) and a "download flagged rows" export for fixing invalid rows
-4. Upload via `{ action: "bulk", rows: valid }` (or `bulk_from_s3` for the legacy Excel path); a response carrying `approval_id` means the whole batch was staged as one pending approval rather than inserted directly (bulk-approval masters), otherwise `{ inserted, skipped }` is shown
+4. Upload via `{ action: "bulk", rows: valid }` for both file types; the server writes those rows back out as the staged CSV (`uploadRowsAsCsv` in `lib/master-routes/bulk-approval.ts`), which is the same artifact the old Excel path staged. A response carrying `approval_id` means the whole batch was staged as one pending approval rather than inserted directly (bulk-approval masters), otherwise `{ inserted, skipped }` is shown
+
+Two things an Excel file needs that a CSV does not, both handled in `parseExcelFile`:
+
+- **Cell values are read with `excelCellText` (`lib/csv.ts`), never `String(v)`.** ExcelJS returns an *object* for formula, rich-text, hyperlink and error cells, and a real `Date` for dates — `String()` renders those `"[object Object]"` and a full JS date string, which then pass the required-field check and get stored. `lib/import-s3.ts` reads cells through the same helper, because that is the path that writes the rows when a staged `*_BULK` approval is approved: if the two disagree, the approver reviewed something other than what landed.
+- **The first sheet *with data* is used, not `worksheets[0]`** — a cover or instructions tab in front of the data is common. When a workbook has more than one sheet the dialog says which one it read rather than choosing silently.
+
+Both file types are also refused up front, rather than previewed as a grid of empty rows, when no column header is recognised (`describeHeaderMismatch` in `field-config.ts`) — that used to surface as every row reading "Missing required: …" with nothing naming the real cause.
 
 Use this component instead of building a new upload dialog whenever an entity needs CSV/Excel bulk import — extend `fields`/`endpoint` rather than forking the component.
 

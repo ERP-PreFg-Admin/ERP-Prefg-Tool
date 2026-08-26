@@ -294,6 +294,57 @@ export const mfgFacilityMap = {
     INNER JOIN master_entity   e ON e.id = dwe.entity_id
     WHERE dwe.id = ? LIMIT 1
   `,
+    /**
+   * One facility's PO-code config, with the columns a scope check needs.
+   *
+   * `wh_name` is not decoration: facility ids arrive from the client as small
+   * consecutive integers, and lib/scope.ts's warehouse dimension is NAMES
+   * (purchase_orders.destination stores the name), so the id must be resolved to
+   * a name before it can be checked at all. Same reason
+   * mfgFacilityMap.selectFacilityById returns it.
+   *
+   * Params: [facility_id]
+   */
+  selectPoConfigById: `
+    SELECT dwe.id, dwe.facility_code, dwe.po_short_code, dwe.po_seq_seed,
+           w.name AS wh_name, e.code AS entity_code
+      FROM details_warehouse_entity dwe
+      INNER JOIN master_warehouse w ON w.id = dwe.warehouse_id
+      INNER JOIN master_entity    e ON e.id = dwe.entity_id
+     WHERE dwe.id = ? LIMIT 1
+  `,
+
+  /**
+   * Every active facility's PO-code config, for the review screen.
+   *
+   * Unpaginated on purpose — 18 rows, the same call the mfg-overview matrix makes
+   * over the same table. Ordered entity-then-location so the two rows of one site
+   * sit in predictable places.
+   */
+  selectPoConfigs: `
+    SELECT dwe.id, dwe.facility_code, dwe.po_short_code, dwe.po_seq_seed,
+           w.name AS wh_name, w.location, e.code AS entity_code
+      FROM details_warehouse_entity dwe
+      INNER JOIN master_warehouse w ON w.id = dwe.warehouse_id
+      INNER JOIN master_entity    e ON e.id = dwe.entity_id
+     WHERE dwe.status = 'active'
+     ORDER BY e.code, w.name
+  `,
+
+  /**
+   * Set or clear one facility's PO-code config.
+   *
+   * Both values may be NULL — clearing po_short_code returns that facility to
+   * today's behaviour (no code sent, Uniware numbers the PO), which is the
+   * documented way to back a pilot out.
+   *
+   * Params: [po_short_code, po_seq_seed, facility_id]
+   */
+  updatePoConfig: `
+    UPDATE details_warehouse_entity
+       SET po_short_code = ?, po_seq_seed = ?
+     WHERE id = ?
+  `,
 
   /** sku_code → id, for the UI write and the catalog sync. Codes that resolve to
    *  nothing simply do not come back, and the caller reports them. `brand_id` comes

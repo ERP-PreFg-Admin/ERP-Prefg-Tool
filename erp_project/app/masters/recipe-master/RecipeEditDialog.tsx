@@ -22,7 +22,7 @@ import { ChangeTypeCheckboxes } from "./ChangeTypeCheckboxes"
 import { RecipeArtifactsAddButton, RecipeArtifactsList } from "./RecipeArtifactsEditor"
 import { rmLockNote } from "./RecipeWizardSteps"
 import { RECIPE_STATUS_VALUES } from "@/lib/validation/recipe"
-import type { RecipeLineRow, RecipeMaterialOption } from "./RecipeLineEditorGrid"
+import type { RecipeLineRow, RecipeMaterialOption, RecipeSku } from "./RecipeLineEditorGrid"
 import type { PropagationTarget } from "./useRecipeWizard"
 import type { RmLock } from "@/lib/masters/variant-rm-lock"
 import type { RecipeArtifact } from "@/types/masters"
@@ -39,6 +39,7 @@ const STATUS_LABELS: Record<string, string> = {
 export function RecipeEditDialog({
   open,
   bomCode,
+  sku,
   rmRows,
   pmRows,
   onChangeRm,
@@ -70,6 +71,8 @@ export function RecipeEditDialog({
 }: {
   open: boolean
   bomCode: string | null
+  /** Whose recipe this is — the title carries the recipe code, not the SKU. */
+  sku?: RecipeSku
   rmRows: RecipeLineRow[]
   pmRows: RecipeLineRow[]
   onChangeRm: (rows: RecipeLineRow[]) => void
@@ -211,6 +214,7 @@ export function RecipeEditDialog({
             pmMaterials={pmMaterials}
             rmLocked={rmLocked}
             rmLockNote={rmLockNote(rmLock)}
+            sku={sku}
           />
         </div>
 

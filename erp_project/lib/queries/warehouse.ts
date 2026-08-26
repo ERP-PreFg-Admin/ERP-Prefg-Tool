@@ -126,6 +126,47 @@ export const warehouse = {
    *  Parameters: [name] */
   selectByNameForDup: `SELECT id FROM master_warehouse WHERE name = ? LIMIT 1`,
 
+  /**
+   * One facility's ERP PO-code config, with the columns a scope check needs.
+   *
+   * `wh_name` is not decoration: facility ids arrive from the client as small
+   * consecutive integers, and lib/scope.ts's warehouse dimension is NAMES
+   * (purchase_orders.destination stores the name), so the id has to be resolved to
+   * a name before it can be checked at all. Same reason
+   * mfgFacilityMap.selectFacilityById returns it.
+   *
+   * Not filtered on status: an inactive facility must still be readable so its
+   * config can be corrected, and the write path checks scope rather than status.
+   *
+   * Parameters: [facility_id]
+   */
+  selectPoConfigById: `
+    SELECT dwe.id, dwe.facility_code, dwe.po_short_code, dwe.po_seq_seed,
+           w.name AS wh_name, e.code AS entity_code
+    FROM details_warehouse_entity dwe
+    INNER JOIN master_warehouse w ON w.id = dwe.warehouse_id
+    INNER JOIN master_entity    e ON e.id = dwe.entity_id
+    WHERE dwe.id = ?
+    LIMIT 1
+  `,
+
+  /**
+   * Every active facility's ERP PO-code config, for the review screen.
+   *
+   * Unpaginated on purpose — 18 rows, the same shape of call the mfg-overview
+   * matrix already makes over this table. Ordered entity then location so the two
+   * rows of one site sit in predictable places.
+   */
+  selectPoConfigs: `
+    SELECT dwe.id, dwe.facility_code, dwe.po_short_code, dwe.po_seq_seed,
+           w.name AS wh_name, w.location, e.code AS entity_code
+    FROM details_warehouse_entity dwe
+    INNER JOIN master_warehouse w ON w.id = dwe.warehouse_id
+    INNER JOIN master_entity    e ON e.id = dwe.entity_id
+    WHERE dwe.status = 'active'
+    ORDER BY e.code, w.name
+  `,
+
   // ============ INSERT QUERIES ============
 
   /** Parameters: [code, name, location, state, zone, type, contact_person,
@@ -188,6 +229,27 @@ export const warehouse = {
     UPDATE master_warehouse
     SET code = ?, location = ?, state = ?, zone = ?, type = ?,
         contact_person = ?, contact_phone = ?, site_gstin = ?, status = ?
+    WHERE id = ?
+  `,
+
+  /**
+   * Set or clear one facility's ERP PO-code config.
+   *
+   * Both values may be NULL, and clearing po_short_code is the documented way to
+   * back a pilot out: the facility returns to sending no purchaseOrderCode and
+   * Uniware numbers the PO, exactly as before this feature existed.
+   *
+   * Deliberately NOT part of upsertEntityRow. That query is driven by the
+   * WAREHOUSE approval diff and restates every column it touches, so folding
+   * these in would put PO numbering behind an approval and — worse — silently
+   * overwrite a configured short code with NULL on any warehouse edit that did
+   * not carry it. This is a direct write, matching the facility-map route.
+   *
+   * Parameters: [po_short_code, po_seq_seed, facility_id]
+   */
+  updatePoConfig: `
+    UPDATE details_warehouse_entity
+    SET po_short_code = ?, po_seq_seed = ?
     WHERE id = ?
   `,
 

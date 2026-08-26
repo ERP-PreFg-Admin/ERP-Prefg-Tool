@@ -898,6 +898,16 @@ model details_warehouse_entity {
   warehouse_id    Int
   entity_id       Int
   facility_code   String?                         @db.VarChar(50)
+  /// This facility's segment in the ERP-minted Uniware PO code:
+  /// <letter>/<this>/<FY>/<serial>, e.g. M/MUM1/2627/01234. Upper-case, no
+  /// separators — the format supplies the slashes. NULL means not configured,
+  /// which sends no purchaseOrderCode and lets Uniware number the PO as it has
+  /// always done; that is what keeps a newly added facility working.
+  po_short_code   String?                         @db.VarChar(12)
+  /// Cutover floor for the serial, so a facility switching to ERP minting does
+  /// not restart at 1 and read as a brand-new operation. First ERP code is this
+  /// + 1. Once real codes exist above it the seed stops mattering.
+  po_seq_seed     Int?
   /// Overrides master_warehouse.type for this entity; NULL means use the
   /// location's. Additive rather than a move, because master_warehouse.type is
   /// NOT NULL and is what warehouseOptions selects for the PO destination
@@ -933,6 +943,12 @@ model details_warehouse_entity {
   master_entity    master_entity    @relation(fields: [entity_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_dwe_entity")
 
   @@unique([warehouse_id, entity_id], map: "uq_warehouse_entity")
+  /// Two facilities of one entity sharing a short code would share a serial
+  /// series and mint colliding PO codes. MySQL treats NULLs as DISTINCT in a
+  /// unique index, so this constrains the configured rows while leaving any
+  /// number of unconfigured ones alone — the inverse of the NULL-distinctness
+  /// trap noted in lib/queries/mfg-facility-map.ts:36-38.
+  @@unique([entity_id, po_short_code], map: "uq_dwe_po_short_code")
   @@index([entity_id], map: "fk_dwe_entity")
   @@index([ship_to_pincode], map: "idx_dwe_pincode")
 }
