@@ -351,7 +351,11 @@ export default function AddPODialog({
       {/* max-w-5xl: eight columns, and the destination now carries a facility code.
           At 3xl the table overflowed and the remove button sat off-screen behind a
           scrollbar. */}
-      <DialogContent className="max-w-5xl">
+      {/* Capped height + column layout so the SKU table is the only thing that
+          grows. DialogContent is fixed and vertically centred, so without the cap
+          a long list pushed the title off the top of the screen AND Raise PO off
+          the bottom, with no way to scroll to either. */}
+      <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Add Purchase Order</DialogTitle>
           <p className="text-xs text-muted-foreground pt-1">
@@ -361,7 +365,10 @@ export default function AddPODialog({
           </p>
         </DialogHeader>
 
-        <div className="grid gap-4 py-1">
+        {/* flex, not grid: the table below needs flex-1 to absorb the leftover
+            height, and a grid child cannot. min-h-0 lets it shrink below its
+            content instead of forcing the dialog taller. */}
+        <div className="flex min-h-0 flex-1 flex-col gap-4 py-1">
           {/* Manufacturer — selected first; SKUs load once picked */}
           <div className="grid gap-1.5">
             <Label htmlFor="apo-mfg">Manufacturer <span className="text-destructive">*</span></Label>
@@ -418,7 +425,12 @@ export default function AddPODialog({
               Search a SKU above to add it to this PO.
             </p>
           ) : (
-            <div className="rounded-lg border border-border overflow-x-auto">
+            // overflow-auto, not just -x: the rows are what grows, so this is the
+            // one element that scrolls. flex-1 gives it whatever height is left
+            // after the manufacturer picker, the search box, Reason and the
+            // footer have taken theirs — those stay put, so Raise PO is always
+            // reachable no matter how many SKUs are on the order.
+            <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
               <table className="w-full text-xs">
                 <thead className="bg-muted/50">
                   <tr>

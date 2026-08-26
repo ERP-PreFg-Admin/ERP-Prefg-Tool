@@ -11,6 +11,7 @@
 // flipped to active on approval, instead of being staged somewhere.
 
 import type { RowDataPacket } from "mysql2/promise"
+import { normalizeDateCell } from "@/lib/date"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { miscCostTypeSchema, parseMiscCostTypeCell } from "@/lib/validation/manufacturing"
 import { parseS3Import } from "@/lib/import-s3"
@@ -79,7 +80,7 @@ export const mfgMiscBulkHandler: ModuleHandler = {
       // Case-folded — see parseMiscCostTypeCell for why that is load-bearing.
       const typeParsed = parseMiscCostTypeCell(row.type)
       const cost = Number(row.cost)
-      const effectiveFrom = String(row.effective_from ?? "").trim()
+      const effectiveFrom = normalizeDateCell(row.effective_from)
 
       if (!skuCode) { skipped.push(`row ${line}: missing sku_code`); continue }
       if (!typeParsed.success) {
@@ -121,7 +122,7 @@ export const mfgMiscBulkHandler: ModuleHandler = {
         typeParsed.data,
         cost,
         effectiveFrom,
-        String(row.effective_till ?? "").trim() || null,
+        normalizeDateCell(row.effective_till) || null,
         STATUS.ACTIVE,
       ])
     }

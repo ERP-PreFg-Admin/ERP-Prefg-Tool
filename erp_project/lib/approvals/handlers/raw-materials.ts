@@ -6,7 +6,7 @@ import { rawMaterials as rmSql } from "@/lib/queries/raw-materials"
 import { vendors as vendorSql } from "@/lib/queries/vendors"
 import { manufacturers as mfgSql } from "@/lib/queries/manufacturers"
 import { approvalsSql } from "@/lib/queries/approvals"
-import { todayIST } from "@/lib/date"
+import { normalizeDateCell, todayIST } from "@/lib/date"
 import { parseS3Import } from "@/lib/import-s3"
 import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
 import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
@@ -336,7 +336,7 @@ export const rmVrmBulkHandler: ModuleHandler = {
 
           // before the upload-time stamp was added can still arrive blank.
 
-          row.effective_from?.trim() || todayIST(), row.effective_to?.trim() || null,
+          normalizeDateCell(row.effective_from) || todayIST(), normalizeDateCell(row.effective_to) || null,
           STATUS.ACTIVE, mfgId,
         ])
         inserted++
@@ -394,7 +394,7 @@ export const rmRateBulkHandler: ModuleHandler = {
 
           // before the upload-time stamp was added can still arrive blank.
 
-          row.effective_from?.trim() || todayIST(), STATUS.ACTIVE,
+          normalizeDateCell(row.effective_from) || todayIST(), STATUS.ACTIVE,
         ])
         inserted++
       }

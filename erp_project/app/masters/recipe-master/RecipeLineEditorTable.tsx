@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Callout } from "@/components/ui/callout"
-import { isRmTotalValid } from "@/lib/validation/recipe"
+import { isRmTotalValid, rmTotalMessage } from "@/lib/validation/recipe"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import {
   defaultUom, emptyBomLine, rmTotal, RecipeSkuHeading,
@@ -83,7 +83,7 @@ function LineTable({
           reachable from here. */}
       {!locked && total != null && rows.length > 0 && !balanced && (
         <Callout variant="warning">
-          RM percentages must total between 99.9% and 100.1% (currently {total.toFixed(2)}%).
+          {rmTotalMessage(total)}
         </Callout>
       )}
 

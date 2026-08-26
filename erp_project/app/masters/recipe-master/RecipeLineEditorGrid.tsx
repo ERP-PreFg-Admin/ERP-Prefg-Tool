@@ -15,7 +15,7 @@
 import { Lock, Plus, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Callout } from "@/components/ui/callout"
-import { isRmTotalValid } from "@/lib/validation/recipe"
+import { isRmTotalValid, rmTotalMessage } from "@/lib/validation/recipe"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { cn } from "@/lib/utils"
 
@@ -204,7 +204,7 @@ function LineSection({
           pointing at a control they cannot reach. */}
       {!locked && total != null && rows.length > 0 && !balanced && (
         <Callout variant="warning">
-          RM percentages must total between 99.9% and 100.1% (currently {total.toFixed(2)}%).
+          {rmTotalMessage(total)}
         </Callout>
       )}
 

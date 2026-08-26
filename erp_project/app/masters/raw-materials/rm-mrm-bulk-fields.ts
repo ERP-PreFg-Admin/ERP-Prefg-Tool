@@ -1,13 +1,5 @@
 import type { MasterField } from "@/components/masters/field-config"
-
-function validateDateStr(raw: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return `must be YYYY-MM-DD (got "${raw}")`
-  const d = new Date(`${raw}T00:00:00Z`)
-  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== raw) {
-    return `is not a valid calendar date (got "${raw}")`
-  }
-  return null
-}
+import { dateCellRemark, parseDateCell } from "@/lib/date"
 
 export const RM_MRM_BULK_FIELDS: MasterField[] = [
   { key: "rm_code", label: "RM Code", required: true, placeholder: "e.g. RM-0001", sample: "RM-0001" },
@@ -20,7 +12,7 @@ export const RM_MRM_BULK_FIELDS: MasterField[] = [
   { key: "uom", label: "UOM", placeholder: "e.g. kg", sample: "kg" },
   {
     key: "effective_from", label: "Effective From", placeholder: "YYYY-MM-DD", sample: "2026-01-01",
-    validate: validateDateStr,
+    validate: dateCellRemark, parse: parseDateCell,
   },
   { key: "remarks", label: "Remarks", colSpan: 2, placeholder: "Optional for new rates — remarks are required when submitting an edit", sample: "" },
 ]

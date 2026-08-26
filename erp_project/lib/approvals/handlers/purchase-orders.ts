@@ -22,6 +22,7 @@ import { parseS3Import } from "@/lib/import-s3"
 import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import { type ModuleHandler, s3KeyOf } from "./types"
 import { brandCode } from "@/lib/constants"
+import { isoDate, normalizeDateCell } from "@/lib/date"
 
 export const poHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
@@ -65,10 +66,10 @@ export const poBulkHandler: ModuleHandler = {
           if (rawStatus && !VALID_STATUSES.includes(rawStatus)) {
             skipped++; skipReasons.push(`${poNo}: invalid status "${row.status}"`); continue
           }
-          const rawExpectedOn = row.expected_on?.trim() || null
+          const rawExpectedOn = normalizeDateCell(row.expected_on) || null
           const rawDestination = row.destination?.trim() || null
 
-          const existingExpectedOn = existing.expected_on ? String(existing.expected_on).slice(0, 10) : null
+          const existingExpectedOn = isoDate(existing.expected_on) || null
           const changes: { field: string; old: string; new: string }[] = []
           if (rawStatus && rawStatus !== existing.status) changes.push({ field: "status", old: existing.status ?? "", new: rawStatus })
           if (rawExpectedOn && rawExpectedOn !== existingExpectedOn) changes.push({ field: "expected_on", old: existingExpectedOn ?? "", new: rawExpectedOn })
@@ -103,7 +104,7 @@ export const poBulkHandler: ModuleHandler = {
           const sku = (skuRows as any[])[0]
           if (!sku) { skipped++; skipReasons.push(`${skuCode}: SKU not found`); continue }
 
-          const expectedOn = row.expected_on?.trim() || null
+          const expectedOn = normalizeDateCell(row.expected_on) || null
           const destination = row.destination?.trim() || null
 
           const rawBrand = sku.brand?.trim() || skuCode.split("-")[0]

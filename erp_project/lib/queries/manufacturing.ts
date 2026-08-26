@@ -462,7 +462,7 @@ export const manufacturingSql = {
    *
    * RM lines (details_recipe.amount) are a formulation PERCENTAGE, not a
    * quantity — the Recipe editor requires all RM lines on a SKU to sum to
-   * ~100% (see lib/validation/bom.ts). RM rates (cost_master_rm_mfg.curr_rate)
+   * ~100% (see lib/validation/recipe.ts). RM rates (cost_master_rm_mfg.curr_rate)
    * are agreed per KG, while the SKU's fill weight (master_skus.filling) is
    * in grams. So the RM grams actually used per unit = filling * pct/100,
    * converted to kg (/1000) before multiplying by the per-kg rate:

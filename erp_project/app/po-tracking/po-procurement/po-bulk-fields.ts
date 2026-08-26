@@ -1,16 +1,6 @@
 import type { MasterField } from "@/components/masters/field-config"
 import { STATUS_CONFIG, STATUS_KEYS } from "./po-types"
-
-// Same format check as app/masters/recipe-master/bom-bulk-fields.ts — pure
-// string validation, no DB round-trip needed here.
-function validateDateStr(raw: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return `must be YYYY-MM-DD (got "${raw}")`
-  const d = new Date(`${raw}T00:00:00Z`)
-  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== raw) {
-    return `is not a valid calendar date (got "${raw}")`
-  }
-  return null
-}
+import { dateCellRemark, parseDateCell } from "@/lib/date"
 
 // "rejected" is an approval-outcome state, not something a human should type
 // into a CSV — STATUS_KEYS already excludes it (see po-types.ts).
@@ -55,7 +45,7 @@ export const PO_BULK_CSV_FIELDS: MasterField[] = [
   },
   {
     key: "expected_on", label: "Expected Dispatch", aliases: ["expected dispatch"], placeholder: "YYYY-MM-DD", sample: "",
-    validate: validateDateStr,
+    validate: dateCellRemark, parse: parseDateCell,
   },
   { key: "destination", label: "Destination", placeholder: "e.g. Gurgaon", sample: "" },
   {

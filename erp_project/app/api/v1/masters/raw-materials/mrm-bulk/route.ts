@@ -18,7 +18,7 @@ import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } 
 import logger from "@/lib/logger"
 import { stageBulkUploadApproval, uploadRowsAsCsv } from "@/lib/master-routes/bulk-approval"
 import { applyMfgRateApproval } from "@/lib/master-routes/material-utils"
-import { todayIST, monthIST } from "@/lib/date"
+import { normalizeDateCell, todayIST, monthIST } from "@/lib/date"
 
 const looseRow = z.record(z.string(), z.unknown())
 
@@ -155,7 +155,7 @@ export const POST = withGateway({
         if (existing) {
           if (!raw.remarks?.trim()) { skipped++; continue } // remarks are mandatory for edits
           const approvalId = await applyMfgRateApproval(conn, userId, "RM_RATE", existing, {
-            curr_rate: raw.curr_rate, rate_uom: raw.uom, effective_from: raw.effective_from, remarks: raw.remarks,
+            curr_rate: raw.curr_rate, rate_uom: raw.uom, effective_from: normalizeDateCell(raw.effective_from), remarks: raw.remarks,
           }, today, rmSql.setRateStatus)
           if (approvalId == null) { skipped++; continue }
           staged++
@@ -167,7 +167,7 @@ export const POST = withGateway({
         // the queue for days, and the rate is meant to start applying from the
         // day it was entered. It also shows the approver the date they are
         // agreeing to.
-        createRows.push({ ...raw, effective_from: raw.effective_from?.trim() || today })
+        createRows.push({ ...raw, effective_from: normalizeDateCell(raw.effective_from) || today })
       }
 
       let batchApprovalId: number | null = null

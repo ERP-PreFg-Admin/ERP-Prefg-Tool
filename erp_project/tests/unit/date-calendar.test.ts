@@ -9,14 +9,16 @@ import assert from "node:assert/strict"
 import {
   WEEKDAYS, parseIso, toIso, daysInMonth, monthMatrix, addMonths,
   anchorMonth, monthLabel, formatDisplay, isBefore, isInRange, isDisabledDate,
-  calendarYears,
+  calendarYears, isMonthDisabled,
 } from "../../lib/date"
 
-test("calendarYears spans a decade either side when nothing bounds it", () => {
+test("calendarYears spans a wide window either side when nothing bounds it", () => {
+  // Wide because the list scrolls and opens centred: a far edge costs scroll
+  // distance, a near one is a dead end. ±10 made 2015 records unreachable.
   const years = calendarYears(2026)
-  assert.equal(years[0], 2016)
-  assert.equal(years[years.length - 1], 2036)
-  assert.equal(years.length, 21)
+  assert.equal(years[0], 1976)
+  assert.equal(years[years.length - 1], 2076)
+  assert.equal(years.length, 101)
 })
 
 test("calendarYears stops at min and max", () => {
@@ -29,6 +31,22 @@ test("calendarYears always offers the year on screen", () => {
   // header would claim a year the grid below it is not showing.
   assert.ok(calendarYears(2030, "2024-01-01", "2026-12-31").includes(2030))
   assert.ok(calendarYears(2020, "2024-01-01", "2026-12-31").includes(2020))
+})
+
+test("isMonthDisabled only kills a month with no selectable day in it", () => {
+  // Compared at the month's EDGES: a min mid-month still leaves days, and
+  // disabling that month would make the min date itself unreachable.
+  assert.equal(isMonthDisabled(2026, 8, "2026-08-20"), false, "20 Aug min — 12 days left")
+  assert.equal(isMonthDisabled(2026, 8, "2026-09-01"), true, "min is after the whole month")
+  assert.equal(isMonthDisabled(2026, 8, undefined, "2026-08-05"), false, "5 Aug max — 5 days left")
+  assert.equal(isMonthDisabled(2026, 8, undefined, "2026-07-31"), true, "max is before the whole month")
+  assert.equal(isMonthDisabled(2026, 8), false, "unbounded is never disabled")
+})
+
+test("isMonthDisabled handles a leap February's last day", () => {
+  // 2028-02-29 exists, so a min of the 29th leaves exactly one day.
+  assert.equal(isMonthDisabled(2028, 2, "2028-02-29"), false)
+  assert.equal(isMonthDisabled(2026, 2, "2026-02-29"), true, "no 29th in 2026 — 28 < 29")
 })
 
 test("calendarYears is ascending with no gaps", () => {

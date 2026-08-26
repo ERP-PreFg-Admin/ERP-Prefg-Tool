@@ -173,18 +173,37 @@ export function monthLabel(y: number, m: number): string {
   return `${MONTH_NAMES[m - 1]} ${y}`
 }
 
-/** Years offered when the picker's min/max leave them unbounded. Rate masters
- *  carry effective dates a few years either side of today, so 10 covers the real
- *  range without anyone configuring it. */
-const YEAR_SPAN = 10
+/**
+ * True when EVERY day of this month falls outside min..max, so offering the
+ * month in a picker is a dead choice.
+ *
+ * Compared at the month's edges, not its 1st: a `min` of the 20th still leaves
+ * ten selectable days, and disabling that month would make the min date itself
+ * unreachable from the month picker.
+ */
+export function isMonthDisabled(y: number, m: number, min?: string, max?: string): boolean {
+  const last = toIso(y, m, daysInMonth(y, m))
+  const first = toIso(y, m, 1)
+  return Boolean(min && last < min) || Boolean(max && first > max)
+}
+
+/**
+ * Years offered either side of the view when min/max leave them unbounded.
+ *
+ * Wide on purpose. The year list scrolls and opens centred on the current year,
+ * so the only cost of a far edge is scroll distance nobody travels — whereas a
+ * range that stops short is a dead end with no way out of it. ±10 was that dead
+ * end: a 2015 historical record and a 2040 contract date were both unreachable.
+ */
+const YEAR_SPAN = 50
 
 /**
  * The years a calendar's year picker should offer, ascending.
  *
  * Bounded by `min`/`max` when the caller gave them — offering a year whose every
  * day is disabled is a dead end. `viewYear` is always included even when the
- * bounds exclude it: a `<select>` whose value matches no option renders showing
- * the FIRST option, so the header would claim a year the grid isn't showing.
+ * bounds exclude it, so the header can never name a year the list has no row
+ * for.
  */
 export function calendarYears(viewYear: number, min?: string, max?: string): number[] {
   const lo = min ? Number(min.slice(0, 4)) : viewYear - YEAR_SPAN
@@ -218,4 +237,148 @@ export function isDisabledDate(iso: string, min?: string, max?: string): boolean
   if (min && iso < min) return true
   if (max && iso > max) return true
   return false
+}
+
+// ── Date cells arriving FROM a CSV / Excel upload ────────────────────────────
+//
+// Everything above turns a date we already trust into something to render or
+// compare. This section is the other direction: text a human typed into a
+// spreadsheet, which is formatted for people and not for us.
+//
+// It corrects rather than rejects. Every bulk importer used to accept strict
+// `YYYY-MM-DD` only, which meant an Excel date column formatted as General
+// ("45000"), a date cell carrying a time, and the two formats an Indian
+// spreadsheet produces by default all came back as "must be YYYY-MM-DD" and
+// kept the row out of the upload.
+
+/** First three letters are enough, and are what every locale abbreviates to. */
+const MONTH_NUMBERS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+}
+
+/**
+ * Excel's day 1 is 1900-01-01, but it also believes 1900-02-29 existed, so from
+ * serial 61 onward — which is every date anyone will ever upload — the epoch
+ * that reproduces its arithmetic is 1899-12-30, not 12-31.
+ */
+const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30)
+
+const MS_PER_DAY = 86_400_000
+
+/**
+ * A bare number only reads as an Excel serial inside this band — 1954-10-03 to
+ * 2064-03-16. Any effective date fits, and a cell holding just a year ("2026")
+ * falls outside it, so it is reported as unreadable rather than silently
+ * becoming 1905-07-18.
+ */
+const SERIAL_MIN = 20_000
+const SERIAL_MAX = 60_000
+
+/**
+ * `y/m/d` as ISO, or `""` if that is not a real date. Every branch of
+ * `normalizeDateCell` ends here, so "31-02-2026" returns nothing instead of the
+ * plausible-looking "2026-02-31" that a bare string build would produce.
+ */
+function checkedIso(y: number, m: number, d: number): string {
+  const iso = toIso(y, m, d)
+  return parseIso(iso) ? iso : ""
+}
+
+/** A 2-digit year is this century: "26" is 2026, never 1926. Same call
+ *  lib/invoice/invoice-mapping.ts makes for the same reason. */
+function fullYear(raw: string): number {
+  return raw.length === 2 ? 2000 + Number(raw) : Number(raw)
+}
+
+/**
+ * A date cell from a CSV or Excel import, as `YYYY-MM-DD`. `""` when the text is
+ * not a date in any shape we recognise — callers already treat an empty date as
+ * "not given" (`|| todayIST()`, `|| null`), so `""` needs no special handling.
+ *
+ * Accepted, first match winning:
+ *
+ *   2026-08-26 · 2026/08/26 · 2026.08.26      ISO, any separator
+ *   2026-08-26 09:30:00 · 2026-08-26T09:30Z   ISO with a time (Excel date cell)
+ *   20260826                                  compact
+ *   45000                                     Excel serial, incl. fractional
+ *   26-08-2026 · 26/08/2026 · 26.8.26         DAY-first numeric
+ *   25-AUg-26 · 25/Aug/2026 · 25 August 26    named month, any case
+ *   Aug-25-2026 · August 25, 2026             named month first
+ *
+ * The one genuinely ambiguous shape is `dd/mm` vs `mm/dd`, and it is resolved
+ * DAY-FIRST, always — the rule `toDateInputValue` already took for Indian
+ * documents. Never inferred from the values, because a rule that reads
+ * 03/04/2026 one way and 04/03/2026 the other is worse than a rule that is
+ * merely a convention. "04/13/2026" therefore has no reading and returns "".
+ */
+export function normalizeDateCell(raw: string | number | null | undefined): string {
+  const s = String(raw ?? "").trim()
+  if (!s) return ""
+
+  // ISO first — it is what our own templates ask for and what a re-uploaded
+  // flagged-rows CSV carries. The optional tail swallows a time component,
+  // which is how ExcelJS renders any date cell not at exact UTC midnight.
+  const iso = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[T ].*)?$/.exec(s)
+  if (iso) return checkedIso(Number(iso[1]), Number(iso[2]), Number(iso[3]))
+
+  if (/^\d{8}$/.test(s)) {
+    return checkedIso(Number(s.slice(0, 4)), Number(s.slice(4, 6)), Number(s.slice(6, 8)))
+  }
+
+  // An Excel serial. Checked after the 8-digit form because 20260826 is a
+  // compact date, not a serial — the largest date Excel can hold is 2958465.
+  if (/^\d+(?:\.\d+)?$/.test(s)) {
+    const serial = Math.floor(Number(s))
+    if (serial < SERIAL_MIN || serial > SERIAL_MAX) return ""
+    const at = new Date(EXCEL_EPOCH_MS + serial * MS_PER_DAY)
+    return checkedIso(at.getUTCFullYear(), at.getUTCMonth() + 1, at.getUTCDate())
+  }
+
+  // Named month, day first: 25-AUg-26, 25/Aug/2026, "25 August 26".
+  const named = /^(\d{1,2})[-/. ]+([A-Za-z]{3,})[-/. ]+(\d{2}|\d{4})$/.exec(s)
+  if (named) {
+    const m = MONTH_NUMBERS[named[2].slice(0, 3).toLowerCase()]
+    return m ? checkedIso(fullYear(named[3]), m, Number(named[1])) : ""
+  }
+
+  // Named month first: Aug-25-2026, "August 25, 2026", "25th" tolerated.
+  const monthFirst = /^([A-Za-z]{3,})[-/. ]+(\d{1,2})(?:st|nd|rd|th)?,?[-/. ]+(\d{2}|\d{4})$/.exec(s)
+  if (monthFirst) {
+    const m = MONTH_NUMBERS[monthFirst[1].slice(0, 3).toLowerCase()]
+    return m ? checkedIso(fullYear(monthFirst[3]), m, Number(monthFirst[2])) : ""
+  }
+
+  // All-numeric, day first. Last, so it can never shadow the ISO form above.
+  const dayFirst = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/.exec(s)
+  if (dayFirst) {
+    return checkedIso(fullYear(dayFirst[3]), Number(dayFirst[2]), Number(dayFirst[1]))
+  }
+
+  return ""
+}
+
+/**
+ * `MasterField.parse` for a date column: the corrected date, or the cell left
+ * exactly as typed when we could not read it.
+ *
+ * The fallback is what makes "Download flagged rows" usable. An unreadable cell
+ * is always flagged by `dateCellRemark` and so never reaches the upload, but
+ * blanking it would hand the uploader a CSV with an empty column to fix rather
+ * than the text that needs fixing.
+ */
+export function parseDateCell(raw: string): string {
+  return normalizeDateCell(raw) || raw
+}
+
+/**
+ * The CSV importer's remark for a date cell, or `null` when there is nothing to
+ * say. Only text `normalizeDateCell` cannot read at all is worth blocking a row
+ * for; every shape it understands is corrected in place, and the corrected value
+ * is what the import preview shows.
+ */
+export function dateCellRemark(raw: string): string | null {
+  return normalizeDateCell(raw)
+    ? null
+    : `is not a date we recognise (got "${raw}") — try YYYY-MM-DD, DD-MM-YYYY or DD-Mon-YYYY`
 }

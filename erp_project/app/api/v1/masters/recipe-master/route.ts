@@ -39,7 +39,7 @@ import logger from "@/lib/logger"
 import { stageBulkUploadApproval, uploadRowsAsCsv } from "@/lib/master-routes/bulk-approval"
 import { diffBomLines, resolveRecipeVersions, type DiffableLine } from "@/lib/masters/recipe-version"
 import { describeRmDrift, resolveRmLock, rmLineageHead, rmPropagationTargets, type FamilyMember } from "@/lib/masters/variant-rm-lock"
-import { monthIST } from "@/lib/date"
+import { monthIST, normalizeDateCell } from "@/lib/date"
 
 type RecipeHeaderRow = {
   id: number; bom_code: string; sku_id: number; status: string; created_by: number
@@ -570,7 +570,7 @@ export const POST = withGateway({
       for (const [skuCode, indices] of groups) {
         const dates = new Set<string>()
         for (const i of indices) {
-          const d = String(rows[i].effective_from ?? "").trim()
+          const d = normalizeDateCell(rows[i].effective_from as string)
           if (d) dates.add(d)
         }
         if (dates.size > 1) {

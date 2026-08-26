@@ -17,7 +17,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useToast } from "@/components/ui/toast"
-import { isRmTotalValid } from "@/lib/validation/recipe"
+import { isRmTotalValid, rmTotalMessage } from "@/lib/validation/recipe"
 import { rmTotal, type RecipeLineRow } from "./RecipeLineEditorGrid"
 import { uploadPendingArtifacts } from "./recipe-artifact-upload"
 import type { RecipeDetailResponse } from "@/types/masters"
@@ -302,7 +302,7 @@ export function useBomDetailPanel() {
       return
     }
     if (!isRmTotalValid(rmTotal(editRmRows))) {
-      setSaveError(`RM percentages must total between 99.9% and 100.1% (currently ${rmTotal(editRmRows).toFixed(2)}%).`)
+      setSaveError(rmTotalMessage(rmTotal(editRmRows)))
       return
     }
     for (const r of [...editRmRows, ...editPmRows]) {

@@ -16,7 +16,7 @@
 
 import { useState } from "react"
 import { useToast } from "@/components/ui/toast"
-import { isRmTotalValid } from "@/lib/validation/recipe"
+import { isRmTotalValid, rmTotalMessage } from "@/lib/validation/recipe"
 import { rmTotal, type RecipeLineRow, type RecipeMaterialOption } from "./RecipeLineEditorGrid"
 import { parseBomCsv } from "./recipe-csv"
 import { uploadPendingArtifacts } from "./recipe-artifact-upload"
@@ -216,7 +216,7 @@ export function useBomWizard({
     if (!effectiveFrom.trim()) { setError("Effective From is required."); return }
     if (rmRows.length === 0) { setError("At least one RM line is required."); return }
     if (!isRmTotalValid(rmTotal(rmRows))) {
-      setError(`RM percentages must total between 99.9% and 100.1% (currently ${rmTotal(rmRows).toFixed(2)}%).`)
+      setError(rmTotalMessage(rmTotal(rmRows)))
       return
     }
     for (const r of [...rmRows, ...pmRows]) {

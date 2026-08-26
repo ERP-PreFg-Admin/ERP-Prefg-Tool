@@ -1,12 +1,13 @@
 "use client"
 
-import { useState, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type WheelEvent } from "react"
 import { Popover } from "radix-ui"
 import { ChevronLeft, ChevronRight, ChevronDown, CalendarDays } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { ScrollFade } from "@/components/ui/scroll-fade"
 import {
   WEEKDAYS, MONTH_NAMES, monthMatrix, addMonths, anchorMonth, monthLabel,
-  calendarYears, formatDisplay, isBefore, isInRange, isDisabledDate,
+  calendarYears, isMonthDisabled, formatDisplay, isBefore, isInRange, isDisabledDate,
 } from "@/lib/date"
 
 /**
@@ -37,19 +38,148 @@ const NAV_CLASS =
 const FOOTER_BTN_CLASS =
   "rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 
-/** Reads as the month/year label it replaced — no border, no chrome — and shows
- *  it is a control on hover and focus. A native <select>, so the keyboard and
- *  the mobile wheel picker come free. */
-const HEADER_SELECT_CLASS =
-  "appearance-none rounded-md bg-transparent py-0.5 pl-1 pr-4 text-sm font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+/** The month/year label, which opens the picker panel below. */
+const HEADER_BTN_CLASS =
+  "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-sm font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+
+/** One month or year cell. Same shape and states as a day cell in MonthGrid, so
+ *  the panel reads as part of the calendar rather than a dropdown over it. */
+const PICK_CELL_CLASS =
+  "rounded-md text-sm tabular-nums transition-colors disabled:cursor-not-allowed disabled:opacity-30"
+
+/** Width of one month grid — the panel matches it so opening the picker doesn't
+ *  resize the popover under the cursor. */
+const GRID_W = { 1: "w-[15.75rem]", 2: "w-[33.5rem]" } as const
 
 /**
- * The dropped-open list is drawn by the OS, not by us: padding, radius, hover
- * and font are all ignored on <option>. Colour is the one thing that lands
- * (Chrome and Firefox honour it), and without it the list opens white inside a
- * dark app. Set from the same tokens as the popover it drops out of.
+ * The nearest scrolling ancestor of `from`, stopping at `bound`.
+ *
+ * ScrollFade owns the scroll container, so it is found from a child rather than
+ * held in a ref, and bounded so the walk cannot escape into the page's own
+ * scroller.
  */
-const HEADER_OPTION_CLASS = "bg-popover text-popover-foreground"
+function scrollParent(from: HTMLElement | null, bound: HTMLElement | null): HTMLElement | null {
+  let el = from
+  while (el && el !== bound && el.scrollHeight <= el.clientHeight) el = el.parentElement
+  return el && el !== bound ? el : null
+}
+
+/**
+ * Month and year chooser, shown in place of the day grid.
+ *
+ * Months are a 3x4 block and years a scrolling column, both visible at once, so
+ * "March 2023" is two clicks with no paging. It replaced two native <select>s:
+ * an <option> list is drawn by the OS, which ignores padding, radius and hover
+ * and opens white inside a dark app.
+ *
+ * Year first, then month: picking a year keeps the panel open (you still owe a
+ * month), picking a month closes it. That is the order the label reads in and it
+ * means the common case — right year, wrong month — is a single click.
+ */
+function MonthYearPanel({
+  view, onView, onClose, months, min, max,
+}: {
+  view: { y: number; m: number }
+  onView: (next: { y: number; m: number }) => void
+  onClose: () => void
+  months: 1 | 2
+  min?: string
+  max?: string
+}) {
+  const years = calendarYears(view.y, min, max)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  // Centre the current year on open. scrollTop is set directly rather than by
+  // scrollIntoView, which walks up every ancestor and would scroll the page
+  // behind the popover too.
+  //
+  // The scroll container belongs to ScrollFade, so it is found from the selected
+  // cell instead of held in a ref — bounded by the panel so the walk can't
+  // escape into the page's own scroller.
+  useEffect(() => {
+    const panel = panelRef.current
+    const current = panel?.querySelector<HTMLButtonElement>("[data-current='true']")
+    const list = scrollParent(current?.parentElement ?? null, panel)
+    if (current && list) {
+      list.scrollTop = current.offsetTop - list.clientHeight / 2 + current.clientHeight / 2
+    }
+  }, [])
+
+  /**
+   * Scroll the year list by hand.
+   *
+   * The picker is portalled to `document.body`, so inside a Radix Dialog it sits
+   * OUTSIDE the subtree that dialog's scroll lock allows — react-remove-scroll
+   * then eats the wheel event and the list looks frozen even though the fade
+   * says there is more below. Every date field in a dialog hits this.
+   *
+   * Doing the scroll here, and stopping the event before the document-level
+   * blocker sees it, behaves identically in or out of a dialog: exactly one
+   * scroll per wheel event.
+   */
+  function onWheel(e: WheelEvent<HTMLDivElement>) {
+    const list = scrollParent(e.currentTarget, panelRef.current)
+    if (!list) return
+    e.preventDefault()
+    e.stopPropagation()
+    list.scrollTop += e.deltaY
+  }
+
+  return (
+    <div ref={panelRef} className={cn("flex gap-3", GRID_W[months])}>
+      <div className="grid flex-1 grid-cols-3 gap-1 content-start">
+        {MONTH_NAMES.map((name, i) => {
+          const m = i + 1
+          const selected = m === view.m
+          return (
+            <button
+              key={name}
+              type="button"
+              disabled={isMonthDisabled(view.y, m, min, max)}
+              aria-pressed={selected}
+              onClick={() => { onView({ y: view.y, m }); onClose() }}
+              className={cn(
+                PICK_CELL_CLASS, "h-9",
+                selected ? "bg-primary font-medium text-primary-foreground" : "hover:bg-accent",
+              )}
+            >
+              {name}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="w-px bg-border" />
+
+      {/* ScrollFade, not a plain overflow container: it hides the scrollbar and
+          draws an edge fade + chevron in its place, so "there is more below"
+          survives losing the bar. Fixed height so the panel is the same size
+          whichever year is centred, and the popover doesn't grow with the range. */}
+      <ScrollFade axis="y" className="h-[13.5rem] w-16 shrink-0">
+        <div className="grid gap-1 pr-0.5" onWheel={onWheel}>
+          {years.map((y) => {
+            const selected = y === view.y
+            return (
+              <button
+                key={y}
+                type="button"
+                data-current={selected}
+                aria-pressed={selected}
+                onClick={() => onView({ y, m: view.m })}
+                className={cn(
+                  PICK_CELL_CLASS, "h-8 w-full",
+                  selected ? "bg-primary font-medium text-primary-foreground" : "hover:bg-accent",
+                )}
+              >
+                {y}
+              </button>
+            )
+          })}
+        </div>
+      </ScrollFade>
+    </div>
+  )
+}
 
 function MonthGrid({
   y, m, selected, from, to, min, max, onPick, onHover,
@@ -137,6 +267,7 @@ function CalendarBody({
   onHover?: (iso: string) => void
 }) {
   const right = addMonths(view.y, view.m, 1)
+  const [picking, setPicking] = useState(false)
 
   // Arrow keys move the focused day. ponytail: clamps at the edge of the
   // rendered months instead of paging the view — page with the chevrons.
@@ -167,39 +298,22 @@ function CalendarBody({
           <ChevronLeft className="h-4 w-4" />
         </button>
         <div className="flex flex-1 items-center justify-around">
-          {/* Selectable, not a label: reaching an effective date three years back
-              was 36 chevron clicks. */}
-          <div className="flex items-center">
-            {/* One chevron for the pair, on the year — two would read as two
-                separate controls when they are one "which month am I on". */}
-            <div className="relative flex items-center">
-              <select
-                className={HEADER_SELECT_CLASS}
-                aria-label="Month"
-                value={view.m}
-                onChange={(e) => onView({ y: view.y, m: Number(e.target.value) })}
-              >
-                {MONTH_NAMES.map((name, i) => (
-                  <option key={name} value={i + 1} className={HEADER_OPTION_CLASS}>{name}</option>
-                ))}
-              </select>
-              <select
-                className={HEADER_SELECT_CLASS}
-                aria-label="Year"
-                value={view.y}
-                onChange={(e) => onView({ y: Number(e.target.value), m: view.m })}
-              >
-                {calendarYears(view.y, grid.min, grid.max).map((y) => (
-                  <option key={y} value={y} className={HEADER_OPTION_CLASS}>{y}</option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-0.5 h-3 w-3 text-muted-foreground" />
-            </div>
-          </div>
+          {/* The label opens the picker — reaching a date three years back was
+              36 chevron clicks. */}
+          <button
+            type="button"
+            className={HEADER_BTN_CLASS}
+            aria-expanded={picking}
+            onClick={() => setPicking((p) => !p)}
+          >
+            {monthLabel(view.y, view.m)}
+            <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform", picking && "rotate-180")} />
+          </button>
           {/* The right month stays derived from the left, so the two are always
-              adjacent — a second pair of selects is exactly the "August next to
-              next March" the single chevron pair exists to prevent. */}
-          {months === 2 && (
+              adjacent — a second picker is exactly the "August next to next
+              March" the single chevron pair exists to prevent. Hidden while
+              picking, since the panel replaces both grids. */}
+          {months === 2 && !picking && (
             <span className="text-sm font-medium">{monthLabel(right.y, right.m)}</span>
           )}
         </div>
@@ -212,10 +326,21 @@ function CalendarBody({
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
-      <div className="flex gap-4">
-        <MonthGrid y={view.y} m={view.m} {...grid} />
-        {months === 2 && <MonthGrid y={right.y} m={right.m} {...grid} />}
-      </div>
+      {picking ? (
+        <MonthYearPanel
+          view={view}
+          onView={onView}
+          onClose={() => setPicking(false)}
+          months={months}
+          min={grid.min}
+          max={grid.max}
+        />
+      ) : (
+        <div className="flex gap-4">
+          <MonthGrid y={view.y} m={view.m} {...grid} />
+          {months === 2 && <MonthGrid y={right.y} m={right.m} {...grid} />}
+        </div>
+      )}
       {footer}
     </div>
   )

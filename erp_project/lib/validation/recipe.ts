@@ -16,12 +16,29 @@ export type RecipeIdParam = z.infer<typeof bomIdParamSchema>
 
 // RM percentages must total within this tolerance of 100%. Exported so the
 // wizard's client-side running-total banner uses the exact same bounds as the
-// server-side gate — single source of truth for the +/-0.1% rule.
-export const RM_TOTAL_MIN = 99.9
-export const RM_TOTAL_MAX = 100.1
+// server-side gate — single source of truth for the +/-0.5% rule.
+//
+// Widened from +/-0.1: a formulation is entered rounded to two decimals, and a
+// real recipe of a dozen-odd materials lands a few tenths off 100 often enough
+// that the tighter band was rejecting correct recipes rather than catching
+// mistakes.
+export const RM_TOTAL_MIN = 99.5
+export const RM_TOTAL_MAX = 100.5
 
 export function isRmTotalValid(total: number): boolean {
   return total >= RM_TOTAL_MIN && total <= RM_TOTAL_MAX
+}
+
+/**
+ * The one wording for an out-of-band RM total, built from the constants above.
+ *
+ * It exists because the message used to be spelled out by hand at four call
+ * sites — two hooks and two editor Callouts — all reading "99.9% and 100.1%".
+ * Widening the band there would have left four places confidently quoting
+ * numbers the code no longer enforced.
+ */
+export function rmTotalMessage(total: number): string {
+  return `RM percentages must total between ${RM_TOTAL_MIN}% and ${RM_TOTAL_MAX}% (currently ${total.toFixed(2)}%).`
 }
 
 // One RM or PM line, as entered manually or parsed from the wizard's CSV step.
@@ -96,7 +113,7 @@ export const bomCreateFullSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["rm_lines"],
-        message: `RM percentages must total between ${RM_TOTAL_MIN}% and ${RM_TOTAL_MAX}% (currently ${rmTotal.toFixed(2)}%).`,
+        message: rmTotalMessage(rmTotal),
       })
     }
   })

@@ -38,7 +38,8 @@
 //
 // Validation is all-or-nothing PER GROUP: every line must resolve (SKU
 // exists and is active, material code resolves to an active RM/PM, positive
-// amount, effective_from present) and RM lines must total 99.9-100.1%, or
+// amount, effective_from present) and RM lines must total within the band in
+// lib/validation/recipe.ts (isRmTotalValid), or
 // the WHOLE group is skipped — never a partially-inserted Recipe. Other groups
 // in the same file still proceed (file-level partial success), matching the
 // existing inserted/skipped counter convention used by rmBulkHandler/pmBulkHandler.
@@ -56,6 +57,7 @@ import { deleteFile } from "@/lib/s3"
 import { parseS3Import } from "@/lib/import-s3"
 import { recordProcessedEvent, makeEventId } from "@/lib/events"
 import { STATUS } from "@/lib/constants"
+import { normalizeDateCell } from "@/lib/date"
 import logger from "@/lib/logger"
 import { type DiffItem, type ModuleHandler, s3KeyOf } from "./types"
 
@@ -582,7 +584,7 @@ export const bomBulkHandler: ModuleHandler = {
           })
         }
         if (groupError) { groupsSkipped++; skipReasons.push(`${skuCode}: ${groupError}`); continue }
-        const effectiveFrom = groupRows[0].effective_from?.trim()
+        const effectiveFrom = normalizeDateCell(groupRows[0].effective_from)
         if (!effectiveFrom) { groupsSkipped++; skipReasons.push(`${skuCode}: missing effective_from`); continue }
 
         const rmTotal = lines.filter((l) => l.mtrl_type === "rm").reduce((sum, l) => sum + l.amount, 0)

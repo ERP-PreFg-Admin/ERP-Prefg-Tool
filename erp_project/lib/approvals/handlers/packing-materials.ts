@@ -6,7 +6,7 @@ import { packingMaterials as pmSql } from "@/lib/queries/packing-materials"
 import { vendors as vendorSql } from "@/lib/queries/vendors"
 import { manufacturers as mfgSql } from "@/lib/queries/manufacturers"
 import { approvalsSql } from "@/lib/queries/approvals"
-import { todayIST } from "@/lib/date"
+import { normalizeDateCell, todayIST } from "@/lib/date"
 import { parseS3Import } from "@/lib/import-s3"
 import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
 import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
@@ -319,7 +319,7 @@ export const pmVrmBulkHandler: ModuleHandler = {
 
           // before the upload-time stamp was added can still arrive blank.
 
-          row.effective_from?.trim() || todayIST(), row.effective_to?.trim() || null,
+          normalizeDateCell(row.effective_from) || todayIST(), normalizeDateCell(row.effective_to) || null,
         ])
         inserted++
       }
@@ -367,7 +367,7 @@ export const pmRateBulkHandler: ModuleHandler = {
           STATUS.ACTIVE,
           // Optional: a blank date means the rate applies from now. Rows staged
           // before the upload-time stamp was added can still arrive blank.
-          row.effective_from?.trim() || todayIST(),
+          normalizeDateCell(row.effective_from) || todayIST(),
         ])
         inserted++
       }
