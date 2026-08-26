@@ -90,6 +90,48 @@ test("rejecting parks the row where costing cannot reach it", async () => {
   })
 })
 
+test("the duplicate guard sees an active line, and steps aside for a dead one", async () => {
+  // ONE live line per (mfg, recipe, type). No unique index expresses it, so the
+  // create-misc route and mfgMiscBulkHandler both have to ask — and the check
+  // used to be in_review-only, which let a second ACTIVE line through. Two
+  // active rows means costing's recipe_id+type map takes whichever MySQL
+  // returns last.
+  await withRollback(async (conn) => {
+    const target = await anyMiscTarget(conn)
+    if (!target) return
+
+    const guard = async () => {
+      const [rows] = await conn.execute<(RowDataPacket & { id: number; status: string })[]>(
+        manufacturingSql.selectLiveMiscFor, [target.mfgId, target.recipeId, "pm_loss"]
+      )
+      return rows[0] ?? null
+    }
+    // Whatever this DB happens to hold for the triple is cleared first — inside
+    // the transaction withRollback always rolls back, so nothing is really lost.
+    await conn.execute(`DELETE FROM bom_misc WHERE mfg_id = ? AND bom_id = ? AND type = 'pm_loss'`, [target.mfgId, target.recipeId])
+    assert.equal(await guard(), null, "the slot must start clear for this test to mean anything")
+
+    for (const status of ["active", "in_review"] as const) {
+      const [ins] = await conn.execute<ResultSetHeader>(manufacturingSql.insertMisc, [
+        target.recipeId, target.mfgId, "pm_loss", 5, "2026-01-01", null, status,
+      ])
+      const found = await guard()
+      assert.equal(found?.status, status, `a ${status} line must occupy the slot`)
+      await conn.execute(`DELETE FROM bom_misc WHERE id = ?`, [ins.insertId])
+    }
+
+    // These three price nothing, so re-adding over one of them is how a cost is
+    // legitimately brought back — the guard must not block it.
+    for (const status of ["inactive", "discontinued", "rejected"] as const) {
+      const [ins] = await conn.execute<ResultSetHeader>(manufacturingSql.insertMisc, [
+        target.recipeId, target.mfgId, "pm_loss", 5, "2026-01-01", null, status,
+      ])
+      assert.equal(await guard(), null, `a ${status} line must not block a new one`)
+      await conn.execute(`DELETE FROM bom_misc WHERE id = ?`, [ins.insertId])
+    }
+  })
+})
+
 test("an approved edit that sets the line inactive does not get reactivated", async () => {
   await withRollback(async (conn) => {
     const target = await anyMiscTarget(conn)

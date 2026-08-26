@@ -40,6 +40,22 @@ export type MfgLineAction = z.infer<typeof mfgLineActionSchema>
 // column jw/shrink/shipper use for an absolute currency amount.
 
 export const miscCostTypeSchema = z.enum(["jw", "shrink", "shipper", "rm_loss", "pm_loss"])
+
+/**
+ * A `type` cell out of a bulk-upload CSV, case-folded before the enum.
+ *
+ * The browser preview (MISC_COST_BULK_CSV_FIELDS) validates
+ * `raw.trim().toLowerCase()` but writes the cell through unchanged, so "Shipper"
+ * reaches the server exactly as somebody typed it into Excel. Parsing that
+ * against the lowercase enum failed, and mfgMiscBulkHandler's `continue` dropped
+ * the row without a word — 194 of 198 rows across three approved uploads.
+ *
+ * Lives here, beside the enum, so the handler and its test read the SAME rule
+ * rather than each keeping a copy that can drift apart again.
+ */
+export function parseMiscCostTypeCell(cell: unknown) {
+  return miscCostTypeSchema.safeParse(String(cell ?? "").trim().toLowerCase())
+}
 export const miscCostStatusSchema = z.enum(["active", "inactive", "discontinued"])
 
 export const createMiscCostSchema = z.object({

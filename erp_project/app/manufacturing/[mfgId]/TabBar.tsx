@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 export type MfgTab =
   | "active"
   | "misc_cost"
-  | "rm_vendor" | "agreed_rates" | "final_costing"
+  | "rm_vendor" | "agreed_rates" | "final_costing" | "analytics"
   | "common_rms" | "vendor_ing_mapping"
 
 const TABS: { key: MfgTab; label: string }[] = [
@@ -15,6 +15,7 @@ const TABS: { key: MfgTab; label: string }[] = [
   { key: "rm_vendor",          label: "Approved Vendor Rates" },
   { key: "agreed_rates",       label: "Agreed Mfg Rates" },
   { key: "final_costing",      label: "Agreed Final Costing" },
+  { key: "analytics",          label: "Analytics" },
   { key: "common_rms",         label: "Common RMs" },
   { key: "vendor_ing_mapping", label: "Vendor Ing Mapping" },
 ]

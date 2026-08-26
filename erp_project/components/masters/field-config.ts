@@ -2,7 +2,11 @@
 // every master-data page. Declare a list of MasterField once per entity and
 // pass it to <AddRecordDialog> and <CsvImportDialog>.
 
-import { parseCsvRows, normalizeCell, isBlankRow } from "@/lib/csv"
+import { parseCsvRows, normalizeCell, isBlankRow, normalizeHeader, describeCsvShape } from "@/lib/csv"
+
+// Re-exported: this used to live here, and it is the contract the server-side
+// importer (lib/import-s3.ts) has to share — so it now lives in lib/csv.ts.
+export { normalizeHeader }
 
 export type FieldType = "text" | "number" | "select"
 
@@ -78,21 +82,6 @@ const ZONE_LOOKUP = new Map(ZONE_OPTIONS.map((o) => [o.value.toLowerCase(), o.va
 /** Case-insensitively resolves a raw zone string to its canonical casing, or null if it's not one of ZONE_OPTIONS. */
 export function normalizeZone(raw: string): string | null {
   return ZONE_LOOKUP.get(raw.trim().toLowerCase()) ?? null
-}
-
-/**
- * Normalizes a CSV/Excel header (or a field key/alias/label) to a comparable
- * form — lowercase, non-alphanumerics collapsed to underscores — so a
- * human-readable column like "Registered Name" or "GST Number" matches the
- * field key `registered_name` / `gst_number` without needing an explicit
- * alias for every label variant.
- */
-export function normalizeHeader(s: string): string {
-  return s
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
 }
 
 export function csvFields(fields: MasterField[]) {
@@ -177,6 +166,8 @@ export function parseCSV(text: string, fields: MasterField[]): ParsedRow[] {
   // broken row per line ("Missing required: name, make, type"), and a value
   // like "Ceramide AP, NP" shifted every later column one place left.
   const rows = parseCsvRows(text).filter((r) => !isBlankRow(r))
+  const problem = describeCsvShape(text, rows)
+  if (problem) throw new Error(problem)
   if (rows.length < 2) {
     throw new Error("CSV must have a header row and at least one data row")
   }

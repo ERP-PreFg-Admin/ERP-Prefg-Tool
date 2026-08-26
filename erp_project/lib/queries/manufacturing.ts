@@ -334,10 +334,29 @@ export const manufacturingSql = {
     UPDATE bom_misc SET cost = ?, effective_from = ?, effective_till = ? WHERE id = ?
   `,
 
-  /** Is there already a pending misc line for this (mfg, recipe, type)? Params: [mfg_id, recipe_id, type] */
-  selectPendingMiscFor: `
-    SELECT id FROM bom_misc
-    WHERE mfg_id = ? AND bom_id = ? AND type = ? AND status = 'in_review'
+  /**
+   * Is a misc line for this (mfg, recipe, type) already occupying the slot?
+   *
+   * ONE live line per (mfg, recipe, type). Costing folds these into a map keyed
+   * on recipe_id + type with no ORDER BY, so a second row means whichever one
+   * MySQL happens to return last silently wins. Nothing in the schema enforces
+   * it — bom_misc has no unique index on the triple — so both doors that can
+   * create a line, the create-misc route and mfgMiscBulkHandler, ask this first.
+   *
+   * `active` and `in_review` only: inactive / discontinued / rejected lines
+   * price nothing, so re-adding over one of those is how a cost is legitimately
+   * brought back. Widened from an in_review-only check, which stopped a second
+   * PENDING line and let a second ACTIVE one straight through.
+   *
+   * The bulk handler gets in-file duplicates free: its inserts land in the same
+   * open transaction, so a repeat of the same SKU + type later in the CSV sees
+   * the row the earlier one wrote.
+   *
+   * Params: [mfg_id, recipe_id, type]
+   */
+  selectLiveMiscFor: `
+    SELECT id, status FROM bom_misc
+    WHERE mfg_id = ? AND bom_id = ? AND type = ? AND status IN ('active', 'in_review')
     LIMIT 1
   `,
 
@@ -554,40 +573,34 @@ export const manufacturingSql = {
   `,
 
   /**
-   * Per-bom-line RM/PM inputs (mtrl_type, mtrl_id, amount, filling) for this
-   * manufacturer's active lines — used to recompute RM/PM cost at an
-   * arbitrary rate (cheapest/max vendor rate) instead of the agreed MRM
-   * rate, via lib/costing/final-costing.ts's computeRmCost/computePmCost.
-   * Filling sourced from master_skus (see selectMaterialCostByMfg's comment).
-   * Params: [mfg_id]
-   */
-  selectBomLineInputsByMfg: `
-    SELECT mbm.recipe_id, db.mtrl_type, db.mtrl_id, db.amount, ${SKU_FILLING} AS filling
-    FROM master_recipe_mfg mbm
-    INNER JOIN master_recipe  b  ON b.id = mbm.recipe_id
-    LEFT  JOIN master_skus sk ON sk.id = b.sku_id
-    LEFT  JOIN details_sku ds ON ds.sku_id = sk.id
-    INNER JOIN details_recipe db ON db.recipe_id = mbm.recipe_id AND db.status = 'active'
-    WHERE mbm.mfg_id = ? AND mbm.status IN ('active', 'discontinued')
-  `,
-
-  /**
-   * Same per-bom-line scope as selectBomLineInputsByMfg, but also resolves
-   * the material's code/name and its agreed MRM rate — used only by the
-   * Agreed Final Costing "Detailed Breakup" export, which needs line-level
-   * (not bom-aggregated) figures to build a per-material negotiation sheet.
+   * Per-bom-line RM/PM detail for this manufacturer's live lines: the inputs
+   * needed to recost at an arbitrary rate (mtrl_type, mtrl_id, amount, filling)
+   * PLUS the material's code/name and its agreed MRM rate.
+   *
+   * Two callers, and they must agree: the Agreed Final Costing tab (vendor-rate
+   * scenarios, and the per-SKU breakup the Actions column opens) and the
+   * "Detailed Breakup" negotiation export.
+   *
+   * `filling` uses SKU_FILLING — the same COALESCE over master_skus then
+   * details_sku that selectMaterialCostByMfg uses. It read bare `sk.filling`
+   * until 2026-08-26, which zeroed every RM line for a SKU whose fill weight
+   * lives only in details_sku: filling is a MULTIPLICAND in the RM formula, so
+   * the export's Detail sheet showed ₹0 lines against a Summary sheet (built
+   * from selectMaterialCostByMfg) that showed a real cost. Same workbook,
+   * two answers.
    * Params: [mfg_id, mfg_id, mfg_id]
    */
   selectBomLineDetailByMfg: `
     SELECT
       mbm.recipe_id, sk.sku_code, sk.name AS sku_name,
-      db.mtrl_type, db.mtrl_id, db.amount, sk.filling,
+      db.mtrl_type, db.mtrl_id, db.amount, ${SKU_FILLING} AS filling,
       CASE WHEN db.mtrl_type = 'rm' THEN r.rm_code ELSE p.pm_code END AS mtrl_code,
       CASE WHEN db.mtrl_type = 'rm' THEN r.name    ELSE p.name    END AS mtrl_name,
       CASE WHEN db.mtrl_type = 'rm' THEN rmm.curr_rate ELSE pmm.curr_rate END AS mrm_rate
     FROM master_recipe_mfg mbm
     INNER JOIN master_recipe  b  ON b.id = mbm.recipe_id
     LEFT  JOIN master_skus sk ON sk.id = b.sku_id
+    LEFT  JOIN details_sku ds ON ds.sku_id = sk.id
     INNER JOIN details_recipe db ON db.recipe_id = mbm.recipe_id AND db.status = 'active'
     LEFT  JOIN master_rm r ON r.id = db.mtrl_id AND db.mtrl_type = 'rm'
     LEFT  JOIN master_pm p ON p.id = db.mtrl_id AND db.mtrl_type = 'pm'

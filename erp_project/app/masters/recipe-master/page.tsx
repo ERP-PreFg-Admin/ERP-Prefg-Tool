@@ -68,7 +68,9 @@ export default async function RecipeMasterPage({
     const allMatching = await timedQuery<RecipeListItem>(
       bom.selectAllFilteredGrouped, [null, null, null, ...scopeParams(scope.brandIds), status, status], { label: "selectAllFilteredGrouped" }
     )
-    const ranked = fuzzyRank(allMatching, search, ["bom_code", "sku_code"])
+    // sku_name is a visible column (RecipeTable.tsx), so it is searchable — same
+    // code + name pairing every other master uses (skus, vendors, RM/PM).
+    const ranked = fuzzyRank(allMatching, search, ["bom_code", "sku_code", "sku_name"])
     total = ranked.length
     rows = ranked.slice(offset, offset + size)
   } else {

@@ -16,6 +16,7 @@
  */
 
 import type { ExportColumn } from "@/lib/export"
+import { wastageFraction } from "@/lib/costing/final-costing"
 // ── Material Master — Raw Material (base record, no rates) ───────────────────
 
 export const RM_BASE_EXPORT_COLUMNS: ExportColumn[] = [
@@ -305,8 +306,14 @@ export const MISC_COST_CURRENT_RATES_EXPORT_COLUMNS: ExportColumn[] = [
     // Mixed unit column (currency amount for jw/shrink/shipper, percentage for
     // rm_loss/pm_loss) — left as "text" so both render as the format() string below
     // instead of the xlsx writer's number branch, which would apply to only one unit.
+    //
+    // Wastage goes through wastageFraction because the stored value is itself in
+    // one of two units: printing it raw showed "0.02%" for a row the costing
+    // charges 2% on.
     key: "cost", label: "Cost / Wastage %",
-    format: (v, row) => (row.type === "rm_loss" || row.type === "pm_loss") ? `${Number(v ?? 0).toFixed(2)}%` : Number(v ?? 0).toFixed(2),
+    format: (v, row) => (row.type === "rm_loss" || row.type === "pm_loss")
+      ? `${(wastageFraction(Number(v ?? 0)) * 100).toFixed(2)}%`
+      : Number(v ?? 0).toFixed(2),
   },
   { key: "effective_from", label: "Effective From", type: "date"   },
   { key: "effective_till", label: "Effective Till", type: "date"   },

@@ -5,7 +5,7 @@
  *
  * Query params (all optional):
  *   format — "csv" (default) | "xlsx"
- *   search — searches bom_code and sku_code
+ *   search — searches bom_code, sku_code and SKU name
  *   type   — "rm" | "pm"  (material type)
  *   status — "draft" | "active" | "inactive" | "in review" | "discontinued"
  *
@@ -43,11 +43,11 @@ export const GET = withGateway({
   // An export must not be a way around the boundary.
   const scope = await getUserScope(Number(session.user.id))
 
-  // Params match selectPaginated / countAll: [like×3, brandScope×2, type×2, status×2].
+  // Params match selectPaginated / countAll: [like×4, brandScope×2, type×2, status×2].
   // brandScope sits after the likes because that is where the predicate is in the
   // WHERE clause — mysql2 binds by position.
   const filterParams = [
-    like, like, like,
+    like, like, like, like,
     ...scopeParams(scope.brandIds),
     typeParam, typeParam,
     statusParam, statusParam,

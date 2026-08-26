@@ -1,17 +1,19 @@
-// The column set shared by all four Agreed Final Costing tables.
+// The column set shared by the Agreed Final Costing table, the three vendor-rate
+// comparisons on the Analytics tab, and the expanded per-SKU row that shows those
+// three scenarios inline.
 //
-// It lives in one file because the tables are STACKED and read down a column:
-// the agreed (MRM) costing, then the same recipe costed at the approved
-// vendor's, cheapest and priciest rates. That only works if a column sits at
-// the same x-position in every table — and it did not, because the MRM table
+// It lives in one file because the columns must line up in all three places: the
+// comparison tables are STACKED and read down a column, and the expanded row
+// reads across the costing row it hangs under. That only works if a column sits
+// at the same x-position everywhere — and it did not, because the MRM table
 // declared its own 9 headers and the comparison table declared a different 9.
 // Two lists that had to agree and nothing making them.
 //
 // Everything about a column now lives on one line here: its label, its width,
-// and how its cell renders. Add a column and all four tables get it.
+// and how its cell renders. Add a column and every table gets it.
 
 import { TableCell, TableHead, TableRow } from "@/components/ui/table"
-import type { FinalCostingRow } from "@/types/masters"
+import type { FinalCostingRow, FinalCostingComparisonRow } from "@/types/masters"
 import { fmtMoney } from "../mfg-utils"
 
 /** Fixed widths, sized to the digits rather than to the label, so the four
@@ -23,6 +25,7 @@ const W = {
   small:   "w-[72px]",
   total:   "w-[94px]",
   delta:   "w-[116px]",
+  actions: "w-[84px]",
 } as const
 
 const HEADS: { label: string; width: string; numeric: boolean }[] = [
@@ -42,10 +45,19 @@ const HEADS: { label: string; width: string; numeric: boolean }[] = [
 
 export const COSTING_COL_COUNT = HEADS.length
 
-export function CostingHeadRow() {
+/**
+ * `actions` appends the trailing Actions column — Agreed Final Costing only.
+ * The three Analytics comparison tables share HEADS and have no per-row control,
+ * so making it a 13th HEADS entry would give all three a permanently empty
+ * column. A table that passes this spans COSTING_COL_COUNT + 1.
+ */
+export function CostingHeadRow({ actions = false }: { actions?: boolean } = {}) {
+  const heads = actions
+    ? [...HEADS, { label: "Actions", width: W.actions, numeric: false }]
+    : HEADS
   return (
     <TableRow>
-      {HEADS.map((h) => (
+      {heads.map((h) => (
         <TableHead key={h.label} className={`${h.width} ${h.numeric ? "text-right" : ""}`}>
           {h.label}
         </TableHead>
@@ -61,11 +73,17 @@ export function CostingHeadRow() {
  * near-identical tables stacked, "which one am I looking at" is the question
  * you ask precisely when the heading is off-screen.
  */
-export function ScenarioLabelRow({ label }: { label: string }) {
+export function ScenarioLabelRow({
+  label, colSpan = COSTING_COL_COUNT,
+}: {
+  label: string
+  /** Pass COSTING_COL_COUNT + 1 from a table that renders the Actions column. */
+  colSpan?: number
+}) {
   return (
     <TableRow className="hover:bg-transparent">
       <TableCell
-        colSpan={COSTING_COL_COUNT}
+        colSpan={colSpan}
         className="bg-muted/50 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
       >
         {label}
@@ -100,6 +118,43 @@ export function CostingCells({ row, best }: { row: FinalCostingRow; best: boolea
         title={best ? "Lowest total costing in this scenario" : undefined}
       >
         {fmtMoney(row.total)}
+      </TableCell>
+    </>
+  )
+}
+
+function fmtPct(v: number) {
+  const sign = v > 0 ? "+" : ""
+  return `${sign}${v.toFixed(1)}%`
+}
+
+function fmtDelta(v: number) {
+  const sign = v > 0 ? "+" : ""
+  return `${sign}${fmtMoney(v)}`
+}
+
+function deltaClass(v: number) {
+  if (v > 0) return "text-destructive"
+  if (v < 0) return "text-emerald-600 dark:text-emerald-400"
+  return ""
+}
+
+/**
+ * The three Δ-vs-MRM cells, shared by the Analytics tab's comparison tables and
+ * by the expanded row on Agreed Final Costing. Two copies of this drift; the
+ * whole reason this file exists is that the header list and the cell list did.
+ */
+export function DeltaCells({ row }: { row: FinalCostingComparisonRow }) {
+  return (
+    <>
+      <TableCell className={"text-right tabular-nums " + deltaClass(row.rm_delta)}>
+        {fmtDelta(row.rm_delta)} ({fmtPct(row.rm_delta_pct)})
+      </TableCell>
+      <TableCell className={"text-right tabular-nums " + deltaClass(row.pm_delta)}>
+        {fmtDelta(row.pm_delta)} ({fmtPct(row.pm_delta_pct)})
+      </TableCell>
+      <TableCell className={"text-right tabular-nums font-semibold " + deltaClass(row.total_delta)}>
+        {fmtDelta(row.total_delta)} ({fmtPct(row.total_delta_pct)})
       </TableCell>
     </>
   )

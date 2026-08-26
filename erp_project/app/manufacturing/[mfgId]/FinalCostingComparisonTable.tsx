@@ -7,26 +7,9 @@ import {
 import { TableEmpty } from "@/components/ui/empty-state"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import type { FinalCostingComparisonRow } from "@/types/masters"
-import { fmtMoney } from "../mfg-utils"
 import {
-  CostingHeadRow, CostingCells, ScenarioLabelRow, bestTotalIndex, COSTING_COL_COUNT,
+  CostingHeadRow, CostingCells, DeltaCells, ScenarioLabelRow, bestTotalIndex, COSTING_COL_COUNT,
 } from "./costing-columns"
-
-function fmtPct(v: number) {
-  const sign = v > 0 ? "+" : ""
-  return `${sign}${v.toFixed(1)}%`
-}
-
-function fmtDelta(v: number) {
-  const sign = v > 0 ? "+" : ""
-  return `${sign}${fmtMoney(v)}`
-}
-
-function deltaClass(v: number) {
-  if (v > 0) return "text-destructive"
-  if (v < 0) return "text-emerald-600 dark:text-emerald-400"
-  return ""
-}
 
 export default function FinalCostingComparisonTable({
   title, subtitle, scenarioLabel, rows, exportEndpoint,
@@ -72,8 +55,6 @@ export default function FinalCostingComparisonTable({
               <TableBody>
                 <ScenarioLabelRow label={scenarioLabel} />
                 {rows.length === 0 ? (
-                  // No action here: this table always renders under FinalCostingTable, which
-                  // already offers the "Add SKUs" button for the same empty condition.
                   <TableEmpty colSpan={COSTING_COL_COUNT}>No active SKUs to cost yet.</TableEmpty>
                 ) : (
                   rows.map((r, i) => (
@@ -85,15 +66,7 @@ export default function FinalCostingComparisonTable({
                           moves RM and PM. They were omitted here before, which is
                           why these totals looked like they didn't add up. */}
                       <CostingCells row={r} best={i === best} />
-                      <TableCell className={"text-right tabular-nums " + deltaClass(r.rm_delta)}>
-                        {fmtDelta(r.rm_delta)} ({fmtPct(r.rm_delta_pct)})
-                      </TableCell>
-                      <TableCell className={"text-right tabular-nums " + deltaClass(r.pm_delta)}>
-                        {fmtDelta(r.pm_delta)} ({fmtPct(r.pm_delta_pct)})
-                      </TableCell>
-                      <TableCell className={"text-right tabular-nums font-semibold " + deltaClass(r.total_delta)}>
-                        {fmtDelta(r.total_delta)} ({fmtPct(r.total_delta_pct)})
-                      </TableCell>
+                      <DeltaCells row={r} />
                     </TableRow>
                   ))
                 )}

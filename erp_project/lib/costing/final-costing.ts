@@ -17,10 +17,14 @@ export function computePmCost(amountQty: number, ratePerUnit: number): number {
 
 export type WastageResult = { rmWastage: number; pmWastage: number; total: number }
 
+export function wastageFraction(stored: number): number {
+  return stored >= 1 ? stored / 100 : stored
+}
+
 /** rm_loss/pm_loss are wastage PERCENTAGES from bom_misc, applied to each cost independently — not a flat rate on the combined RM+PM cost. */
 export function computeWastage(rmCost: number, pmCost: number, rmLossPct: number, pmLossPct: number): WastageResult {
-  const rmWastage = rmCost * (rmLossPct / 100)
-  const pmWastage = pmCost * (pmLossPct / 100)
+  const rmWastage = rmCost * wastageFraction(rmLossPct)
+  const pmWastage = pmCost * wastageFraction(pmLossPct)
   return { rmWastage, pmWastage, total: rmWastage + pmWastage }
 }
 

@@ -4,7 +4,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
-  computeRmCost, computePmCost, computeWastage, computeTotalCosting,
+  computeRmCost, computePmCost, computeWastage, computeTotalCosting, wastageFraction,
 } from "../../lib/costing/final-costing"
 
 // Worked by hand from the formula's intent: an RM line is a PERCENTAGE of the
@@ -63,6 +63,30 @@ test("computeWastage applies each loss percentage to its OWN side only", () => {
 test("computeWastage with zero losses adds nothing", () => {
   const r = computeWastage(500, 300, 0, 0)
   assert.deepEqual(r, { rmWastage: 0, pmWastage: 0, total: 0 })
+})
+
+test("wastageFraction reads both units the cost column carries", () => {
+  // 2 means 2%; 0.02 means the same thing already divided. Both must land on
+  // the same multiplier, or the same wastage costs two different amounts
+  // depending on who typed the row.
+  assert.equal(wastageFraction(2), 0.02, "2 is a percentage")
+  assert.equal(wastageFraction(0.02), 0.02, "0.02 is already a fraction")
+  assert.equal(wastageFraction(0), 0, "no wastage either way")
+  assert.equal(wastageFraction(100), 1, "100% is the whole cost again")
+})
+
+test("computeWastage costs a percentage and its pre-divided twin identically", () => {
+  // The reason wastageFraction exists: these two rows mean the same thing.
+  assert.deepEqual(computeWastage(100, 200, 2, 3), computeWastage(100, 200, 0.02, 0.03))
+})
+
+test("wastageFraction switches units at 1", () => {
+  // The boundary is the rule, not an accident — pinned so nobody "fixes" it.
+  assert.equal(wastageFraction(1), 0.01, "1 is a percentage: 1%")
+  assert.equal(wastageFraction(0.99), 0.99, "0.99 is a fraction: 99%")
+  assert.equal(wastageFraction(0.5), 0.5, "0.5 is a fraction: 50%")
+  // Which means a percentage under 1% is written as a fraction.
+  assert.equal(wastageFraction(0.005), 0.005, "0.5% is entered as 0.005")
 })
 
 test("computeTotalCosting sums all six components", () => {

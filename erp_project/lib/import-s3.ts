@@ -1,6 +1,6 @@
 import { getFileBuffer } from "@/lib/s3"
 import ExcelJS from "exceljs"
-import { parseCsvObjects, normalizeCell } from "@/lib/csv"
+import { parseCsvObjects, normalizeCell, normalizeHeader } from "@/lib/csv"
 
 export type ImportRow = Record<string, string>
 
@@ -26,7 +26,14 @@ export async function parseS3Import(key: string): Promise<ImportRow[]> {
 function parseCsvBuffer(buffer: Buffer): ImportRow[] {
   // Splitting on newlines before considering quotes broke every cell that
   // wrapped across lines into a row of its own — see lib/csv.ts.
-  return parseCsvObjects(buffer.toString("utf-8"))
+  //
+  // normalizeHeader, not the default `.toLowerCase()`: every handler reading
+  // these rows keys on the field name (`pm_code`, `hsn_code`), and the files
+  // people re-upload are our own exports, whose headers are labels ("PM Code").
+  // Lower-casing alone yields `pm code`, which matches nothing — so an edit
+  // sheet was read as all-new records. Same normalisation the browser importer
+  // applies (components/masters/field-config.ts).
+  return parseCsvObjects(buffer.toString("utf-8"), normalizeHeader)
 }
 
 async function parseXlsxBuffer(buffer: Buffer): Promise<ImportRow[]> {
@@ -47,7 +54,9 @@ async function parseXlsxBuffer(buffer: Buffer): Promise<ImportRow[]> {
       v == null ? "" : normalizeCell(String(v))
     )
     if (rowNumber === 1) {
-      headers = values.map((h) => h.toLowerCase())
+      // Same normalisation as parseCsvBuffer above — an .xlsx re-upload of the
+      // Material Master export is the path that actually hit this in prod.
+      headers = values.map(normalizeHeader)
     } else {
       if (values.every((v) => !v)) return
       const obj: ImportRow = {}

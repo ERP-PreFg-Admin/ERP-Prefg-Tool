@@ -103,7 +103,7 @@ export default function RecipeMasterComponent({
       <MasterToolbar>
         <UrlSearchInput
           initialValue={currentSearch}
-          placeholder="Search by Recipe code or SKU code…"
+          placeholder="Search by Recipe code, SKU code or SKU name…"
         />
 
         <FilterToggleButton open={filterPanel.open} onToggle={filterPanel.toggle} activeCount={activeFilterCount} />

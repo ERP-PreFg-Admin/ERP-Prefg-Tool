@@ -36,7 +36,8 @@ export function rateGapReasons(g: CostingGapInput): string[] {
   return reasons
 }
 
-const MISC_LABEL: Record<MiscCostType, string> = {
+/** Also the label and the display ORDER for the breakup panel's misc list. */
+export const MISC_LABEL: Record<MiscCostType, string> = {
   jw: "JW",
   shrink: "Shrink Wrap",
   shipper: "Shipper",

@@ -12,7 +12,7 @@
 
 import type { RowDataPacket } from "mysql2/promise"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
-import { miscCostTypeSchema } from "@/lib/validation/manufacturing"
+import { miscCostTypeSchema, parseMiscCostTypeCell } from "@/lib/validation/manufacturing"
 import { parseS3Import } from "@/lib/import-s3"
 import { STATUS } from "@/lib/constants"
 import { type ModuleHandler, buildFieldMap, s3KeyOf } from "./types"
@@ -71,13 +71,23 @@ export const mfgMiscBulkHandler: ModuleHandler = {
 
   async applyAndArchive(conn, entityId, items) {
     const rows = await parseS3Import(s3KeyOf(items, "MFG_MISC_BULK"))
+    const skipped: string[] = []
 
-    for (const row of rows) {
+    for (const [i, row] of rows.entries()) {
+      const line = i + 2 // +1 for the header row, +1 for 1-based numbering
       const skuCode = String(row.sku_code ?? "").trim()
-      const typeParsed = miscCostTypeSchema.safeParse(String(row.type ?? "").trim())
+      // Case-folded — see parseMiscCostTypeCell for why that is load-bearing.
+      const typeParsed = parseMiscCostTypeCell(row.type)
       const cost = Number(row.cost)
       const effectiveFrom = String(row.effective_from ?? "").trim()
-      if (!skuCode || !typeParsed.success || !Number.isFinite(cost) || !effectiveFrom) continue
+
+      if (!skuCode) { skipped.push(`row ${line}: missing sku_code`); continue }
+      if (!typeParsed.success) {
+        skipped.push(`row ${line} (${skuCode}): type "${row.type ?? ""}" must be one of ${miscCostTypeSchema.options.join(", ")}`)
+        continue
+      }
+      if (!Number.isFinite(cost)) { skipped.push(`row ${line} (${skuCode}): cost "${row.cost ?? ""}" is not a number`); continue }
+      if (!effectiveFrom) { skipped.push(`row ${line} (${skuCode}): missing effective_from`); continue }
 
       // Same SKU-code → recipe_id resolution the direct route used, so a CSV
       // that imported before behaves identically now that it needs approval.
@@ -85,7 +95,25 @@ export const mfgMiscBulkHandler: ModuleHandler = {
         manufacturingSql.selectMfgLineBySkuCode, [entityId, skuCode]
       )
       const recipeId = lineRows[0]?.id
-      if (!recipeId) continue
+      if (!recipeId) {
+        skipped.push(`row ${line}: ${skuCode} has no recipe linked to this manufacturer`)
+        continue
+      }
+
+      // Same one-live-line-per-(mfg, recipe, type) rule the create-misc route
+      // enforces. Catches BOTH a repeat inside this file and a re-upload of a
+      // file already applied — approvals 198 and 199 in prod were the identical
+      // 49 rows, and with no guard that is two active rows for every cost.
+      const [existing] = await conn.execute<(RowDataPacket & { id: number; status: string })[]>(
+        manufacturingSql.selectLiveMiscFor, [entityId, recipeId, typeParsed.data]
+      )
+      if (existing[0]) {
+        skipped.push(
+          `row ${line}: ${skuCode} already has ${existing[0].status === STATUS.IN_REVIEW ? "a pending" : "an active"} ` +
+          `${typeParsed.data} cost — edit that line instead of adding a second one`
+        )
+        continue
+      }
 
       await conn.execute(manufacturingSql.insertMisc, [
         recipeId,
@@ -96,6 +124,22 @@ export const mfgMiscBulkHandler: ModuleHandler = {
         String(row.effective_till ?? "").trim() || null,
         STATUS.ACTIVE,
       ])
+    }
+
+    // ALL OR NOTHING, LOUDLY. Every one of the `continue`s above used to be
+    // silent: the approval committed, reported success, and wrote nothing.
+    // These figures feed Total Costing, so a half-applied file is worse than a
+    // refused one — throwing rolls the whole batch back (the route owns the
+    // transaction) and leaves the approval pending, so the file can be fixed
+    // and re-uploaded. The full list reaches the logs via the route's
+    // logger.error; the approver sees the count and the first few reasons.
+    if (skipped.length > 0) {
+      const shown = skipped.slice(0, 5).join("; ")
+      throw new Error(
+        `${skipped.length} of ${rows.length} rows could not be applied, so none were. ` +
+        `Fix the file and upload it again — ${shown}` +
+        (skipped.length > 5 ? `; …and ${skipped.length - 5} more` : "")
+      )
     }
   },
 }

@@ -16,6 +16,7 @@ import type {
   MiscCostLine, MiscCostType,
 } from "@/types/masters"
 import { rateGapReasons, missingMiscReasons } from "./costing-gaps"
+import { buildBreakup } from "./costing-breakup"
 import TabBar, { type MfgTab } from "./TabBar"
 import ManufacturingLinesClient from "./ManufacturingLinesClient"
 import MiscCostClient from "./MiscCostClient"
@@ -27,7 +28,18 @@ import CommonRmsTable from "./CommonRmsTable"
 import VendorIngMappingClient from "./VendorIngMappingClient"
 // import MfgMonthlyPoSummary from "./MfgMonthlyPoSummary"
 
-type RecipeLineInputRow = { recipe_id: number; mtrl_type: "rm" | "pm"; mtrl_id: number; amount: string; filling: string | null }
+/** manufacturingSql.selectBomLineDetailByMfg — the recost inputs plus the
+ *  material's identity and agreed rate, which the breakup panel shows. */
+type RecipeLineDetailRow = {
+  recipe_id: number
+  mtrl_type: "rm" | "pm"
+  mtrl_id: number
+  amount: string
+  filling: string | null
+  mtrl_code: string | null
+  mtrl_name: string | null
+  mrm_rate: string | null
+}
 /** manufacturingSql.selectApprovedVendorRate{ByRm,ByPm} — one of rm_id/pm_id is set. */
 type ApprovedVendorRateRow = {
   rm_id?: number
@@ -52,7 +64,7 @@ export const dynamic = "force-dynamic"
 const VALID_TABS: MfgTab[] = [
   "active",
   "misc_cost",
-  "rm_vendor", "agreed_rates", "final_costing",
+  "rm_vendor", "agreed_rates", "final_costing", "analytics",
   "common_rms", "vendor_ing_mapping",
 ]
 
@@ -106,11 +118,16 @@ export default async function ManufacturerDetailPage({
         {tab === "misc_cost" && <MiscTabContent mfgId={id} />}
         {tab === "rm_vendor" && <RmVendorTabContent mfgId={id} />}
         {tab === "agreed_rates" && <AgreedRatesTabContent mfgId={id} />}
-        {tab === "final_costing" && (
-          // The min/max vendor-rate comparison spans every vendor, so this tab
-          // needs the vendor dimension of the scope too.
+        {(tab === "final_costing" || tab === "analytics") && (
+          // One loader for both tabs: they run the same eight queries, because the
+          // comparison rows are computed against the MRM rows and the expandable
+          // row on the costing tab shows the comparisons.
+          //
+          // The min/max vendor-rate comparison spans every vendor, so this needs
+          // the vendor dimension of the scope too.
           <FinalCostingTabContent
             mfgId={id}
+            view={tab}
             brandScope={scopeParams(scope.brandIds)}
             vendorScope={[...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds)]}
             approvedScope={[...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds)]}
@@ -200,8 +217,12 @@ async function AgreedRatesTabContent({ mfgId }: { mfgId: number }) {
 }
 
 async function FinalCostingTabContent({
-  mfgId, brandScope, vendorScope, approvedScope,
-}: { mfgId: number; brandScope: unknown[]; vendorScope: unknown[]; approvedScope: unknown[] }) {
+  mfgId, view, brandScope, vendorScope, approvedScope,
+}: {
+  mfgId: number
+  view: "final_costing" | "analytics"
+  brandScope: unknown[]; vendorScope: unknown[]; approvedScope: unknown[]
+}) {
   const [
     lineRows, materialCostRows, miscCostRows, bomLineInputRows,
     minMaxRmRows, minMaxPmRows, approvedRmRows, approvedPmRows,
@@ -213,7 +234,7 @@ async function FinalCostingTabContent({
       rm_lines_without_rate: number; pm_lines_without_rate: number
     }>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId], { label: "manufacturing.selectMaterialCostByMfg" }),
     timedQuery<{ recipe_id: number; type: MiscCostType; cost: string }>(manufacturingSql.selectMiscCostsByMfg, [mfgId], { label: "manufacturing.selectMiscCostsByMfg" }),
-    timedQuery<RecipeLineInputRow>(manufacturingSql.selectBomLineInputsByMfg, [mfgId], { label: "manufacturing.selectBomLineInputsByMfg" }),
+    timedQuery<RecipeLineDetailRow>(manufacturingSql.selectBomLineDetailByMfg, [mfgId, mfgId, mfgId], { label: "manufacturing.selectBomLineDetailByMfg" }),
     timedQuery<MinMaxRateRow>(rawMaterials.selectMinMaxVrmRateByRm, vendorScope, { label: "rawMaterials.selectMinMaxVrmRateByRm" }),
     timedQuery<MinMaxRateRow>(packingMaterials.selectMinMaxVrmRateByPm, vendorScope, { label: "packingMaterials.selectMinMaxVrmRateByPm" }),
     timedQuery<ApprovedVendorRateRow>(manufacturingSql.selectApprovedVendorRateByRm, [...approvedScope, mfgId], { label: "manufacturing.selectApprovedVendorRateByRm" }),
@@ -275,7 +296,7 @@ async function FinalCostingTabContent({
     }
   })
 
-  const linesByBom = new Map<number, RecipeLineInputRow[]>()
+  const linesByBom = new Map<number, RecipeLineDetailRow[]>()
   for (const l of bomLineInputRows) {
     const arr = linesByBom.get(l.recipe_id) ?? []
     arr.push(l)
@@ -340,15 +361,29 @@ async function FinalCostingTabContent({
     })
   }
 
-  return (
-    <div className="space-y-6">
-      <FinalCostingTable mfgId={mfgId} rows={rows} />
+  // Each entry is `rows.map(...)`, so all three stay index-aligned with `rows` —
+  // which is what lets the expanded costing row pick its scenarios by index.
+  const scenarios = [
+    { label: "Approved vendor rate",           rows: buildComparisonRows("approved") },
+    { label: "Cheapest available vendor rate", rows: buildComparisonRows("min") },
+    { label: "Most expensive available rate",  rows: buildComparisonRows("max") },
+  ]
+
+  if (view === "analytics") {
+    return (
       <VendorCostingComparison
-        approvedRows={buildComparisonRows("approved")}
-        minRows={buildComparisonRows("min")}
-        maxRows={buildComparisonRows("max")}
+        approvedRows={scenarios[0].rows}
+        minRows={scenarios[1].rows}
+        maxRows={scenarios[2].rows}
         exportEndpoint={`/api/v1/manufacturing/${mfgId}/final-costing/detailed-export`}
       />
-    </div>
+    )
+  }
+
+  // Same index alignment as `scenarios` — both are rows.map(...).
+  const breakups = rows.map((r) =>
+    buildBreakup(linesByBom.get(r.recipe_id) ?? [], miscByBom.get(r.recipe_id) ?? {})
   )
+
+  return <FinalCostingTable mfgId={mfgId} rows={rows} scenarios={scenarios} breakups={breakups} />
 }

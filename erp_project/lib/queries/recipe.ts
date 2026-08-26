@@ -96,8 +96,8 @@ export const bom = {
 
   /**
    * Paginated Recipe list with optional search, material-type, and status filters.
-   * Params: [like×3, brandScope×2, type×2, status×2, LIMIT, OFFSET]
-   *   like   — '%search%' or null (bom_code / sku_code columns)
+   * Params: [like×4, brandScope×2, type×2, status×2, LIMIT, OFFSET]
+   *   like   — '%search%' or null (bom_code / sku_code / sku name columns)
    *   type   — 'rm'|'pm' or null
    *   status — 'draft'|'active'|'inactive' or null
    */
@@ -111,7 +111,7 @@ export const bom = {
     FROM details_recipe AS bd
     INNER JOIN master_recipe AS b ON b.id = bd.recipe_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
-    WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+    WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ? OR s.name LIKE ?)
       AND (? IS NULL OR s.brand_id IS NULL OR s.brand_id IN (?))
       AND (? IS NULL OR bd.mtrl_type = ?)
       AND (? IS NULL OR b.status = ?)
@@ -122,7 +122,7 @@ export const bom = {
   /**
    * Fetch ALL matching Recipe rows for export (no LIMIT/OFFSET).
    * Same WHERE clause as selectPaginated.
-   * Params: [like×3, brandScope×2, type×2, status×2]
+   * Params: [like×4, brandScope×2, type×2, status×2]
    */
   selectAllFiltered: `
     SELECT
@@ -134,7 +134,7 @@ export const bom = {
     FROM details_recipe AS bd
     INNER JOIN master_recipe AS b ON b.id = bd.recipe_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
-    WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+    WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ? OR s.name LIKE ?)
       AND (? IS NULL OR s.brand_id IS NULL OR s.brand_id IN (?))
       AND (? IS NULL OR bd.mtrl_type = ?)
       AND (? IS NULL OR b.status = ?)
@@ -143,14 +143,14 @@ export const bom = {
 
   /**
    * Matching COUNT for selectPaginated.
-   * Params: [like×3, brandScope×2, type×2, status×2]
+   * Params: [like×4, brandScope×2, type×2, status×2]
    */
   countAll: `
     SELECT COUNT(*) AS total
     FROM details_recipe AS bd
     INNER JOIN master_recipe AS b ON b.id = bd.recipe_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
-    WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ?)
+    WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ? OR s.name LIKE ?)
       AND (? IS NULL OR s.brand_id IS NULL OR s.brand_id IN (?))
       AND (? IS NULL OR bd.mtrl_type = ?)
       AND (? IS NULL OR b.status = ?)

@@ -71,12 +71,15 @@ export const POST = withGateway({
       logger.info({ ...logCtx, mfgId: body.mfg_id, bomId: body.recipe_id, type: body.type, cost: body.cost, message: "Misc. cost line create submitted for approval" })
       recordRawEvent("MFG_MISC_COST", eventId, { mfgId: body.mfg_id, bomId: body.recipe_id, type: body.type, cost: body.cost })
 
-      // One pending line per (mfg, recipe, type) — otherwise two submissions
-      // both land as in_review and approving both leaves two "active" rows for
-      // the same cost, which selectMiscCostsByMfg would sum together.
-      const pending = await query<{ id: number }>(manufacturingSql.selectPendingMiscFor, [body.mfg_id, body.recipe_id, body.type])
-      if (pending.length > 0) {
-        throw new ApiError(409, "conflict", "This cost is already awaiting approval for that SKU.")
+      // One LIVE line per (mfg, recipe, type). This used to check in_review only,
+      // which stopped two pending submissions but not a second line added on top
+      // of an already-active one — and the dialog offers every type regardless of
+      // what the SKU already has, so that was a couple of clicks away.
+      const existing = await query<{ id: number; status: string }>(manufacturingSql.selectLiveMiscFor, [body.mfg_id, body.recipe_id, body.type])
+      if (existing.length > 0) {
+        throw new ApiError(409, "conflict", existing[0].status === STATUS.IN_REVIEW
+          ? "This cost is already awaiting approval for that SKU."
+          : "This SKU already has an active cost of this type — edit that line instead of adding a second one.")
       }
 
       const conn: PoolConnection = await pool.getConnection()

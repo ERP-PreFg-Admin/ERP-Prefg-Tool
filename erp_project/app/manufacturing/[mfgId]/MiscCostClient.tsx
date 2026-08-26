@@ -14,6 +14,7 @@ import { DownloadButton } from "@/components/masters/DownloadButton"
 import { SearchInput } from "@/components/masters/SearchInput"
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import type { MfgLineOption, MiscCostLine, MiscCostType } from "@/types/masters"
+import { wastageFraction } from "@/lib/costing/final-costing"
 import { fmtDate, fmtMoney } from "../mfg-utils"
 import MiscCostDialog from "./MiscCostDialog"
 import { MISC_COST_BULK_CSV_FIELDS } from "./misc-cost-bulk-fields"
@@ -136,7 +137,12 @@ export default function MiscCostClient({
                       <TableCell className="max-w-40 truncate">{r.sku_name ?? "—"}</TableCell>
                       <TableCell>{TYPE_LABEL[r.type]}</TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {isPercentType(r.type) ? `${Number(r.cost ?? 0).toFixed(2)}%` : fmtMoney(r.cost)}
+                        {/* wastageFraction, not the raw value: the stored number
+                            is in one of two units, so printing it raw showed
+                            "0.02%" for a row the costing charges 2% on. */}
+                        {isPercentType(r.type)
+                          ? `${(wastageFraction(Number(r.cost ?? 0)) * 100).toFixed(2)}%`
+                          : fmtMoney(r.cost)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{fmtDate(r.effective_from)}</TableCell>
                       <TableCell className="whitespace-nowrap">{fmtDate(r.effective_till)}</TableCell>
