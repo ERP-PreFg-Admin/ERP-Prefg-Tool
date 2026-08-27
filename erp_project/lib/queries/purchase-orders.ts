@@ -226,7 +226,7 @@ const SELECT_COLS = `
     po.id, po.po_no, po.date, po.sku_code, po.qty, po.unit_price,
     po.total_amount, po.expected_on, po.received_qty, po.invoice_no,
     po.uniware_po_code,
-    po.destination, ${DISPLAY_STATUS_EXPR} AS status, po.status AS raw_status,
+    po.destination, po.remarks, ${DISPLAY_STATUS_EXPR} AS status, po.status AS raw_status,
     po.po_type, po.attachment_key,
     po.csv_source_key, po.email_sent_at,
     po.recipe_id, b.bom_code,
@@ -392,7 +392,7 @@ export const purchaseOrdersSql = {
 
   /**
    * Insert an impromptu PO as draft (pending approval).
-   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, po_type, destination, mfg_id, sku_code]
+   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, po_type, destination, remarks, mfg_id, sku_code]
    *
    * recipe_id is deliberately the LAST column on every insert below: its two
    * resolver params then append to the existing array instead of being threaded
@@ -401,18 +401,18 @@ export const purchaseOrdersSql = {
    */
   insert: `
     INSERT INTO purchase_orders
-      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, recipe_id)
-    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, 'draft', ?, ?, ${RECIPE_ID_FOR_LINE})
+      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, remarks, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ${RECIPE_ID_FOR_LINE})
   `,
 
   /**
    * Insert a normal PO directly as raised (no approval needed).
-   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, mfg_id, sku_code]
+   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, remarks, mfg_id, sku_code]
    */
   insertNormal: `
     INSERT INTO purchase_orders
-      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, recipe_id)
-    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, 'raised', 'normal', ?, ${RECIPE_ID_FOR_LINE})
+      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, remarks, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, 'raised', 'normal', ?, ?, ${RECIPE_ID_FOR_LINE})
   `,
 
   /**
@@ -563,7 +563,7 @@ export const purchaseOrdersSql = {
    */
   warehouseOptions: `
     SELECT
-      w.id, w.name, w.location, w.zone,
+      w.id, w.code, w.name, w.location, w.zone,
       COALESCE(dwe.type, w.type) AS type,
       e.code            AS entity_code,
       dwe.facility_code AS facility_code,
@@ -716,24 +716,24 @@ export const purchaseOrdersSql = {
 
   /**
    * Insert a PO directly as 'raised' for the bulk CSV flow.
-   * Parameters: [po_no, mfg_id, sku_code, qty, expected_on, destination, csv_source_key, mfg_id, sku_code]
+   * Parameters: [po_no, mfg_id, sku_code, qty, expected_on, destination, remarks, csv_source_key, mfg_id, sku_code]
    */
   insertBulkPo: `
     INSERT INTO purchase_orders
-      (po_no, mfg_id, date, sku_code, qty, expected_on, status, po_type, destination, csv_source_key, recipe_id)
-    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, 'raised', 'normal', ?, ?, ${RECIPE_ID_FOR_LINE})
+      (po_no, mfg_id, date, sku_code, qty, expected_on, status, po_type, destination, remarks, csv_source_key, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, 'raised', 'normal', ?, ?, ?, ${RECIPE_ID_FOR_LINE})
   `,
 
   /**
    * Update editable fields on a draft PO. recipe_id is re-resolved because this is
    * the one edit that can change the SKU or the manufacturer, either of which
    * would leave the stamped Recipe describing an order that no longer exists.
-   * Parameters: [mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, mfg_id, sku_code, id]
+   * Parameters: [mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, remarks, mfg_id, sku_code, id]
    */
   updateDraft: `
     UPDATE purchase_orders
     SET mfg_id = ?, sku_code = ?, qty = ?, unit_price = ?, total_amount = ?,
-        expected_on = ?, destination = ?, recipe_id = ${RECIPE_ID_FOR_LINE}
+        expected_on = ?, destination = ?, remarks = ?, recipe_id = ${RECIPE_ID_FOR_LINE}
     WHERE id = ?
   `,
 
@@ -747,7 +747,7 @@ export const purchaseOrdersSql = {
    * PO it names). Params: [po_no]
    */
   selectByPoNo: `
-    SELECT id, po_no, status, expected_on, destination, sku_code, recipe_id,
+    SELECT id, po_no, status, expected_on, destination, remarks, sku_code, recipe_id,
            qty, COALESCE(received_qty, 0) AS received_qty
     FROM purchase_orders
     WHERE po_no = ?
@@ -755,14 +755,14 @@ export const purchaseOrdersSql = {
   `,
 
   /**
-   * Update only the 3 fields the bulk CSV importer is allowed to edit on an
-   * existing PO (status, expected_on, destination) — qty/rate/etc. are
+   * Update only the 4 fields the bulk CSV importer is allowed to edit on an
+   * existing PO (status, expected_on, destination, remarks) — qty/rate/etc. are
    * deliberately out of reach here; use updateDraft for a full field edit.
-   * Parameters: [status, expected_on, destination, id]
+   * Parameters: [status, expected_on, destination, remarks, id]
    */
   updatePoStatusFields: `
     UPDATE purchase_orders
-    SET status = ?, expected_on = ?, destination = ?
+    SET status = ?, expected_on = ?, destination = ?, remarks = ?
     WHERE id = ?
   `,
 

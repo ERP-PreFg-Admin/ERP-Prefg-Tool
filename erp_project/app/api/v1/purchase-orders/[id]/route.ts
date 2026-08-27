@@ -97,6 +97,7 @@ export const PUT = withGateway({
     // Update PO fields
     await conn.execute(purchaseOrdersSql.updateDraft, [
       Number(mfg_id), sku_code, Number(qty), unitPrice, totalAmount, expected_on || null, destination || null,
+      reason?.trim() || null,
       // Re-resolved: this edit can change the SKU or the manufacturer, either of
       // which leaves the stamped Recipe describing an order that no longer exists.
       Number(mfg_id), sku_code, poId,

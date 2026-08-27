@@ -22,21 +22,22 @@ const STATUS_OPTIONS = STATUS_KEYS.map((k) => ({ value: k, label: STATUS_CONFIG[
  * see buildRows in components/masters/field-config.ts.
  *
  * Row semantics (see poBulkHandler.applyAndArchive):
- *   po_no blank/unrecognized → CREATE a new PO (mfg_code, sku_code, bom_code, qty required)
- *   po_no matches an existing PO → UPDATE that PO's status/expected_on/destination only
- *     (bom_code is still required, but only as a cross-check against the PO —
- *      it is written only when the PO doesn't have one yet)
+ *   po_no blank/unrecognized → CREATE a new PO (mfg_code, sku_code, qty required)
+ *   po_no matches an existing PO → UPDATE that PO's status/expected_on/destination/remarks only
  */
 export const PO_BULK_CSV_FIELDS: MasterField[] = [
   { key: "po_no", label: "PO No.", aliases: ["po no."], placeholder: "Blank = create new PO", sample: "" },
   { key: "mfg_code", label: "Mfg Code", aliases: ["mfg code"], required: true, placeholder: "e.g. MFG-001-ABC", sample: "MFG-001-ABC" },
   { key: "sku_code", label: "SKU", aliases: ["sku"], required: true, placeholder: "e.g. SKU-001", sample: "SKU-001" },
   {
-    // Which recipe the PO is against. Required on every row, including updates:
-    // the importer uses it to confirm the row is talking about the same PO the
-    // po_no points at, and backfills it on POs raised before this column existed.
-    key: "bom_code", label: "Recipe Code", aliases: ["bom code"], required: true,
-    placeholder: "e.g. Recipe-SKU-001-R1-P1", sample: "Recipe-SKU-001-R1-P1",
+    // Which recipe the PO is against. OPTIONAL: nothing reads this cell.
+    // poBulkHandler resolves recipe_id from (mfg_id, sku_code) via
+    // RECIPE_ID_FOR_LINE on create, and never touches it on update — so
+    // demanding it only blocked otherwise-valid files. It stays in the column
+    // list because the export writes it, and a downloaded file should preview
+    // cleanly on re-upload.
+    key: "bom_code", label: "Recipe Code", aliases: ["bom code"],
+    placeholder: "e.g. Recipe-SKU-001-R1-P1 (optional)", sample: "Recipe-SKU-001-R1-P1",
   },
   {
     key: "qty", label: "PO Qty", aliases: ["po qty"], type: "number", required: true, placeholder: "e.g. 5000", sample: "5000",
@@ -53,5 +54,14 @@ export const PO_BULK_CSV_FIELDS: MasterField[] = [
     options: STATUS_OPTIONS,
     validate: (raw) =>
       STATUS_KEYS.includes(raw.trim().toLowerCase()) ? null : `must be one of ${STATUS_KEYS.join(", ")} (got "${raw}")`,
+  },
+  {
+    // Why the PO was raised — the same note the Add PO dialog collects, stored
+    // on purchase_orders.remarks. Optional here: a bulk file is planned
+    // replenishment, not the exception an impromptu PO documents.
+    key: "remarks", label: "Remarks", aliases: ["remarks"],
+    placeholder: "Why this PO was raised", sample: "",
+    validate: (raw) =>
+      raw.length <= 300 ? null : `must be 300 characters or fewer (got ${raw.length})`,
   },
 ]

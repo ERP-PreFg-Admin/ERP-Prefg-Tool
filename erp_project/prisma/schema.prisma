@@ -71,6 +71,9 @@ model purchase_orders {
   /// off the same invoice — Uniware's model is one PO for all SKUs.
   uniware_po_code String?                @db.VarChar(64)
   destination    String?                 @db.VarChar(100)
+  /// Free-text "Reason / Notes" captured when the PO was raised, or set from
+  /// the bulk CSV. Mandatory only for impromptu POs (see poCreateSchema).
+  remarks        String?                 @db.VarChar(300)
   status         purchase_orders_status? @default(draft)
   attachment_key String?                 @db.Text
   po_type        purchase_orders_type?   @default(impromptu)

@@ -11,8 +11,8 @@
 // and, per row:
 //   po_no blank/unrecognized → CREATE a new PO (mfg_code, sku_code, qty
 //     required), same {Brand}-PO-{yyyymm}-{seq} numbering as a normal PO.
-//   po_no matches an existing PO → UPDATE only status/expected_on/destination
-//     (qty/rate/etc. are out of reach here — see po-bulk-fields.ts).
+//   po_no matches an existing PO → UPDATE only status/expected_on/destination/
+//     remarks (qty/rate/etc. are out of reach here — see po-bulk-fields.ts).
 // Every create/update writes a history_pos row so the change is visible from
 // PoTable's Actions menu (see app/api/v1/purchase-orders/history/route.ts).
 
@@ -68,12 +68,16 @@ export const poBulkHandler: ModuleHandler = {
           }
           const rawExpectedOn = normalizeDateCell(row.expected_on) || null
           const rawDestination = row.destination?.trim() || null
+          // Truncated, not rejected: the column is VARCHAR(300) and a long note
+          // is not a reason to drop the whole row.
+          const rawRemarks = row.remarks?.trim().slice(0, 300) || null
 
           const existingExpectedOn = isoDate(existing.expected_on) || null
           const changes: { field: string; old: string; new: string }[] = []
           if (rawStatus && rawStatus !== existing.status) changes.push({ field: "status", old: existing.status ?? "", new: rawStatus })
           if (rawExpectedOn && rawExpectedOn !== existingExpectedOn) changes.push({ field: "expected_on", old: existingExpectedOn ?? "", new: rawExpectedOn })
           if (rawDestination && rawDestination !== existing.destination) changes.push({ field: "destination", old: existing.destination ?? "", new: rawDestination })
+          if (rawRemarks && rawRemarks !== existing.remarks) changes.push({ field: "remarks", old: existing.remarks ?? "", new: rawRemarks })
 
           if (changes.length === 0) { skipped++; skipReasons.push(`${poNo}: no changes`); continue }
 
@@ -81,6 +85,7 @@ export const poBulkHandler: ModuleHandler = {
             rawStatus ?? existing.status,
             rawExpectedOn ?? existing.expected_on,
             rawDestination ?? existing.destination,
+            rawRemarks ?? existing.remarks,
             existing.id,
           ])
           for (const c of changes) {
@@ -106,6 +111,7 @@ export const poBulkHandler: ModuleHandler = {
 
           const expectedOn = normalizeDateCell(row.expected_on) || null
           const destination = row.destination?.trim() || null
+          const remarks = row.remarks?.trim().slice(0, 300) || null
 
           const rawBrand = sku.brand?.trim() || skuCode.split("-")[0]
           const brand = brandCode(rawBrand)
@@ -117,7 +123,7 @@ export const poBulkHandler: ModuleHandler = {
           const newPoNo = `${poPrefix}-${seq}`
 
           const [poResult] = await conn.execute(purchaseOrdersSql.insertBulkPo, [
-            newPoNo, mfg.id, skuCode, qty, expectedOn, destination, s3Key,
+            newPoNo, mfg.id, skuCode, qty, expectedOn, destination, remarks, s3Key,
             mfg.id, skuCode,
           ])
           const poId = (poResult as any).insertId

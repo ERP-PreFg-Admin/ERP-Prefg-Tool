@@ -284,6 +284,18 @@ export default function PoDataRow({
         )}
       </TableCell>
 
+      {/* Why this PO was raised. Truncated with the full text on hover — the
+          column is VARCHAR(300) and this table has no width to spare. */}
+      {!inwardingMode && (
+        <TableCell className="text-xs text-muted-foreground">
+          {r.remarks ? (
+            <span className="block max-w-40 truncate" title={r.remarks}>{r.remarks}</span>
+          ) : (
+            "—"
+          )}
+        </TableCell>
+      )}
+
       <TableCell>
         <Badge variant={cfg.variant} className="whitespace-nowrap">{cfg.label}</Badge>
       </TableCell>

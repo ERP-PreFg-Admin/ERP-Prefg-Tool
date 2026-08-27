@@ -552,6 +552,7 @@ export default function PoProcurementClient({
           unit_price:  editTarget.unit_price,
           expected_on: editTarget.expected_on,
           destination: editTarget.destination,
+          remarks:     editTarget.remarks,
         } : null}
       />
 

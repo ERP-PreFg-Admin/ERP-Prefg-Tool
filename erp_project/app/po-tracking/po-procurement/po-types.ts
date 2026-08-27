@@ -51,6 +51,9 @@ export type PoRow = {
    *  apart is on the invoices tab, not here. */
   uniware_status: string | null
   destination: string | null
+  /** Why the PO was raised — typed on the Add PO dialog, or set from the bulk
+   *  CSV. Null on inward POs and on anything raised before the column existed. */
+  remarks: string | null
   /** The Unicommerce facility at `destination` for this PO's entity. Null when
    *  either is unresolved — the site isn't set up for that entity, or the SKU is
    *  unattributed so there's no entity to resolve against. */
@@ -92,6 +95,10 @@ export type MfgOption       = { id: number; code: string; name: string; register
  */
 export type WarehouseOption = {
   id: number
+  /** master_warehouse.code — the site's own short code ("GGN"), shared by both
+   *  its entity rows. Optional on the master, so frequently null. Distinct from
+   *  `facility_code`, which is Unicommerce's and differs per entity. */
+  code: string | null
   name: string
   location: string | null
   zone: string | null
@@ -109,6 +116,17 @@ export type WarehouseOption = {
    *  column. Its PIN is what separates the two legal entities at one site, so
    *  matchWarehouse extracts it rather than the master storing it twice. */
   bill_to_address: string | null
+  /**
+   * Set by warehousesForEntity ONLY when there is no entity to narrow by — an
+   * unattributed SKU. The site's rows collapse to one option there, and naming
+   * a single entity's facility on it would claim a destination the goods may
+   * never reach, so `facility_code` is cleared and every facility the site has
+   * is carried here for warehouseLabel to name.
+   *
+   * Absent in the normal narrowed case, where entity_code/facility_code already
+   * hold the single right answer. Never comes back from the query.
+   */
+  siteFacilities?: { entity_code: string; facility_code: string | null }[]
 }
 
 export type BadgeVariant = "default" | "secondary" | "success" | "warning" | "info" | "destructive" | "outline"
@@ -224,6 +242,7 @@ export type EditData = {
   unit_price: number | string | null
   expected_on: string | null
   destination: string | null
+  remarks: string | null
 }
 
 export const EMPTY_FORM: ImpromptuForm = {

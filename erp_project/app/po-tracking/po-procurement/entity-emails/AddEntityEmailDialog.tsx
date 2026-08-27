@@ -13,8 +13,18 @@ import { apiErrorMessage } from "@/lib/api-error-message"
 
 type EntityType = "vendor" | "mfg" | "warehouse" | "employee"
 type EntityOption = { id: number; code: string; name: string }
-/** What an employee row hangs off. "all_mfgs" is stored as entity_code '*'. */
-type AttachTo = "warehouse" | "mfg" | "all_mfgs"
+/**
+ * What an employee row hangs off. "all_mfgs" is stored as entity_code '*'.
+ *
+ * "all_warehouses" is the odd one out: it stores entity_type 'warehouse', not
+ * 'employee'. It has to — '*' on an employee row already means every
+ * MANUFACTURER (selectForMfg), so the same value cannot also mean every
+ * warehouse. The every-warehouse wildcard lives on the warehouse type
+ * (selectByWarehouseForEntity), and this option is a shortcut to it, so the
+ * person is found from the flow they were looking in rather than duplicating
+ * the wildcard on a second type.
+ */
+type AttachTo = "warehouse" | "mfg" | "all_mfgs" | "all_warehouses"
 
 const TYPE_LABEL: Record<EntityType, string> = {
   mfg: "Manufacturer",
@@ -142,8 +152,15 @@ export default function AddEntityEmailDialog({
   async function handleSubmit() {
     setApiError("")
 
-    // "All manufacturers" is the one code the user doesn't pick from a list.
-    const code = isEmployee && attachTo === "all_mfgs" ? ALL_MFGS : entityCode
+    // The two "all" options are the codes the user doesn't pick from a list.
+    // all_warehouses also changes the TYPE — see the AttachTo comment: the
+    // every-warehouse wildcard is a warehouse row, because '*' on an employee
+    // row is already spoken for by every-manufacturer.
+    const type = isEmployee && attachTo === "all_warehouses" ? "warehouse" : entityType
+    const code =
+      isEmployee && attachTo === "all_mfgs"       ? ALL_MFGS
+      : isEmployee && attachTo === "all_warehouses" ? ALL_WAREHOUSES
+      : entityCode
     if (!code) {
       setApiError(
         !isEmployee ? "Select an entity."
@@ -175,7 +192,7 @@ export default function AddEntityEmailDialog({
             // One address, by id. `emails[0]` is the only row in edit mode.
             ? {
                 id: editing.id,
-                entity_type: entityType,
+                entity_type: type,
                 entity_code: code,
                 legal_entity_code: legal,
                 email: emails[0].email,
@@ -184,7 +201,7 @@ export default function AddEntityEmailDialog({
                 status,
               }
             : {
-                entity_type: entityType,
+                entity_type: type,
                 entity_code: code,
                 legal_entity_code: legal,
                 emails,
@@ -243,6 +260,7 @@ export default function AddEntityEmailDialog({
                 >
                   <option value="all_mfgs">All manufacturers</option>
                   <option value="mfg">One manufacturer</option>
+                  <option value="all_warehouses">All warehouses</option>
                   <option value="warehouse">One warehouse</option>
                 </Select>
               </div>
@@ -261,7 +279,7 @@ export default function AddEntityEmailDialog({
 
           {isEmployee && (
             <>
-              {attachTo !== "all_mfgs" && (
+              {(attachTo === "mfg" || attachTo === "warehouse") && (
                 <div className="grid gap-1.5">
                   <Label htmlFor="ee-attach-code">
                     {attachTo === "warehouse" ? "Warehouse" : "Manufacturer"}
@@ -281,6 +299,8 @@ export default function AddEntityEmailDialog({
               <p className="text-xs text-muted-foreground">
                 {attachTo === "all_mfgs"
                   ? "One row per address, covering every manufacturer — including any added later."
+                  : attachTo === "all_warehouses"
+                  ? "Looped in on the inward-invoice mail for every site and every legal entity — including sites added later. Saved as a warehouse contact, so it appears under Warehouse in the list."
                   : attachTo === "warehouse"
                   ? "Looped in on the inward-invoice mail for this site, for every legal entity."
                   : "Looped in on the PO mail for this manufacturer only."}

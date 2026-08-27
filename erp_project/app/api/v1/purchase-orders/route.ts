@@ -147,6 +147,7 @@ export const POST = withGateway({
     try {
       const [poResult] = await conn.execute(purchaseOrdersSql.insertNormal, [
         po_no, Number(mfg_id), sku_code, Number(qty), unitPrice, totalAmount, expected_on || null, destination || null,
+        reason?.trim() || null,
         Number(mfg_id), sku_code,
       ])
       const poId = (poResult as any).insertId
@@ -174,6 +175,7 @@ export const POST = withGateway({
   try {
     const [poResult] = await conn.execute(purchaseOrdersSql.insert, [
       po_no, Number(mfg_id), sku_code, Number(qty), unitPrice, totalAmount, expected_on || null, po_type, destination || null,
+      reason?.trim() || null,
       Number(mfg_id), sku_code,
     ])
     const poId = (poResult as any).insertId

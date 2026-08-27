@@ -19,11 +19,12 @@ import { type MenuAction } from "./PoActionMenu"
 import { poTolerance, SortHead, type SortDir } from "./PoTableCells"
 
 // Columns always present: PO No., Manufacturer, PO Date, Exp. Dispatch, SKU,
-// Recipe, PO Qty, Received, Rate, Amount, Destination, Status, Actions.
+// Recipe, PO Qty, Received, Rate, Amount, Destination, Remarks, Status, Actions.
 // Conditional and counted in below: the checkbox, the expand chevron, the two
 // inwarding-only columns (Invoice No and Invoice Rate) and the two Uniware
-// columns (Code and Status, one flag).
-const BASE_COLUMN_COUNT = 13
+// columns (Code and Status, one flag). Remarks is the one that goes the other
+// way — it drops on the inwarding desk, so `inwardingMode` nets +1, not +2.
+const BASE_COLUMN_COUNT = 14
 
 export default function PoTable({
   rows,
@@ -94,7 +95,7 @@ export default function PoTable({
   // actually expand.
   const hasSplits = rows.some((r) => Number(r.child_count) > 0)
   const columnCount =
-    BASE_COLUMN_COUNT + (selectable ? 1 : 0) + (inwardingMode ? 2 : 0)
+    BASE_COLUMN_COUNT + (selectable ? 1 : 0) + (inwardingMode ? 1 : 0)
     + (showUniwareCode ? 2 : 0) + (hasSplits ? 1 : 0)
 
   // Select-all covers what a checkbox could reach: the unsplit masters on this
@@ -229,6 +230,11 @@ export default function PoTable({
                   {showUniwareCode && <TableHead>Uniware Code</TableHead>}
                   {showUniwareCode && <TableHead>Uniware Status</TableHead>}
                   <TableHead>Destination</TableHead>
+                  {/* FG only. On the inwarding desk every PO is raised by an
+                      invoice, never by someone typing a reason, so the column
+                      would always be "—" — the same reason Invoice No is
+                      inwarding-only above, in reverse. */}
+                  {!inwardingMode && <TableHead>Remarks</TableHead>}
                   <SortHead colKey="status"       {...sh}>Status</SortHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>

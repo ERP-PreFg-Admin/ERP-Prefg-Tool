@@ -150,6 +150,9 @@ export const PO_PROCUREMENT_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "invoice_no",    label: "Invoice No",          type: "text"   },
   { key: "uniware_po_code", label: "Uniware Code",      type: "text"   },
   { key: "destination",   label: "Destination",         type: "text"   },
+  // Same reason as bom_code above: the importer can write this one, so a
+  // downloaded file has to round-trip it instead of blanking it on re-upload.
+  { key: "remarks",       label: "Remarks",             type: "text"   },
   { key: "status",        label: "Status",              type: "text"   },
   { key: "po_type",       label: "PO Type",             type: "text"   },
 ]

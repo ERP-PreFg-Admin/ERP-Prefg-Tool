@@ -23,9 +23,10 @@ const wh = (
   name: string,
   entity_code: string | null,
   facility_code: string | null = null,
-  type: "MWH" | "CWH" = "CWH"
+  type: "MWH" | "CWH" = "CWH",
+  code: string | null = null
 ): WarehouseOption => ({
-  id, name, location: name, zone: "West", type, entity_code, facility_code,
+  id, code, name, location: name, zone: "West", type, entity_code, facility_code,
   // Not used by warehousesForEntity — see invoice-mapping.test.ts for the
   // PIN-code matching these two carry.
   ship_to_pincode: null, bill_to_address: null,
@@ -60,13 +61,25 @@ test("a site with no per-entity row stays selectable for everyone", () => {
   }
 })
 
-test("a null entity does not narrow, and shows no facility code", () => {
+test("a null entity does not narrow, and claims no single facility code", () => {
   // An unattributed SKU. Which entity's facility applies is genuinely unknown, and
-  // a plausible-looking wrong code is worse than none.
+  // a plausible-looking wrong code is worse than none — so the collapsed row's own
+  // facility is cleared...
   const all = warehousesForEntity(OPTIONS, null)
   assert.deepEqual(all.map((w) => w.name), ["Mumbai MWH", "Guwahati CWH", "Kolkata CWH"])
   assert.deepEqual(all.map((w) => w.facility_code), [null, null, null])
   assert.deepEqual(all.map((w) => w.entity_code), [null, null, null])
+
+  // ...and every facility the site has rides along instead, so the label can name
+  // them all rather than the option reading just "Mumbai MWH".
+  assert.deepEqual(all[0].siteFacilities, [
+    { entity_code: "PEP", facility_code: "MUM_PEP" },
+    { entity_code: "KREATIVE", facility_code: "MUM_KRE" },
+  ])
+  // A single-entity site carries its one facility the same way.
+  assert.deepEqual(all[1].siteFacilities, [{ entity_code: "PEP", facility_code: "GHY_PEP" }])
+  // A site with no per-entity row has nothing to carry and is left untouched.
+  assert.equal(all[2].siteFacilities, undefined)
 
   // undefined behaves the same — callers pass `?? null` inconsistently.
   assert.equal(warehousesForEntity(OPTIONS, undefined).length, 3)
@@ -113,6 +126,40 @@ test("the label carries the Uniware facility code", () => {
     warehouseLabel(wh(1, "Mumbai", "PEP", "MUM_PEP", "MWH")),
     "Mumbai (MWH) · MUM_PEP"
   )
+})
+
+test("the site's own short code leads the parens when it is set", () => {
+  // The city alone doesn't say which site it is, and `code` is what people
+  // quote. Both entity rows of one site share it, unlike facility_code.
+  assert.equal(
+    warehouseLabel(wh(1, "Gurgaon", "PEP", "GGN_WAREHOUSE", "MWH", "GGN")),
+    "Gurgaon (GGN, MWH) · GGN_WAREHOUSE"
+  )
+  assert.equal(
+    warehouseLabel(wh(1, "Gurgaon", "KREATIVE", "HYP_B2B_GGN", "MWH", "GGN")),
+    "Gurgaon (GGN, MWH) · HYP_B2B_GGN"
+  )
+  // Optional on the master: an unset code leaves the label exactly as it was,
+  // rather than rendering an empty slot or a stray comma.
+  assert.equal(
+    warehouseLabel(wh(1, "Gurgaon", "PEP", "GGN_WAREHOUSE", "MWH")),
+    "Gurgaon (MWH) · GGN_WAREHOUSE"
+  )
+})
+
+test("with no entity to narrow by, the label names every facility the site has", () => {
+  // The bug this fixes: the option read "Mumbai MWH (MWH)" and said nothing about
+  // where the goods land. Naming one entity's facility would have been a promise
+  // nothing here can make, so both are named and tagged.
+  const [mumbai, guwahati, kolkata] = warehousesForEntity(OPTIONS, null)
+  assert.equal(
+    warehouseLabel(mumbai),
+    "Mumbai MWH (MWH) · PEP MUM_PEP / KREATIVE MUM_KRE"
+  )
+  // A site under one entity reads as the single tagged code, not a bare name.
+  assert.equal(warehouseLabel(guwahati), "Guwahati CWH (CWH) · PEP GHY_PEP")
+  // Nothing configured anywhere for the site — still nothing to say.
+  assert.equal(warehouseLabel(kolkata), "Kolkata CWH (CWH)")
 })
 
 test("a known entity with no facility says so instead of going quiet", () => {

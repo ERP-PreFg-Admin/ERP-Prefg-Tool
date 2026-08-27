@@ -24,7 +24,8 @@ export const poCreateSchema = z
     total_amount: z.union([z.number(), z.string()]).optional().nullable(),
     expected_on: z.string().trim().optional().nullable(),
     destination: z.string().trim().optional().nullable(),
-    reason: z.string().trim().optional().nullable(),
+    // Stored on purchase_orders.remarks — capped to that column's width.
+    reason: z.string().trim().max(300, "Remarks must be 300 characters or fewer.").optional().nullable(),
     po_type: z.enum(["normal", "impromptu"]).optional().default("impromptu"),
   })
   .refine((v) => Number(v.qty) > 0, {

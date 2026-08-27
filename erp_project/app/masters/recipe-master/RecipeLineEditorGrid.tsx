@@ -110,7 +110,7 @@ function LineRowCard({
         </div>
         <p className="w-24 shrink-0 text-sm tabular-nums">{row.amount || "—"}</p>
         <p className="w-20 shrink-0 text-sm uppercase text-muted-foreground">{row.uom || "—"}</p>
-        <span className="w-[26px] shrink-0" />
+        <span className="w-6.5 shrink-0" />
       </div>
     )
   }

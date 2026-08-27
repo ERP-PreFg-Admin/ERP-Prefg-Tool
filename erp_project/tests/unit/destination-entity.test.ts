@@ -18,7 +18,9 @@ import type { WarehouseOption } from "../../app/po-tracking/po-procurement/po-ty
 const wh = (
   id: number, name: string, entity_code: string | null, facility_code: string | null = null
 ): WarehouseOption => ({
-  id, name, location: name, zone: null, type: "CWH", entity_code, facility_code,
+  // `code` is the site's own short code — it labels the dropdown but plays no
+  // part in which entity a destination serves, so it stays null here.
+  id, code: null, name, location: name, zone: null, type: "CWH", entity_code, facility_code,
   // Addresses play no part in destinationAllowed — see invoice-mapping.test.ts
   // for the PIN-code matching they exist for.
   ship_to_pincode: null, bill_to_address: null,

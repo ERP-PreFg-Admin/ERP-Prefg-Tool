@@ -19,11 +19,11 @@ const KRE_BILL_TO = "Unit 7, Sector 44, Gurgaon, Haryana - 122003"
 // One row per (site, entity) — what the live warehouseOptions query returns.
 // Bhiwandi runs under both entities, so its PIN hits two rows sharing one name.
 const WAREHOUSES: WarehouseOption[] = [
-  { id: 1, name: "Bhiwandi MWH", location: "Bhiwandi", zone: "West", type: "MWH", entity_code: "PEP", facility_code: "BHW_PEP", ship_to_pincode: "421302", bill_to_address: PEP_BILL_TO },
-  { id: 1, name: "Bhiwandi MWH", location: "Bhiwandi", zone: "West", type: "MWH", entity_code: "KREATIVE", facility_code: "BHW_KRE", ship_to_pincode: "421302", bill_to_address: KRE_BILL_TO },
-  { id: 2, name: "Guwahati CWH", location: "Guwahati", zone: "East", type: "CWH", entity_code: "PEP", facility_code: "GHY_PEP", ship_to_pincode: "781017", bill_to_address: PEP_BILL_TO },
+  { id: 1, code: "BHW", name: "Bhiwandi MWH", location: "Bhiwandi", zone: "West", type: "MWH", entity_code: "PEP", facility_code: "BHW_PEP", ship_to_pincode: "421302", bill_to_address: PEP_BILL_TO },
+  { id: 1, code: "BHW", name: "Bhiwandi MWH", location: "Bhiwandi", zone: "West", type: "MWH", entity_code: "KREATIVE", facility_code: "BHW_KRE", ship_to_pincode: "421302", bill_to_address: KRE_BILL_TO },
+  { id: 2, code: "GHY", name: "Guwahati CWH", location: "Guwahati", zone: "East", type: "CWH", entity_code: "PEP", facility_code: "GHY_PEP", ship_to_pincode: "781017", bill_to_address: PEP_BILL_TO },
   // CHAR(6) — MySQL pads rather than rejects, so a padded value must still match.
-  { id: 3, name: "Gurgaon CWH", location: "Gurgaon", zone: "North", type: "CWH", entity_code: "PEP", facility_code: "GGN_PEP", ship_to_pincode: "122505 ", bill_to_address: PEP_BILL_TO },
+  { id: 3, code: null, name: "Gurgaon CWH", location: "Gurgaon", zone: "North", type: "CWH", entity_code: "PEP", facility_code: "GGN_PEP", ship_to_pincode: "122505 ", bill_to_address: PEP_BILL_TO },
 ]
 
 test("the PIN comes out of the shapes invoices actually print", () => {

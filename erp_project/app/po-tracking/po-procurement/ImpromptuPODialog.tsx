@@ -58,7 +58,9 @@ export default function ImpromptuPODialog({
           ? new Date(editData.expected_on).toISOString().slice(0, 10)
           : "",
         destination: editData.destination ?? defaultDest,
-        reason: "",
+        // Prefilled, not blank: remarks are mandatory here, so an empty box
+        // meant every re-edit silently overwrote the original reason.
+        reason: editData.remarks ?? "",
       })
     } else {
       setForm({ ...EMPTY_FORM, destination: defaultDest })

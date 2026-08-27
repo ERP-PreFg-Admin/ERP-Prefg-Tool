@@ -66,11 +66,28 @@ export function warehousesForEntity(
   }
   const rows = [...byName.values()]
   if (entityCode) return rows
-  return rows.map((w) => (w.entity_code ? { ...w, entity_code: null, facility_code: null } : w))
+  // Nothing to narrow by, so a two-entity site collapsed to a single option and
+  // the surviving row's facility_code is just whichever came first. Claiming it
+  // would name a destination the goods may never reach — but going silent left
+  // the option reading "Mumbai (MWH)", which says nothing about where it lands.
+  // So the one code is cleared and ALL of the site's facilities ride along for
+  // the label to name, each tagged with whose it is.
+  return rows.map((w) => {
+    if (!w.entity_code) return w
+    const siteFacilities = options
+      .filter((o) => o.name === w.name && o.entity_code)
+      .map((o) => ({ entity_code: o.entity_code as string, facility_code: o.facility_code }))
+    return { ...w, entity_code: null, facility_code: null, siteFacilities }
+  })
 }
 
 /**
- * "Gurgaon (MWH) · GGN_WAREHOUSE"
+ * "Gurgaon (GGN, MWH) · GGN_WAREHOUSE"
+ *
+ * The site's own short code (master_warehouse.code) leads the parens: the city
+ * alone doesn't say which of our sites it is, and the code is what people quote
+ * to each other. It is optional on the warehouse master, so a site without one
+ * simply reads "Gurgaon (MWH) · …" as before rather than showing an empty slot.
  *
  * The facility code is shown because it is what the warehouse and Uniware both
  * key on, and picking the wrong site is otherwise only discovered at inwarding.
@@ -78,16 +95,33 @@ export function warehousesForEntity(
  * rather than left blank — an unset facility breaks the inward flow later, and the
  * dropdown is the last place anyone looks at these together.
  *
+ * With NO entity to narrow by (an unattributed SKU) the site's facilities are
+ * all named, each tagged with whose it is:
+ *
+ *   "Mumbai (MUM, MWH) · PEP MUM_WAREHOUSE2 / KREATIVE HYP_B2B_MUM2"
+ *
+ * — see siteFacilities on WarehouseOption. Showing one of them unlabelled would
+ * read as a promise about where the goods go that nothing here can make.
+ *
  * The zone is deliberately absent. It used to read "Gurgaon — North (MWH)", but
  * `name` is the city, so the zone restated what the city already says and pushed
  * the useful part off the end of a closed <select>. Still on the /masters/warehouses
  * table, where there is room for it and it is a filter.
  */
 export function warehouseLabel(w: WarehouseOption): string {
+  const site = `${w.name} (${w.code ? `${w.code}, ` : ""}${w.type})`
+
+  if (w.siteFacilities?.length) {
+    const all = w.siteFacilities
+      .map((f) => `${f.entity_code} ${f.facility_code ?? "facility not set"}`)
+      .join(" / ")
+    return `${site} · ${all}`
+  }
+
   const facility = w.facility_code
     ? ` · ${w.facility_code}`
     : w.entity_code ? " · facility not set" : ""
-  return `${w.name} (${w.type})${facility}`
+  return `${site}${facility}`
 }
 
 /** Stable React key. `id` repeats across a site's per-entity rows. */
