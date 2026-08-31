@@ -12,7 +12,8 @@ import { TableEmpty } from "@/components/ui/empty-state"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import type { FinalCostingRow, FinalCostingComparisonRow } from "@/types/masters"
 import {
-  CostingHeadRow, CostingCells, DeltaCells, ScenarioLabelRow, bestTotalIndex, COSTING_COL_COUNT,
+  CostingHeadRow, CostingCells, DeltaCells, ScenarioLabelRow, ScenarioHeadRow,
+  bestTotalIndex, COSTING_BASE_COL_COUNT,
 } from "./costing-columns"
 import { rateGapReasons } from "./costing-gaps"
 import type { CostingBreakup } from "./costing-breakup"
@@ -21,8 +22,15 @@ import CostingBreakupPanel from "./CostingBreakupPanel"
 /** The two things a row can expand into. One slot, so they never stack. */
 type Panel = "scenarios" | "breakup"
 
-/** Every cell of this table's rows, including the trailing Actions column. */
-const COL_COUNT = COSTING_COL_COUNT + 1
+/**
+ * Every cell of this table's rows, including the trailing Actions column.
+ *
+ * The three Δ-vs-MRM columns are NOT among them. Every row here is the MRM
+ * baseline the deltas are measured against, so all three read `—`, `—`,
+ * "baseline" — 348px of width carrying no figure. They now live in the scenario
+ * table an expanded row opens, where they have something to say.
+ */
+const COL_COUNT = COSTING_BASE_COL_COUNT + 1
 
 // Why a costing is incomplete, named precisely rather than guessed.
 //
@@ -82,7 +90,7 @@ export default function FinalCostingTable({
         <CardContent className="p-0">
             <Table>
               <TableHeader>
-                <CostingHeadRow actions />
+                <CostingHeadRow actions deltas={false} />
               </TableHeader>
               <TableBody>
                 <ScenarioLabelRow label="Agreed rate — this manufacturer (MRM)" colSpan={COL_COUNT} />
@@ -136,12 +144,6 @@ export default function FinalCostingTable({
                             {r.sku_name ?? "—"}
                           </TableCell>
                           <CostingCells row={r} best={i === best} />
-                          {/* This row IS the baseline the three scenarios measure
-                              against, so its delta cells hold the alignment
-                              rather than carrying a figure. */}
-                          <TableCell className="text-right text-muted-foreground">—</TableCell>
-                          <TableCell className="text-right text-muted-foreground">—</TableCell>
-                          <TableCell className="text-right text-[11px] italic text-muted-foreground">baseline</TableCell>
                           <TableCell>
                             <Button
                               variant="outline"
@@ -154,20 +156,49 @@ export default function FinalCostingTable({
                             </Button>
                           </TableCell>
                         </TableRow>
-                        {/* The Analytics tab's three scenarios for this one SKU.
-                            colSpan 2 + 7 CostingCells + 3 DeltaCells + the empty
-                            Actions cell lines every figure up under the costing
-                            row above. */}
-                        {shown === "scenarios" && scenarios.map((s) => (
-                          <TableRow key={s.label} className="bg-muted/40 hover:bg-muted/40">
-                            <TableCell colSpan={2} className="pl-6 text-[11px] text-muted-foreground">
-                              {s.label}
+                        {/* The Analytics tab's three scenarios for this one SKU,
+                            as their OWN table rather than more rows of this one.
+                            That is what lets the parent drop its three Δ columns:
+                            they only ever carried a figure down here, and inline
+                            rows had to keep three placeholder columns open on
+                            every collapsed row to stay aligned with them.
+
+                            The MRM row is repeated as the first line so the panel
+                            reads on its own — a delta is meaningless without the
+                            baseline it is measured from, and that baseline is now
+                            scrolled off to the left in the parent. */}
+                        {shown === "scenarios" && (
+                          <TableRow className="bg-muted/40 hover:bg-muted/40">
+                            <TableCell colSpan={COL_COUNT} className="px-3 py-2">
+                              <div className="rounded-md border border-border bg-background">
+                                <Table>
+                                  <TableHeader>
+                                    <ScenarioHeadRow />
+                                  </TableHeader>
+                                  <TableBody>
+                                    <TableRow className="hover:bg-transparent">
+                                      <TableCell className="text-[11px] font-medium">
+                                        Agreed rate (MRM)
+                                        <span className="ml-1 font-normal italic text-muted-foreground">baseline</span>
+                                      </TableCell>
+                                      <CostingCells row={r} best={false} />
+                                      <TableCell className="text-right text-muted-foreground">—</TableCell>
+                                      <TableCell className="text-right text-muted-foreground">—</TableCell>
+                                      <TableCell className="text-right text-muted-foreground">—</TableCell>
+                                    </TableRow>
+                                    {scenarios.map((s) => (
+                                      <TableRow key={s.label}>
+                                        <TableCell className="text-[11px] text-muted-foreground">{s.label}</TableCell>
+                                        <CostingCells row={s.rows[i]} best={false} />
+                                        <DeltaCells row={s.rows[i]} />
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </div>
                             </TableCell>
-                            <CostingCells row={s.rows[i]} best={false} />
-                            <DeltaCells row={s.rows[i]} />
-                            <TableCell />
                           </TableRow>
-                        ))}
+                        )}
                         {shown === "breakup" && (
                           <TableRow className="bg-muted/40 hover:bg-muted/40">
                             <TableCell colSpan={COL_COUNT} className="px-3 py-2">

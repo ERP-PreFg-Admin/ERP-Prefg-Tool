@@ -105,7 +105,7 @@ export function withGateway<TBody = unknown, TParams = Record<string, string>>(o
 
       let release = () => {}
       if (opts.rateLimit) {
-        const verdict = acquire(ctx.path, ctx.userId, opts.rateLimit)
+        const verdict = acquire(opts.rateLimit.key ?? ctx.path, ctx.userId, opts.rateLimit)
         if (!verdict.ok) {
           logger.warn({
             ...ctx, reason: verdict.reason, limit: verdict.limit, observed: verdict.observed,

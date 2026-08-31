@@ -37,6 +37,7 @@ export default function PoDataRow({
   menuActions,
   inwardingMode,
   showUniwareCode,
+  showInvoiceColumns,
   selectedPoId,
   onOpenInwarding,
 }: {
@@ -59,6 +60,8 @@ export default function PoDataRow({
   /** PO Inwarding desk: no edit, split, cancel or Receive — see canReceive. */
   inwardingMode: boolean
   showUniwareCode: boolean
+  /** Invoice No + Invoice Rate. Separate from inwardingMode — see PoTable. */
+  showInvoiceColumns: boolean
   selectedPoId: number | null
   onOpenInwarding?: (row: PoRow) => void
 }) {
@@ -223,7 +226,7 @@ export default function PoDataRow({
       <TableCell className="text-xs tabular-nums whitespace-nowrap">{fmtMoney(r.total_amount)}</TableCell>
 
       {/* Inwarding only — see the matching header in PoTable. */}
-      {inwardingMode && (
+      {showInvoiceColumns && (
         <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
           {r.invoice_no ?? "—"}
         </TableCell>
@@ -232,7 +235,7 @@ export default function PoDataRow({
       {/* What the invoice billed, against `unit_price` two columns left. Amber
           when they disagree — this column exists to make that visible, so it
           should not need reading two numbers to notice. */}
-      {inwardingMode && (
+      {showInvoiceColumns && (
         <TableCell className="text-xs tabular-nums whitespace-nowrap">
           {r.invoice_rate == null ? (
             <span className="text-muted-foreground">—</span>

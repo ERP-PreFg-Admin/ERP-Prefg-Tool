@@ -155,9 +155,6 @@ function SplitPurchaseOrderDoc({ d }: { d: PoEmailData }) {
           <Text style={S.refDate}>{fmtDate(d.date)}</Text>
         </View>
         <View style={S.splitOf}>
-          {/* Rendered even when reference_po is somehow null: this template is
-              only ever used for a split, so a missing parent is a data problem
-              worth showing rather than a line to quietly drop. */}
           <Text style={S.splitOfTx}>Split of {d.reference_po ?? "—"}</Text>
         </View>
 

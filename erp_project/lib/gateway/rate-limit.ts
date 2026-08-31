@@ -6,6 +6,12 @@ export type RateLimitRule = {
   concurrency?: number
   /** Max simultaneous in-flight requests for this route, across all users. */
   instanceConcurrency?: number
+  /**Required for any `[id]` route: ctx.path is the CONCRETE pathname, so
+   * /purchase-orders/123/inwarding and /456/inwarding are different buckets and
+   * a caller gets a fresh budget per id. Also lets a family of routes share one
+   * budget — every /export route can hold a single concurrency slot.
+    */
+  key?: string 
 }
 
 // `ok` MUST be the literal `false` / `true`, not `false | true` (which collapses

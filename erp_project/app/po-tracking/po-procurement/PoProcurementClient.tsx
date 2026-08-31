@@ -233,6 +233,19 @@ export default function PoProcurementClient({
   const afterAction = () => router.refresh()
   const activeTab = (currentStatus || "all") as TabKey
 
+  /**
+   * Invoice No, Invoice Rate, Uniware Code and Uniware Status.
+   *
+   * The inwarding desk's Open tab is work still AWAITING goods, so all four
+   * describe a document that does not exist yet — four columns of "—" across the
+   * widest table in the app. They return on every other inwarding tab.
+   *
+   * Deliberately not folded into `inwardingMode`: that flag also removes Receive
+   * and Split, and the desk must not get those back merely because a column was
+   * hidden.
+   */
+  const showInvoiceCols = isInwarding && activeTab !== "open"
+
   return (
     <div className="space-y-4 text-xs [&_th]:h-9 [&_th]:px-3 [&_th]:text-[11px] [&_td]:px-3 [&_td]:py-2">
 
@@ -475,7 +488,8 @@ export default function PoProcurementClient({
             onToggleAll={toggleAll}
             selectable={!isInwarding}
             inwardingMode={isInwarding}
-            showUniwareCode={isInwarding}
+            showUniwareCode={showInvoiceCols}
+            showInvoiceColumns={showInvoiceCols}
             selectedPoId={inwarding.selectedPoId}
             onOpenInwarding={(r) => inwarding.openFor(r.id)}
           />

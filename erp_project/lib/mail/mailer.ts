@@ -595,9 +595,12 @@ export async function sendSplitPoEmail(mfgId: number, line: SelectedPoLine): Pro
       // Omitted when empty rather than sent as "": nodemailer treats a blank Cc as
       // a malformed address and throws.
       ...(cc.length ? { cc: cc.join(", ") } : {}),
-      // The parent PO is in the subject, not just the body — this lands in an
-      // inbox beside the mail for the order it came off.
-      subject: `Split PO — ${line.po_no} (split of ${parent}) — ${mfg.name}`,
+      // The parent PO is deliberately NOT in the subject. It is our internal
+      // numbering, and to the manufacturer this is simply a purchase order to
+      // fulfil — naming an order they were never told about reads as a second
+      // reference they have to reconcile. The body still says which order it is
+      // part of, for anyone who needs it.
+      subject: `Split PO — ${line.po_no} — ${mfg.name}`,
       html: `
         <div style="font-family:sans-serif;max-width:620px;margin:auto;color:#111">
           <h2 style="margin-bottom:4px">Split Purchase Order: ${escapeHtml(line.po_no)}</h2>

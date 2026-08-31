@@ -27,6 +27,10 @@ import logger from "@/lib/logger"
 import type { InwardingHeader, InwardingLine } from "@/app/po-tracking/po-procurement/po-types"
 
 export const GET = withGateway({
+    // SES, one send per manufacturer. concurrency 1 stops a double-click mailing
+  // a manufacturer twice — email_sent_at's IS NULL guard makes the stamp safe,
+  // but the mail itself has already gone out by then.
+  rateLimit: { limit: 10, windowMs: 10 * 60_000, concurrency: 1 },
   paramsSchema: poIdParamSchema,
   access: { pageSlug: "/po-tracking", level: "viewer" },
   handler: async ({ params, session, ctx }) => {

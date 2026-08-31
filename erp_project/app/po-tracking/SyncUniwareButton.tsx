@@ -1,6 +1,12 @@
 "use client"
 
-// One button that refreshes every mirrored PO's Uniware status.
+// One button that refreshes every mirrored PO's Uniware status AND pulls the
+// goods receipts booked against the ones that have any.
+//
+// Both in one press on purpose: the status pass learns inflowReceiptsCount for
+// free from the call it already makes, so the receipts cost nothing to find and
+// only the POs that have them are walked. Two buttons pressed in the wrong
+// order is how "0 rejected" comes to mean "nobody synced".
 //
 // Deliberately not per row: the status of one PO is worth nothing on its own —
 // the desk's question is "which of these has Uniware actually approved", and that

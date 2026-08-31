@@ -31,7 +31,11 @@ type FormState = {
 const EMPTY_FORM: FormState = {
   recipe_ids: [],
   status: "active",
-  effective_from: new Date().toISOString().slice(0, 10),
+  // Empty, NOT today. Seeding it made the range control read "27 Aug 2026 →
+  // Ongoing" before anyone touched it, so a date that nobody chose looked
+  // chosen — and any selection that failed to commit fell back to it invisibly.
+  // Empty shows the placeholder instead, and handleSubmit refuses to send it.
+  effective_from: "",
   effective_to: "",
   monthly_capacity: "",
   this_month_plan: "",
@@ -99,6 +103,9 @@ export default function LineDialog({
 
   async function handleSubmit() {
     if (!editData && form.recipe_ids.length === 0) { toast({ title: "Select at least one SKU / Recipe.", variant: "error" }); return }
+    // createMfgLineSchema requires it, and the form no longer defaults it to
+    // today — so say so here rather than letting the API 400.
+    if (!editData && !form.effective_from) { toast({ title: "Select an effective period.", variant: "error" }); return }
 
     setSubmitting(true)
     try {
@@ -134,9 +141,9 @@ export default function LineDialog({
             status: form.status,
             effective_from: form.effective_from,
             effective_to: form.effective_to || null,
-            monthly_capacity: form.monthly_capacity ? Number(form.monthly_capacity) : null,
-            this_month_plan: form.this_month_plan ? Number(form.this_month_plan) : null,
-            last_batch_date: form.last_batch_date || null,
+            // No capacity / plan / last_batch_date: those inputs are edit-only
+            // now, so there is nothing to send. The schema has them optional
+            // and the column default is NULL, which is what they were anyway.
             remarks: form.remarks.trim() || null,
           })
           if (!res.ok) failed.push(label)
@@ -257,33 +264,42 @@ export default function LineDialog({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="ml-capacity">Monthly Capacity</Label>
-              {/* step 1: the schema coerces to an int, so a decimal is rejected
-                  server-side rather than rounded. */}
-              <Input
-                id="ml-capacity" type="number" min={0} step="1" placeholder="e.g. 50000"
-                value={form.monthly_capacity} onChange={(e) => set("monthly_capacity", e.target.value)}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="ml-plan">This Month&apos;s Plan</Label>
-              <Input
-                id="ml-plan" type="number" min={0} step="1" placeholder="e.g. 12000"
-                value={form.this_month_plan} onChange={(e) => set("this_month_plan", e.target.value)}
-              />
-            </div>
-          </div>
+          {/* Monthly Capacity, This Month's Plan and Last Batch Date are
+              EDIT-ONLY. Adding a line is "this manufacturer makes this SKU" —
+              the planning numbers are not known then and were never filled: all
+              61 live lines have NULL in every one of the three. The columns and
+              the API still carry them, so an existing line can still be edited. */}
+          {editData && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ml-capacity">Monthly Capacity</Label>
+                  {/* step 1: the schema coerces to an int, so a decimal is rejected
+                      server-side rather than rounded. */}
+                  <Input
+                    id="ml-capacity" type="number" min={0} step="1" placeholder="e.g. 50000"
+                    value={form.monthly_capacity} onChange={(e) => set("monthly_capacity", e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ml-plan">This Month&apos;s Plan</Label>
+                  <Input
+                    id="ml-plan" type="number" min={0} step="1" placeholder="e.g. 12000"
+                    value={form.this_month_plan} onChange={(e) => set("this_month_plan", e.target.value)}
+                  />
+                </div>
+              </div>
 
-          <div className="grid gap-1.5">
-            <Label>Last Batch Date</Label>
-            <DatePicker
-              value={form.last_batch_date}
-              onChange={(v) => set("last_batch_date", v)}
-              placeholder="Not produced yet"
-            />
-          </div>
+              <div className="grid gap-1.5">
+                <Label>Last Batch Date</Label>
+                <DatePicker
+                  value={form.last_batch_date}
+                  onChange={(v) => set("last_batch_date", v)}
+                  placeholder="Not produced yet"
+                />
+              </div>
+            </>
+          )}
 
           <div className="grid gap-1.5">
             <Label htmlFor="ml-status">Status</Label>

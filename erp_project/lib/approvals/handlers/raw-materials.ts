@@ -7,15 +7,14 @@ import { vendors as vendorSql } from "@/lib/queries/vendors"
 import { manufacturers as mfgSql } from "@/lib/queries/manufacturers"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { normalizeDateCell, todayIST } from "@/lib/date"
-import { parseS3Import } from "@/lib/import-s3"
 import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
-import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import { STATUS } from "@/lib/constants"
 import { roundToWholeNumber, roundToTwoDecimals } from "@/lib/numeric"
 import { toRmParams } from "@/lib/master-routes/material-utils"
 import { insertHistoryEntry } from "@/lib/master-routes/history-utils"
 import { findEditMatchForRow } from "@/lib/master-routes/edit-match"
-import { type ModuleHandler, buildFieldMap, s3KeyOf, supersededOn } from "./types"
+import { type ModuleHandler, buildFieldMap, supersededOn } from "./types"
+import { bulkHandler } from "./bulk-envelope"
 
 export const rmRateHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
@@ -29,11 +28,6 @@ export const rmRateHandler: ModuleHandler = {
 
     await conn.execute(rmSql.archiveToHistoryMrm, [
       cur.mfg_id, cur.rm_id, cur.approved_vendor_id ?? 0,
-      // effective_to closes the archived row's validity window: the outgoing rate
-      // applied until the incoming one starts. cost_master_rm_mfg has no effective_to
-      // column of its own, so it has to be derived here — passing null left every
-      // archived manufacturer rate open-ended, so two superseded rates looked as
-      // though they applied simultaneously.
       cur.curr_rate, cur.effective_from, supersededOn(fieldMap.effective_from),
       cur.status === STATUS.ACTIVE ? 1 : 0,
       fieldMap.remarks || null, raisedBy ?? null,
@@ -98,62 +92,32 @@ export const rmMatHandler: ModuleHandler = {
   },
 }
 
-// Same shape as every other *_BULK handler: one approval per whole uploaded
-// batch, no separate entity table to update on reject, and the real insert
-// happens here — at approve time — instead of when the file was first
-// uploaded (see stageBulkUploadApproval in lib/master-routes/bulk-approval.ts
-// for the write side). Rows are inserted directly as 'active' since this
-// insert IS the approval being applied, not a new one being raised. Only
-// ever contains NEW-record rows — edits are split out and submitted as
-// their own real RM_MAT approval at staging time (see rm-handler.ts's
-// rmBulk/rmS3Bulk + submitRmBulkEdit below).
-export const rmBulkHandler: ModuleHandler = {
-  async setStatus() {
-    // No entity exists before approval — nothing to roll back on reject.
-  },
-  async applyAndArchive(conn, _entityId, items, approverId) {
-    const s3Key = s3KeyOf(items, "RM_BULK")
-    const rows = await parseS3Import(s3Key)
-    if (rows.length === 0) throw new Error("RM_BULK: file has no data rows")
+export const rmBulkHandler = bulkHandler("RM_BULK", {
+  prepare: resolveRmBulkRows,
+  applyRow: async (r, { conn, approverId }) => {
+    if (r.action !== "create") return "skipped"
 
-    const eventId = makeEventId("RM_BULK", "apply")
-    let inserted = 0, skipped = 0
+    const { row } = r
     try {
-      const resolved = await resolveRmBulkRows(conn, rows)
-      for (const r of resolved) {
-        // The staged file only ever contains new-record rows (see
-        // rm-handler.ts). A row resolving to "edit" here means it started
-        // matching an existing record only AFTER staging — nobody reviewed
-        // it as an edit, so skip it rather than silently applying an
-        // unreviewed change.
-        if (r.action !== "create") { skipped++; continue }
-
-        const { row } = r
-        try {
-          const [rmResult] = await conn.execute(rmSql.insert, await toRmParams(conn, {
-            rm_code: row.rm_code, name: row.name, make: row.make, type: row.type,
-            uom: row.uom, hsn_code: row.hsn_code, inci_name: row.inci_name,
-          }, STATUS.ACTIVE))
-          const rmId = (rmResult as ResultSetHeader).insertId
-          await insertHistoryEntry(conn, {
-            module: "RM_MAT",
-            entityId: rmId,
-            actionType: "create",
-            remarks: row.remarks?.trim() || null,
-            createdBy: approverId,
-          })
-          inserted++
-        } catch (err: any) {
-          if (err.code === "ER_DUP_ENTRY") { skipped++ } else { throw err }
-        }
-      }
-      recordProcessedEvent("RM_BULK", eventId, { s3Key, inserted, skipped })
+      const [rmResult] = await conn.execute(rmSql.insert, await toRmParams(conn, {
+        rm_code: row.rm_code, name: row.name, make: row.make, type: row.type,
+        uom: row.uom, hsn_code: row.hsn_code, inci_name: row.inci_name,
+      }, STATUS.ACTIVE))
+      const rmId = (rmResult as ResultSetHeader).insertId
+      await insertHistoryEntry(conn, {
+        module: "RM_MAT",
+        entityId: rmId,
+        actionType: "create",
+        remarks: row.remarks?.trim() || null,
+        createdBy: approverId,
+      })
+      return "inserted"
     } catch (err: any) {
-      recordFailedEvent("RM_BULK", eventId, { s3Key }, err.message)
+      if (err.code === "ER_DUP_ENTRY") return "skipped"
       throw err
     }
   },
-}
+})
 
 type RmCandidateRow = {
   id: number; code: string; name: string; make: string | null; type: string | null
@@ -292,116 +256,76 @@ export async function stageRmBulkRows(
 // The preview-time check (raw-materials/vrm-bulk/route.ts's check_duplicates
 // action) runs the SAME resolution checks so a bad row is caught before
 // submission, not silently dropped here.
-export const rmVrmBulkHandler: ModuleHandler = {
-  async setStatus() {
-    // No entity exists before approval — nothing to roll back on reject.
-  },
-  async applyAndArchive(conn, _entityId, items) {
-    const s3Key = s3KeyOf(items, "RM_VRM_BULK")
-    const rows = await parseS3Import(s3Key)
-    if (rows.length === 0) throw new Error("RM_VRM_BULK: file has no data rows")
-
-    const eventId = makeEventId("RM_VRM_BULK", "apply")
-    let inserted = 0, skipped = 0
-    try {
-      for (const row of rows) {
-        const rmCode = row.rm_code?.trim()
-        const vendorCode = row.vendor_code?.trim()
-        const currRate = Number(row.curr_rate)
-        const moq = Number(row.moq)
-        if (!rmCode || !vendorCode || !Number.isFinite(currRate) || currRate <= 0
-          || !Number.isFinite(moq) || moq <= 0) {
-          skipped++; continue
-        }
-
-        const [rmRows] = await conn.execute(rmSql.selectByCode, [rmCode])
-        const rm = (rmRows as any[])[0]
-        if (!rm) { skipped++; continue }
-
-        const [vRows] = await conn.execute(vendorSql.selectByCode, [vendorCode])
-        const vendor = (vRows as any[])[0]
-        if (!vendor) { skipped++; continue }
-
-        let mfgId: number | null = null
-        if (row.mfg_code?.trim()) {
-          const [mRows] = await conn.execute(mfgSql.selectByCode, [row.mfg_code.trim()])
-          mfgId = (mRows as any[])[0]?.id ?? null
-        }
-
-        await conn.execute(rmSql.insertVendorRate, [
-          rm.id, vendor.id, vendorCode,
-          roundToTwoDecimals(currRate), roundToWholeNumber(moq),
-          row.uom?.trim() || null,
-          // Optional: a blank date means the rate applies from now. Rows staged
-
-          // before the upload-time stamp was added can still arrive blank.
-
-          normalizeDateCell(row.effective_from) || todayIST(), normalizeDateCell(row.effective_to) || null,
-          STATUS.ACTIVE, mfgId,
-        ])
-        inserted++
-      }
-      recordProcessedEvent("RM_VRM_BULK", eventId, { s3Key, inserted, skipped })
-    } catch (err: any) {
-      recordFailedEvent("RM_VRM_BULK", eventId, { s3Key }, err.message)
-      throw err
+export const rmVrmBulkHandler = bulkHandler("RM_VRM_BULK", {
+  applyRow: async (row, { conn }) => {
+    const rmCode = row.rm_code?.trim()
+    const vendorCode = row.vendor_code?.trim()
+    const currRate = Number(row.curr_rate)
+    const moq = Number(row.moq)
+    if (!rmCode || !vendorCode || !Number.isFinite(currRate) || currRate <= 0
+      || !Number.isFinite(moq) || moq <= 0) {
+      return "skipped"
     }
+
+    const [rmRows] = await conn.execute(rmSql.selectByCode, [rmCode])
+    const rm = (rmRows as any[])[0]
+    if (!rm) return "skipped"
+
+    const [vRows] = await conn.execute(vendorSql.selectByCode, [vendorCode])
+    const vendor = (vRows as any[])[0]
+    if (!vendor) return "skipped"
+
+    let mfgId: number | null = null
+    if (row.mfg_code?.trim()) {
+      const [mRows] = await conn.execute(mfgSql.selectByCode, [row.mfg_code.trim()])
+      mfgId = (mRows as any[])[0]?.id ?? null
+    }
+
+    await conn.execute(rmSql.insertVendorRate, [
+      rm.id, vendor.id, vendorCode,
+      roundToTwoDecimals(currRate), roundToWholeNumber(moq),
+      row.uom?.trim() || null,
+      // Optional: a blank date means the rate applies from now. Rows staged
+      // before the upload-time stamp was added can still arrive blank.
+      normalizeDateCell(row.effective_from) || todayIST(), normalizeDateCell(row.effective_to) || null,
+      STATUS.ACTIVE, mfgId,
+    ])
+    return "inserted"
   },
-}
+})
 
 // Bulk RM × Manufacturer rate upload — one CSV row = one cost_master_rm_mfg row.
 // approved_vendor_code is optional (mirrors the single-row add-rates flow).
-export const rmRateBulkHandler: ModuleHandler = {
-  async setStatus() {
-    // No entity exists before approval — nothing to roll back on reject.
-  },
-  async applyAndArchive(conn, _entityId, items) {
-    const s3Key = s3KeyOf(items, "RM_RATE_BULK")
-    const rows = await parseS3Import(s3Key)
-    if (rows.length === 0) throw new Error("RM_RATE_BULK: file has no data rows")
+export const rmRateBulkHandler = bulkHandler("RM_RATE_BULK", {
+  applyRow: async (row, { conn }) => {
+    const rmCode = row.rm_code?.trim()
+    const mfgCode = row.mfg_code?.trim()
+    const currRate = Number(row.curr_rate)
+    if (!rmCode || !mfgCode || !Number.isFinite(currRate) || currRate <= 0) return "skipped"
 
-    const eventId = makeEventId("RM_RATE_BULK", "apply")
-    let inserted = 0, skipped = 0
-    try {
-      for (const row of rows) {
-        const rmCode = row.rm_code?.trim()
-        const mfgCode = row.mfg_code?.trim()
-        const currRate = Number(row.curr_rate)
-        if (!rmCode || !mfgCode || !Number.isFinite(currRate) || currRate <= 0) {
-          skipped++; continue
-        }
+    const [rmRows] = await conn.execute(rmSql.selectByCode, [rmCode])
+    const rm = (rmRows as any[])[0]
+    if (!rm) return "skipped"
 
-        const [rmRows] = await conn.execute(rmSql.selectByCode, [rmCode])
-        const rm = (rmRows as any[])[0]
-        if (!rm) { skipped++; continue }
+    const [mRows] = await conn.execute(mfgSql.selectByCode, [mfgCode])
+    const mfg = (mRows as any[])[0]
+    if (!mfg) return "skipped"
 
-        const [mRows] = await conn.execute(mfgSql.selectByCode, [mfgCode])
-        const mfg = (mRows as any[])[0]
-        if (!mfg) { skipped++; continue }
-
-        let approvedVendorId: number | null = null
-        const approvedVendorCode = row.approved_vendor_code?.trim() || null
-        if (approvedVendorCode) {
-          const [vRows] = await conn.execute(vendorSql.selectByCode, [approvedVendorCode])
-          approvedVendorId = (vRows as any[])[0]?.id ?? null
-        }
-
-        await conn.execute(rmSql.insertMfgRate, [
-          rm.id, mfg.id, mfgCode,
-          roundToTwoDecimals(currRate), row.uom?.trim() || null,
-          approvedVendorId, approvedVendorCode,
-          // Optional: a blank date means the rate applies from now. Rows staged
-
-          // before the upload-time stamp was added can still arrive blank.
-
-          normalizeDateCell(row.effective_from) || todayIST(), STATUS.ACTIVE,
-        ])
-        inserted++
-      }
-      recordProcessedEvent("RM_RATE_BULK", eventId, { s3Key, inserted, skipped })
-    } catch (err: any) {
-      recordFailedEvent("RM_RATE_BULK", eventId, { s3Key }, err.message)
-      throw err
+    let approvedVendorId: number | null = null
+    const approvedVendorCode = row.approved_vendor_code?.trim() || null
+    if (approvedVendorCode) {
+      const [vRows] = await conn.execute(vendorSql.selectByCode, [approvedVendorCode])
+      approvedVendorId = (vRows as any[])[0]?.id ?? null
     }
+
+    await conn.execute(rmSql.insertMfgRate, [
+      rm.id, mfg.id, mfgCode,
+      roundToTwoDecimals(currRate), row.uom?.trim() || null,
+      approvedVendorId, approvedVendorCode,
+      // Optional: a blank date means the rate applies from now. Rows staged
+      // before the upload-time stamp was added can still arrive blank.
+      normalizeDateCell(row.effective_from) || todayIST(), STATUS.ACTIVE,
+    ])
+    return "inserted"
   },
-}
+})

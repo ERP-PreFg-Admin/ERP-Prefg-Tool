@@ -10,14 +10,19 @@ export { createPurchaseOrder, fetchPurchaseOrderPdf, fetchPurchaseOrderStatus, p
 export type { UniwarePushResult } from "./purchase-order"
 
 export {
-  EXPORT_COLUMNS_KEY, VENDOR_ITEM_EXPORT, VENDOR_ITEM_COLUMNS,
+  EXPORT_COLUMNS_KEY, VENDOR_ITEM_EXPORT, VENDOR_ITEM_COLUMNS, SALE_ORDER_EXPORT,
   isFatalExportError, UniwareFatalError,
   createExportJob, getExportJobStatus, classifyJobStatus, pollExportJob, downloadExportCsv,
 } from "./export-jobs"
-export type { ExportJobStatus } from "./export-jobs"
+export type { ExportJobStatus, ExportFilter } from "./export-jobs"
 
 export { createVendorItem } from "./vendor-items"
 export type { UniwareVendorItemInput } from "./vendor-items"
+
+export { fetchInflowReceiptCodes, fetchInflowReceipt, fetchGrnsForPo } from "./grn"
+export type { Grn, GrnItem } from "./grn-map"
+export { grnTotalsByPo, reconcile, rejectedAmount } from "./grn-totals"
+export type { PoGrnTotals, Reconciliation, GrnTotalRow } from "./grn-totals"
 
 // ./errors is deliberately NOT re-exported here.
 //

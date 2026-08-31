@@ -66,6 +66,15 @@ model purchase_orders {
   total_amount   Decimal?                @db.Decimal(14, 4)
   expected_on    DateTime?               @db.Date
   received_qty   Decimal?                @default(0.000) @db.Decimal(12, 3)
+  /// Unicommerce's own numbers for this PO line, mirrored by the Uniware sync.
+  /// THEIRS, not ours — received_qty above is what the invoice claimed at inward
+  /// time, these are what the warehouse's system says. They will disagree, and
+  /// the disagreement is the point: never derive one from the other.
+  /// NULL = never asked; un_line_synced_at is what separates that from a real 0.
+  /// See prisma/add_po_uniware_line_qty.sql.
+  un_pending_qty    Decimal?             @db.Decimal(12, 3)
+  un_qc_pass_qty    Decimal?             @db.Decimal(12, 3)
+  un_line_synced_at DateTime?            @db.DateTime(0)
   invoice_no     String?                 @db.VarChar(100)
   /// The Unicommerce PO this row was mirrored into. Shared by every inward PO
   /// off the same invoice — Uniware's model is one PO for all SKUs.
@@ -148,6 +157,12 @@ model supplier_invoices {
   /// See prisma/add_invoice_uniware_status.sql.
   uniware_status    String?                @db.VarChar(40)
   uniware_synced_at DateTime?              @db.DateTime(0)
+  /// inflowReceiptsCount as of the last status sync — how many GRNs Uniware
+  /// holds against this PO. Stored because getPurchaseOrderDetails already
+  /// returns it, so it costs no extra call and lets the GRN sweep walk only the
+  /// invoices that have receipts. NULL = never asked, 0 = nothing received yet.
+  uniware_grn_count Int?
+  grns              grn_uniware[]
   created_by      Int?
   created_at      DateTime                 @default(now()) @db.DateTime(0)
   mfgs            master_mfgs              @relation(fields: [mfg_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_supplier_invoices_mfg")
@@ -1316,4 +1331,61 @@ enum rm_mrm_fixed_status {
   in_review
   draft
   rejected
+}
+
+/// Read-only mirror of a Unicommerce inflow receipt (GRN) against a PO we
+/// mirrored there. NOTHING in the sync path writes to purchase_orders:
+/// received_qty is what the invoice claimed, this is what the warehouse
+/// accepted, and the disagreement between them is the point.
+/// See prisma/add_uniware_grn.sql.
+model grn_uniware {
+  id                 Int         @id @default(autoincrement())
+  /// inflowReceiptCode — Uniware's own identifier for the receipt.
+  grn_code           String      @unique(map: "uq_grn_code") @db.VarChar(64)
+  /// The mirrored PO this receipt is against.
+  uniware_po_code    String      @db.VarChar(64)
+  /// Resolved from uniware_po_code. NULL = a receipt against a PO we did not mirror.
+  invoice_id         Int?
+  facility_code      String?     @db.VarChar(50)
+  status_code        String?     @db.VarChar(40)
+  /// The manufacturer's invoice number as the warehouse keyed it.
+  vendor_invoice_no  String?     @db.VarChar(100)
+  /// Uniware's `created` is epoch MILLISECONDS, not ISO — divided by 1000 at ingest.
+  grn_created_at     DateTime?   @db.DateTime(0)
+  total_qty          Decimal     @default(0) @db.Decimal(12, 3)
+  total_rejected_qty Decimal     @default(0) @db.Decimal(12, 3)
+  synced_at          DateTime    @default(now()) @db.DateTime(0)
+  /// The payload verbatim, while the response shape is still being learned.
+  raw                Json?
+  invoice            supplier_invoices?  @relation(fields: [invoice_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_grn_invoice")
+  items              grn_items_uniware[]
+
+  @@index([uniware_po_code], map: "idx_grn_po_code")
+  @@index([invoice_id], map: "idx_grn_invoice")
+}
+
+/// One line of a GRN. `quantity` is the ACCEPTED quantity, `rejected_qty` beside
+/// it is the bad one — together they are the good/bad split the ERP reports.
+model grn_items_uniware {
+  id           Int      @id @default(autoincrement())
+  grn_id       Int
+  line_no      Int
+  sku_code     String?  @db.VarChar(50)
+  /// OUR inward PO for this (uniware_po_code, sku_code). Resolvable 1:1 only
+  /// because mergeInwardLinesBySku raises one inward PO per SKU. NULL means the
+  /// warehouse received a SKU we never raised — a finding, not a dropped row.
+  po_id        Int?
+  quantity     Decimal  @default(0) @db.Decimal(12, 3)
+  rejected_qty Decimal  @default(0) @db.Decimal(12, 3)
+  batch_code   String?  @db.VarChar(100)
+  /// VARCHAR for the same reason invoice_items_mfg.expiry is: what the document
+  /// said, not something we derive.
+  expiry       String?  @db.VarChar(20)
+  mfg_date     String?  @db.VarChar(20)
+  grn          grn_uniware      @relation(fields: [grn_id], references: [id], onDelete: Cascade, map: "fk_grn_item_grn")
+  purchase_order purchase_orders? @relation(fields: [po_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_grn_item_po")
+
+  @@unique([grn_id, line_no], map: "uq_grn_line")
+  @@index([sku_code], map: "idx_grn_item_sku")
+  @@index([po_id], map: "idx_grn_item_po")
 }

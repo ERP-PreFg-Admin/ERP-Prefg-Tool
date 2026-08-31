@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Database, Factory, CalendarDays,
   Activity, DollarSign, CheckSquare, BarChart2,
   Settings, ChevronLeft, ChevronRight, ChevronDown, LogOut,
-  Package, Truck, FlaskConical, Box, Lock, Sun, Moon, Bug, ExternalLink
+  Package, Truck, FlaskConical, Box, Lock, Sun, Moon, Bug, ExternalLink, Boxes
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/components/ThemeProvider"
@@ -22,6 +22,17 @@ type NavItem = {
   href?: string
   icon: React.ElementType
   children?: NavChild[]
+  /**
+   * Absent from the sidebar entirely when the user has no access, instead of
+   * rendered locked.
+   *
+   * The default is to lock rather than hide, so a missing screen has a visible
+   * explanation and people can ask for it. Set this only where the LABEL ITSELF
+   * is the thing being withheld — the same reasoning app/layout.tsx gives for
+   * out-of-scope manufacturers, which are "absent from the sidebar entirely, not
+   * locked — the lock icon would still disclose the name".
+   */
+  hideWhenLocked?: boolean
 }
 
 /** Where "Issues" goes. Swap this one line if the form is ever replaced. */
@@ -53,6 +64,11 @@ const NAV: NavItem[] = [
       { label: "Invoices",          href: "/po-tracking/invoices" },
     ],
   },
+  { label: "GatePass", href: "/gatepass", icon: Truck },
+  // Developer-only, and HIDDEN rather than locked: only 'developer' holds a
+  // /uniware row, and everyone else has no business knowing the screen exists.
+  // See prisma/add_uniware_explorer_page.sql.
+  { label: "Uniware Explorer", href: "/uniware", icon: Boxes, hideWhenLocked: true },
   {
     label: "Approvals", href: "/approvals", icon: CheckSquare,
   },
@@ -155,16 +171,26 @@ export default function Sidebar({ user, mfgs = [], access }: SidebarProps) {
   // section open/close) — otherwise every <Link> below gets a "new" element
   // each render and Next's viewport-prefetch observer refires for all of
   // them, doubling every sidebar link's prefetch request.
-  const nav: NavItem[] = useMemo(() => [
-    NAV[0], NAV[1],
-    {
-      label: "MFG Cost Manager", icon: Factory,
-      children: [
-        ...mfgs.map(m => ({ label: m.name, href: `/manufacturing/${m.id}` })),
-      ],
-    },
-    ...NAV.slice(2),
-  ], [mfgs])
+  const nav: NavItem[] = useMemo(() => {
+    const items: NavItem[] = [
+      NAV[0], NAV[1],
+      {
+        label: "MFG Cost Manager", icon: Factory,
+        children: [
+          ...mfgs.map(m => ({ label: m.name, href: `/manufacturing/${m.id}` })),
+        ],
+      },
+      ...NAV.slice(2),
+    ]
+    // Dropped before render, not styled away: a hidden item must not reach the
+    // DOM at all, or its label is still there for anyone who opens devtools.
+    // `access` is resolved server-side (app/layout.tsx), so this filter runs on
+    // an answer the client never gets to influence — and the page and both API
+    // routes refuse independently, so this is the courtesy, not the boundary.
+    return items.filter(
+      item => !(item.hideWhenLocked && access?.[item.href ?? ""] === "none")
+    )
+  }, [mfgs, access])
 
   const toggleSection = (label: string) =>
     setOpenSections(prev =>

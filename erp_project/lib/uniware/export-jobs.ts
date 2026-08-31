@@ -24,10 +24,23 @@ export class UniwareFatalError extends Error {}
 
 
 
+/** The report the GatePass summary pulls. Named exactly as Uniware lists it. */
+export const SALE_ORDER_EXPORT = "Sale Orders"
+
+/**
+ * One `exportFilters` entry. Uniware's filter ids are per report — `invoicedOn`
+ * on Sale Orders — and the value shape varies by id, so this stays open rather
+ * than pretending to model a union we only know one member of.
+ */
+export type ExportFilter = { id: string; dateRange?: { start: number; end: number } }
+
 export async function createExportJob(
-    facility : string , 
-    jobTypeName = VENDOR_ITEM_EXPORT , 
-    columns: string[] = VENDOR_ITEM_COLUMNS
+    facility : string ,
+    jobTypeName = VENDOR_ITEM_EXPORT ,
+    columns: string[] = VENDOR_ITEM_COLUMNS,
+    // Empty means "the whole report", which is what the Vendor Item Master sync
+    // wants. Sale Orders is unbounded without a date filter, so its caller passes one.
+    filters: ExportFilter[] = [],
 ) : Promise<string> {
     if(!facility) throw new Error("An export job needs a facility — it is what scopes the report.")
     const  token = await getToken()
@@ -45,7 +58,7 @@ export async function createExportJob(
         body: JSON.stringify({
             exportJobTypeName : jobTypeName,
             [EXPORT_COLUMNS_KEY]: columns,
-            exportFilters :[],
+            exportFilters : filters,
             frequency: "ONETIME"
         }),
         signal : AbortSignal.timeout(TIMEOUT_MS)

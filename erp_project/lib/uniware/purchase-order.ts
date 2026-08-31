@@ -79,13 +79,37 @@ export async function fetchPurchaseOrderPdf(code: string , facility ? : string) 
 }
 
 
-export async function fetchPurchaseOrderStatus(code : string , facility?: string) : Promise<string> {
+/** One PO line's quantities as Unicommerce reports them, keyed by SKU. */
+export type UniwarePoLineQty = {
+    sku: string
+    pendingQty: number
+    qcPassQty: number
+}
+
+/**
+ * What Uniware currently says about one mirrored PO.
+ *
+ * Returns the GRN count and the per-line quantities alongside the status,
+ * because the SAME call already carries all three — getPurchaseOrderDetails
+ * answers with `inflowReceiptsCount` and `purchaseOrderItems[]` beside
+ * `statusCode` (this response is FLAT, unlike getInflowReceipt next door).
+ *
+ * That is what makes both cheap. The GRN sweep is 1+N calls per PO, so knowing
+ * which POs have receipts at all costs nothing here; and pending/QC-pass, which
+ * have no local equivalent, arrive without a second request. See
+ * lib/uniware/grn-sync.ts and prisma/add_po_uniware_line_qty.sql.
+ *
+ * grnCount 0 means nothing has been received yet, however approved the PO looks.
+ */
+export async function fetchPurchaseOrderStatus(
+    code : string , facility?: string
+) : Promise<{ status: string; grnCount: number; lines: UniwarePoLineQty[] }> {
     const token = await getToken()
 
     const res = await fetch(`${BASE}${PO_DETAILS_PATH}` , {
-        method : "POST" , 
+        method : "POST" ,
         headers : {
-            ...authHeaders(token , facility) , 
+            ...authHeaders(token , facility) ,
             "Content-Type" : "application/json"
         },
         body: JSON.stringify({purchaseOrderCode : code}),
@@ -93,8 +117,14 @@ export async function fetchPurchaseOrderStatus(code : string , facility?: string
     })
 
     const data = (await res.json().catch(() => ({}))) as {
-        successful?: boolean 
-        statusCode?: string 
+        successful?: boolean
+        statusCode?: string
+        inflowReceiptsCount?: number
+        purchaseOrderItems?: {
+            itemSKU?: string
+            pendingQuantity?: number
+            qcPassQuantity?: number
+        }[]
         errors?:{
             description?: string;
             message?: string
@@ -108,7 +138,29 @@ export async function fetchPurchaseOrderStatus(code : string , facility?: string
     }
     if(!data.statusCode) throw new Error(`Uniware returned no statusCode for ${code}`)
 
-    return data.statusCode
+    // Coerced rather than required: unlike the GRN payload's quantities, a
+    // missing count here is safely read as "none" — the sweep simply skips the
+    // PO, and the next status sync will pick it up if that was wrong.
+    const grnCount = Number(data.inflowReceiptsCount ?? 0)
+
+    const num = (v: unknown) => {
+        const n = Number(v ?? 0)
+        return Number.isFinite(n) ? n : 0
+    }
+
+    // Lines WITHOUT a SKU are dropped rather than kept with a blank key: the SKU
+    // is the only thing that maps a Uniware line to one of our inward POs, so a
+    // line without one can be stored nowhere. `itemSKU` is confirmed live on PO
+    // items (unlike on receipt items — see grn-map.ts).
+    const lines: UniwarePoLineQty[] = (data.purchaseOrderItems ?? [])
+        .filter((i) => typeof i.itemSKU === "string" && i.itemSKU.trim() !== "")
+        .map((i) => ({
+            sku: (i.itemSKU as string).trim(),
+            pendingQty: num(i.pendingQuantity),
+            qcPassQty: num(i.qcPassQuantity),
+        }))
+
+    return { status: data.statusCode, grnCount: Number.isFinite(grnCount) ? grnCount : 0, lines }
 }
 
 export type UniwarePushResult = {

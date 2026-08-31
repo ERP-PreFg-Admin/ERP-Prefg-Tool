@@ -7,15 +7,14 @@ import { vendors as vendorSql } from "@/lib/queries/vendors"
 import { manufacturers as mfgSql } from "@/lib/queries/manufacturers"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { normalizeDateCell, todayIST } from "@/lib/date"
-import { parseS3Import } from "@/lib/import-s3"
 import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
-import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import { STATUS } from "@/lib/constants"
 import { roundToWholeNumber, roundToTwoDecimals } from "@/lib/numeric"
 import { toPmParams } from "@/lib/master-routes/material-utils"
 import { insertHistoryEntry } from "@/lib/master-routes/history-utils"
 import { findEditMatchForRow } from "@/lib/master-routes/edit-match"
-import { type ModuleHandler, buildFieldMap, s3KeyOf, supersededOn } from "./types"
+import { type ModuleHandler, buildFieldMap, supersededOn } from "./types"
+import { bulkHandler } from "./bulk-envelope"
 
 export const pmRateHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
@@ -101,53 +100,36 @@ export const pmMatHandler: ModuleHandler = {
 // NEW-record rows — edits are split out and submitted as their own real
 // PM_MAT approval at staging time (see pm-handler.ts's pmBulk/pmS3Bulk +
 // submitPmBulkEdit below).
-export const pmBulkHandler: ModuleHandler = {
-  async setStatus() {
-    // No entity exists before approval — nothing to roll back on reject.
-  },
-  async applyAndArchive(conn, _entityId, items, approverId) {
-    const s3Key = s3KeyOf(items, "PM_BULK")
-    const rows = await parseS3Import(s3Key)
-    if (rows.length === 0) throw new Error("PM_BULK: file has no data rows")
+export const pmBulkHandler = bulkHandler("PM_BULK", {
+  prepare: resolvePmBulkRows,
+  applyRow: async (r, { conn, approverId }) => {
+    // The staged file only ever contains new-record rows (see pm-handler.ts).
+    // A row resolving to "edit" here means it started matching an existing
+    // record only AFTER staging — nobody reviewed it as an edit, so skip it
+    // rather than silently applying an unreviewed change.
+    if (r.action !== "create") return "skipped"
 
-    const eventId = makeEventId("PM_BULK", "apply")
-    let inserted = 0, skipped = 0
+    const { row } = r
     try {
-      const resolved = await resolvePmBulkRows(conn, rows)
-      for (const r of resolved) {
-        // The staged file only ever contains new-record rows (see
-        // pm-handler.ts). A row resolving to "edit" here means it started
-        // matching an existing record only AFTER staging — nobody reviewed
-        // it as an edit, so skip it rather than silently applying an
-        // unreviewed change.
-        if (r.action !== "create") { skipped++; continue }
-
-        const { row } = r
-        try {
-          const [pmResult] = await conn.execute(pmSql.insert, await toPmParams(conn, {
-            pm_code: row.pm_code, name: row.name, type: row.type,
-            hsn_code: row.hsn_code, uom: row.uom, pantone_color: row.pantone_color,
-          }, STATUS.ACTIVE))
-          const pmId = (pmResult as ResultSetHeader).insertId
-          await insertHistoryEntry(conn, {
-            module: "PM_MAT",
-            entityId: pmId,
-            actionType: "create",
-            remarks: row.remarks?.trim() || null,
-            createdBy: approverId,
-          })
-          inserted++
-        } catch (err: any) {
-          if (err.code === "ER_DUP_ENTRY") { skipped++ } else { throw err }
-        }
-      }
-      recordProcessedEvent("PM_BULK", eventId, { s3Key, inserted, skipped })
+      const [pmResult] = await conn.execute(pmSql.insert, await toPmParams(conn, {
+        pm_code: row.pm_code, name: row.name, type: row.type,
+        hsn_code: row.hsn_code, uom: row.uom, pantone_color: row.pantone_color,
+      }, STATUS.ACTIVE))
+      const pmId = (pmResult as ResultSetHeader).insertId
+      await insertHistoryEntry(conn, {
+        module: "PM_MAT",
+        entityId: pmId,
+        actionType: "create",
+        remarks: row.remarks?.trim() || null,
+        createdBy: approverId,
+      })
+      return "inserted"
     } catch (err: any) {
-      recordFailedEvent("PM_BULK", eventId, { s3Key }, err.message)
+      if (err.code === "ER_DUP_ENTRY") return "skipped"
       throw err
     }
   },
-}
+})
 
 type PmCandidateRow = {
   id: number; code: string; name: string; type: string | null
@@ -281,100 +263,62 @@ export async function stagePmBulkRows(
 // Bulk PM × Vendor rate upload — one CSV row = one cost_master_pm_ven row.
 // cost_master_pm_ven has no mfg_id column (unlike cost_master_rm_ven), so there's no
 // manufacturer tag here.
-export const pmVrmBulkHandler: ModuleHandler = {
-  async setStatus() {
-    // No entity exists before approval — nothing to roll back on reject.
-  },
-  async applyAndArchive(conn, _entityId, items) {
-    const s3Key = s3KeyOf(items, "PM_VRM_BULK")
-    const rows = await parseS3Import(s3Key)
-    if (rows.length === 0) throw new Error("PM_VRM_BULK: file has no data rows")
-
-    const eventId = makeEventId("PM_VRM_BULK", "apply")
-    let inserted = 0, skipped = 0
-    try {
-      for (const row of rows) {
-        const pmCode = row.pm_code?.trim()
-        const vendorCode = row.vendor_code?.trim()
-        const currRate = Number(row.curr_rate)
-        const moq = Number(row.moq)
-        if (!pmCode || !vendorCode || !Number.isFinite(currRate) || currRate <= 0
-          || !Number.isFinite(moq) || moq <= 0) {
-          skipped++; continue
-        }
-
-        const [pmRows] = await conn.execute(pmSql.selectByCode, [pmCode])
-        const pm = (pmRows as any[])[0]
-        if (!pm) { skipped++; continue }
-
-        const [vRows] = await conn.execute(vendorSql.selectByCode, [vendorCode])
-        const vendor = (vRows as any[])[0]
-        if (!vendor) { skipped++; continue }
-
-        await conn.execute(pmSql.insertVendorRate, [
-          pm.id, vendor.id, vendorCode,
-          roundToTwoDecimals(currRate), roundToWholeNumber(moq),
-          row.uom?.trim() || null, STATUS.ACTIVE,
-          // Optional: a blank date means the rate applies from now. Rows staged
-
-          // before the upload-time stamp was added can still arrive blank.
-
-          normalizeDateCell(row.effective_from) || todayIST(), normalizeDateCell(row.effective_to) || null,
-        ])
-        inserted++
-      }
-      recordProcessedEvent("PM_VRM_BULK", eventId, { s3Key, inserted, skipped })
-    } catch (err: any) {
-      recordFailedEvent("PM_VRM_BULK", eventId, { s3Key }, err.message)
-      throw err
+export const pmVrmBulkHandler = bulkHandler("PM_VRM_BULK", {
+  applyRow: async (row, { conn }) => {
+    const pmCode = row.pm_code?.trim()
+    const vendorCode = row.vendor_code?.trim()
+    const currRate = Number(row.curr_rate)
+    const moq = Number(row.moq)
+    if (!pmCode || !vendorCode || !Number.isFinite(currRate) || currRate <= 0
+      || !Number.isFinite(moq) || moq <= 0) {
+      return "skipped"
     }
+
+    const [pmRows] = await conn.execute(pmSql.selectByCode, [pmCode])
+    const pm = (pmRows as any[])[0]
+    if (!pm) return "skipped"
+
+    const [vRows] = await conn.execute(vendorSql.selectByCode, [vendorCode])
+    const vendor = (vRows as any[])[0]
+    if (!vendor) return "skipped"
+
+    await conn.execute(pmSql.insertVendorRate, [
+      pm.id, vendor.id, vendorCode,
+      roundToTwoDecimals(currRate), roundToWholeNumber(moq),
+      row.uom?.trim() || null, STATUS.ACTIVE,
+      // Optional: a blank date means the rate applies from now. Rows staged
+      // before the upload-time stamp was added can still arrive blank.
+      normalizeDateCell(row.effective_from) || todayIST(), normalizeDateCell(row.effective_to) || null,
+    ])
+    return "inserted"
   },
-}
+})
 
 // Bulk PM × Manufacturer rate upload — one CSV row = one cost_master_pm_mfg row.
 // cost_master_pm_mfg has no approved-vendor column (unlike cost_master_rm_mfg).
-export const pmRateBulkHandler: ModuleHandler = {
-  async setStatus() {
-    // No entity exists before approval — nothing to roll back on reject.
+export const pmRateBulkHandler = bulkHandler("PM_RATE_BULK", {
+  applyRow: async (row, { conn }) => {
+    const pmCode = row.pm_code?.trim()
+    const mfgCode = row.mfg_code?.trim()
+    const currRate = Number(row.curr_rate)
+    if (!pmCode || !mfgCode || !Number.isFinite(currRate) || currRate <= 0) return "skipped"
+
+    const [pmRows] = await conn.execute(pmSql.selectByCode, [pmCode])
+    const pm = (pmRows as any[])[0]
+    if (!pm) return "skipped"
+
+    const [mRows] = await conn.execute(mfgSql.selectByCode, [mfgCode])
+    const mfg = (mRows as any[])[0]
+    if (!mfg) return "skipped"
+
+    await conn.execute(pmSql.insertMfgRate, [
+      pm.id, mfg.id, mfgCode,
+      roundToTwoDecimals(currRate), row.uom?.trim() || null,
+      STATUS.ACTIVE,
+      // Optional: a blank date means the rate applies from now. Rows staged
+      // before the upload-time stamp was added can still arrive blank.
+      normalizeDateCell(row.effective_from) || todayIST(),
+    ])
+    return "inserted"
   },
-  async applyAndArchive(conn, _entityId, items) {
-    const s3Key = s3KeyOf(items, "PM_RATE_BULK")
-    const rows = await parseS3Import(s3Key)
-    if (rows.length === 0) throw new Error("PM_RATE_BULK: file has no data rows")
-
-    const eventId = makeEventId("PM_RATE_BULK", "apply")
-    let inserted = 0, skipped = 0
-    try {
-      for (const row of rows) {
-        const pmCode = row.pm_code?.trim()
-        const mfgCode = row.mfg_code?.trim()
-        const currRate = Number(row.curr_rate)
-        if (!pmCode || !mfgCode || !Number.isFinite(currRate) || currRate <= 0) {
-          skipped++; continue
-        }
-
-        const [pmRows] = await conn.execute(pmSql.selectByCode, [pmCode])
-        const pm = (pmRows as any[])[0]
-        if (!pm) { skipped++; continue }
-
-        const [mRows] = await conn.execute(mfgSql.selectByCode, [mfgCode])
-        const mfg = (mRows as any[])[0]
-        if (!mfg) { skipped++; continue }
-
-        await conn.execute(pmSql.insertMfgRate, [
-          pm.id, mfg.id, mfgCode,
-          roundToTwoDecimals(currRate), row.uom?.trim() || null,
-          STATUS.ACTIVE,
-          // Optional: a blank date means the rate applies from now. Rows staged
-          // before the upload-time stamp was added can still arrive blank.
-          normalizeDateCell(row.effective_from) || todayIST(),
-        ])
-        inserted++
-      }
-      recordProcessedEvent("PM_RATE_BULK", eventId, { s3Key, inserted, skipped })
-    } catch (err: any) {
-      recordFailedEvent("PM_RATE_BULK", eventId, { s3Key }, err.message)
-      throw err
-    }
-  },
-}
+})

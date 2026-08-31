@@ -74,6 +74,7 @@ export const GET = withGateway({
 export const POST = withGateway({
   // No `schema`: this is multipart, and withGateway's Zod step would consume the
   // body as JSON. The `payload` field is validated below with the same schema.
+  rateLimit: { limit: 20, windowMs: 10 * 60_000, concurrency: 1, instanceConcurrency: 3 },
   access: { pageSlug: "/po-tracking", level: "editor" },
   handler: async ({ req, session, ctx }) => {
     const userId = Number(session.user.id)

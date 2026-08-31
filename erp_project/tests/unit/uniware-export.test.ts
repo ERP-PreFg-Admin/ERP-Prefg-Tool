@@ -142,3 +142,50 @@ test("the download refuses an empty body", async () => {
   const { downloadExportCsv } = await import("../../lib/uniware")
   await assert.rejects(() => downloadExportCsv("/reports/x.csv"), /empty/i)
 })
+
+test("a code-1000 error keeps the cause, not just 'please fill valid value'", async () => {
+  const { envelopeError } = await import("../../lib/uniware/envelope")
+
+  // The exact shape four gatepass lines came back with. `description` alone
+  // names neither the field nor the reason, which is why it must not win.
+  const jackson = envelopeError({
+    successful: false,
+    errors: [{
+      code: 1000, fieldName: null as unknown as string,
+      description: "please fill valid value",
+      message: 'Unrecognized field "itemSKU" (Class com.uniware.core.api.material.AddItemRequest), '
+        + "not marked as ignorable\n at [Source: org.springframework.web.util."
+        + "ContentCachingRequestWrapper$ContentCachingInputStream@3bcefde6; line: 1, column: 16]",
+    }],
+  }, 400, "fallback")
+
+  assert.match(jackson, /please fill valid value/)
+  assert.match(jackson, /Unrecognized field "itemSKU"/)
+  // Jackson's source pointer is an object address and an offset into a body we
+  // already have — noise in a toast.
+  assert.equal(jackson.includes("[Source:"), false)
+  assert.equal(jackson.includes("ContentCaching"), false)
+})
+
+test("an ordinary business error reads exactly as it did before", async () => {
+  const { envelopeError } = await import("../../lib/uniware/envelope")
+  // description === message, which is the common case; no duplication.
+  assert.equal(
+    envelopeError({ successful: false, errors: [{
+      description: "Atleast one Gate pass code should be present",
+      message: "Atleast one Gate pass code should be present",
+    }] }, 200, "fallback"),
+    "Atleast one Gate pass code should be present",
+  )
+})
+
+test("a missing-parameter error names the field", async () => {
+  const { envelopeError } = await import("../../lib/uniware/envelope")
+  assert.equal(
+    envelopeError({ successful: false, errors: [{
+      code: 1001, fieldName: "wsGatePass",
+      description: "wsGatePass can not be empty", message: "MISSING_REQUIRED_PARAMETERS",
+    }] }, 200, "fallback"),
+    "wsGatePass: wsGatePass can not be empty — MISSING_REQUIRED_PARAMETERS",
+  )
+})

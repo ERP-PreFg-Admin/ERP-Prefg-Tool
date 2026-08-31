@@ -126,6 +126,23 @@ export type InvoiceHistoryHeader = {
   /** Present on the list query only. */
   item_count?:     number
   received_count?: number
+  /** Total quantity billed across this invoice's lines — what Short Qty
+   *  subtracts the warehouse's accepted + rejected from. */
+  billed_qty?:     string | number
+  /* ── Goods receipts (grn_uniware), list query only ────────────────────────
+   * What the WAREHOUSE accepted, as against invoice_total / item_count above,
+   * which are what the manufacturer BILLED. The two disagreeing is the point;
+   * nothing reconciles them into one number.
+   *
+   * All zero for an invoice whose GRNs have never been synced — the same
+   * reading as "synced, nothing received yet". uniware_grn_count on the invoice
+   * is what distinguishes those two, and NULL there means never asked. */
+  grn_count?:          number
+  grn_accepted?:       string | number
+  grn_rejected?:       string | number
+  /** Rejected qty priced from the inward PO's unit_price, which is the
+   *  invoice's own rate. Excludes receipt lines that matched no PO of ours. */
+  grn_rejected_value?: string | number | null
 }
 
 /** One line of a historical invoice, with both PO links resolved. */
@@ -147,11 +164,46 @@ export type InvoiceHistoryItem = {
   po_id:                  number | null
   po_no:                  string | null
   po_status:              string | null
+  /** That PO's own rate. Written from `rate` below at inward time, so the two
+   *  differing means one was edited since. */
+  po_unit_price:          string | number | null
+  /* ── Unicommerce's own numbers for this line ──────────────────────────────
+   * Only the two with no local equivalent — received and rejected are derived
+   * from the goods receipts instead. NULL means never asked; `un_line_synced_at`
+   * is what separates that from Uniware reporting a real zero. */
+  un_pending_qty?:        string | number | null
+  un_qc_pass_qty?:        string | number | null
+  un_line_synced_at?:     string | null
   /** The pre-existing PO it was also received against. */
   received_against_po_id: number | null
   received_against_po_no: string | null
   received_against_qty:            string | number | null
   received_against_received_qty:   string | number | null
+  /* ── Goods receipts against this line's inward PO ─────────────────────────
+   * What the WAREHOUSE accepted, as against `qty` above, which is what the
+   * manufacturer billed on this line. Zero also reads as "never synced" — the
+   * receipts list beside it is what tells those apart. */
+  grn_accepted?: string | number
+  grn_rejected?: string | number
+}
+
+/** One line of one goods receipt, as mirrored into grn_items_uniware. */
+export type InvoiceGrnLine = {
+  grn_code:          string
+  status_code:       string | null
+  vendor_invoice_no: string | null
+  grn_created_at:    string | null
+  line_no:           number
+  /** The receipt's SKU, not our invoice line's — they can disagree. */
+  sku_code:          string | null
+  /** Our inward PO. Null = the warehouse received a SKU we never raised. */
+  po_id:             number | null
+  po_no:             string | null
+  quantity:          string | number
+  rejected_qty:      string | number
+  batch_code:        string | null
+  expiry:            string | null
+  mfg_date:          string | null
 }
 
 /** One line item after the user has reviewed/corrected it, ready to become a PO. */

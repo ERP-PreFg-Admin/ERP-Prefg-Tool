@@ -5,14 +5,13 @@ import type { PoolConnection } from "mysql2/promise"
 import type { ResultSetHeader } from "mysql2/promise"
 import { manufacturers as mfgSql } from "@/lib/queries/manufacturers"
 import { approvalsSql } from "@/lib/queries/approvals"
-import { parseS3Import } from "@/lib/import-s3"
 import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
-import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import { STATUS } from "@/lib/constants"
 import { findDuplicateBankingField, insertMfgWithGeneratedCode } from "@/lib/master-routes/material-utils"
 import { insertHistoryEntry } from "@/lib/master-routes/history-utils"
 import { findEditMatchForRow } from "@/lib/master-routes/edit-match"
-import { type ModuleHandler, buildFieldMap, s3KeyOf } from "./types"
+import { type ModuleHandler, buildFieldMap } from "./types"
+import {  bulkHandler } from "./bulk-envelope"
 
 const MFG_DOC_FIELDS = new Set([
   "gst_certificate_key", "cancelled_cheque_key", "pan_card_key", "misc_document_key",
@@ -231,55 +230,33 @@ export async function stageMfgBulkRows(
 // NEW-record rows — edits are split out and submitted as their own real MFG
 // approval at staging time (see route.ts + submitMfgBulkEdit above), so
 // there is nothing here for setStatus to unlock on reject.
-export const mfgBulkHandler: ModuleHandler = {
-  async setStatus() {
-    // No entity exists before approval — nothing to roll back on reject.
-  },
-  async applyAndArchive(conn, _entityId, items, approverId) {
-    const s3Key = s3KeyOf(items, "MFG_BULK")
-    const rows = await parseS3Import(s3Key)
-    if (rows.length === 0) throw new Error("MFG_BULK: file has no data rows")
+export const mfgBulkHandler = bulkHandler("MFG_BULK", {
+  prepare: resolveMfgBulkRows,
+  applyRow: async (r, { conn, approverId }) => {
+    if (r.action !== "create") return "skipped"
 
-    const eventId = makeEventId("MFG_BULK", "apply")
-    let inserted = 0, skipped = 0
-    try {
-      const resolved = await resolveMfgBulkRows(conn, rows)
-      for (const r of resolved) {
-        // The staged file only ever contains new-record rows (see route.ts).
-        // A row resolving to "edit" here means it started matching an
-        // existing record only AFTER staging (e.g. another edit landed in
-        // between) — nobody reviewed it as an edit, so skip it rather than
-        // silently applying an unreviewed change.
-        if (r.action !== "create") { skipped++; continue }
-
-        const { row } = r
-        const name = row.name?.trim() ?? ""
-        const { mfgId } = await insertMfgWithGeneratedCode(conn, mfgSql.insert, mfgSql.countTotal, name)
-        await conn.execute(mfgSql.insertDetails, [
-          mfgId,
-          row.location?.trim() || null,
-          row.gst_number?.trim() || null,
-          STATUS.ACTIVE,
-          row.registered_name?.trim() || null,
-          row.zone?.trim() || null,
-          row.bank_name?.trim() || null,
-          row.ifsc_number?.trim() || null,
-          row.account_number?.trim() || null,
-          row.email?.trim() || null,
-        ])
-        await insertHistoryEntry(conn, {
-          module: "MFG",
-          entityId: mfgId,
-          actionType: "create",
-          remarks: row.remarks?.trim() || null,
-          createdBy: approverId,
-        })
-        inserted++
-      }
-      recordProcessedEvent("MFG_BULK", eventId, { s3Key, inserted, skipped })
-    } catch (err: any) {
-      recordFailedEvent("MFG_BULK", eventId, { s3Key }, err.message)
-      throw err
-    }
+    const { row } = r
+    const name = row.name?.trim() ?? ""
+    const { mfgId } = await insertMfgWithGeneratedCode(conn, mfgSql.insert, mfgSql.countTotal, name)
+    await conn.execute(mfgSql.insertDetails, [
+      mfgId,
+      row.location?.trim() || null,
+      row.gst_number?.trim() || null,
+      STATUS.ACTIVE,
+      row.registered_name?.trim() || null,
+      row.zone?.trim() || null,
+      row.bank_name?.trim() || null,
+      row.ifsc_number?.trim() || null,
+      row.account_number?.trim() || null,
+      row.email?.trim() || null,
+    ])
+    await insertHistoryEntry(conn, {
+      module: "MFG",
+      entityId: mfgId,
+      actionType: "create",
+      remarks: row.remarks?.trim() || null,
+      createdBy: approverId,
+    })
+    return "inserted"
   },
-}
+})

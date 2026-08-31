@@ -45,19 +45,55 @@ const HEADS: { label: string; width: string; numeric: boolean }[] = [
 
 export const COSTING_COL_COUNT = HEADS.length
 
+/** The three trailing Δ-vs-MRM columns, which not every table wants. */
+const DELTA_COL_COUNT = 3
+
+/** HEADS without the Δ columns — what Agreed Final Costing spans. */
+export const COSTING_BASE_COL_COUNT = HEADS.length - DELTA_COL_COUNT
+
 /**
  * `actions` appends the trailing Actions column — Agreed Final Costing only.
  * The three Analytics comparison tables share HEADS and have no per-row control,
  * so making it a 13th HEADS entry would give all three a permanently empty
  * column. A table that passes this spans COSTING_COL_COUNT + 1.
+ *
+ * `deltas: false` drops the three Δ-vs-MRM columns. Agreed Final Costing sets it
+ * because its own rows ARE the MRM baseline — every delta there was `—`, `—`,
+ * "baseline", three columns of placeholder held only to line up with the vendor
+ * scenarios underneath. Those now render in their own table when a row is
+ * expanded, so the columns have nothing left to align and only cost width.
  */
-export function CostingHeadRow({ actions = false }: { actions?: boolean } = {}) {
+export function CostingHeadRow(
+  { actions = false, deltas = true }: { actions?: boolean; deltas?: boolean } = {}
+) {
+  const base = deltas ? HEADS : HEADS.slice(0, COSTING_BASE_COL_COUNT)
   const heads = actions
-    ? [...HEADS, { label: "Actions", width: W.actions, numeric: false }]
-    : HEADS
+    ? [...base, { label: "Actions", width: W.actions, numeric: false }]
+    : base
   return (
     <TableRow>
       {heads.map((h) => (
+        <TableHead key={h.label} className={`${h.width} ${h.numeric ? "text-right" : ""}`}>
+          {h.label}
+        </TableHead>
+      ))}
+    </TableRow>
+  )
+}
+
+/**
+ * The costing + Δ heads for the scenario table inside an expanded row, whose
+ * first column names the scenario rather than the SKU.
+ *
+ * Reuses HEADS from index 2 so the labels and their order cannot drift from the
+ * parent table's — the whole reason this file exists is that a header list and a
+ * cell list did exactly that.
+ */
+export function ScenarioHeadRow() {
+  return (
+    <TableRow>
+      <TableHead className={W.name}>Scenario</TableHead>
+      {HEADS.slice(2).map((h) => (
         <TableHead key={h.label} className={`${h.width} ${h.numeric ? "text-right" : ""}`}>
           {h.label}
         </TableHead>

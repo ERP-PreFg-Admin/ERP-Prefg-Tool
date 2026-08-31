@@ -10,7 +10,7 @@ import { query } from "@/lib/db"
 import { supplierInvoicesSql } from "@/lib/queries/supplier-invoices"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
-import type { InvoiceHistoryHeader, InvoiceHistoryItem } from "@/types/invoice"
+import type { InvoiceHistoryHeader, InvoiceHistoryItem, InvoiceGrnLine } from "@/types/invoice"
 
 const paramsSchema = z.object({ id: z.coerce.number().int().positive() })
 
@@ -22,12 +22,15 @@ export const GET = withGateway({
   // scope; this must too, or the scope is one incremented id away from nothing.
   scope: { type: "invoice", from: ({ params }) => params.id },
   handler: async ({ params }) => {
-    const [headers, items] = await Promise.all([
+    // Three small reads in parallel — the receipts are usually zero rows, and
+    // a second round trip on expand would cost more than the query does.
+    const [headers, items, grns] = await Promise.all([
       query<InvoiceHistoryHeader>(supplierInvoicesSql.selectInvoiceById, [params.id]),
       query<InvoiceHistoryItem>(supplierInvoicesSql.selectItemsByInvoiceId, [params.id]),
+      query<InvoiceGrnLine>(supplierInvoicesSql.selectGrnsByInvoiceId, [params.id]),
     ])
     if (!headers[0]) throw new ApiError(404, "not_found", `Invoice id=${params.id} not found`)
 
-    return NextResponse.json({ invoice: headers[0], items })
+    return NextResponse.json({ invoice: headers[0], items, grns })
   },
 })

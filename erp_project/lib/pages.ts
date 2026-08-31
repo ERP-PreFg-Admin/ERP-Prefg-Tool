@@ -44,6 +44,12 @@ export const PAGES: readonly PageEntry[] = [
   { slug: "/po-tracking/rm-pm-procurement",  label: "RM/PM Procurement", section: "Production" },
   { slug: "/po-tracking/po-inwarding",       label: "PO Inwarding",      section: "Production" },
   { slug: "/po-tracking/invoices",           label: "Invoices",          section: "Production" },
+  { slug: "/gatepass",                       label: "GatePass",          section: "Production" },
+  // Top-level, NOT "/admin/uniware": resolveAccess walks a slug up its parents,
+  // so a child of /admin would let every admin inherit it. This must be
+  // grantable to developers with admins excluded — see
+  // prisma/add_uniware_explorer_page.sql.
+  { slug: "/uniware",                        label: "Uniware Explorer",  section: "Production" },
 
   // Seeded in scripts/seed-permissions.ts but no pages exist yet.
   { slug: "/inventory",  label: "Inventory",            section: "Planned", nav: false },

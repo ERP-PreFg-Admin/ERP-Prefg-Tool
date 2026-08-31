@@ -5,14 +5,13 @@ import type { PoolConnection } from "mysql2/promise"
 import type { ResultSetHeader } from "mysql2/promise"
 import { vendors as vendorSql } from "@/lib/queries/vendors"
 import { approvalsSql } from "@/lib/queries/approvals"
-import { parseS3Import } from "@/lib/import-s3"
 import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
-import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import { STATUS } from "@/lib/constants"
 import { findDuplicateBankingField, insertVendorWithGeneratedCode } from "@/lib/master-routes/material-utils"
 import { insertHistoryEntry } from "@/lib/master-routes/history-utils"
 import { findEditMatchForRow } from "@/lib/master-routes/edit-match"
-import { type ModuleHandler, buildFieldMap, s3KeyOf } from "./types"
+import { type ModuleHandler, buildFieldMap } from "./types"
+import { bulkHandler } from "./bulk-envelope"
 
 const VENDOR_DOC_FIELDS = new Set([
   "gst_certificate_key", "cancelled_cheque_key", "pan_card_key", "misc_document_key",
@@ -236,55 +235,38 @@ export async function stageVendorBulkRows(
 // NEW-record rows — edits are split out and submitted as their own real
 // VENDOR approval at staging time (see route.ts + submitVendorBulkEdit
 // above), so there is nothing here for setStatus to unlock on reject.
-export const vendorBulkHandler: ModuleHandler = {
-  async setStatus() {
-    // No entity exists before approval — nothing to roll back on reject.
-  },
-  async applyAndArchive(conn, _entityId, items, approverId) {
-    const s3Key = s3KeyOf(items, "VENDOR_BULK")
-    const rows = await parseS3Import(s3Key)
-    if (rows.length === 0) throw new Error("VENDOR_BULK: file has no data rows")
+export const vendorBulkHandler = bulkHandler("VENDOR_BULK", {
+  prepare: resolveVendorBulkRows,
+  applyRow: async (r, { conn, approverId }) => {
+    // The staged file only ever contains new-record rows (see route.ts). A row
+    // resolving to "edit" here means it started matching an existing record
+    // only AFTER staging (e.g. another edit landed in between) — nobody
+    // reviewed it as an edit, so skip it rather than silently applying an
+    // unreviewed change.
+    if (r.action !== "create") return "skipped"
 
-    const eventId = makeEventId("VENDOR_BULK", "apply")
-    let inserted = 0, skipped = 0
-    try {
-      const resolved = await resolveVendorBulkRows(conn, rows)
-      for (const r of resolved) {
-        // The staged file only ever contains new-record rows (see route.ts).
-        // A row resolving to "edit" here means it started matching an
-        // existing record only AFTER staging (e.g. another edit landed in
-        // between) — nobody reviewed it as an edit, so skip it rather than
-        // silently applying an unreviewed change.
-        if (r.action !== "create") { skipped++; continue }
-
-        const { row } = r
-        const name = row.name?.trim() ?? ""
-        const type = row.type?.trim() ?? ""
-        const { vendorId } = await insertVendorWithGeneratedCode(conn, vendorSql.insertVendor, vendorSql.countTotal, name, type)
-        await conn.execute(vendorSql.insertVendorDetails, [
-          vendorId,
-          row.location?.trim() || null,
-          STATUS.ACTIVE,
-          row.zone?.trim() || null,
-          row.registered_name?.trim() || null,
-          row.gst_number?.trim() || null,
-          row.bank_name?.trim() || null,
-          row.ifsc_number?.trim() || null,
-          row.account_number?.trim() || null,
-        ])
-        await insertHistoryEntry(conn, {
-          module: "VENDOR",
-          entityId: vendorId,
-          actionType: "create",
-          remarks: row.remarks?.trim() || null,
-          createdBy: approverId,
-        })
-        inserted++
-      }
-      recordProcessedEvent("VENDOR_BULK", eventId, { s3Key, inserted, skipped })
-    } catch (err: any) {
-      recordFailedEvent("VENDOR_BULK", eventId, { s3Key }, err.message)
-      throw err
-    }
+    const { row } = r
+    const name = row.name?.trim() ?? ""
+    const type = row.type?.trim() ?? ""
+    const { vendorId } = await insertVendorWithGeneratedCode(conn, vendorSql.insertVendor, vendorSql.countTotal, name, type)
+    await conn.execute(vendorSql.insertVendorDetails, [
+      vendorId,
+      row.location?.trim() || null,
+      STATUS.ACTIVE,
+      row.zone?.trim() || null,
+      row.registered_name?.trim() || null,
+      row.gst_number?.trim() || null,
+      row.bank_name?.trim() || null,
+      row.ifsc_number?.trim() || null,
+      row.account_number?.trim() || null,
+    ])
+    await insertHistoryEntry(conn, {
+      module: "VENDOR",
+      entityId: vendorId,
+      actionType: "create",
+      remarks: row.remarks?.trim() || null,
+      createdBy: approverId,
+    })
+    return "inserted"
   },
-}
+})

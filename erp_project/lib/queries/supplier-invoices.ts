@@ -54,7 +54,48 @@ const INVOICE_LIST_BODY = `
          m.code AS mfg_code, m.name AS mfg_name,
          u.name AS created_by_name,
          COUNT(sii.id)                   AS item_count,
-         SUM(sii.link_type = 'received') AS received_count
+         SUM(sii.link_type = 'received') AS received_count,
+         -- Total quantity BILLED on this invoice. Safe to aggregate here beside
+         -- COUNT(sii.id): both read the same joined item rows at the same grain.
+         -- It is the minuend of Short Qty — billed, less whatever the warehouse
+         -- accounted for below.
+         COALESCE(SUM(sii.qty), 0)       AS billed_qty,
+         -- ── What the warehouse actually accepted (grn_uniware) ─────────────
+         -- SCALAR SUBQUERIES, not joins. This query already LEFT JOINs
+         -- invoice_items_mfg and GROUP BYs si.id, so a second join would
+         -- multiply the row set and silently inflate item_count and
+         -- received_count above. Same technique, and the same reason, as the
+         -- uniware_status subquery in lib/queries/purchase-orders.ts.
+         --
+         -- All three read 0 for an invoice nobody has synced GRNs for, which is
+         -- indistinguishable from "synced, nothing received" — invoice_mfg
+         -- .uniware_grn_count is the field that tells those apart.
+         (SELECT COUNT(*) FROM grn_uniware g WHERE g.invoice_id = si.id)
+           AS grn_count,
+         (SELECT COALESCE(SUM(i.quantity), 0)
+            FROM grn_items_uniware i
+            JOIN grn_uniware g ON g.id = i.grn_id
+           WHERE g.invoice_id = si.id) AS grn_accepted,
+         (SELECT COALESCE(SUM(i.rejected_qty), 0)
+            FROM grn_items_uniware i
+            JOIN grn_uniware g ON g.id = i.grn_id
+           WHERE g.invoice_id = si.id) AS grn_rejected,
+         -- Rejected VALUE, priced from the inward PO the line resolved to.
+         --
+         -- Through po_id rather than matching invoice_items_mfg on sku_code: an
+         -- invoice can carry the same SKU on two lines at two rates, so a SKU
+         -- join is both ambiguous and a fan-out. po_id is one row per receipt
+         -- line, so this is 1:1, and purchase_orders.unit_price on an inward PO
+         -- IS the invoice's own rate — it was written from it at inward time.
+         --
+         -- An INNER join deliberately: a receipt line with no po_id is a SKU we
+         -- never raised, and pricing it at zero would understate the loss
+         -- silently. It contributes nothing here and is findable by its NULL.
+         (SELECT COALESCE(SUM(i.rejected_qty * po.unit_price), 0)
+            FROM grn_items_uniware i
+            JOIN grn_uniware g      ON g.id  = i.grn_id
+            JOIN purchase_orders po ON po.id = i.po_id
+           WHERE g.invoice_id = si.id) AS grn_rejected_value
   FROM invoice_mfg si
   INNER JOIN master_mfgs m ON m.id = si.mfg_id
   LEFT JOIN users u ON u.id = si.created_by
@@ -328,14 +369,67 @@ export const supplierInvoicesSql = {
     SELECT sii.*,
            inw.po_no    AS po_no,
            inw.status   AS po_status,
+           -- The rate the inward PO was raised at, beside the rate the invoice
+           -- billed. They are written from each other at inward time, so a
+           -- difference means one of them was edited since — which is exactly
+           -- what the desk needs to see before approving a payment.
+           inw.unit_price AS po_unit_price,
+           -- Unicommerce's own view of this line, mirrored onto the inward PO by
+           -- the status sync. Only the two with no local equivalent: received and
+           -- rejected already come from grn_items_uniware below, and the same
+           -- quantity under two names is how a reader stops trusting either.
+           -- NULL means never asked, which un_line_synced_at distinguishes from 0.
+           inw.un_pending_qty    AS un_pending_qty,
+           inw.un_qc_pass_qty    AS un_qc_pass_qty,
+           inw.un_line_synced_at AS un_line_synced_at,
            ref.po_no    AS received_against_po_no,
            ref.qty      AS received_against_qty,
-           ref.received_qty AS received_against_received_qty
+           ref.received_qty AS received_against_received_qty,
+           -- ── What the warehouse accepted against THIS line ────────────────
+           -- Keyed on sii.po_id, the inward PO this line raised. That resolves
+           -- 1:1 only because mergeInwardLinesBySku raises one inward PO per
+           -- SKU, which is the same join grn_items_uniware.po_id was written
+           -- for — so a line and its receipts always mean the same SKU.
+           --
+           -- Scalar subqueries, not joins: this query is one row per line, and
+           -- a receipt can carry several lines for one PO, so a join would
+           -- duplicate the invoice line itself.
+           (SELECT COALESCE(SUM(gi.quantity), 0)
+              FROM grn_items_uniware gi
+             WHERE gi.po_id = sii.po_id) AS grn_accepted,
+           (SELECT COALESCE(SUM(gi.rejected_qty), 0)
+              FROM grn_items_uniware gi
+             WHERE gi.po_id = sii.po_id) AS grn_rejected
     FROM invoice_items_mfg sii
     LEFT JOIN purchase_orders inw ON inw.id = sii.po_id
     LEFT JOIN purchase_orders ref ON ref.id = sii.received_against_po_id
     WHERE sii.invoice_id = ?
     ORDER BY sii.line_no
+  `,
+
+  /**
+   * The goods receipts booked against one invoice, line by line.
+   *
+   * A flat join rather than two round trips: a handful of rows, and the header
+   * fields repeat per line so the client can group by grn_code without a second
+   * query. Ordered newest receipt first, matching how the invoice list reads.
+   *
+   * `sku_code` comes from the receipt, NOT from our invoice line — they can
+   * disagree, and when they do that is the finding. `po_id IS NULL` rows are
+   * included deliberately: a receipt for a SKU we never raised still belongs to
+   * this invoice's Uniware PO, and hiding it would hide the discrepancy.
+   * Parameters: [invoice_id]
+   */
+  selectGrnsByInvoiceId: `
+    SELECT g.grn_code, g.status_code, g.vendor_invoice_no, g.grn_created_at,
+           i.line_no, i.sku_code, i.po_id, i.quantity, i.rejected_qty,
+           i.batch_code, i.expiry, i.mfg_date,
+           po.po_no
+    FROM grn_uniware g
+    INNER JOIN grn_items_uniware i ON i.grn_id = g.id
+    LEFT  JOIN purchase_orders po  ON po.id   = i.po_id
+    WHERE g.invoice_id = ?
+    ORDER BY g.grn_created_at DESC, g.id DESC, i.line_no ASC
   `,
 }
 

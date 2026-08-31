@@ -444,6 +444,23 @@ export function DateRangePicker({
       setView(anchorMonth(from, min ?? ""))
       setPending("")
       setHover("")
+      return
+    }
+    // Closing on a half-finished range — one click in, no second click.
+    //
+    // `label` below renders `pending`, so the trigger was ALREADY showing the
+    // user's start date while the caller still held its previous value. The
+    // field looked set and the form submitted something else: in LineDialog
+    // that was today, because its form seeds effective_from with today's date.
+    // 58 of 61 live master_recipe_mfg rows were written that way.
+    //
+    // So commit it rather than dropping it. One click means "from this date
+    // on", which is what an empty `to` already means to every caller — an
+    // open-ended validity window, or a filter with no upper bound.
+    if (pending) {
+      onChange(pending, "")
+      setPending("")
+      setHover("")
     }
   }
 

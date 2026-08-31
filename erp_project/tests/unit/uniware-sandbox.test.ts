@@ -79,13 +79,31 @@ test("the status fetch obeys the same pin — it shares authHeaders", async () =
       return Response.json({ access_token: "test-token", expires_in: 43199 })
     }
     captured.facility = new Headers(init?.headers).get("Facility") ?? undefined
-    return Response.json({ successful: true, statusCode: "APPROVED" })
+    return Response.json({ successful: true, statusCode: "APPROVED", inflowReceiptsCount: 2 })
   }) as unknown as typeof fetch
 
-  const status = await fetchPurchaseOrderStatus("GM/2627/PO/2006", "mCaff_Kolkata2")
+  const { status, grnCount } = await fetchPurchaseOrderStatus("GM/2627/PO/2006", "mCaff_Kolkata2")
 
   assert.equal(captured.facility, "TEST_FACILITY")
   assert.equal(status, "APPROVED")
+  // The same call carries the GRN count, which is what lets the GRN sweep walk
+  // only the POs that have receipts. See lib/uniware/grn-sync.ts.
+  assert.equal(grnCount, 2)
+})
+
+test("a PO with no receipts reports 0 GRNs, not a missing count", async () => {
+  // inflowReceiptsCount absent is the normal shape for a PO nothing has arrived
+  // against. Unlike the GRN payload's quantities, reading it as 0 is safe — the
+  // sweep just skips the PO and the next status sync picks it up.
+  const { fetchPurchaseOrderStatus } = await import("../../lib/uniware")
+  globalThis.fetch = (async (input: unknown) => {
+    if (String(input).includes("/oauth/token")) {
+      return Response.json({ access_token: "test-token", expires_in: 43199 })
+    }
+    return Response.json({ successful: true, statusCode: "CREATED" })
+  }) as unknown as typeof fetch
+
+  assert.equal((await fetchPurchaseOrderStatus("X", "TEST_FACILITY")).grnCount, 0)
 })
 
 test("the status fetch reads statusCode flat, not through a purchaseOrder wrapper", async () => {

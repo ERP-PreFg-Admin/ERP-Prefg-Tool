@@ -25,6 +25,13 @@ export type SyncResult = {
   failures?: SyncFailure[]
   truncated?: boolean
   limit?: number
+  /* ── Goods receipts, pulled by the same run ───────────────────────────────
+   * The status pass learns inflowReceiptsCount for free and walks the receipts
+   * of the POs that have any, within its own budget. `grnDeferred` is what that
+   * budget cut off — still to be picked up by /uniware-grn. */
+  receipts?: number
+  grnDeferred?: number
+  unmatchedLines?: number
 }
 
 export type SyncSummary = {
@@ -46,13 +53,26 @@ export function summariseSync(r: SyncResult): SyncSummary {
 
   const parts = [`${r.synced} of ${r.total} synced`]
   if (r.failed) parts.push(`${r.failed} failed`)
+  // Receipts only when there were some. "0 goods receipts" on every run would
+  // be noise on a tenant where most POs never have one.
+  if (r.receipts) parts.push(`${r.receipts} goods receipt${r.receipts === 1 ? "" : "s"}`)
   // Never let a cap pass unmentioned: "40 of 40 synced" would otherwise read as
   // the whole list when it was the newest 40 of 300.
   if (r.truncated) parts.push(`only the newest ${r.limit} were checked`)
+  // Deferred is not a failure — it is work the receipt budget postponed, and
+  // saying so is what stops "synced" reading as "receipts are current".
+  if (r.grnDeferred) parts.push(`${r.grnDeferred} still awaiting a receipt pull`)
+
+  const reasons = failureReasons(r.failures ?? [], r.failed)
+  // A finding, not an error: the warehouse booked a SKU we never ordered. It
+  // would otherwise show up nowhere a human looks.
+  if (r.unmatchedLines) {
+    reasons.push(`${r.unmatchedLines} receipt line(s) matched no purchase order of ours`)
+  }
 
   return {
     counts: parts.join(" · "),
-    reasons: failureReasons(r.failures ?? [], r.failed),
+    reasons,
     failed: r.failed > 0,
   }
 }
