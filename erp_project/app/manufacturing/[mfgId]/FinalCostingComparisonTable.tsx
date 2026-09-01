@@ -8,7 +8,7 @@ import { TableEmpty } from "@/components/ui/empty-state"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import type { FinalCostingComparisonRow } from "@/types/masters"
 import {
-  CostingHeadRow, CostingCells, DeltaCells, ScenarioLabelRow, bestTotalIndex, COSTING_COL_COUNT,
+  CostingHeadRow, CostingCells, ScenarioLabelRow, bestTotalIndex, COSTING_COL_COUNT,
 } from "./costing-columns"
 
 export default function FinalCostingComparisonTable({
@@ -66,7 +66,6 @@ export default function FinalCostingComparisonTable({
                           moves RM and PM. They were omitted here before, which is
                           why these totals looked like they didn't add up. */}
                       <CostingCells row={r} best={i === best} />
-                      <DeltaCells row={r} />
                     </TableRow>
                   ))
                 )}

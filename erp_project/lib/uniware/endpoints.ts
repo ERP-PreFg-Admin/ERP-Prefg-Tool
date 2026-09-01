@@ -38,6 +38,22 @@ export const PO_LIST_PATH = "/services/rest/v1/purchase/purchaseOrder/getPurchas
 /** The web UI's print view, not a REST endpoint — see fetchPurchaseOrderPdf. */
 export const PO_DOCUMENT_PATH = "/po/show"
 
+/**
+ * Documents attached to a PO. Not `/services/rest/v1/*` and not bearer-auth —
+ * a different system with a different trust model, so read lib/uniware/documents.ts
+ * before touching these.
+ *
+ * DOC_AUTH_PATH is on the TENANT and takes the web cookie (bearer → 500,
+ * anonymous → 401). Everything else is on docs.unicommerce.com, whose host comes
+ * back in the mint response's `url` — never hardcode it — and is authorised by
+ * the minted token+checksum ALONE: no cookie, no bearer.
+ */
+export const DOC_AUTH_PATH = "/data/document/auth/details/get"
+export const DOCS_LIST_PATH = "/documents/list"
+export const DOCS_DOWNLOAD_PATH = "/document/V2/download"
+export const DOCS_UPLOAD_PATH = "/document/V2/upload"
+export const DOCS_UPLOAD_ACK_PATH = "/document/V2/acknowledge/upload"
+
 export const EXPORT_JOB_CREATE_PATH = "/services/rest/v1/export/job/create"
 export const EXPORT_JOB_STATUS_PATH = "/services/rest/v1/export/job/status"
 

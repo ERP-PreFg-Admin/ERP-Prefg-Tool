@@ -13,7 +13,10 @@
 // and how its cell renders. Add a column and every table gets it.
 
 import { TableCell, TableHead, TableRow } from "@/components/ui/table"
-import type { FinalCostingRow, FinalCostingComparisonRow } from "@/types/masters"
+// FinalCostingComparisonRow is no longer imported: nothing here reads a delta
+// field. A scenario row is still one, but every cell this file renders comes
+// from the FinalCostingRow half of it, which is what CostingCells takes.
+import type { FinalCostingRow } from "@/types/masters"
 import { fmtMoney } from "../mfg-utils"
 
 /** Fixed widths, sized to the digits rather than to the label, so the four
@@ -24,7 +27,6 @@ const W = {
   money:   "w-[78px]",
   small:   "w-[72px]",
   total:   "w-[94px]",
-  delta:   "w-[116px]",
   actions: "w-[84px]",
 } as const
 
@@ -38,38 +40,27 @@ const HEADS: { label: string; width: string; numeric: boolean }[] = [
   { label: "Shipper",       width: W.small, numeric: true  },
   { label: "Wastage",       width: W.money, numeric: true  },
   { label: "Total Costing", width: W.total, numeric: true  },
-  { label: "RM Δ vs MRM",   width: W.delta, numeric: true  },
-  { label: "PM Δ vs MRM",   width: W.delta, numeric: true  },
-  { label: "Total Δ vs MRM", width: W.delta, numeric: true },
 ]
 
 export const COSTING_COL_COUNT = HEADS.length
 
-/** The three trailing Δ-vs-MRM columns, which not every table wants. */
-const DELTA_COL_COUNT = 3
-
-/** HEADS without the Δ columns — what Agreed Final Costing spans. */
-export const COSTING_BASE_COL_COUNT = HEADS.length - DELTA_COL_COUNT
-
 /**
  * `actions` appends the trailing Actions column — Agreed Final Costing only.
  * The three Analytics comparison tables share HEADS and have no per-row control,
- * so making it a 13th HEADS entry would give all three a permanently empty
+ * so making it a 10th HEADS entry would give all three a permanently empty
  * column. A table that passes this spans COSTING_COL_COUNT + 1.
  *
- * `deltas: false` drops the three Δ-vs-MRM columns. Agreed Final Costing sets it
- * because its own rows ARE the MRM baseline — every delta there was `—`, `—`,
- * "baseline", three columns of placeholder held only to line up with the vendor
- * scenarios underneath. Those now render in their own table when a row is
- * expanded, so the columns have nothing left to align and only cost width.
+ * There are no Δ-vs-MRM columns any more, in any of the four tables. On Agreed
+ * Final Costing they were always `—`, `—`, "baseline" — its own rows ARE the MRM
+ * baseline, so there was nothing to measure against. On Analytics and in the
+ * expanded scenario table they were real, but the baseline they measured from
+ * was not beside them, so the arithmetic could not be checked where it was read.
+ * Compare totals down the Total Costing column instead.
  */
-export function CostingHeadRow(
-  { actions = false, deltas = true }: { actions?: boolean; deltas?: boolean } = {}
-) {
-  const base = deltas ? HEADS : HEADS.slice(0, COSTING_BASE_COL_COUNT)
+export function CostingHeadRow({ actions = false }: { actions?: boolean } = {}) {
   const heads = actions
-    ? [...base, { label: "Actions", width: W.actions, numeric: false }]
-    : base
+    ? [...HEADS, { label: "Actions", width: W.actions, numeric: false }]
+    : HEADS
   return (
     <TableRow>
       {heads.map((h) => (
@@ -82,8 +73,8 @@ export function CostingHeadRow(
 }
 
 /**
- * The costing + Δ heads for the scenario table inside an expanded row, whose
- * first column names the scenario rather than the SKU.
+ * The costing heads for the scenario table inside an expanded row, whose first
+ * column names the scenario rather than the SKU.
  *
  * Reuses HEADS from index 2 so the labels and their order cannot drift from the
  * parent table's — the whole reason this file exists is that a header list and a
@@ -113,7 +104,12 @@ export function ScenarioLabelRow({
   label, colSpan = COSTING_COL_COUNT,
 }: {
   label: string
-  /** Pass COSTING_COL_COUNT + 1 from a table that renders the Actions column. */
+  /**
+   * Pass COSTING_COL_COUNT + 1 from a table that renders the Actions column. An
+   * over-span is clamped silently by the browser, so getting this wrong looks
+   * right — which is why the Actions table sets it rather than relying on the
+   * default.
+   */
   colSpan?: number
 }) {
   return (
@@ -154,43 +150,6 @@ export function CostingCells({ row, best }: { row: FinalCostingRow; best: boolea
         title={best ? "Lowest total costing in this scenario" : undefined}
       >
         {fmtMoney(row.total)}
-      </TableCell>
-    </>
-  )
-}
-
-function fmtPct(v: number) {
-  const sign = v > 0 ? "+" : ""
-  return `${sign}${v.toFixed(1)}%`
-}
-
-function fmtDelta(v: number) {
-  const sign = v > 0 ? "+" : ""
-  return `${sign}${fmtMoney(v)}`
-}
-
-function deltaClass(v: number) {
-  if (v > 0) return "text-destructive"
-  if (v < 0) return "text-emerald-600 dark:text-emerald-400"
-  return ""
-}
-
-/**
- * The three Δ-vs-MRM cells, shared by the Analytics tab's comparison tables and
- * by the expanded row on Agreed Final Costing. Two copies of this drift; the
- * whole reason this file exists is that the header list and the cell list did.
- */
-export function DeltaCells({ row }: { row: FinalCostingComparisonRow }) {
-  return (
-    <>
-      <TableCell className={"text-right tabular-nums " + deltaClass(row.rm_delta)}>
-        {fmtDelta(row.rm_delta)} ({fmtPct(row.rm_delta_pct)})
-      </TableCell>
-      <TableCell className={"text-right tabular-nums " + deltaClass(row.pm_delta)}>
-        {fmtDelta(row.pm_delta)} ({fmtPct(row.pm_delta_pct)})
-      </TableCell>
-      <TableCell className={"text-right tabular-nums font-semibold " + deltaClass(row.total_delta)}>
-        {fmtDelta(row.total_delta)} ({fmtPct(row.total_delta_pct)})
       </TableCell>
     </>
   )

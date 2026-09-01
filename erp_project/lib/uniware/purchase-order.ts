@@ -4,7 +4,7 @@ import { getToken } from "./auth";
 import { authHeaders } from "./facility";
 import { buildPurchaseOrder } from "./po-builder";
 import type { UniwarePoInput } from "./po-builder";
-import { BASE, TIMEOUT_MS, PO_CREATE_PATH, PO_DETAILS_PATH } from "./endpoints";
+import { BASE, TIMEOUT_MS, PO_CREATE_PATH, PO_DETAILS_PATH, PO_DOCUMENT_PATH } from "./endpoints";
 
 export async function createPurchaseOrder(po: UniwarePoInput): Promise<{ purchaseOrderCode: string }> {
     const token = await getToken()
@@ -56,9 +56,27 @@ export async function createPurchaseOrder(po: UniwarePoInput): Promise<{ purchas
 
 
 
+/**
+ * The PO as Unicommerce renders it, for attaching to the manufacturer's mail.
+ *
+ * `/po/show` is the web UI's print view, not a REST endpoint — but it accepts
+ * the same bearer token, verified against prod: it answers
+ * `application/pdf`. That is why this can be a plain fetch and needs no browser.
+ *
+ * ── THE SEPARATOR IS LOAD-BEARING ────────────────────────────────────────────
+ * This read `?code=...$legacy=1` — a `$` where the `&` should be — so the whole
+ * thing went out as ONE parameter named `code` with the value
+ * "HLPL/2627/5663$legacy=1". Uniware answered 200 with its 5004-byte SPA shell
+ * instead of the PDF, and the %PDF- guard below then threw "expected a PDF, got
+ * text/html". Every PO document attachment failed that way.
+ *
+ * URLSearchParams rather than hand-built now, so a separator cannot be mistyped
+ * again, and it encodes the slashes in a PO code for free.
+ */
 export async function fetchPurchaseOrderPdf(code: string , facility ? : string) : Promise<Buffer> {
     const token =await getToken()
-    const url = `${BASE}/po/show?code=${encodeURIComponent(code)}$legacy=1`
+    const query = new URLSearchParams({ code, legacy: "1" })
+    const url = `${BASE}${PO_DOCUMENT_PATH}?${query}`
 
     const res = await fetch(url , {
         headers :authHeaders(token , facility),

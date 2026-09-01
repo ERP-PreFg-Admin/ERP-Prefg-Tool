@@ -35,4 +35,22 @@ USER nextjs
 
 EXPOSE 3000
 
+# Build provenance, surfaced by app/api/health. Deliberately the LAST thing before
+# CMD: an ARG invalidates the build cache for every layer below it and GIT_SHA
+# changes on every commit, so anything above this stays cached.
+#
+# ARG and ENV are both needed and are not interchangeable — an ARG exists only
+# while the image is being built and is gone by the time a container starts; the
+# ENV is what survives into the running process. ARG receives, ENV keeps.
+#
+# APP_VERSION is the release name a person says out loud ("v1.2.0"), or the raw
+# SHA on test where no tag is cut. GIT_SHA is the forensic one: a tag can be moved
+# or deleted, a commit hash cannot lie.
+ARG APP_VERSION=dev
+ARG GIT_SHA=dev
+ARG BUILD_TIME=unknown
+ENV APP_VERSION=$APP_VERSION
+ENV GIT_SHA=$GIT_SHA
+ENV BUILD_TIME=$BUILD_TIME
+
 CMD ["node", "server.js"]

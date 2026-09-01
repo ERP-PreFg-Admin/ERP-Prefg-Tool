@@ -139,3 +139,57 @@ test("a business failure carries Uniware's own words, not the HTTP status", asyn
     /Purchase Order not found/
   )
 })
+
+test("the PO document URL sends code and legacy as SEPARATE parameters", async () => {
+  // This shipped as `?code=${code}$legacy=1` — a `$` where the `&` belongs — so
+  // the whole thing went out as ONE parameter named `code` with the value
+  // "GM/2627/PO/2006$legacy=1". Uniware answered 200 with its SPA shell instead
+  // of the PDF, and every PO document attachment on a manufacturer's mail failed
+  // with "expected a PDF, got text/html".
+  //
+  // Nothing could catch it: the URL is a template string, so it compiled, linted
+  // and type-checked, and only the network boundary knew. Same class of bug as
+  // tests/unit/nanonets-endpoints.test.ts guards against.
+  const { fetchPurchaseOrderPdf } = await import("../../lib/uniware")
+  let requested = ""
+  globalThis.fetch = (async (input: unknown) => {
+    if (String(input).includes("/oauth/token")) {
+      return Response.json({ access_token: "test-token", expires_in: 43199 })
+    }
+    requested = String(input)
+    // A minimal well-formed PDF so the %PDF- guard passes.
+    return new Response(Buffer.from("%PDF-1.4\n"), {
+      status: 200, headers: { "content-type": "application/pdf" },
+    })
+  }) as unknown as typeof fetch
+
+  await fetchPurchaseOrderPdf("GM/2627/PO/2006", "TEST_FACILITY")
+
+  const url = new URL(requested)
+  assert.equal(url.pathname, "/po/show")
+  // The assertion that would have failed: parsed as one param, `code` carries
+  // the legacy flag glued onto the PO number.
+  assert.equal(url.searchParams.get("code"), "GM/2627/PO/2006")
+  assert.equal(url.searchParams.get("legacy"), "1")
+  assert.ok(!requested.includes("$"), `no stray separator in ${requested}`)
+})
+
+test("a non-PDF body is rejected rather than mailed as an attachment", async () => {
+  // What the tenant actually returns for a malformed request: 200, HTML, its app
+  // shell. Sending that to a manufacturer as "your purchase order" is worse than
+  // failing, so the magic-bytes check has to stay.
+  const { fetchPurchaseOrderPdf } = await import("../../lib/uniware")
+  globalThis.fetch = (async (input: unknown) => {
+    if (String(input).includes("/oauth/token")) {
+      return Response.json({ access_token: "test-token", expires_in: 43199 })
+    }
+    return new Response("<!DOCTYPE HTML><html><head><title>Uniware</title>", {
+      status: 200, headers: { "content-type": "text/html;charset=UTF-8" },
+    })
+  }) as unknown as typeof fetch
+
+  await assert.rejects(
+    () => fetchPurchaseOrderPdf("GM/2627/PO/2006", "TEST_FACILITY"),
+    /expected a PDF, got text\/html/
+  )
+})

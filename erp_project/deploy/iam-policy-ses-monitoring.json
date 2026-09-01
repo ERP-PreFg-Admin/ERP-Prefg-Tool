@@ -1,0 +1,89 @@
+{
+  "_comment": [
+    "SETUP-ONLY permissions to finish SES/SNS bounce monitoring. Attach to IAM user",
+    "mcaffeine-erp-prefg-tool in account 157320387454 as its own policy, alongside",
+    "iam-policy-erp-app-runtime-ses.json and iam-policy-erp-app-deploy.json.",
+    "",
+    "The running app needs NONE of this. It only sends mail (runtime-ses) and",
+    "receives events on POST /api/v1/webhooks/ses, which is unauthenticated to AWS",
+    "and gated by the SNS signature check instead. This policy exists so the",
+    "monitoring can be CONFIGURED, and can be detached again afterwards.",
+    "",
+    "ALREADY DONE, needs nothing further:",
+    "  - SES configuration set 'erp-app' publishes BOUNCE, COMPLAINT, DELIVERY,",
+    "    DELIVERY_DELAY, REJECT, RENDERING_FAILURE to topic erp-app-ses-events.",
+    "  - That topic has a CONFIRMED https subscription to",
+    "    https://erp.mcaffeine.com/api/v1/webhooks/ses, verified end to end via the",
+    "    SES bounce simulator on 2026-08-31.",
+    "  - The subscription's retry policy is 18 attempts, 20s -> 300s exponential.",
+    "    Note SNS caps TOTAL retry time at 3600s, so this is close to the maximum;",
+    "    a longer outage than an hour still loses events, which is what the DLQ",
+    "    below is for.",
+    "",
+    "STILL OUTSTANDING, and what each statement here unblocks:",
+    "  1. Queue erp-app-ses-events-dlq EXISTS but has no access policy, so SNS",
+    "     cannot write to it. sqs:SetQueueAttributes is the missing piece; until it",
+    "     lands, attaching a redrive policy would look configured while still",
+    "     dropping messages, so the redrive has deliberately been left off.",
+    "  2. No CloudWatch alarms on SES at all. The account has only a disk-usage and",
+    "     an EC2 status-check alarm.",
+    "",
+    "The three alarms to create, all actioned to the existing Email_ALert topic:",
+    "  erp-ses-bounce-rate         AWS/SES Reputation.BounceRate    > 0.05",
+    "  erp-ses-complaint-rate      AWS/SES Reputation.ComplaintRate > 0.001",
+    "  erp-ses-events-undelivered  AWS/SNS NumberOfNotificationsFailed > 0",
+    "",
+    "The last read-only statement is not incidental: the alarms point at",
+    "Email_ALert and nobody has confirmed it has a subscriber. An alarm topic with",
+    "no subscriber is the exact failure this whole exercise uncovered on",
+    "erp-app-ses-events - bounces published for months to a topic nobody read.",
+    "",
+    "Remove this _comment key before attaching; IAM rejects unknown top-level keys."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DeadLetterQueueForSesEvents",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:CreateQueue",
+        "sqs:GetQueueUrl",
+        "sqs:GetQueueAttributes",
+        "sqs:SetQueueAttributes",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage"
+      ],
+      "Resource": "arn:aws:sqs:ap-south-1:157320387454:erp-app-ses-events-dlq"
+    },
+    {
+      "Sid": "AlarmsOnBounceComplaintAndLostEvents",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:DeleteAlarms"
+      ],
+      "Resource": "arn:aws:cloudwatch:ap-south-1:157320387454:alarm:erp-ses-*"
+    },
+    {
+      "Sid": "AttachTheDlqToTheExistingSubscription",
+      "Effect": "Allow",
+      "Action": [
+        "sns:GetTopicAttributes",
+        "sns:ListSubscriptionsByTopic",
+        "sns:GetSubscriptionAttributes",
+        "sns:SetSubscriptionAttributes"
+      ],
+      "Resource": "arn:aws:sns:ap-south-1:157320387454:erp-app-ses-events"
+    },
+    {
+      "Sid": "ConfirmTheAlarmTopicReachesSomeone",
+      "Effect": "Allow",
+      "Action": [
+        "sns:GetTopicAttributes",
+        "sns:ListSubscriptionsByTopic"
+      ],
+      "Resource": "arn:aws:sns:ap-south-1:157320387454:Email_ALert"
+    }
+  ]
+}

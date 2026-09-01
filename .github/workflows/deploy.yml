@@ -14,6 +14,17 @@ on:
         default: test
         type: choice
         options: [test, prod]
+      # No machine can read a diff and know whether it is a bugfix or a feature —
+      # that is a judgement about intent. Prod deploys are already a deliberate
+      # manual dispatch, so the decision goes where a human already is, rather than
+      # depending on commit-message discipline.
+      # Ignored on test deploys, which are identified by SHA and cut no tag.
+      bump:
+        description: "Version bump (prod only)"
+        required: true
+        default: patch
+        type: choice
+        options: [patch, minor, major, none]
 
 env:
   AWS_REGION: ap-south-1
@@ -44,11 +55,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
-      contents: read
+      # write, not read: the release step pushes a version tag.
+      contents: write
     outputs:
       environment: ${{ steps.target.outputs.environment }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Load-bearing. The default shallow clone fetches NO tags, so `git tag -l`
+          # comes back empty, every release computes from v0.0.0, and the version is
+          # forever v0.0.1 while looking like it worked.
+          fetch-depth: 0
 
       - name: Determine target environment
         id: target
@@ -56,6 +73,37 @@ jobs:
           # workflow_dispatch lets a human pick test or prod; a plain push to
           # main always goes to test — prod is a deliberate, manually-triggered promotion.
           echo "environment=${{ github.event.inputs.environment || 'test' }}" >> "$GITHUB_OUTPUT"
+
+      # Version lives in git tags, never in package.json. Storing it in the file
+      # would force CI to commit back to main on every release: a commit nobody
+      # authored (which re-triggers this workflow), a merge conflict whenever two
+      # branches touch the line, and a second source of truth to disagree with the
+      # tag. Reading tags and pushing a new one costs none of that.
+      - name: Compute version
+        id: version
+        if: steps.target.outputs.environment == 'prod' && github.event.inputs.bump != 'none'
+        run: |
+          # --sort=-v:refname is LOAD-BEARING: it sorts by version, not lexically.
+          # Lexically v1.10.0 sorts BEFORE v1.9.0, so past version 9 every release
+          # computes from the wrong base and the sequence silently goes backwards.
+          LATEST=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          LATEST=${LATEST:-v0.0.0}
+          IFS=. read -r MAJOR MINOR PATCH <<< "${LATEST#v}"
+          case "${{ github.event.inputs.bump }}" in
+            major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR+1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH+1)) ;;
+          esac
+          # Lower components always reset to zero — this is what keeps it monotonic:
+          # 1.0.5 --minor--> 1.1.0, never 1.1.5.
+          NEW="v$MAJOR.$MINOR.$PATCH"
+          echo "Releasing $LATEST -> $NEW"
+          # Pushed BEFORE the build on purpose: if two prod deploys race, both read
+          # the same LATEST and the loser's push is rejected here in seconds rather
+          # than after a full build has been paid for.
+          git tag "$NEW"
+          git push origin "$NEW"
+          echo "version=$NEW" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials (hosting account)
         uses: aws-actions/configure-aws-credentials@v4
@@ -73,7 +121,12 @@ jobs:
           ENVIRONMENT: ${{ steps.target.outputs.environment }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
+          # The || fallback is what makes test builds SHA-identified without a
+          # second code path: no tag was cut, so APP_VERSION is just the commit.
           docker build \
+            --build-arg APP_VERSION="${{ steps.version.outputs.version || github.sha }}" \
+            --build-arg GIT_SHA="${{ github.sha }}" \
+            --build-arg BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -t "$REGISTRY/$ECR_REPOSITORY:$ENVIRONMENT-$IMAGE_TAG" \
             -t "$REGISTRY/$ECR_REPOSITORY:$ENVIRONMENT" \
             erp_project
