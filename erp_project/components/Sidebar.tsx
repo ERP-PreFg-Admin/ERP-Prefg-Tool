@@ -84,6 +84,10 @@ interface SidebarProps {
    *  keys default to accessible so a slug this map doesn't cover never
    *  accidentally locks a legitimate link. */
   access?: Record<string, AccessLevel>
+  /** Build identity from app/layout.tsx — "v1.2.0" on prod, a short commit SHA on
+   *  test, "dev" locally. Shown so a user can read it off their own screen when
+   *  reporting a problem, rather than us guessing what they are running. */
+  version?: string
 }
 
 // Sections with more children than this show only the first CHILD_CAP and
@@ -100,7 +104,7 @@ const WIDTH_MAX = 400
 const WIDTH_DEFAULT = 224
 const WIDTH_KEY = "sidebar-width"
 
-export default function Sidebar({ user, mfgs = [], access }: SidebarProps) {
+export default function Sidebar({ user, mfgs = [], access, version }: SidebarProps) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
   const [width, setWidth] = useState(WIDTH_DEFAULT)
@@ -443,6 +447,12 @@ export default function Sidebar({ user, mfgs = [], access }: SidebarProps) {
               <div className="min-w-0">
                 <p className="text-xs font-medium text-sidebar-foreground truncate">{user?.name ?? "User"}</p>
                 <p className="text-xs text-sidebar-foreground/50 truncate">{user?.email ?? ""}</p>
+                {/* Quieter than the email on purpose — support reads it, nobody
+                    else needs to. Inside the !collapsed guard, so the 56px rail
+                    is untouched. */}
+                {version && (
+                  <p className="text-[10px] font-mono text-sidebar-foreground/35 truncate" title="Build version">{version}</p>
+                )}
               </div>
             )}
           </div>

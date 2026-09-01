@@ -80,6 +80,17 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     access = Object.fromEntries(staticSlugs.map((slug, i) => [slug, levels[i]]));
   }
 
+  // Read server-side and passed down as a prop. This deliberately CANNOT be a
+  // NEXT_PUBLIC_ var: those are inlined into the client bundle during `next build`
+  // (the Dockerfile's builder stage), while APP_VERSION is an ENV set in the runner
+  // stage afterwards — so a NEXT_PUBLIC_ read would silently inline an empty string
+  // while /api/health kept reporting correctly.
+  //
+  // A release tag on prod ("v1.2.0"); a raw commit SHA on test, where no tag is
+  // cut — shortened so it fits the sidebar.
+  const appVersionRaw = process.env.APP_VERSION ?? "dev";
+  const appVersion = appVersionRaw.startsWith("v") ? appVersionRaw : appVersionRaw.slice(0, 7);
+
   return (
     <html
       lang="en"
@@ -102,6 +113,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           user={user}
           mfgs={mfgs}
           access={access}
+          version={appVersion}
           topBarRight={<BrandViewSwitcher brands={brandOptions} active={brandView} />}
         >{children}</ClientLayout>
         </ThemeProvider>

@@ -15,11 +15,14 @@ interface Props {
   /** Rendered in the top bar — the platform-view switcher, built server-side. */
   topBarRight?: React.ReactNode
   access?: Record<string, AccessLevel>
+  /** Build identity, read from the server env in app/layout.tsx. Same value the
+   *  /api/health endpoint reports. */
+  version?: string
 }
 
 const AUTH_ROUTES = ["/auth/"]
 
-export default function ClientLayout({ children, user, mfgs, access, topBarRight }: Props) {
+export default function ClientLayout({ children, user, mfgs, access, topBarRight, version }: Props) {
   const pathname = usePathname()
   const isAuthPage = AUTH_ROUTES.some(r => pathname.startsWith(r))
 
@@ -31,7 +34,7 @@ export default function ClientLayout({ children, user, mfgs, access, topBarRight
     <ToastProvider>
       <AccessProvider access={access}>
         <div className="flex h-screen overflow-hidden bg-background">
-          <Sidebar user={user} mfgs={mfgs} access={access} />
+          <Sidebar user={user} mfgs={mfgs} access={access} version={version} />
           <div className="flex flex-col flex-1 overflow-hidden">
             <TopBar right={topBarRight} />
             <main className="flex-1 overflow-hidden">
