@@ -105,7 +105,7 @@ export function uploadInvoice(
   })
 }
 
-export type InwardStep = "s3" | "po" | "uniware" | "email"
+export type InwardStep = "s3" | "po" | "uniware" | "docs" | "email"
 
 export type StepEvent = {
   step: InwardStep

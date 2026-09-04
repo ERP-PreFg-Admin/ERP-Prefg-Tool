@@ -33,3 +33,7 @@ export type { PoGrnTotals, Reconciliation, GrnTotalRow } from "./grn-totals"
 // hence ./auth, hence @/lib/env.
 //
 // UI imports "@/lib/uniware/errors" directly. See the header of ./errors.ts.
+
+export { mintCapability, isWebCookieValid, listDocuments, downloadDocument, uploadDocument, DOC_MAX_BYTES } from "./document"
+export type { DocCapability, UniwareDocument } from "./document"
+export { getUniwareWebCookie, requireUniwareWebCookie, getUniwareWebSessionInfo, UniwareSessionStale } from "./web-session"

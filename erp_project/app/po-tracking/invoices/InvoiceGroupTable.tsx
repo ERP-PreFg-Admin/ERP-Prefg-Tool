@@ -24,7 +24,7 @@ import { Select } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { SectionHead } from "../po-inwarding/InvoiceFields"
 import UniwareStatusBadge from "../UniwareStatusBadge"
-import type { InvoiceHistoryHeader, InvoiceHistoryItem, InvoiceGrnLine } from "@/types/invoice"
+import type { InvoiceHistoryHeader, InvoiceHistoryItem, InvoiceGrnLine, InvoiceDocument } from "@/types/invoice"
 import { IST, todayIST } from "@/lib/date"
 
 const num = (v: unknown) => (v == null || v === "" ? null : Number(v))
@@ -337,6 +337,50 @@ function GrnSection({ lines }: { lines: InvoiceGrnLine[] }) {
   )
 }
 
+/**
+ * The documents living on this invoice's Uniware PO, mirrored into our S3.
+ *
+ * 'uniware' is what the warehouse attached — the signed invoice copy is the one
+ * anyone opening this is usually after — and 'erp' is our own invoice PDF that
+ * the push put there, shown so the list matches what Uniware holds rather than
+ * hiding half of it. Both open through the same presign the Original column uses.
+ */
+function DocumentsSection({
+  documents, onOpen,
+}: { documents: InvoiceDocument[]; onOpen: (key: string) => void }) {
+  if (documents.length === 0) {
+    return (
+      <p className="py-3 text-muted-foreground">
+        No documents synced for this invoice yet. Use “Sync Documents” to pull the warehouse’s copy.
+      </p>
+    )
+  }
+  return (
+    <ul className="grid gap-1.5">
+      {documents.map((d) => (
+        <li key={d.id} className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5">
+          <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <button
+            onClick={() => onOpen(d.s3_key)}
+            className="min-w-0 flex-1 truncate text-left text-primary underline-offset-2 hover:underline"
+            title={d.filename}
+          >
+            {d.filename}
+          </button>
+          {/* Which way it moved — "From warehouse" is the one worth pulling. */}
+          <Badge variant="secondary">{d.source === "erp" ? "Pushed" : "From warehouse"}</Badge>
+          {d.uniware_uploaded_by && (
+            <span className="hidden max-w-40 truncate text-[11px] text-muted-foreground sm:inline" title={d.uniware_uploaded_by}>
+              {d.uniware_uploaded_by}
+            </span>
+          )}
+          <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export default function InvoiceGroupTable({
   search = "",
   filterQuery = "",
@@ -373,10 +417,12 @@ export default function InvoiceGroupTable({
   const [items, setItems]       = useState<Record<number, InvoiceHistoryItem[]>>({})
   /** Receipt lines for the expanded invoice, keyed like `items`. */
   const [grns, setGrns] = useState<Record<number, InvoiceGrnLine[]>>({})
+  /** Uniware PO documents for the expanded invoice, keyed like `items`. */
+  const [documents, setDocuments] = useState<Record<number, InvoiceDocument[]>>({})
   /** Which table the expansion shows. Reset on every open — the lines are what
-   *  someone expanding an invoice is looking for by default; the receipts are
-   *  the follow-up question. */
-  const [view, setView] = useState<"lines" | "grns">("lines")
+   *  someone expanding an invoice is looking for by default; the receipts and
+   *  documents are the follow-up questions. */
+  const [view, setView] = useState<"lines" | "grns" | "documents">("lines")
   const [itemsLoading, setItemsLoading] = useState(false)
   const [itemsError, setItemsError]     = useState("")
 
@@ -440,6 +486,7 @@ export default function InvoiceGroupTable({
       if (!res.ok) throw new Error(data.error ?? "Couldn't load these line items.")
       setItems((prev) => ({ ...prev, [id]: data.items ?? [] }))
       setGrns((prev) => ({ ...prev, [id]: data.grns ?? [] }))
+      setDocuments((prev) => ({ ...prev, [id]: data.documents ?? [] }))
     } catch (e: unknown) {
       setItemsError(e instanceof Error ? e.message : "Couldn't load these line items.")
     } finally {
@@ -629,7 +676,9 @@ export default function InvoiceGroupTable({
                               <SectionHead>
                                 {view === "lines"
                                   ? `Line items (${lines.length})`
-                                  : `Goods receipts (${grnCount(grns[inv.id])})`}
+                                  : view === "grns"
+                                  ? `Goods receipts (${grnCount(grns[inv.id])})`
+                                  : `Documents (${documents[inv.id]?.length ?? 0})`}
                               </SectionHead>
                               {/* A select, not tabs: two options swapping one
                                   table for another inside an already dense row.
@@ -638,15 +687,18 @@ export default function InvoiceGroupTable({
                               <Select
                                 aria-label="Which table to show"
                                 value={view}
-                                onChange={(e) => setView(e.target.value as "lines" | "grns")}
+                                onChange={(e) => setView(e.target.value as "lines" | "grns" | "documents")}
                                 className="h-7 py-0 text-[11px]"
                               >
                                 <option value="lines">Line items ({lines.length})</option>
                                 <option value="grns">Goods receipts ({grnCount(grns[inv.id])})</option>
+                                <option value="documents">Documents ({documents[inv.id]?.length ?? 0})</option>
                               </Select>
                             </div>
 
-                            {view === "grns" ? <GrnSection lines={grns[inv.id] ?? []} /> : (
+                            {view === "documents" ? (
+                              <DocumentsSection documents={documents[inv.id] ?? []} onOpen={openOriginal} />
+                            ) : view === "grns" ? <GrnSection lines={grns[inv.id] ?? []} /> : (
                             <table className="w-full text-[11px]">
                               <thead>
                                 <tr className="[&>th]:whitespace-nowrap [&>th]:px-1.5 [&>th]:py-1 [&>th]:text-left [&>th]:font-medium [&>th]:text-muted-foreground">

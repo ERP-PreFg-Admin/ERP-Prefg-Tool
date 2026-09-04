@@ -7,6 +7,8 @@ import { resolveAccess, type AccessLevel } from "@/lib/permissions";
 import { NAV_SLUGS } from "@/lib/pages";
 import { getUserScope, scopeParams, UNRESTRICTED } from "@/lib/scope"
 import { getBrandView, getSelectableBrands } from "@/lib/brand-view"
+import { APP_ENV } from "@/lib/env"
+import { buildAge, type BuildInfo } from "@/lib/build-info"
 import { BrandViewSwitcher } from "@/components/BrandViewSwitcher";
 import ClientLayout from "@/components/ClientLayout";
 import { ThemeProvider } from "@/components/ThemeProvider";
@@ -87,9 +89,18 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // while /api/health kept reporting correctly.
   //
   // A release tag on prod ("v1.2.0"); a raw commit SHA on test, where no tag is
-  // cut — shortened so it fits the sidebar.
+  // cut — shortened so it fits the header.
   const appVersionRaw = process.env.APP_VERSION ?? "dev";
-  const appVersion = appVersionRaw.startsWith("v") ? appVersionRaw : appVersionRaw.slice(0, 7);
+  const build: BuildInfo = {
+    version: appVersionRaw.startsWith("v") ? appVersionRaw : appVersionRaw.slice(0, 7),
+    // APP_ENV is "test" | "prod" and cannot distinguish a developer's laptop from
+    // the test box — NODE_ENV can't either, the image hardcodes it to production.
+    // An unset APP_VERSION only happens on a bare local run, so it is the one
+    // signal that separates the three.
+    env: appVersionRaw === "dev" ? "local" : APP_ENV,
+    builtAt: process.env.BUILD_TIME ?? null,
+    age: buildAge(process.env.BUILD_TIME),
+  };
 
   return (
     <html
@@ -113,7 +124,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           user={user}
           mfgs={mfgs}
           access={access}
-          version={appVersion}
+          build={build}
           topBarRight={<BrandViewSwitcher brands={brandOptions} active={brandView} />}
         >{children}</ClientLayout>
         </ThemeProvider>

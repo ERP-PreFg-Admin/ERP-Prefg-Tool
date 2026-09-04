@@ -87,17 +87,25 @@ jobs:
           # Lexically v1.10.0 sorts BEFORE v1.9.0, so past version 9 every release
           # computes from the wrong base and the sequence silently goes backwards.
           LATEST=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
-          LATEST=${LATEST:-v0.0.0}
-          IFS=. read -r MAJOR MINOR PATCH <<< "${LATEST#v}"
-          case "${{ github.event.inputs.bump }}" in
-            major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
-            minor) MINOR=$((MINOR+1)); PATCH=0 ;;
-            patch) PATCH=$((PATCH+1)) ;;
-          esac
-          # Lower components always reset to zero — this is what keeps it monotonic:
-          # 1.0.5 --minor--> 1.1.0, never 1.1.5.
-          NEW="v$MAJOR.$MINOR.$PATCH"
-          echo "Releasing $LATEST -> $NEW"
+          if [ -z "$LATEST" ]; then
+            # First release ever starts at v1.0.0, whatever `bump` says. Bumping a
+            # notional v0.0.0 would land on v0.0.1, which reads as "pre-release" for
+            # an app that has been in production for months and whose package.json
+            # has claimed 1.0.0 since the first commit.
+            NEW="v1.0.0"
+            echo "No existing tags — starting at $NEW (bump input ignored for the first release)"
+          else
+            IFS=. read -r MAJOR MINOR PATCH <<< "${LATEST#v}"
+            case "${{ github.event.inputs.bump }}" in
+              major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR+1)); PATCH=0 ;;
+              patch) PATCH=$((PATCH+1)) ;;
+            esac
+            # Lower components always reset to zero — this is what keeps it monotonic:
+            # 1.0.5 --minor--> 1.1.0, never 1.1.5.
+            NEW="v$MAJOR.$MINOR.$PATCH"
+            echo "Releasing $LATEST -> $NEW"
+          fi
           # Pushed BEFORE the build on purpose: if two prod deploys race, both read
           # the same LATEST and the loser's push is rejected here in seconds rather
           # than after a full build has been paid for.

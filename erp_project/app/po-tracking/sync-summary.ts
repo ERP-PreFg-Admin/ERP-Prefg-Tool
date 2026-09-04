@@ -77,6 +77,51 @@ export function summariseSync(r: SyncResult): SyncSummary {
   }
 }
 
+/** The document sweep's result shape — see lib/uniware/document-sync.ts. */
+export type DocSyncResult = {
+  total: number
+  pulled: number
+  pushed: number
+  failed: number
+  failures?: SyncFailure[]
+  sessionStale?: boolean
+  truncated?: boolean
+  limit?: number
+  disabled?: boolean
+}
+
+/**
+ * What the Sync Documents run says afterwards. Kept beside summariseSync because
+ * it renders into the same SyncSummary shape and reuses failureReasons.
+ */
+export function summariseDocSync(r: DocSyncResult): SyncSummary {
+  // Off dev the feature is inert by design — say so plainly, not as a failure.
+  if (r.disabled) {
+    return { counts: "Document sync is limited to the test facility for now.", reasons: [], failed: false }
+  }
+  // The one failure the user can actually fix, so it gets its own message.
+  if (r.sessionStale) {
+    return {
+      counts: "Uniware session expired.",
+      reasons: ["Open Uniware and click the ERP Uniware Session extension, then run this again."],
+      failed: true,
+    }
+  }
+  if (r.total === 0) {
+    return { counts: "No mirrored invoices to sync yet.", reasons: [], failed: false }
+  }
+
+  const parts = [`${r.pulled} pulled`, `${r.pushed} pushed`]
+  if (r.failed) parts.push(`${r.failed} failed`)
+  if (r.truncated) parts.push(`only the newest ${r.limit} were checked`)
+
+  return {
+    counts: parts.join(" · "),
+    reasons: failureReasons(r.failures ?? [], r.failed),
+    failed: r.failed > 0,
+  }
+}
+
 /**
  * One entry per DISTINCT reason, not per failure.
  *

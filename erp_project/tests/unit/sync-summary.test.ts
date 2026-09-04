@@ -12,11 +12,15 @@
 
 import test from "node:test"
 import assert from "node:assert/strict"
-import { summariseSync, type SyncResult } from "../../app/po-tracking/sync-summary"
+import { summariseSync, summariseDocSync, type SyncResult, type DocSyncResult } from "../../app/po-tracking/sync-summary"
 import { uniwareStatusFallback } from "../../lib/uniware/errors"
 
 const result = (over: Partial<SyncResult> = {}): SyncResult => ({
   total: 5, synced: 0, failed: 0, ...over,
+})
+
+const docResult = (over: Partial<DocSyncResult> = {}): DocSyncResult => ({
+  total: 3, pulled: 0, pushed: 0, failed: 0, ...over,
 })
 
 test("nothing to sync says so and is not an error", () => {
@@ -146,4 +150,30 @@ test("failed count with no failure detail is still reported honestly", () => {
   assert.equal(s.counts, "3 of 5 synced · 2 failed")
   assert.deepEqual(s.reasons, [])
   assert.equal(s.failed, true)
+})
+
+// ── Document sync ────────────────────────────────────────────────────────────
+
+test("doc sync: disabled off the test facility is a fact, not a failure", () => {
+  const s = summariseDocSync(docResult({ total: 0, disabled: true }))
+  assert.equal(s.failed, false)
+  assert.match(s.counts, /test facility/)
+})
+
+test("doc sync: a stale session tells the user exactly what to do", () => {
+  const s = summariseDocSync(docResult({ sessionStale: true }))
+  assert.equal(s.failed, true)
+  assert.match(s.reasons[0], /extension/)
+})
+
+test("doc sync: counts read pulled then pushed", () => {
+  const s = summariseDocSync(docResult({ total: 5, pulled: 2, pushed: 3 }))
+  assert.equal(s.counts, "2 pulled · 3 pushed")
+  assert.equal(s.failed, false)
+})
+
+test("doc sync: nothing mirrored yet is not an error", () => {
+  const s = summariseDocSync(docResult({ total: 0 }))
+  assert.equal(s.failed, false)
+  assert.match(s.counts, /No mirrored invoices/)
 })

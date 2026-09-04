@@ -6,11 +6,20 @@
  */
 
 /**
- * Branding shown in the top bar. APP_VERSION is the single place the release
- * label lives — bump it here and the header follows.
+ * Branding shown in the top bar.
+ *
+ * The version number deliberately does NOT live here any more. It used to
+ * (`APP_VERSION = "PreFG v1.0.0"`, bumped by hand), but a hardcoded label is a
+ * second source of truth: it drifts from the released git tag the first time
+ * someone forgets, and a header confidently showing the wrong version is worse
+ * than one showing none. It now comes from the build — read from the server env
+ * in app/layout.tsx, same value /api/health reports.
+ *
+ * PRODUCT_NAME is the stable half; the release label is appended at render time,
+ * giving "PreFG v1.0.0" on prod and "PreFG <short-sha>" on test.
  */
 export const APP_NAME = "House of Pep"
-export const APP_VERSION = "PreFG v1.0.0"
+export const PRODUCT_NAME = "PreFG"
 
 export const STATUS = {
   ACTIVE:    "active",

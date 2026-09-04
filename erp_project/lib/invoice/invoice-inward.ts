@@ -41,6 +41,8 @@ import { skus as skusSql } from "@/lib/queries/skus"
 import { receivePo } from "@/lib/po/po-receive"
 import { mergeInwardLinesBySku, type InwardLine } from "@/lib/invoice/invoice-merge"
 import { createPurchaseOrder, futureDeliveryDate, uniwareEnabled, uniwareVendorCode } from "@/lib/uniware"
+import { pushInvoicePdfToUniware } from "@/lib/uniware/document-sync"
+import { UniwareSessionStale } from "@/lib/uniware/web-session"
 import { UNIWARE_SANDBOX } from "@/lib/env"
 import { sendInwardInvoiceEmail } from "@/lib/mail/mailer"
 import { ApiError } from "@/lib/gateway/errors"
@@ -50,8 +52,9 @@ import { monthIST, todayIST } from "@/lib/date"
 import { brandCode } from "../constants"
 import { panOf } from "./gstin"
 import { warehouse } from "../queries/warehouse"
+import { mfgFacilityMap } from "../queries/mfg-facility-map"
 
-export const INWARD_STEPS = ["s3", "po", "uniware", "email"] as const
+export const INWARD_STEPS = ["s3", "po", "uniware", "docs", "email"] as const
 export type InwardStep = (typeof INWARD_STEPS)[number]
 
 export type StepEvent = {
@@ -282,6 +285,11 @@ export async function runInwardInvoice(
   const mfgRows = await query<{ code: string; name: string }>(manufacturersSql.selectById, [Number(mfg_id)])
   const mfgCode = mfgRows[0]?.code ?? ""
   let facility:string | undefined
+  // This manufacturer's Uniware VENDOR code AT that facility — a different
+  // identifier from master_mfgs.code, and different per facility (Archeesh is
+  // ARCHEES at GGN_WAREHOUSE and ARCHEESH at HYP_B2B_GGN). Left undefined off
+  // prod, where uniwareVendorCode() pins the sandbox vendor anyway.
+  let vendorCode: string | undefined
   // Which of our entities was billed. Also selects that entity's point of contact
   // at the destination warehouse for the notification below — a site can have a
   // different POC for Pep than for Kreative.
@@ -295,7 +303,7 @@ export async function runInwardInvoice(
         "billed. Fill it in on the review screen and try again."
       )
     }
-    const whRows = await query<{facility_code : string | null; entity_code : string}> (
+    const whRows = await query<{wh_id : number; facility_code : string | null; entity_code : string}> (
         warehouse.facilityByDestinationAndPan , [destination , pan]
     )
     facility = whRows[0]?.facility_code?.trim() || undefined
@@ -310,6 +318,24 @@ export async function runInwardInvoice(
         `'${destination}' has no active Uniware facility for the entity billed on this invoice ` +
         `(PAN ${pan}). Set it on /masters/warehouses — otherwise this PO would land in the wrong facility.`
       )
+    }
+    // Vendors are configured PER FACILITY in Uniware, so this is the same lookup
+    // /po-tracking/mfg-overview writes and cannot be a global setting. Refused
+    // here rather than left to Uniware: the tenant answers "Vendor [X] is not
+    // configured for the facility [Y]", which is true but names neither the
+    // manufacturer nor the screen that fixes it.
+    if (whRows[0] && !UNIWARE_SANDBOX) {
+      const vcRows = await query<{ un_mfg_code: string | null }>(
+        mfgFacilityMap.selectVendorCode, [whRows[0].wh_id, Number(mfg_id)]
+      )
+      vendorCode = vcRows[0]?.un_mfg_code?.trim() || undefined
+      if (!vendorCode) {
+        throw new ApiError(
+          400, "vendor_code_missing",
+          `${mfgCode || "This manufacturer"} has no Uniware vendor code at ${facility}. ` +
+          "Set it on /po-tracking/mfg-overview — otherwise this PO would be raised against the wrong vendor."
+        )
+      }
     }
   }
   // ── 1. S3 ─────────────────────────────────────────────────────────────────
@@ -383,7 +409,7 @@ export async function runInwardInvoice(
       // mergeItemsBySku downstream stays as the guard against a repeat here.
       const res = await createPurchaseOrder({
         facility : facility,
-        vendorCode: uniwareVendorCode(mfgCode),
+        vendorCode: uniwareVendorCode(vendorCode),
         currencyCode: body.currency || "INR",
         // Almost always omitted here: expectedOn is the invoice date, which is
         // in the past because the goods have already shipped, and Uniware only
@@ -441,7 +467,42 @@ export async function runInwardInvoice(
   }
   conn.release()
 
-  // ── 4. Email — after commit, and never a reason to undo ───────────────────
+  // ── 4. Docs — attach our invoice PDF to the Uniware PO (non-fatal) ─────────
+  // After commit, like email: the upload is not reversible, and its failure is
+  // never a reason to undo a receipt that has physically arrived. A skip here is
+  // picked up by the Sync Documents button, which reconciles both directions.
+  // Scoped to the test facility for now (UNIWARE_SANDBOX), so on prod it is inert.
+  await emit({ step: "docs", status: "start" })
+  if (!uniwarePoCode) {
+    await emit({ step: "docs", status: "skipped", message: "No Uniware PO to attach to" })
+  } else if (!UNIWARE_SANDBOX) {
+    await emit({ step: "docs", status: "skipped", message: "Limited to the test facility for now" })
+  } else {
+    try {
+      // The PDF is already in hand — no need to re-fetch from S3. attachmentKey is
+      // reused as the stored row's s3_key rather than duplicating the object.
+      const pushed = await pushInvoicePdfToUniware(
+        { id: written.invoiceId, invoice_no, uniware_po_code: uniwarePoCode },
+        pdf.buffer,
+        attachmentKey,
+      )
+      await emit({
+        step: "docs",
+        status: pushed ? "ok" : "skipped",
+        message: pushed ? "Invoice attached in Uniware" : "Invoice already attached, or too large",
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      // A dead web session is a "log in again" situation (the extension refreshes
+      // it), not a failure of this invoice. Everything else is reported but still
+      // non-fatal: the goods are received and both POs exist.
+      const stale = err instanceof UniwareSessionStale
+      logger.warn({ module: "PO_INVOICE", invoice_no, err: message, message: "Uniware document push skipped" })
+      await emit({ step: "docs", status: stale ? "skipped" : "failed", message })
+    }
+  }
+
+  // ── 5. Email — after commit, and never a reason to undo ───────────────────
   await emit({ step: "email", status: "start" })
   try {
     // Not the PO-status mail procurement sends, and not to the manufacturer:

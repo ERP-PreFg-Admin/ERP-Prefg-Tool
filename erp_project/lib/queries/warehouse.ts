@@ -108,10 +108,15 @@ export const warehouse = {
    * mail routing (entity_emails.legal_entity_code) — one query rather than two,
    * and it cannot drift from the facility it was resolved alongside.
    *
+   * `wh_id` (details_warehouse_entity.id) rides along for the same reason: it is
+   * the key un_code_mfg_sku_wh_map is scoped by, and the inward push needs this
+   * facility's Uniware VENDOR code for the manufacturer right after resolving
+   * the facility itself. Resolving the pair twice is how the two would disagree.
+   *
    * Parameters: [destination, pan]
    */
   facilityByDestinationAndPan: `
-    SELECT dwe.facility_code, e.code AS entity_code
+    SELECT dwe.id AS wh_id, dwe.facility_code, e.code AS entity_code
     FROM master_warehouse w
     JOIN details_warehouse_entity dwe ON dwe.warehouse_id = w.id AND dwe.status = 'active'
     JOIN master_entity e ON e.id = dwe.entity_id

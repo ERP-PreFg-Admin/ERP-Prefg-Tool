@@ -15,7 +15,7 @@
  */
 
 import { Fragment, useEffect, useState } from "react"
-import { ChevronDown, ChevronRight, Loader2, Search } from "lucide-react"
+import { ChevronDown, ChevronRight, ExternalLink, FileText, Loader2, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -65,6 +65,15 @@ type RawPoDetail = {
 }
 
 type PoPayload = { detail: RawPoDetail | null; grns: RawGrn[] }
+
+/** One document on the PO, as /documents/list returns it. */
+type ExploredDoc = {
+  fileName: string
+  documentLocation: string | null
+  uploadedBy: string | null
+  created: string | null
+}
+type DocState = ExploredDoc[] | "loading" | { error: string }
 
 type RawGrn = {
   code: string
@@ -241,6 +250,69 @@ function RawBlock({
   )
 }
 
+/**
+ * The documents attached to the PO in Uniware, fetched ON DEMAND by a button —
+ * not with the PO detail. Minting a document capability needs the stored web
+ * session (the extension) and one outbound call per PO, so it is a deliberate
+ * click rather than something every expand pays for. "View" then streams each
+ * file through our server, which is the pull path exercised end to end.
+ */
+function DocsBlock({
+  state, onFetch, onOpen,
+}: { state: DocState | undefined; onFetch: () => void; onOpen: (filename: string) => void }) {
+  const loading = state === "loading"
+  const fetched = Array.isArray(state) || (state && typeof state === "object" && "error" in state)
+
+  return (
+    <div>
+      <div className="mb-1.5 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold">Attachments</span>
+        {Array.isArray(state) && (
+          <span className="text-[11px] font-normal text-muted-foreground">
+            {state.length === 0 ? "none on this PO" : `${state.length} document(s)`}
+          </span>
+        )}
+        {/* On demand: nothing is fetched until this is pressed. After a result it
+            becomes a re-fetch, so a freshly attached document can be pulled in. */}
+        <Button variant="outline" size="xs" onClick={onFetch} disabled={loading} className="ml-auto">
+          {loading
+            ? <><Loader2 className="mr-1 h-3 w-3 animate-spin" /> Fetching…</>
+            : <><FileText className="mr-1 h-3 w-3" /> {fetched ? "Re-fetch attachments" : "Fetch attachments"}</>}
+        </Button>
+      </div>
+
+      {state && typeof state === "object" && "error" in state && (
+        <p className="text-[11px] text-amber-700 dark:text-amber-400">{state.error}</p>
+      )}
+
+      {Array.isArray(state) && state.length > 0 && (
+        <ul className="grid gap-1.5">
+          {state.map((d) => (
+            <li key={d.fileName} className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-[11px]">
+              <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <button
+                type="button"
+                onClick={() => onOpen(d.fileName)}
+                className="min-w-0 flex-1 truncate text-left text-primary underline-offset-2 hover:underline"
+                title={d.fileName}
+              >
+                {d.fileName}
+              </button>
+              {d.uploadedBy && (
+                <span className="hidden max-w-40 truncate text-muted-foreground sm:inline" title={d.uploadedBy}>
+                  {d.uploadedBy}
+                </span>
+              )}
+              {d.created && <span className="hidden text-muted-foreground md:inline">{d.created}</span>}
+              <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export default function UniwareExplorerClient() {
   // A shortcut for the input, never a restriction — the tenant has facilities
   // our warehouse master does not know about, so the box stays free text.
@@ -265,12 +337,17 @@ export default function UniwareExplorerClient() {
   // and the receipt walk is 1+N more round trips on top.
   const [openPo, setOpenPo] = useState<string | null>(null)
   const [detail, setDetail] = useState<Record<string, PoPayload | "loading" | { error: string }>>({})
+  // Documents live behind a separate call from the PO detail: minting needs the
+  // stored web session (the extension), and a missing one must not break the
+  // detail view — it is a different failure with a different fix.
+  const [docs, setDocs] = useState<Record<string, DocState>>({})
 
   async function run() {
     setLoading(true)
     setError("")
     setResult(null)
     setDetail({})
+    setDocs({})
     setOpenPo(null)
     try {
       const qs = new URLSearchParams({ facility, days, limit })
@@ -304,6 +381,31 @@ export default function UniwareExplorerClient() {
     } catch {
       setDetail((d) => ({ ...d, [code]: { error: "Network error." } }))
     }
+  }
+
+  async function loadDocs(code: string) {
+    // Guard only against a double-click while in flight — a button press should
+    // otherwise always re-fetch, including a retry after an error.
+    if (docs[code] === "loading") return
+    setDocs((d) => ({ ...d, [code]: "loading" }))
+    try {
+      const res = await fetch(`/api/v1/uniware/explorer/documents?po=${encodeURIComponent(code)}`)
+      const data = await res.json()
+      setDocs((d) => ({
+        ...d,
+        [code]: res.ok
+          ? ((data.documents as ExploredDoc[]) ?? [])
+          : { error: data.error ?? "Failed to read documents." },
+      }))
+    } catch {
+      setDocs((d) => ({ ...d, [code]: { error: "Network error." } }))
+    }
+  }
+
+  /** Open one attachment via the streaming download route — proves the pull. */
+  function openDoc(code: string, filename: string) {
+    const qs = new URLSearchParams({ po: code, filename })
+    window.open(`/api/v1/uniware/explorer/documents?${qs}`, "_blank")
   }
 
   return (
@@ -541,6 +643,18 @@ export default function UniwareExplorerClient() {
                                       />
                                     ))}
                                   </div>
+
+                                  {/* ── Attachments ───────────────────────────
+                                      The pull path, live: mint → list → stream.
+                                      "View" streams the bytes through our server,
+                                      which is exactly what the invoice sweep does
+                                      before storing them — so a PDF opening here
+                                      is proof the download works end to end. */}
+                                  <DocsBlock
+                                    state={docs[p.code]}
+                                    onFetch={() => void loadDocs(p.code)}
+                                    onOpen={(f) => openDoc(p.code, f)}
+                                  />
                                 </div>
                               )}
                             </TableCell>

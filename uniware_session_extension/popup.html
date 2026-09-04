@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font: 13px system-ui, sans-serif; width: 300px; margin: 0; padding: 14px; color: #1a1a1a; }
+    h1 { font-size: 14px; margin: 0 0 10px; }
+    label { display: block; font-size: 11px; color: #666; margin: 10px 0 3px; }
+    input { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; font: inherit; }
+    button { margin-top: 12px; width: 100%; padding: 8px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    button:disabled { background: #9db8f0; cursor: default; }
+    #status { margin-top: 12px; font-size: 12px; white-space: pre-wrap; }
+    .ok { color: #15803d; }
+    .err { color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <h1>ERP Uniware Session</h1>
+  <label for="erp">ERP address</label>
+  <input id="erp" type="text" placeholder="http://localhost:3000" />
+  <button id="send">Send session to ERP</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -20,6 +20,11 @@ export async function GET() {
     // A release tag on prod ("v1.2.0"); the raw SHA on test, which correctly
     // signals "this is not a release".
     version: process.env.APP_VERSION ?? "dev",
+    // Read straight from process.env rather than importing APP_ENV from lib/env:
+    // that module calls required() at import time for DB_NAME and friends, so a
+    // health check would start throwing on exactly the misconfiguration it exists
+    // to report. This route must have no import that can fail.
+    env: process.env.APP_ENV === "prod" ? "prod" : process.env.APP_VERSION ? "test" : "local",
     // Short SHA, not the full 40 — enough to identify a build. This route is
     // public: nginx proxies / to the app and there is no withGateway here.
     commit: (process.env.GIT_SHA ?? "dev").slice(0, 7),

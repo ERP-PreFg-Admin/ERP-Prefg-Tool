@@ -46,6 +46,7 @@ const STEP_LABEL: Record<InwardStep, string> = {
   s3:      "Invoice stored",
   po:      "Inward POs created",
   uniware: "Sent to Uniware",
+  docs:    "Invoice attached in Uniware",
   email:   "Warehouse notified",
 }
 
@@ -53,6 +54,7 @@ const STEP_PROGRESS: Record<InwardStep, string> = {
   s3:      "Storing invoice…",
   po:      "Creating inward POs…",
   uniware: "Sending to Uniware…",
+  docs:    "Attaching invoice in Uniware…",
   email:   "Notifying warehouse…",
 }
 

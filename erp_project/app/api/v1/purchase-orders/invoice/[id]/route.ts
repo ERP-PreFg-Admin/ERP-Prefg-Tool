@@ -8,9 +8,10 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { query } from "@/lib/db"
 import { supplierInvoicesSql } from "@/lib/queries/supplier-invoices"
+import { uniwareDocsSql } from "@/lib/queries/uniware-documents"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
-import type { InvoiceHistoryHeader, InvoiceHistoryItem, InvoiceGrnLine } from "@/types/invoice"
+import type { InvoiceHistoryHeader, InvoiceHistoryItem, InvoiceGrnLine, InvoiceDocument } from "@/types/invoice"
 
 const paramsSchema = z.object({ id: z.coerce.number().int().positive() })
 
@@ -22,15 +23,16 @@ export const GET = withGateway({
   // scope; this must too, or the scope is one incremented id away from nothing.
   scope: { type: "invoice", from: ({ params }) => params.id },
   handler: async ({ params }) => {
-    // Three small reads in parallel — the receipts are usually zero rows, and
-    // a second round trip on expand would cost more than the query does.
-    const [headers, items, grns] = await Promise.all([
+    // Small reads in parallel — receipts and documents are usually a few rows,
+    // and a second round trip on expand would cost more than the query does.
+    const [headers, items, grns, documents] = await Promise.all([
       query<InvoiceHistoryHeader>(supplierInvoicesSql.selectInvoiceById, [params.id]),
       query<InvoiceHistoryItem>(supplierInvoicesSql.selectItemsByInvoiceId, [params.id]),
       query<InvoiceGrnLine>(supplierInvoicesSql.selectGrnsByInvoiceId, [params.id]),
+      query<InvoiceDocument>(uniwareDocsSql.selectByInvoice, [params.id]),
     ])
     if (!headers[0]) throw new ApiError(404, "not_found", `Invoice id=${params.id} not found`)
 
-    return NextResponse.json({ invoice: headers[0], items, grns })
+    return NextResponse.json({ invoice: headers[0], items, grns, documents })
   },
 })

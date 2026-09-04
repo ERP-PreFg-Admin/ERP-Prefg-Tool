@@ -206,6 +206,23 @@ export type InvoiceGrnLine = {
   mfg_date:          string | null
 }
 
+/**
+ * A document living on the invoice's Uniware PO, mirrored into our S3.
+ * `source` says which way it moved: 'erp' we pushed, 'uniware' the warehouse
+ * attached and we pulled — the signed invoice copy above all.
+ */
+export type InvoiceDocument = {
+  id:                  number
+  filename:            string
+  s3_key:              string
+  content_type:        string | null
+  bytes:               number | null
+  source:              "erp" | "uniware"
+  uniware_uploaded_by: string | null
+  uniware_created:     string | null
+  synced_at:           string | null
+}
+
 /** One line item after the user has reviewed/corrected it, ready to become a PO. */
 export type InwardLineItem = {
   sku_code:     string

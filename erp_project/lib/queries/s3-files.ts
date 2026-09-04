@@ -32,6 +32,12 @@ const KEY_OWNER_SELECTS = [
   `SELECT mfg_id, NULL AS destination FROM invoice_mfg
      WHERE attachment_key = ?`,
 
+  // Uniware PO documents pulled into our S3 (attachments_invoice), scoped like
+  // the invoice PDF they sit beside — by the owning invoice's manufacturer.
+  `SELECT im.mfg_id, NULL AS destination FROM attachments_invoice ai
+     JOIN invoice_mfg im ON im.id = ai.invoice_id
+    WHERE ai.s3_key = ?`,
+
   // A PO attachment that has since been replaced still has readable history.
   `SELECT po.mfg_id, po.destination FROM history_pos h
      JOIN purchase_orders po ON po.id = h.po_id

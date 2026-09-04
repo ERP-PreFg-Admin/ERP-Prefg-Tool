@@ -145,6 +145,22 @@ test("on prod, the sandbox facility is refused rather than sent", async () => {
   assert.equal(uniwareFacility("GGN_WAREHOUSE"), "GGN_WAREHOUSE")
 })
 
+test("on prod, a resolved vendor code beats UNIWARE_VENDOR_CODE", async () => {
+  // The shipped bug, and why it was silent: uniwareVendorCode read
+  // `UNIWARE_VENDOR_CODE || resolved`, putting the env var FIRST — and it
+  // defaults to Test_Vendor. UNIWARE_VENDOR_CODE is deliberately left unset in
+  // this file so it holds that default, exactly as prod SSM did. Every inward
+  // PO went out as Test_Vendor whatever the mapping said, and Uniware answered
+  // "Vendor [Test_Vendor] is not configured for the facility [GGN_WAREHOUSE]".
+  const { uniwareVendorCode } = await import("../../lib/uniware")
+
+  assert.equal(uniwareVendorCode("ARCHEES_"), "ARCHEES_")
+  // With nothing resolved there is no real code to send, so it refuses rather
+  // than raising the PO against the sandbox vendor.
+  assert.throws(() => uniwareVendorCode(), /Refusing a production Uniware call/)
+  assert.throws(() => uniwareVendorCode("  "), /Refusing a production Uniware call/)
+})
+
 test("fetchPurchaseOrderPdf falls back to UNIWARE_FACILITY when given none", async () => {
   const { fetchPurchaseOrderPdf } = await import("../../lib/uniware")
   const cap = stubFetch(okPdf)

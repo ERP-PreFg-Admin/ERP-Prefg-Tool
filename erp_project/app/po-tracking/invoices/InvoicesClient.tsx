@@ -10,6 +10,7 @@ import { SearchInput } from "@/components/masters/SearchInput"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import type { MfgOption } from "../po-procurement/po-types"
 import SyncUniwareButton from "../SyncUniwareButton"
+import SyncDocumentsButton from "../SyncDocumentsButton"
 import InvoiceGroupTable from "./InvoiceGroupTable"
 
 export default function InvoicesClient({
@@ -98,6 +99,7 @@ export default function InvoicesClient({
           )}
           <div className="ml-auto flex items-center gap-3">
             <SyncUniwareButton onDone={() => setReloadKey((k) => k + 1)} />
+            <SyncDocumentsButton onDone={() => setReloadKey((k) => k + 1)} />
             {/* The search and filters are component state, not URL params, and
                 DownloadButton only reads useSearchParams — extraParams is how
                 they reach the export. */}
