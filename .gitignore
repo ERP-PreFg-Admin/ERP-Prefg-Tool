@@ -4,3 +4,10 @@ check_uniware_apis/*
 
 uniware_documents
 uniware_documents/*
+
+# Secrets / local config for the sku-export helper — never track.
+uniware_sku_export/.env
+
+# Real supplier documents. This root Invoices/ is separate from erp_project/Invoices/,
+# which erp_project/.gitignore already covers.
+/Invoices/

@@ -33,6 +33,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# One-off env/log dumps from deploy debugging — these have leaked live secrets before.
+deploy/.tmp-*
+
 # vercel
 .vercel
 
