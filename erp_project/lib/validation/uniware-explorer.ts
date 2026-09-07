@@ -25,6 +25,20 @@ export const uniwareExplorerQuerySchema = z.object({
   days: z.coerce.number().int().min(1).max(400).optional().default(30),
 
   /**
+   * Explicit PO date range (YYYY-MM-DD). When both are set they win over `days`
+   * and drive the getPurchaseOrders `createdBetween` / `approvedBetween` filter;
+   * left blank, the rolling `days` window is used.
+   */
+  dateFrom: z.string().trim().optional().default(""),
+  dateTo: z.string().trim().optional().default(""),
+
+  /**
+   * Which Uniware timestamp the range filters on. `both` sends createdBetween AND
+   * approvedBetween (an AND — narrower). Default `created`, matching the days window.
+   */
+  dateBasis: z.enum(["created", "approved", "both"]).optional().default("created"),
+
+  /**
    * How many POs to fetch details for. Each costs one round trip, so this is one
    * request's budget — the list itself is not capped, and what was cut off is
    * reported.

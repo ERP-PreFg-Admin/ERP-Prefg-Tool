@@ -47,7 +47,7 @@ export const GET = withGateway({
     if (!parsed.success) {
       throw new ApiError(400, "validation_error", "Invalid query parameters", parsed.error.flatten())
     }
-    const { facility, days, limit, po } = parsed.data
+    const { facility, days, limit, po, dateFrom, dateTo, dateBasis } = parsed.data
 
     if (po) {
       // Both, in one round trip. They answer one question together — what was
@@ -59,6 +59,11 @@ export const GET = withGateway({
       const grns = await exploreGrns(po, facility || undefined)
       return NextResponse.json({ po, detail, grns })
     }
-    return NextResponse.json(await explorePurchaseOrders({ facility, days, limit }))
+    return NextResponse.json(await explorePurchaseOrders({
+      facility, days, limit,
+      from: dateFrom || undefined,
+      to: dateTo || undefined,
+      basis: dateBasis,
+    }))
   },
 })

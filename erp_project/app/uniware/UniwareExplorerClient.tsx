@@ -19,6 +19,8 @@ import { ChevronDown, ChevronRight, ExternalLink, FileText, Loader2, Search } fr
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select } from "@/components/ui/select"
+import { DateRangePicker } from "@/components/ui/date-picker"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -328,6 +330,10 @@ export default function UniwareExplorerClient() {
   const [facility, setFacility] = useState("")
   const [days, setDays] = useState("30")
   const [limit, setLimit] = useState("25")
+  // Explicit PO date range. When both are set it wins over `days` on the server.
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
+  const [dateBasis, setDateBasis] = useState<"created" | "approved" | "both">("created")
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -351,6 +357,12 @@ export default function UniwareExplorerClient() {
     setOpenPo(null)
     try {
       const qs = new URLSearchParams({ facility, days, limit })
+      // Only send the range when both ends are chosen; otherwise the server uses `days`.
+      if (dateFrom && dateTo) {
+        qs.set("dateFrom", dateFrom)
+        qs.set("dateTo", dateTo)
+        qs.set("dateBasis", dateBasis)
+      }
       const res = await fetch(`/api/v1/uniware/explorer?${qs}`)
       const data = await res.json()
       if (!res.ok) { setError(data.error ?? "Uniware did not answer."); return }
@@ -438,8 +450,37 @@ export default function UniwareExplorerClient() {
             <Input
               id="ue-days" type="number" min={1} max={400}
               value={days} onChange={(e) => setDays(e.target.value)}
-              className="w-24 tabular-nums"
+              disabled={Boolean(dateFrom && dateTo)}
+              title={dateFrom && dateTo ? "Ignored while a date range is set" : undefined}
+              className="w-24 tabular-nums disabled:opacity-50"
             />
+          </div>
+
+          {/* Explicit PO date range — when both ends are set it overrides Days. */}
+          <div className="grid gap-1.5">
+            <Label>PO date range</Label>
+            <DateRangePicker
+              from={dateFrom}
+              to={dateTo}
+              onChange={(f, t) => { setDateFrom(f); setDateTo(t) }}
+              placeholder="Any date"
+              className="w-60 text-sm"
+            />
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="ue-basis">Range by</Label>
+            <Select
+              id="ue-basis"
+              value={dateBasis}
+              onChange={(e) => setDateBasis(e.target.value as "created" | "approved" | "both")}
+              disabled={!(dateFrom && dateTo)}
+              className="h-9 w-32 text-sm disabled:opacity-50"
+            >
+              <option value="created">Created</option>
+              <option value="approved">Approved</option>
+              <option value="both">Both (AND)</option>
+            </Select>
           </div>
 
           <div className="grid gap-1.5">

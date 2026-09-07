@@ -177,16 +177,34 @@ export async function explorePurchaseOrders(opts: {
   facility: string
   days: number
   limit: number
+  /** Explicit range (YYYY-MM-DD). Both set ⇒ wins over `days`. */
+  from?: string
+  to?: string
+  /** Which timestamp the explicit range filters on. */
+  basis?: "created" | "approved" | "both"
 }): Promise<ExploreResult> {
   const requested = opts.facility.trim()
   const effective = requested || UNIWARE_FACILITY
 
-  const to = new Date()
-  const from = new Date(to.getTime() - opts.days * 24 * 60 * 60 * 1000)
+  // An explicit range wins over the rolling `days` window. Day boundaries in UTC,
+  // matching the epoch-millis `created` the endpoint compares against.
+  const hasRange = Boolean(opts.from && opts.to)
+  const to = hasRange ? new Date(`${opts.to}T23:59:59.999Z`) : new Date()
+  const from = hasRange
+    ? new Date(`${opts.from}T00:00:00.000Z`)
+    : new Date(to.getTime() - opts.days * 24 * 60 * 60 * 1000)
+
+  // createdBetween unless the caller chose otherwise; `both` is an AND, so it is
+  // opt-in rather than the default.
+  const between = { start: isoMillis(from), end: isoMillis(to) }
+  const basis = hasRange ? (opts.basis ?? "created") : "created"
+  const filter: Record<string, { start: string; end: string }> = {}
+  if (basis === "created" || basis === "both") filter.createdBetween = between
+  if (basis === "approved" || basis === "both") filter.approvedBetween = between
 
   const list = await call(
     PO_LIST_PATH,
-    { createdBetween: { start: isoMillis(from), end: isoMillis(to) } },
+    filter,
     requested || undefined,
     `purchase orders at ${effective}`
   )
