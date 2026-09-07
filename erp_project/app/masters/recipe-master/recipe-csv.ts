@@ -6,6 +6,7 @@
 
 import type { RecipeLineRow, RecipeMaterialOption } from "./RecipeLineEditorGrid"
 import { parseCsvRows, normalizeCell, isBlankRow } from "@/lib/csv"
+import type { RecipeDetailResponse } from "@/types/masters"
 
 export const CSV_HEADER = ["mtrl_type", "mtrl_code", "amount", "uom"]
 
@@ -16,6 +17,44 @@ export function buildBomCsvTemplate(): string {
     ["pm", "PM-0001", "5", "pcs"],
   ]
   return [CSV_HEADER, ...sampleRows].map((row) => row.join(",")).join("\n")
+}
+
+// ── One recipe → CSV (the detail panel's Download button) ───────────────────
+// Built client-side from the detail payload already in memory: no route, no
+// second query. lib/export.ts is not an option here — it imports ExcelJS at
+// module scope and is deliberately server-only.
+
+const RECIPE_DUMP_HEADER = [
+  "recipe_code", "sku_code", "sku_name", "status", "effective_from", "effective_till",
+  "mtrl_type", "mtrl_code", "mtrl_name", "amount", "uom", "line_status",
+]
+
+const csvCell = (v: unknown) =>
+  `"${String(v ?? "").replace(/"/g, '""')}"`
+
+const isoDate = (v: Date | string | null) => (v ? String(v).slice(0, 10) : "")
+
+/** RM first, matching the panel's toggle — `ORDER BY mtrl_type ASC` in SQL puts pm first. */
+const typeRank = (t: string | null) => (t === "rm" ? 0 : 1)
+
+/** Every line of one recipe, RM then PM, one row per material. */
+export function buildRecipeDumpCsv(detail: RecipeDetailResponse): string {
+  const header = [
+    detail.bom_code, detail.sku_code, detail.sku_name, detail.status,
+    isoDate(detail.effective_from), isoDate(detail.effective_till),
+  ]
+  const body = [...detail.lines]
+    .sort((a, b) => typeRank(a.mtrl_type) - typeRank(b.mtrl_type))
+    .map((l) => [
+      ...header,
+      l.mtrl_type, l.mtrl_code ?? l.mtrl_id, l.mtrl_name,
+      l.amount, l.uom, l.material_status,
+    ])
+
+  // BOM so Excel on Windows reads it as UTF-8, matching lib/export.ts.
+  return "﻿" + [RECIPE_DUMP_HEADER, ...body]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\r\n")
 }
 
 export function parseBomCsv(

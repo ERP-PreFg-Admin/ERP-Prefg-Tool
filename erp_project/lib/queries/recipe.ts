@@ -122,18 +122,27 @@ export const bom = {
   /**
    * Fetch ALL matching Recipe rows for export (no LIMIT/OFFSET).
    * Same WHERE clause as selectPaginated.
+   *
+   * Resolves the material's code and name from master_rm / master_pm the same
+   * way selectDetailLinesByBomId does — a bare mtrl_id is meaningless in a
+   * downloaded dump. The joins add no placeholders, so the param array is
+   * unchanged (tests/unit/recipe-export-params.test.ts pins that).
    * Params: [like×4, brandScope×2, type×2, status×2]
    */
   selectAllFiltered: `
     SELECT
-      b.bom_code, bd.recipe_id, s.sku_code,
+      b.bom_code, bd.recipe_id, s.sku_code, s.name AS sku_name,
       bd.mtrl_id, bd.mtrl_type, bd.uom, bd.amount,
+      COALESCE(rm.rm_code, pm.pm_code) AS mtrl_code,
+      COALESCE(rm.name, pm.name) AS mtrl_name,
       NULL AS mtrl_cost, bd.status AS material_status, b.status AS bom_status,
       b.effective_from, b.effective_till, bd.last_updated,
       b.created_by
     FROM details_recipe AS bd
     INNER JOIN master_recipe AS b ON b.id = bd.recipe_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
+    LEFT JOIN master_rm AS rm ON rm.id = bd.mtrl_id AND bd.mtrl_type = 'rm'
+    LEFT JOIN master_pm AS pm ON pm.id = bd.mtrl_id AND bd.mtrl_type = 'pm'
     WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ? OR s.name LIKE ?)
       AND (? IS NULL OR s.brand_id IS NULL OR s.brand_id IN (?))
       AND (? IS NULL OR bd.mtrl_type = ?)
@@ -327,7 +336,8 @@ export const bom = {
    * Recipe header for the detail side-panel. Params: [recipe_id]
    */
   selectHeaderById: `
-    SELECT b.id AS recipe_id, b.bom_code, b.sku_id, s.sku_code, b.status, b.created_at,
+    SELECT b.id AS recipe_id, b.bom_code, b.sku_id, s.sku_code, s.name AS sku_name,
+      b.status, b.created_at,
       b.effective_from, b.effective_till
     FROM master_recipe AS b
     LEFT JOIN master_skus AS s ON s.id = b.sku_id

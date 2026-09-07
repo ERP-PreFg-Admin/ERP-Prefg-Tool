@@ -501,6 +501,7 @@ export type RecipeDetailResponse = {
   bom_code: string | null;
   sku_id: number | null;
   sku_code: string | null;
+  sku_name: string | null;
   status: string | null;
   created_at: Date | string | null;
   effective_from: Date | string | null;

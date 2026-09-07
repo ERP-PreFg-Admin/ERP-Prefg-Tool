@@ -10,6 +10,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { bom as recipeSql } from "../../lib/queries/recipe"
 import { UNRESTRICTED, scopeParams } from "../../lib/scope"
+import { RECIPE_EXPORT_COLUMNS } from "../../lib/export-configs"
 
 const placeholders = (sql: string) => (sql.match(/\?/g) ?? []).length
 
@@ -31,6 +32,14 @@ test("selectAllFiltered takes the same params as the count", () => {
 
 test("selectPaginated takes the same params plus limit and offset", () => {
   assert.equal(placeholders(recipeSql.selectPaginated), placeholders(recipeSql.countAll) + 2)
+})
+
+test("export selects every column the export config asks for", () => {
+  // The dump has to carry names, not bare ids: query<T> is an unchecked cast, so
+  // a column the config names and the SQL doesn't select exports as blank.
+  for (const col of RECIPE_EXPORT_COLUMNS) {
+    assert.match(recipeSql.selectAllFiltered, new RegExp(`\\b${col.key}\\b`), `missing ${col.key}`)
+  }
 })
 
 test("search covers the SKU name, not just the codes", () => {

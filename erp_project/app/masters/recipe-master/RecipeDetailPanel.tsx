@@ -7,15 +7,27 @@
  * the panel doesn't have to switch between read/edit layouts.
  */
 
-import { X, Pencil, ExternalLink, Paperclip } from "lucide-react"
+import { X, Pencil, ExternalLink, Paperclip, Download } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { formatDate, LOCKED_STATUSES } from "./recipe-format"
+import { buildRecipeDumpCsv } from "./recipe-csv"
 import { StatusBadge } from "@/components/masters/StatusBadge"
 import { SegmentedToggle } from "@/components/ui/segmented-toggle"
 import type { RecipeDetailResponse } from "@/types/masters"
+
+function downloadRecipe(detail: RecipeDetailResponse) {
+  const url = URL.createObjectURL(
+    new Blob([buildRecipeDumpCsv(detail)], { type: "text/csv;charset=utf-8" })
+  )
+  const a = document.createElement("a")
+  a.href = url
+  a.download = `recipe_${detail.sku_code ?? detail.bom_code ?? detail.recipe_id}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 async function viewArtifact(s3Key: string) {
   try {
@@ -66,15 +78,28 @@ export function RecipeDetailPanel({
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">Recipe Detail</p>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 shrink-0 -mt-1 -mr-1"
-            onClick={onClose}
-            title="Close detail panel"
-          >
-            <X className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-0.5 shrink-0 -mt-1 -mr-1">
+            {detail && detail.lines.length > 0 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => downloadRecipe(detail)}
+                title="Download this recipe as CSV"
+              >
+                <Download className="h-4 w-4" />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={onClose}
+              title="Close detail panel"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </CardHeader>
 

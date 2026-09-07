@@ -192,8 +192,12 @@ export const MFG_EXPORT_COLUMNS: ExportColumn[] = [
 
 export const RECIPE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "bom_code",        label: "Recipe Code",        type: "text"   },
+  { key: "sku_code",        label: "SKU",             type: "text"   },
+  { key: "sku_name",        label: "SKU Name",        type: "text"   },
   { key: "mtrl_type",       label: "Material Type",   type: "text"   },
   { key: "mtrl_id",         label: "Material ID",     type: "number" },
+  { key: "mtrl_code",       label: "Material Code",   type: "text"   },
+  { key: "mtrl_name",       label: "Material Name",   type: "text"   },
   { key: "amount",          label: "Amount",          type: "number" },
   { key: "uom",             label: "UOM",             type: "text"   },
   { key: "material_status", label: "Material Status", type: "text"   },
