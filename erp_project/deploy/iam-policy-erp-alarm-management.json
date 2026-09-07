@@ -1,0 +1,65 @@
+{
+  "_comment": [
+    "Alarm management for IAM user mcaffeine-erp-prefg-tool, account 157320387454.",
+    "Suggested policy name: erp-alarm-management",
+    "",
+    "Probed 2026-09-07: cloudwatch:PutMetricAlarm is DENIED for these keys today.",
+    "This is the policy that lifts that.",
+    "",
+    "── WHY THIS IS NEEDED ──────────────────────────────────────────────────────",
+    "The account's only disk alarm, 'Email_Alert', is dead twice over:",
+    "  - it watches namespace CWAgent, which holds 0 metrics (this app's agent",
+    "    publishes to ERP/EC2 — see deploy/cloudwatch-agent-config.json)",
+    "  - its dimension is InstanceId=i-0fe68f439de2aceaf, which is neither live",
+    "    app instance (i-0a249d3d470e693d3, i-0d269978588f3c2da)",
+    "So it sits in INSUFFICIENT_DATA permanently and there is NO working disk",
+    "alarm. Fixing that needs PutMetricAlarm.",
+    "",
+    "── THIS IS A WRITE GRANT, KEPT SEPARATE FOR THAT REASON ────────────────────",
+    "Every other observability permission is read-only. This one creates and",
+    "deletes alarms, so it lives in its own policy: attach it while fixing the",
+    "alarms, detach it afterwards, and the read-only tabs keep working.",
+    "",
+    "DeleteAlarms is included because replacing 'Email_Alert' means removing it —",
+    "but note the name does NOT match the erp-* pattern below, so deleting that",
+    "specific alarm needs either a one-off console action or its ARN added here.",
+    "That is deliberate: a policy that can delete any alarm in the account is a",
+    "bigger grant than fixing one alarm warrants.",
+    "",
+    "── NAMING ──────────────────────────────────────────────────────────────────",
+    "Scoped to alarm:erp-* so these keys cannot touch alarms belonging to anything",
+    "else in this shared account. Name replacements accordingly, e.g.",
+    "  erp-disk-used-high, erp-mem-used-high, erp-rds-cpu-high",
+    "An alarm created outside that prefix will be refused by this policy.",
+    "",
+    "DescribeAlarms is a list operation with no resource-level permissions, so it",
+    "stays on '*' — it is already granted by iam-policy-erp-app-deploy.json and is",
+    "repeated here only so this policy is useful standalone.",
+    "",
+    "NOT granted: cloudwatch:PutMetricData. Nothing in this app publishes custom",
+    "metrics — the CloudWatch agent does that under the instance role, not these",
+    "keys. If app-level metrics are ever wanted, prefer EMF log lines (free, no",
+    "new permission) over PutMetricData."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ManageErpNamedAlarms",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:DeleteAlarms",
+        "cloudwatch:EnableAlarmActions",
+        "cloudwatch:DisableAlarmActions",
+        "cloudwatch:SetAlarmState"
+      ],
+      "Resource": "arn:aws:cloudwatch:ap-south-1:157320387454:alarm:erp-*"
+    },
+    {
+      "Sid": "ReadAlarmState",
+      "Effect": "Allow",
+      "Action": ["cloudwatch:DescribeAlarms", "cloudwatch:ListMetrics"],
+      "Resource": "*"
+    }
+  ]
+}

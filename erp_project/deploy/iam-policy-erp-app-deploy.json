@@ -67,6 +67,16 @@
       "Resource": "*"
     },
     {
+      "_comment": [
+        "Metrics here already cover /observability > Infra: GetMetricData serves",
+        "the SEARCH() expressions in lib/services/infra.ts, verified live. Nothing",
+        "was added for it.",
+        "",
+        "The Logs tab needs logs:FilterLogEvents, which is NOT in this list. It is",
+        "granted separately by deploy/iam-policy-erp-app-observability-logs.json,",
+        "scoped to the /erp/* groups — kept out of here so it stays independently",
+        "reviewable and detachable, the same reasoning the SES runtime policy gives."
+      ],
       "Sid": "CloudWatchReadOnly",
       "Effect": "Allow",
       "Action": [

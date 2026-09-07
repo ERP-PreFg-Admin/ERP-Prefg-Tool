@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Database, Factory, CalendarDays,
   Activity, DollarSign, CheckSquare, BarChart2,
   Settings, ChevronLeft, ChevronRight, ChevronDown, LogOut,
-  Package, Truck, FlaskConical, Box, Lock, Sun, Moon, Bug, ExternalLink, Boxes
+  Package, Truck, FlaskConical, Box, Lock, Sun, Moon, Bug, ExternalLink, Boxes , Gauge
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/components/ThemeProvider"
@@ -69,6 +69,8 @@ const NAV: NavItem[] = [
   // /uniware row, and everyone else has no business knowing the screen exists.
   // See prisma/add_uniware_explorer_page.sql.
   { label: "Uniware Explorer", href: "/uniware", icon: Boxes, hideWhenLocked: true },
+  // Same treatment, same reason — see prisma/add_observability_page.sql.
+  { label: "Observability", href: "/observability", icon: Gauge, hideWhenLocked: true },
   {
     label: "Approvals", href: "/approvals", icon: CheckSquare,
   },

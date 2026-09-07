@@ -1,0 +1,66 @@
+{
+  "_comment": [
+    "Log read for /observability > Logs. Attach to IAM user",
+    "mcaffeine-erp-prefg-tool in account 157320387454 — the identity behind",
+    "ACCESS_KEY_ID_AWS / SECRET_ACCESS_KEY_AWS in SSM /erp-app/*.",
+    "",
+    "Suggested policy name: erp-app-observability-logs",
+    "",
+    "WHY ITS OWN POLICY, not another statement in iam-policy-erp-app-deploy.json:",
+    "same reasoning that file's SES sibling gives — one concern per policy stays",
+    "independently reviewable and can be detached without touching the deploy",
+    "path that ECR, SSM and EC2 depend on.",
+    "",
+    "WHY SCOPED, when every statement in the deploy policy uses '*':",
+    "these keys already carry ssm:SendCommand with AWS-RunShellScript on both app",
+    "instances plus read/write on all /erp-app/* secrets (see the SECURITY NOTE in",
+    "iam-policy-erp-app-runtime-ses.json). Application logs are the app's own",
+    "output and carry user names, email addresses, PO numbers and request paths,",
+    "so the marginal grant is held to the two groups the CloudWatch agent writes:",
+    "/erp/app and /erp/bootstrap (deploy/cloudwatch-agent-config.json).",
+    "",
+    "Do NOT widen Resource to '*' to reach an unrelated log group — add a second",
+    "statement naming that group instead.",
+    "",
+    "BOTH ARNs are required. FilterLogEvents authorises against the log-group ARN,",
+    "but the ':log-stream:*' form is what several logs actions check, and omitting",
+    "it produces an AccessDenied that names the group and so reads as if the group",
+    "ARN were wrong. Listing both widens nothing.",
+    "",
+    "Logs Insights (logs:StartQuery, logs:GetQueryResults, logs:StopQuery) is",
+    "deliberately NOT granted. lib/aws/cloudwatch.ts uses the synchronous",
+    "FilterLogEvents, and aggregation over logs is already done in SQL on the",
+    "Requests tab — faster, and joined to users, which Insights cannot do.",
+    "",
+    "This grants READ only. Nothing in the app writes to CloudWatch Logs; the",
+    "agent on the instance does that under the instance role, not these keys."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ErpLogGroupsRead",
+      "Effect": "Allow",
+      "Action": [
+        "logs:FilterLogEvents",
+        "logs:GetLogEvents",
+        "logs:DescribeLogStreams"
+      ],
+      "Resource": [
+        "arn:aws:logs:ap-south-1:157320387454:log-group:/erp/*",
+        "arn:aws:logs:ap-south-1:157320387454:log-group:/erp/*:log-stream:*"
+      ]
+    },
+    {
+      "_comment_describe": [
+        "DescribeLogGroups does not support resource-level permissions — it is a",
+        "list operation over the account, so '*' is the only expressible form.",
+        "It is already granted by the deploy policy; listed here so this policy",
+        "works standalone if that one is ever detached."
+      ],
+      "Sid": "ErpLogGroupsList",
+      "Effect": "Allow",
+      "Action": ["logs:DescribeLogGroups"],
+      "Resource": "*"
+    }
+  ]
+}

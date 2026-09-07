@@ -26,8 +26,10 @@ export const PAGES: readonly PageEntry[] = [
   { slug: "/",         label: "Dashboard",      section: "General" },
   { slug: "/approvals", label: "Approvals",     section: "General" },
   { slug: "/admin",    label: "Administration", section: "General" },
+  // Top-level, not under /admin — a child of /admin is inherited by every admin.
+  { slug: "/observability", label: "Observability", section: "General" },
 
-  { slug: "/masters",                     label: "Masters (all)",        section: "Masters" },
+  { slug: "/masters",                  label: "Masters (all)",        section: "Masters" },
   { slug: "/masters/skus",                label: "SKUs",                 section: "Masters" },
   { slug: "/masters/manufacturers",       label: "Manufacturers",        section: "Masters" },
   { slug: "/masters/vendors",             label: "Vendors",              section: "Masters" },
@@ -36,7 +38,6 @@ export const PAGES: readonly PageEntry[] = [
   { slug: "/masters/packing-materials",   label: "PM Cost Master",       section: "Masters" },
   { slug: "/masters/recipe-master",          label: "Recipe Master",        section: "Masters" },
   { slug: "/masters/warehouses",          label: "Warehouses",           section: "Masters" },
-
   { slug: "/manufacturing", label: "MFG Cost Manager", section: "Production" },
   { slug: "/po-tracking",                    label: "PO Tracking (all)", section: "Production" },
   { slug: "/po-tracking/mfg-overview",       label: "MFG Overview",      section: "Production" },
@@ -45,10 +46,6 @@ export const PAGES: readonly PageEntry[] = [
   { slug: "/po-tracking/po-inwarding",       label: "PO Inwarding",      section: "Production" },
   { slug: "/po-tracking/invoices",           label: "Invoices",          section: "Production" },
   { slug: "/gatepass",                       label: "GatePass",          section: "Production" },
-  // Top-level, NOT "/admin/uniware": resolveAccess walks a slug up its parents,
-  // so a child of /admin would let every admin inherit it. This must be
-  // grantable to developers with admins excluded — see
-  // prisma/add_uniware_explorer_page.sql.
   { slug: "/uniware",                        label: "Uniware Explorer",  section: "Production" },
 
   // Seeded in scripts/seed-permissions.ts but no pages exist yet.
