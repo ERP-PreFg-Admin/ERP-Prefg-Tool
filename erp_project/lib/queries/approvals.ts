@@ -105,6 +105,16 @@ export const entityLabelSql: Record<string, string> = {
     JOIN master_mfgs m ON m.id = bm.mfg_id
     WHERE bm.id = ? LIMIT 1
   `,
+  // entity_id is the master_recipe_mfg line. Only its re-activation is approved;
+  // the label names the SKU and manufacturer the line ties together.
+  MFG_LINE: `
+    SELECT s.sku_code AS code, s.name, m.code AS secondary_code, m.name AS secondary_name
+    FROM master_recipe_mfg l
+    JOIN master_recipe b ON b.id = l.recipe_id
+    LEFT JOIN master_skus s ON s.id = b.sku_id
+    JOIN master_mfgs m ON m.id = l.mfg_id
+    WHERE l.id = ? LIMIT 1
+  `,
   // Bulk uploads carry the MANUFACTURER as entity_id, not a user — every
   // bom_misc row belongs to one mfg and the uploading page already knows it.
   MFG_MISC_BULK: `

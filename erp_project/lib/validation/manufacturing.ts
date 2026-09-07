@@ -8,10 +8,9 @@ export const createMfgLineSchema = z.object({
   mfg_id: z.coerce.number().int().positive(),
   status: mfgLineStatusSchema,
   effective_from: z.string().trim().min(1, "effective_from is required"),
-  effective_to: z.string().trim().nullable().optional(),
-  monthly_capacity: z.coerce.number().int().nonnegative().nullable().optional(),
-  this_month_plan: z.coerce.number().int().nonnegative().nullable().optional(),
-  last_batch_date: z.string().trim().nullable().optional(),
+  // effective_to is DERIVED from status server-side (see lib/manufacturing/
+  // line-status.ts). Monthly capacity / this-month plan / last-batch date are no
+  // longer collected — all live lines held NULL and they are off the form now.
   remarks: z.string().trim().max(255).nullable().optional(),
 })
 
@@ -19,10 +18,7 @@ export const updateMfgLineSchema = z.object({
   action: z.literal("update"),
   id: z.coerce.number().int().positive(),
   status: mfgLineStatusSchema,
-  effective_to: z.string().trim().nullable().optional(),
-  monthly_capacity: z.coerce.number().int().nonnegative().nullable().optional(),
-  this_month_plan: z.coerce.number().int().nonnegative().nullable().optional(),
-  last_batch_date: z.string().trim().nullable().optional(),
+  // effective_to derived server-side; planning fields removed from the form.
   remarks: z.string().trim().max(255).nullable().optional(),
 })
 

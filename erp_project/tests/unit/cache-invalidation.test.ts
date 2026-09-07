@@ -82,6 +82,7 @@ test("every registered module that writes a master declares its tags", async () 
     BOM_BULK: "same as BOM",
     MFG_MISC: "bom_misc feeds costing, which reads live",
     MFG_MISC_BULK: "same as MFG_MISC",
+    MFG_LINE: "master_recipe_mfg feeds costing/overview, which read live",
     // Vendor rates feed the RM/PM cost masters, which are read live per material.
     RM_VRM_BULK: "covered by ref:rm via RM_VRM",
     PM_VRM_BULK: "covered by ref:pm via PM_VRM",

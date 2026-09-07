@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { DatePicker, DateRangePicker } from "@/components/ui/date-picker"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { Select } from "@/components/ui/select"
@@ -22,9 +22,6 @@ type FormState = {
   status: MfgLineStatus
   effective_from: string
   effective_to: string
-  monthly_capacity: string
-  this_month_plan: string
-  last_batch_date: string
   remarks: string
 }
 
@@ -37,9 +34,6 @@ const EMPTY_FORM: FormState = {
   // Empty shows the placeholder instead, and handleSubmit refuses to send it.
   effective_from: "",
   effective_to: "",
-  monthly_capacity: "",
-  this_month_plan: "",
-  last_batch_date: "",
   remarks: "",
 }
 
@@ -68,9 +62,6 @@ export default function LineDialog({
         // though MfgLine types them `string | null`.
         effective_from: isoDate(editData.effective_from),
         effective_to: isoDate(editData.effective_to),
-        monthly_capacity: editData.monthly_capacity != null ? String(editData.monthly_capacity) : "",
-        this_month_plan: editData.this_month_plan != null ? String(editData.this_month_plan) : "",
-        last_batch_date: isoDate(editData.last_batch_date),
         remarks: editData.remarks ?? "",
       })
     } else {
@@ -114,15 +105,17 @@ export default function LineDialog({
           action: "update",
           id: editData.id,
           status: form.status,
-          effective_to: form.effective_to || null,
-          monthly_capacity: form.monthly_capacity ? Number(form.monthly_capacity) : null,
-          this_month_plan: form.this_month_plan ? Number(form.this_month_plan) : null,
-          last_batch_date: form.last_batch_date || null,
+          // effective_to and the planning fields are no longer edited here.
           remarks: form.remarks.trim() || null,
         })
         const data = await res.json()
         if (!res.ok) { toast({ title: "Couldn't save manufacturing line", description: data.error, variant: "error" }); return }
-        toast({ title: "Line updated", variant: "success" })
+        // Re-activating a deactivated line is staged for approval, not saved live.
+        if (data.approval_id) {
+          toast({ title: "Sent for approval", description: "Re-activating this line needs approval before it goes live.", variant: "success" })
+        } else {
+          toast({ title: "Line updated", variant: "success" })
+        }
         onSaved()
         return
       }
@@ -140,7 +133,7 @@ export default function LineDialog({
             mfg_id: mfgId,
             status: form.status,
             effective_from: form.effective_from,
-            effective_to: form.effective_to || null,
+            // effective_to is derived server-side from status; not sent from here.
             // No capacity / plan / last_batch_date: those inputs are edit-only
             // now, so there is nothing to send. The schema has them optional
             // and the column default is NULL, which is what they were anyway.
@@ -234,71 +227,31 @@ export default function LineDialog({
             </div>
           )}
 
-          {/* effective_from is create-only (updateMfgLineSchema has no such
-              field), so editing offers the end of the window, not both ends. */}
+          {/* effective_from is create-only; effective_to is no longer entered by
+              hand — the server derives it from status (cleared when Active, set to
+              today when Inactive/Discontinued), so editing just shows the rule. */}
           {editData ? (
             <div className="grid gap-1.5">
               <Label>Effective To</Label>
-              <DatePicker
-                value={form.effective_to}
-                onChange={(v) => set("effective_to", v)}
-                min={form.effective_from || undefined}
-                placeholder="Ongoing — no end date"
-              />
-              <p className="text-[11px] text-muted-foreground">
-                {/* formatDisplay, not the raw field: it is a Date object at
-                    runtime, which React refuses to render. */}
-                Running since {formatDisplay(form.effective_from) || "—"}. Leave empty while the line is open-ended.
+              <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                Set automatically from status — <b>cleared</b> while Active
+                (open-ended), stamped with today&apos;s date when set Inactive or
+                Discontinued. Currently{" "}
+                <b>{formatDisplay(form.effective_to) || "ongoing (no end date)"}</b>.
               </p>
             </div>
           ) : (
             <div className="grid gap-1.5">
-              <Label>Effective Period <span className="text-destructive">*</span></Label>
-              <DateRangePicker
-                from={form.effective_from}
-                to={form.effective_to}
-                onChange={(f, t) => { set("effective_from", f); set("effective_to", t) }}
-                allowOpenEnded
-                placeholder="Select effective period"
+              <Label>Effective From <span className="text-destructive">*</span></Label>
+              <DatePicker
+                value={form.effective_from}
+                onChange={(v) => set("effective_from", v)}
+                placeholder="Select start date"
               />
+              <p className="text-[11px] text-muted-foreground">
+                The end date is set automatically from the line&apos;s status.
+              </p>
             </div>
-          )}
-
-          {/* Monthly Capacity, This Month's Plan and Last Batch Date are
-              EDIT-ONLY. Adding a line is "this manufacturer makes this SKU" —
-              the planning numbers are not known then and were never filled: all
-              61 live lines have NULL in every one of the three. The columns and
-              the API still carry them, so an existing line can still be edited. */}
-          {editData && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="grid gap-1.5">
-                  <Label htmlFor="ml-capacity">Monthly Capacity</Label>
-                  {/* step 1: the schema coerces to an int, so a decimal is rejected
-                      server-side rather than rounded. */}
-                  <Input
-                    id="ml-capacity" type="number" min={0} step="1" placeholder="e.g. 50000"
-                    value={form.monthly_capacity} onChange={(e) => set("monthly_capacity", e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="ml-plan">This Month&apos;s Plan</Label>
-                  <Input
-                    id="ml-plan" type="number" min={0} step="1" placeholder="e.g. 12000"
-                    value={form.this_month_plan} onChange={(e) => set("this_month_plan", e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="grid gap-1.5">
-                <Label>Last Batch Date</Label>
-                <DatePicker
-                  value={form.last_batch_date}
-                  onChange={(v) => set("last_batch_date", v)}
-                  placeholder="Not produced yet"
-                />
-              </div>
-            </>
           )}
 
           <div className="grid gap-1.5">
@@ -308,9 +261,10 @@ export default function LineDialog({
               onChange={(e) => set("status", e.target.value as MfgLineStatus)}
               className="w-full"
             >
-              {/* The three mfgLineStatusSchema accepts. 'discontinued' still
-                  counts as live for costing and PO-raising; only 'inactive'
-                  drops out — see selectLiveLinesByMfg. */}
+              {/* The three mfgLineStatusSchema accepts. Setting Inactive OR
+                  Discontinued now stamps effective_to = today, so both drop out
+                  of costing. Re-selecting Active on a deactivated line does not
+                  save directly — it is sent for approval. */}
               <option value="active">Active</option>
               <option value="discontinued">Discontinued</option>
               <option value="inactive">Inactive</option>

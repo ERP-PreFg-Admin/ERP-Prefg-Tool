@@ -173,28 +173,45 @@ export const manufacturingSql = {
   `,
 
   /**
-   * Insert a new manufacturer↔Recipe line.
-   * Params: [recipe_id, mfg_id, status, effective_from, effective_to, monthly_capacity, this_month_plan, last_batch_date, remarks, created_by]
+   * Insert a new manufacturer↔Recipe line. The planning columns
+   * (monthly_capacity, this_month_plan, last_batch_date) are no longer collected
+   * by the form — they default NULL, which is what every live line already held.
+   * Params: [recipe_id, mfg_id, status, effective_from, effective_to, remarks, created_by]
    */
   insertLine: `
     INSERT INTO master_recipe_mfg
-      (recipe_id, mfg_id, status, effective_from, effective_to, monthly_capacity, this_month_plan, last_batch_date, remarks, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (recipe_id, mfg_id, status, effective_from, effective_to, remarks, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `,
 
   /**
-   * Update an existing line's editable fields.
-   * Params: [status, effective_to, monthly_capacity, this_month_plan, last_batch_date, remarks, id]
+   * Update an existing line's editable fields. The planning columns are
+   * deliberately NOT in the SET list — they are off the form, so any legacy value
+   * is preserved rather than wiped. Params: [status, effective_to, remarks, id]
    */
   updateLine: `
     UPDATE master_recipe_mfg
-    SET status = ?, effective_to = ?, monthly_capacity = ?, this_month_plan = ?, last_batch_date = ?, remarks = ?
+    SET status = ?, effective_to = ?, remarks = ?
     WHERE id = ?
   `,
 
-  /** Fetch a single line by id — used to confirm ownership/mfg_id before update. Params: [id] */
+  /**
+   * Fetch a single line by id — used to confirm ownership/mfg_id before update,
+   * AND to read the stored status/effective_to so the route can (a) derive the
+   * new effective_to from a status change and (b) tell an activation transition
+   * (inactive/discontinued → active) from an ordinary edit. Params: [id]
+   */
   selectLineById: `
-    SELECT id, recipe_id, mfg_id FROM master_recipe_mfg WHERE id = ? LIMIT 1
+    SELECT id, recipe_id, mfg_id, status, effective_to FROM master_recipe_mfg WHERE id = ? LIMIT 1
+  `,
+
+  /**
+   * Activate a line — the MFG_LINE approval handler's applyAndArchive. A line is
+   * only ever set active through the approval flow, and activating clears
+   * effective_to (an active line is open-ended). Params: [id]
+   */
+  setLineActive: `
+    UPDATE master_recipe_mfg SET status = 'active', effective_to = NULL WHERE id = ?
   `,
 
   // ── Misc. Cost: JW / Shrink Wrap / Shipper / Wastage (bom_misc) ────────────

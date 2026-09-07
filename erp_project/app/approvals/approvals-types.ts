@@ -65,6 +65,7 @@ export const MODULE_LABEL: Record<string, string> = {
   BOM_BULK: "Bulk Recipe Upload",
   MFG_MISC: "Misc. Cost (MFG)",
   MFG_MISC_BULK: "Bulk Misc. Cost Upload",
+  MFG_LINE: "Recipe Line Activation",
   WAREHOUSE: "Warehouse",
 }
 
@@ -137,6 +138,7 @@ export const MODULE_COLOR: Record<string, string> = {
   // MFG's amber — and the bulk borrows the single, as every other pair does.
   MFG_MISC:      "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-900/40",
   MFG_MISC_BULK: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-900/40",
+  MFG_LINE:      "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-900/40",
   // Sky was the one unused hue in this palette.
   WAREHOUSE: "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/30 dark:text-sky-400 dark:border-sky-900/40",
 }
