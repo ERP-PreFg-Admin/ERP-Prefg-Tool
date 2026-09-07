@@ -135,7 +135,11 @@ const DISPLAY_STATUS_EXPR = `
 // records, not procurement's. Expressed as its own nullable flag rather than
 // folded into the po_type filter, which matches on equality and so can't say
 // "anything but this". Pass 1 to exclude, null to leave inward POs in.
-const EXCLUDE_INWARD = `AND (? IS NULL OR po.po_type <> 'inward')`
+// COALESCE, not a bare `<>`: in SQL `NULL <> 'inward'` is NULL, not TRUE, so a
+// bare comparison silently drops every PO with a NULL po_type — which is what an
+// impromptu or directly-inserted FG PO has. Matches the null-safe form its
+// siblings already use (IS_SPLIT_CHILD, DISPLAY_STATUS_EXPR, CHILD_AGG_JOIN).
+const EXCLUDE_INWARD = `AND (? IS NULL OR COALESCE(po.po_type, '') <> 'inward')`
 
 // Split children never appear as rows of their own: they belong to their master
 // and are reached by expanding it. Taking no parameter — unlike EXCLUDE_INWARD —
