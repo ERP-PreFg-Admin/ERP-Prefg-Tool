@@ -41,7 +41,7 @@ import { skus as skusSql } from "@/lib/queries/skus"
 import { receivePo } from "@/lib/po/po-receive"
 import { mergeInwardLinesBySku, type InwardLine } from "@/lib/invoice/invoice-merge"
 import { createPurchaseOrder, futureDeliveryDate, uniwareEnabled, uniwareVendorCode } from "@/lib/uniware"
-import { pushInvoicePdfToUniware } from "@/lib/uniware/document-sync"
+import { pushInvoicePdfToUniware, docSyncFacilityAllowed } from "@/lib/uniware/document-sync"
 import { UniwareSessionStale } from "@/lib/uniware/web-session"
 import { UNIWARE_SANDBOX } from "@/lib/env"
 import { sendInwardInvoiceEmail } from "@/lib/mail/mailer"
@@ -471,12 +471,13 @@ export async function runInwardInvoice(
   // After commit, like email: the upload is not reversible, and its failure is
   // never a reason to undo a receipt that has physically arrived. A skip here is
   // picked up by the Sync Documents button, which reconciles both directions.
-  // Scoped to the test facility for now (UNIWARE_SANDBOX), so on prod it is inert.
+  // Enabled per facility: sandbox everywhere off prod, the UNIWARE_DOC_FACILITIES
+  // allowlist on prod.
   await emit({ step: "docs", status: "start" })
   if (!uniwarePoCode) {
     await emit({ step: "docs", status: "skipped", message: "No Uniware PO to attach to" })
-  } else if (!UNIWARE_SANDBOX) {
-    await emit({ step: "docs", status: "skipped", message: "Limited to the test facility for now" })
+  } else if (!docSyncFacilityAllowed(facility)) {
+    await emit({ step: "docs", status: "skipped", message: "Document sync is not enabled for this facility" })
   } else {
     try {
       // The PDF is already in hand — no need to re-fetch from S3. attachmentKey is

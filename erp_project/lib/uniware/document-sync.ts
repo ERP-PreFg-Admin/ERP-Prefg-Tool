@@ -35,12 +35,35 @@ import { mintCapability, listDocuments, downloadDocument, uploadDocument, DOC_MA
 import { UniwareSessionStale } from "./web-session"
 import { getFileBuffer, uploadFile } from "@/lib/s3"
 import { monthIST } from "@/lib/date"
-import { UNIWARE_SANDBOX } from "@/lib/env"
+import { UNIWARE_SANDBOX, UNIWARE_DOC_FACILITIES } from "@/lib/env"
+import { facilityForInvoice } from "./facility-resolve"
 import logger from "@/lib/logger"
 
 // ponytail: a flat cap like the GRN sweep's. Each invoice is 1 mint + a list +
 // a download per new file + maybe one upload; 40 fits comfortably in maxDuration.
 export const MAX_PER_RUN = 40
+
+/** Prod facilities the document sync is enabled for, from UNIWARE_DOC_FACILITIES. */
+const DOC_FACILITIES = UNIWARE_DOC_FACILITIES.split(",").map((s) => s.trim()).filter(Boolean)
+/** `*` means every facility — the "on for all of prod" switch. */
+const DOC_ALL = DOC_FACILITIES.includes("*")
+
+/**
+ * May the document sync touch this invoice's facility?
+ *
+ * Off prod the sandbox pins everything to TEST_FACILITY, so everything is in
+ * scope. On prod it is driven by UNIWARE_DOC_FACILITIES (SSM):
+ *   "*"                      → every facility
+ *   "MUM_WAREHOUSE2,…"       → only those codes
+ *   "" (unset)               → inert
+ * An invoice whose facility can't be resolved is left alone unless "*" is set.
+ */
+export function docSyncFacilityAllowed(facility: string | undefined): boolean {
+  if (UNIWARE_SANDBOX) return true
+  if (DOC_ALL) return true
+  if (!facility) return false
+  return DOC_FACILITIES.includes(facility)
+}
 
 type Candidate = {
   id: number
@@ -177,8 +200,8 @@ export async function runDocumentSync(
     failures: [], sessionStale: false, truncated: false, limit,
   }
 
-  // Scoped to the test facility for now — see the header. Inert, not an error.
-  if (!UNIWARE_SANDBOX) return { ...empty, disabled: true }
+  // On prod with no facilities chosen, the feature is inert — say so plainly.
+  if (!UNIWARE_SANDBOX && DOC_FACILITIES.length === 0) return { ...empty, disabled: true }
 
   const rows = await query<Candidate>(uniwareDocsSql.selectSyncCandidates, [limit + 1])
   const truncated = rows.length > limit
@@ -192,6 +215,13 @@ export async function runDocumentSync(
 
   for (const inv of batch) {
     try {
+      // Only the facilities the feature is enabled for. When everything is in
+      // scope (sandbox, or "*") the per-invoice facility lookup is pointless, so
+      // it's skipped; a specific allowlist resolves and checks each one.
+      const needFacility = !UNIWARE_SANDBOX && !DOC_ALL
+      const facility = needFacility ? await facilityForInvoice(inv) : undefined
+      if (!docSyncFacilityAllowed(facility)) { skipped++; continue }
+
       const one = await syncDocumentsForInvoice(inv)
       pulled += one.pulled
       pushed += one.pushed

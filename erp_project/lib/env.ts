@@ -131,6 +131,14 @@ export const UNIWARE_FACILITY  = process.env.UNIWARE_FACILITY  ?? UNIWARE_SANDBO
 // this set explicitly in SSM.
 export const UNIWARE_VENDOR_CODE = process.env.UNIWARE_VENDOR_CODE ?? UNIWARE_SANDBOX_VENDOR
 
+// Facilities the document sync (push invoice PDF / pull warehouse copy) is enabled
+// for ON PROD, set in SSM. Off prod the sandbox handles scoping (everything is
+// TEST_FACILITY), so this is ignored there.
+//   "*"                → every facility (on for all of prod)
+//   "MUM_WAREHOUSE2,…" → only those codes
+//   "" (unset)         → inert
+export const UNIWARE_DOC_FACILITIES = process.env.UNIWARE_DOC_FACILITIES ?? ""
+
 // ── App base URL ─────────────────────────────────────────────────────────────
 // Used to build absolute links back into the app (e.g. PO links in emails).
 // Optional — falls back to localhost so a missing var only breaks link

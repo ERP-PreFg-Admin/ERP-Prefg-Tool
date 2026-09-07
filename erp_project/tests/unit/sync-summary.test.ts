@@ -154,10 +154,10 @@ test("failed count with no failure detail is still reported honestly", () => {
 
 // ── Document sync ────────────────────────────────────────────────────────────
 
-test("doc sync: disabled off the test facility is a fact, not a failure", () => {
+test("doc sync: disabled (no facilities enabled) is a fact, not a failure", () => {
   const s = summariseDocSync(docResult({ total: 0, disabled: true }))
   assert.equal(s.failed, false)
-  assert.match(s.counts, /test facility/)
+  assert.match(s.counts, /enabled for any facility/)
 })
 
 test("doc sync: a stale session tells the user exactly what to do", () => {

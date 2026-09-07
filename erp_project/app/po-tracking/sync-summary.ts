@@ -95,9 +95,10 @@ export type DocSyncResult = {
  * it renders into the same SyncSummary shape and reuses failureReasons.
  */
 export function summariseDocSync(r: DocSyncResult): SyncSummary {
-  // Off dev the feature is inert by design — say so plainly, not as a failure.
+  // Inert until facilities are chosen (prod, empty UNIWARE_DOC_FACILITIES) — a
+  // fact, not a failure.
   if (r.disabled) {
-    return { counts: "Document sync is limited to the test facility for now.", reasons: [], failed: false }
+    return { counts: "Document sync isn't enabled for any facility yet.", reasons: [], failed: false }
   }
   // The one failure the user can actually fix, so it gets its own message.
   if (r.sessionStale) {
