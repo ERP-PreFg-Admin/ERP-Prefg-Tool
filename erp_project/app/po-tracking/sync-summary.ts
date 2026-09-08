@@ -53,9 +53,12 @@ export function summariseSync(r: SyncResult): SyncSummary {
 
   const parts = [`${r.synced} of ${r.total} synced`]
   if (r.failed) parts.push(`${r.failed} failed`)
-  // Receipts only when there were some. "0 goods receipts" on every run would
-  // be noise on a tenant where most POs never have one.
-  if (r.receipts) parts.push(`${r.receipts} goods receipt${r.receipts === 1 ? "" : "s"}`)
+  // Always, including zero. Hiding "0 goods receipts" was meant to cut noise,
+  // but it left a run that asked and found none looking identical to one that
+  // never asked — which is exactly how "the GRN sync doesn't work" is read.
+  if (r.receipts != null) {
+    parts.push(r.receipts === 0 ? "no goods receipts yet" : `${r.receipts} goods receipt${r.receipts === 1 ? "" : "s"}`)
+  }
   // Never let a cap pass unmentioned: "40 of 40 synced" would otherwise read as
   // the whole list when it was the newest 40 of 300.
   if (r.truncated) parts.push(`only the newest ${r.limit} were checked`)

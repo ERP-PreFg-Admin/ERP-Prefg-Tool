@@ -12,6 +12,13 @@ export const OAUTH_TOKEN_PATH = "/oauth/token"
 export const PO_CREATE_PATH = "/services/rest/v1/purchase/purchaseOrder/create"
 export const PO_DETAILS_PATH = "/services/rest/v1/purchase/purchaseOrder/getPurchaseOrderDetails"
 
+// `create` lands a PO in statusCode CREATED with an empty
+// purchaseOrderApprovalAudits, and a CREATED PO cannot be received against. The
+// warehouse approves it in Uniware — we deliberately do NOT, so a fresh mirrored
+// PO reading CREATED with 0 receipts is the normal state, not a broken sync.
+// (There IS a purchaseOrder/approve endpoint, verified on prod 2026-09-08;
+// purchaseOrder/edit and purchaseOrder/updateStatus both 404.)
+
 /**
  * Inflow receipts — GRNs. Two calls, because the list endpoint returns bare
  * codes and every field worth having (received qty, rejectedQuantity, batch,

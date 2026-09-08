@@ -11,17 +11,21 @@
 
 export const uniwareGrn = {
   /**
-   * Which mirrored invoices are worth walking.
+   * Which mirrored invoices are worth walking: every one that reached Uniware.
    *
-   * Only those Uniware says have receipts — inflowReceiptsCount is stored by the
-   * status sync at no extra API cost, and GRNs are 1+N calls per PO, so this
-   * filter is what keeps the sweep inside maxDuration.
+   * It used to also require `uniware_grn_count IS NULL OR > 0`, on the theory
+   * that the status sync had already told us which POs have receipts. But that
+   * count is a CACHE of what the last status pass saw, so a 0 permanently
+   * excluded the PO from this sweep — goods received after that pass were
+   * discoverable only by running the status sync again. With every PO on the
+   * tenant currently at 0 receipts, that made this button a guaranteed no-op
+   * reporting "No mirrored POs to sync yet", which reads as broken.
    *
-   * `uniware_grn_count IS NULL` is included deliberately: NULL means the status
-   * sync has never asked, not "no receipts", so those still need a look.
-   *
-   * Newest first and LIMITed, matching selectAllForStatusSync — the recent ones
-   * are the ones still moving, and the caller reports what the limit cut off.
+   * The cost is one list call per PO instead of none. That is what the LIMIT is
+   * for. ponytail: newest-first and capped, so the oldest POs past the cap are
+   * only covered by the status sync's wider pass — fine while the mirrored set
+   * is in the dozens; needs a least-recently-checked ordering if it reaches
+   * hundreds.
    * Parameters: [limit]
    */
   selectForGrnSync: `
@@ -29,7 +33,6 @@ export const uniwareGrn = {
            si.uniware_grn_count
     FROM invoice_mfg si
     WHERE si.uniware_po_code IS NOT NULL
-      AND (si.uniware_grn_count IS NULL OR si.uniware_grn_count > 0)
     ORDER BY si.id DESC
     LIMIT ?
   `,

@@ -37,6 +37,18 @@ test("a clean run is counts only", () => {
   assert.equal(s.failed, false)
 })
 
+test("a run that asked and found no receipts says so", () => {
+  // Silence here used to be indistinguishable from never having asked.
+  const s = summariseSync(result({ synced: 5, receipts: 0 }))
+  assert.equal(s.counts, "5 of 5 synced · no goods receipts yet")
+  assert.equal(s.failed, false)
+})
+
+test("receipts found are counted", () => {
+  assert.match(summariseSync(result({ synced: 5, receipts: 1 })).counts, /1 goods receipt$/)
+  assert.match(summariseSync(result({ synced: 5, receipts: 3 })).counts, /3 goods receipts$/)
+})
+
 test("counts and reasons are separate, so they can be styled apart", () => {
   const s = summariseSync(result({
     failed: 5,

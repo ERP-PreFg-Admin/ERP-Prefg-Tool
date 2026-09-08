@@ -49,8 +49,10 @@ const PO = {
 type Captured = {
   /** The Facility header on the last non-auth request. */
   facility: string | undefined
-  /** The parsed JSON body on the last POST, for the leak check below. */
+  /** The parsed JSON body on the first POST, for the leak check below. */
   body: Record<string, unknown> | undefined
+  /** Every non-auth URL hit, in order. */
+  urls: string[]
 }
 
 /**
@@ -58,13 +60,14 @@ type Captured = {
  * else with `respond`. Returns the capture slot, filled in as calls arrive.
  */
 function stubFetch(respond: () => Response): Captured {
-  const captured: Captured = { facility: undefined, body: undefined }
+  const captured: Captured = { facility: undefined, body: undefined, urls: [] }
   globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
     if (String(input).includes("/oauth/token")) {
       return Response.json({ access_token: "test-token", expires_in: 43199 })
     }
+    captured.urls.push(String(input))
     captured.facility = new Headers(init?.headers).get("Facility") ?? undefined
-    captured.body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
+    captured.body ??= typeof init?.body === "string" ? JSON.parse(init.body) : undefined
     return respond()
   }) as unknown as typeof fetch
   return captured
@@ -117,6 +120,19 @@ test("facility is a header only — it never reaches the request body", async ()
 
   assert.ok(cap.body, "expected a JSON body")
   assert.equal("facility" in cap.body!, false)
+})
+
+test("create does not approve — the warehouse owns that step in Uniware", async () => {
+  // A CREATED PO cannot be received against, but approval is the warehouse's
+  // call, not ours. Pinned because auto-approving from here was tried and
+  // reverted: it would silently take over their control step.
+  const { createPurchaseOrder } = await import("../../lib/uniware")
+  const cap = stubFetch(okCreate)
+
+  await createPurchaseOrder({ ...PO, facility: "GGN_WAREHOUSE" })
+
+  assert.equal(cap.urls.length, 1, `expected the create alone, got ${JSON.stringify(cap.urls)}`)
+  assert.ok(!cap.urls[0].includes("/approve"), cap.urls[0])
 })
 
 test("fetchPurchaseOrderPdf sends the facility it was given", async () => {
