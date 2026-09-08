@@ -15,6 +15,7 @@
 
 import { DIFF_NEW_CELL_CLASS } from "@/app/approvals/approval-card/diff-colors"
 import { MISSING_CELL_CLASS } from "@/components/masters/missing-value"
+import type { MfgFacilitySkuRow } from "@/types/masters"
 
 export type MapState = "mapped" | "partial" | "unmapped" | "unavailable"
 
@@ -175,6 +176,84 @@ export function summarise(cells: MatrixCell[]): {
     }
   }
   return { unmapped, partial, missing }
+}
+
+/** A SKU is mapped at a facility when it has a row there and that row is active. */
+export const isMapped = (s: MfgFacilitySkuRow) => s.map_id !== null && s.map_status === "active"
+
+/** Mapped, but Uniware has neither acknowledged our push nor reported it. */
+export const isUnconfirmed = (s: MfgFacilitySkuRow) =>
+  isMapped(s) && s.un_pushed_at === null && s.un_seen_at === null
+
+/** One manufacturer's slice of a facility, for the column drilldown. */
+export type FacilityGroup = {
+  mfg_id: number
+  mfg_name: string
+  mfg_code: string | null
+  /** Is this manufacturer a Uniware vendor here? False = nothing can be mapped
+   *  until it is registered, which is the group's Register button. */
+  hasCode: boolean
+  total: number
+  mapped: number
+  unconfirmed: number
+  state: MapState
+  skus: MfgFacilitySkuRow[]
+}
+
+/** What facilityGroups needs off a matrix cell — MfgFacilityCell satisfies it. */
+export type FacilityGroupCell = Omit<MatrixCell, "total_skus" | "mapped_skus" | "unpushed_skus"> & {
+  mfg_id: number
+  mfg_name: string
+  mfg_code: string | null
+}
+
+/** Attention first, so the work is at the top of a long panel. */
+const GROUP_ORDER: Record<MapState, number> = {
+  unmapped: 0,
+  partial: 1,
+  mapped: 2,
+  unavailable: 3,
+}
+
+/**
+ * One facility's cells → one group per manufacturer, ordered attention-first.
+ *
+ * Counts come from `skus` rather than the cell's own `mapped_skus`/`total_skus`:
+ * that array is what the panel renders and ticks, so a group header can never
+ * disagree with the rows under it. The cell is still the source for the two
+ * preconditions `cellState` reads — facility code and vendor code — because
+ * neither is knowable from a SKU list.
+ */
+export function facilityGroups(
+  cells: FacilityGroupCell[],
+  skusByMfg: Map<number, MfgFacilitySkuRow[]>,
+): FacilityGroup[] {
+  return cells
+    .map((cell) => {
+      const skus = skusByMfg.get(cell.mfg_id) ?? []
+      const mapped = skus.filter(isMapped).length
+      return {
+        mfg_id: cell.mfg_id,
+        mfg_name: cell.mfg_name,
+        mfg_code: cell.mfg_code,
+        hasCode: Boolean(cell.un_mfg_code),
+        total: skus.length,
+        mapped,
+        unconfirmed: skus.filter(isUnconfirmed).length,
+        state: cellState({
+          un_mfg_code: cell.un_mfg_code,
+          facility_code: cell.facility_code,
+          total_skus: skus.length,
+          mapped_skus: mapped,
+          unpushed_skus: 0,
+        }),
+        skus,
+      }
+    })
+    .sort(
+      (a, b) =>
+        GROUP_ORDER[a.state] - GROUP_ORDER[b.state] || a.mfg_name.localeCompare(b.mfg_name)
+    )
 }
 
 /**

@@ -12,10 +12,12 @@ import test from "node:test"
 import assert from "node:assert/strict"
 import {
   cellState, cellLabel, needsPush, summarise, matchesSearch,
+  isMapped, isUnconfirmed, facilityGroups,
   MAP_STATE_CELL, MAP_STATE_DOT, MAP_STATE_LABEL, MAP_STATES,
-  type MatrixCell,
+  type MatrixCell, type FacilityGroupCell,
 } from "../../app/po-tracking/mfg-overview/mapping-state"
 import { facilityMapActionSchema } from "../../lib/validation/manufacturing"
+import type { MfgFacilitySkuRow } from "../../types/masters"
 
 /** A fully-configured, fully-mapped cell. Each test overrides just what it means. */
 function cell(over: Partial<MatrixCell> = {}): MatrixCell {
@@ -156,6 +158,132 @@ test("an empty search matches everything, including a manufacturer with no code"
   assert.equal(matchesSearch({ name: "Apex", code: null }, [], ""), true)
   assert.equal(matchesSearch({ name: "Apex", code: null }, [], "   "), true)
   assert.equal(matchesSearch({ name: "Apex", code: null }, [], "apex"), true)
+})
+
+// ── The facility (column) drilldown's groups ───────────────────────────────────
+// One facility, one group per manufacturer. The counts come off the SKU rows the
+// panel actually renders, NOT the cell's own mapped_skus — a header that disagreed
+// with the ticks under it is the failure mode worth pinning.
+
+function sku(id: number, over: Partial<MfgFacilitySkuRow> = {}): MfgFacilitySkuRow {
+  return {
+    sku_id: id,
+    sku_code: `SKU-${id}`,
+    sku_name: `Product ${id}`,
+    brand_id: 1,
+    has_recipe: 1,
+    has_mapping: 0,
+    map_id: null,
+    map_status: null,
+    un_pushed_at: null,
+    un_push_error: null,
+    un_seen_at: null,
+    ...over,
+  }
+}
+
+/** A mapped row: has a row here, and that row is active. */
+const mappedSku = (id: number, over: Partial<MfgFacilitySkuRow> = {}) =>
+  sku(id, { map_id: 1, map_status: "active", un_seen_at: "2026-09-01 10:00:00", ...over })
+
+function groupCell(over: Partial<FacilityGroupCell> = {}): FacilityGroupCell {
+  return {
+    mfg_id: 1,
+    mfg_name: "Prime Manufacturing Ltd.",
+    mfg_code: "MFG-001",
+    un_mfg_code: "PRIME_",
+    facility_code: "GGN_WAREHOUSE",
+    ...over,
+  }
+}
+
+test("isMapped needs both a row and an active status", () => {
+  assert.equal(isMapped(mappedSku(1)), true)
+  assert.equal(isMapped(sku(1)), false, "no row at this facility")
+  assert.equal(isMapped(sku(1, { map_id: 1, map_status: "inactive" })), false,
+    "a deliberately unmapped row must not read as mapped")
+})
+
+test("isUnconfirmed is mapped-here-but-unknown-to-Uniware, not just unpushed", () => {
+  assert.equal(isUnconfirmed(mappedSku(1, { un_pushed_at: null, un_seen_at: null })), true)
+  assert.equal(isUnconfirmed(mappedSku(1, { un_pushed_at: "2026-09-01", un_seen_at: null })), false)
+  assert.equal(isUnconfirmed(mappedSku(1, { un_pushed_at: null, un_seen_at: "2026-09-01" })), false,
+    "an export confirmed it, so there is nothing outstanding")
+  assert.equal(isUnconfirmed(sku(1)), false, "not mapped here at all")
+})
+
+test("group counts come from the SKU rows, so the header cannot outrun the ticks", () => {
+  const [g] = facilityGroups(
+    [groupCell()],
+    new Map([[1, [mappedSku(1), mappedSku(2), sku(3)]]])
+  )
+  assert.deepEqual(
+    { total: g.total, mapped: g.mapped, state: g.state },
+    { total: 3, mapped: 2, state: "partial" }
+  )
+})
+
+test("a manufacturer with no vendor code here is unavailable, and flagged for Register", () => {
+  // The grey → pink precondition, per group instead of per cell: nothing can be
+  // mapped until the manufacturer is a Uniware vendor at this facility.
+  const [g] = facilityGroups(
+    [groupCell({ un_mfg_code: null })],
+    new Map([[1, [sku(1), sku(2)]]])
+  )
+  assert.equal(g.hasCode, false)
+  assert.equal(g.state, "unavailable")
+})
+
+test("a registered manufacturer with no live SKUs is unavailable, not mapped", () => {
+  const [g] = facilityGroups([groupCell()], new Map())
+  assert.deepEqual({ total: g.total, mapped: g.mapped, state: g.state },
+    { total: 0, mapped: 0, state: "unavailable" })
+  assert.deepEqual(g.skus, [], "a missing entry is an empty list, not a crash")
+})
+
+test("groups are ordered attention-first, then by name", () => {
+  // The panel is long and starts collapsed, so the work has to be at the top.
+  const cells: FacilityGroupCell[] = [
+    groupCell({ mfg_id: 1, mfg_name: "Zenith", mfg_code: "MFG-Z" }),        // mapped
+    groupCell({ mfg_id: 2, mfg_name: "Apex", mfg_code: "MFG-A" }),          // partial
+    groupCell({ mfg_id: 3, mfg_name: "Corex", mfg_code: "MFG-C" }),         // unmapped
+    groupCell({ mfg_id: 4, mfg_name: "Delta", un_mfg_code: null }),         // unavailable
+    groupCell({ mfg_id: 5, mfg_name: "Alta", mfg_code: "MFG-AL" }),         // unmapped
+  ]
+  const skus = new Map<number, MfgFacilitySkuRow[]>([
+    [1, [mappedSku(1)]],
+    [2, [mappedSku(1), sku(2)]],
+    [3, [sku(1)]],
+    [4, [sku(1)]],
+    [5, [sku(1)]],
+  ])
+  assert.deepEqual(
+    facilityGroups(cells, skus).map((g) => [g.mfg_name, g.state]),
+    [
+      ["Alta", "unmapped"],   // unmapped first, alphabetical within the state
+      ["Corex", "unmapped"],
+      ["Apex", "partial"],
+      ["Zenith", "mapped"],
+      ["Delta", "unavailable"],
+    ]
+  )
+})
+
+test("unconfirmed is counted per group for the warning icon", () => {
+  const [g] = facilityGroups(
+    [groupCell()],
+    new Map([[1, [
+      mappedSku(1),                                            // seen by Uniware
+      mappedSku(2, { un_pushed_at: null, un_seen_at: null }),  // outstanding
+      sku(3),                                                  // not mapped
+    ]]])
+  )
+  assert.equal(g.unconfirmed, 1)
+  assert.equal(g.state, "partial", "the overlay must not change the group's state")
+})
+
+test("facilityGroups of nothing is nothing", () => {
+  assert.deepEqual(facilityGroups([], new Map()), [])
 })
 
 // ── The colour maps ────────────────────────────────────────────────────────────

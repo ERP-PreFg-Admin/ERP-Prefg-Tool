@@ -24,6 +24,7 @@
 import { useState } from "react"
 import { Check, AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { SkuTickList } from "./SkuTickList"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -35,13 +36,12 @@ import {
   SidePanel, SidePanelContent, SidePanelHeader, SidePanelTitle,
 } from "@/components/ui/side-panel"
 import { cn } from "@/lib/utils"
-import { uniwareErrorReasons, uniwareErrorMessage } from "@/lib/uniware/errors"
-import { DIFF_NEW_CELL_CLASS } from "@/app/approvals/approval-card/diff-colors"
-import { cellState, MAP_STATE_CELL, MAP_STATE_LABEL, type MatrixCell } from "./mapping-state"
+import { uniwareErrorReasons } from "@/lib/uniware/errors"
+import {
+  cellState, isMapped, isUnconfirmed,
+  MAP_STATE_CELL, MAP_STATE_LABEL, type MatrixCell,
+} from "./mapping-state"
 import type { MfgFacilityCell, MfgFacilitySkuRow } from "@/types/masters"
-
-/** A SKU is mapped here when it has a row and that row is active. */
-const isMapped = (s: MfgFacilitySkuRow) => s.map_id !== null && s.map_status === "active"
 
 /** Every distinct reason across the pair's rows, cleaned, first-seen order. */
 function dedupeReasons(raws: (string | null)[]): string[] {
@@ -51,10 +51,6 @@ function dedupeReasons(raws: (string | null)[]): string[] {
   }
   return [...seen]
 }
-
-/** Mapped, but Uniware has neither acknowledged our push nor reported it. */
-const isUnconfirmed = (s: MfgFacilitySkuRow) =>
-  isMapped(s) && s.un_pushed_at === null && s.un_seen_at === null
 
 const MAP_FILTER_OPTIONS = [
   { key: "all",      label: "All" },
@@ -395,67 +391,12 @@ function PanelBody({
           </span>
         </div>
       )}
-      <div className="space-y-2">
-        {visible.map((sku) => {
-            const on = ticked.has(sku.sku_id)
-            // Locked once mapped — see toggle(). Genuinely `disabled`, not just
-            // styled that way, so keyboard and pointer both refuse.
-            const locked = initial.has(sku.sku_id)
-            return (
-              // <label> wrapping the checkbox makes the whole card the hit target
-              // with no onClick on a div and no stopPropagation — nothing else in
-              // the panel competes for the click.
-              <label
-                key={sku.sku_id}
-                title={locked ? "Mapped in Uniware — a mapping cannot be withdrawn" : undefined}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors",
-                  locked
-                    ? "cursor-default"
-                    : canEdit && hasCode ? "cursor-pointer" : "cursor-not-allowed opacity-70",
-                  on
-                    ? cn("border-emerald-200 dark:border-emerald-900", DIFF_NEW_CELL_CLASS)
-                    : "border-border bg-background hover:bg-accent/50"
-                )}
-              >
-                <input
-                  type="checkbox"
-                  checked={on}
-                  disabled={locked || !canEdit || !hasCode || saving !== null}
-                  onChange={() => toggle(sku.sku_id)}
-                  className="h-3.5 w-3.5 shrink-0 accent-emerald-600"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{sku.sku_name ?? sku.sku_code}</div>
-                  <div className="font-mono text-[11px] text-muted-foreground">
-                    {sku.sku_code}
-                    {/* Where this SKU came from. Worth showing because a SKU known
-                        only from Unicommerce has no recipe, so it prices nothing —
-                        it is real for mapping and invisible to costing. */}
-                    {!sku.has_recipe && (
-                      <span className="ml-1.5 font-sans not-italic text-muted-foreground/70">
-                        · no recipe
-                      </span>
-                    )}
-                  </div>
-                </div>
-                {isUnconfirmed(sku) && (
-                  <Badge
-                    variant="warning"
-                    className="shrink-0"
-                    title={uniwareErrorMessage(sku.un_push_error) ?? undefined}
-                  >
-                    Not in Uniware
-                  </Badge>
-                )}
-                <Badge variant={on ? "success" : "outline"} className="shrink-0">
-                  {on && <Check className="mr-1 h-3 w-3" />}
-                  {locked ? "Mapped" : on ? "To add" : "Not mapped"}
-                </Badge>
-            </label>
-          )
-        })}
-      </div>
+      <SkuTickList
+        skus={visible}
+        isTicked={(sku) => ticked.has(sku.sku_id)}
+        disabled={!canEdit || !hasCode || saving !== null}
+        onToggle={(sku) => toggle(sku.sku_id)}
+      />
       {skus.length > 0 && visible.length === 0 && (
         <div className="py-6 text-center text-sm">
           <EmptyState hasFilters filteredMessage="No SKUs match this filter." />

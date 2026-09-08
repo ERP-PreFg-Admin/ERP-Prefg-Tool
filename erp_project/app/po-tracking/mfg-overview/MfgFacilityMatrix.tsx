@@ -20,17 +20,18 @@
  * straight over the frozen ones.
  */
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { SearchInput } from "@/components/masters/SearchInput"
 import { MasterToolbar, MasterToolbarActions } from "@/components/masters/MasterToolbar"
 import { cn } from "@/lib/utils"
 import {
-  cellState, cellLabel, needsPush, summarise, matchesSearch,
+  cellState, cellLabel, needsPush, summarise, matchesSearch, facilityGroups,
   MAP_STATES, MAP_STATE_CELL, MAP_STATE_BLOCK, MAP_STATE_DOT, MAP_STATE_LABEL,
 } from "./mapping-state"
 import { MfgFacilityMapPanel } from "./MfgFacilityMapPanel"
+import { FacilityMapPanel } from "./FacilityMapPanel"
 import { SyncFacilityMapDialog } from "./SyncFacilityMapDialog"
 import type { MfgFacilityCell, MfgFacilitySkuRow } from "@/types/masters"
 
@@ -59,6 +60,17 @@ export type MappingRow = {
   un_seen_at: string | null
 }
 
+/**
+ * What the drilldown is open on. A cell (one manufacturer × one facility) or a
+ * whole facility column — never both, since they are the same slide-over.
+ *
+ * Both carry `whId`, which is what the column highlight reads, so it works for
+ * either without asking which kind it is.
+ */
+type Selection =
+  | { kind: "cell"; mfgId: number; whId: number }
+  | { kind: "facility"; whId: number }
+
 /** Facility column widths. `left-*` offsets below are derived from these, so the
  *  two cannot be changed independently — hence one place. */
 const MFG_COL = "w-56 min-w-56"
@@ -79,7 +91,9 @@ export function MfgFacilityMatrix({
 }) {
   const router = useRouter()
   const [search, setSearch] = useState("")
-  const [selected, setSelected] = useState<{ mfgId: number; whId: number } | null>(null)
+  const [selected, setSelected] = useState<Selection | null>(null)
+  const selCell = selected?.kind === "cell" ? selected : null
+  const selFacility = selected?.kind === "facility" ? selected : null
 
   /** The facility columns, in the order the server sent them (MWH before CWH,
    *  then name, then entity). Derived from the cells so there is no second source
@@ -142,34 +156,62 @@ export function MfgFacilityMatrix({
     [visible]
   )
 
-  const selectedCell = selected
-    ? rows.find((r) => r.first.mfg_id === selected.mfgId)?.cells.get(selected.whId) ?? null
+  const selectedCell = selCell
+    ? rows.find((r) => r.first.mfg_id === selCell.mfgId)?.cells.get(selCell.whId) ?? null
     : null
 
-  /** The panel's SKU list: this manufacturer's live lines, each flagged with its
-   *  mapping state at the selected facility. */
-  const selectedSkus = useMemo<MfgFacilitySkuRow[]>(() => {
-    if (!selected) return []
-    const mapped = new Map(
-      (mappingsByCell.get(`${selected.mfgId}:${selected.whId}`) ?? []).map((m) => [m.sku_id, m])
+  /**
+   * One manufacturer's live lines, each flagged with its mapping state at one
+   * facility. Both panels are built from this, so a SKU cannot look mapped in one
+   * and unmapped in the other.
+   */
+  const skuRowsFor = useCallback(
+    (mfgId: number, whId: number): MfgFacilitySkuRow[] => {
+      const mapped = new Map(
+        (mappingsByCell.get(`${mfgId}:${whId}`) ?? []).map((m) => [m.sku_id, m])
+      )
+      return (linesByMfg.get(mfgId) ?? []).map((l) => {
+        const m = mapped.get(l.sku_id)
+        return {
+          sku_id: l.sku_id,
+          sku_code: l.sku_code,
+          sku_name: l.sku_name,
+          brand_id: l.brand_id,
+          has_recipe: l.has_recipe,
+          has_mapping: l.has_mapping,
+          map_id: m ? 1 : null,
+          map_status: m ? ("active" as const) : null,
+          un_pushed_at: m?.un_pushed_at ?? null,
+          un_push_error: m?.un_push_error ?? null,
+          un_seen_at: m?.un_seen_at ?? null,
+        }
+      })
+    },
+    [linesByMfg, mappingsByCell]
+  )
+
+  const selectedSkus = useMemo<MfgFacilitySkuRow[]>(
+    () => (selCell ? skuRowsFor(selCell.mfgId, selCell.whId) : []),
+    [selCell, skuRowsFor]
+  )
+
+  /** The column drilldown's groups: every manufacturer at the selected facility,
+   *  attention-first. Derived from the same maps as the cell panel. */
+  const selectedFacilityGroups = useMemo(() => {
+    if (!selFacility) return []
+    const whId = selFacility.whId
+    const cellsAt = rows
+      .map((r) => r.cells.get(whId))
+      .filter((c): c is MfgFacilityCell => Boolean(c))
+    return facilityGroups(
+      cellsAt,
+      new Map(cellsAt.map((c) => [c.mfg_id, skuRowsFor(c.mfg_id, whId)]))
     )
-    return (linesByMfg.get(selected.mfgId) ?? []).map((l) => {
-      const m = mapped.get(l.sku_id)
-      return {
-        sku_id: l.sku_id,
-        sku_code: l.sku_code,
-        sku_name: l.sku_name,
-        brand_id: l.brand_id,
-        has_recipe: l.has_recipe,
-        has_mapping: l.has_mapping,
-        map_id: m ? 1 : null,
-        map_status: m ? ("active" as const) : null,
-        un_pushed_at: m?.un_pushed_at ?? null,
-        un_push_error: m?.un_push_error ?? null,
-        un_seen_at: m?.un_seen_at ?? null,
-      }
-    })
-  }, [selected, linesByMfg, mappingsByCell])
+  }, [selFacility, rows, skuRowsFor])
+
+  const selectedFacility = selFacility
+    ? facilities.find((f) => f.wh_id === selFacility.whId) ?? null
+    : null
 
   return (
     <>
@@ -230,15 +272,19 @@ export function MfgFacilityMatrix({
               {/* z-20 beats the frozen columns' z-10, or they paint over the
                   header they scroll past. */}
               <thead className="sticky top-0 z-20 bg-muted">
-                <tr className="[&>th]:px-2 [&>th]:py-1.5 [&>th]:align-bottom [&>th]:font-medium [&>th]:text-muted-foreground">
-                  <th className={cn("sticky left-0 z-20 bg-muted text-left", MFG_COL)}>
+                {/* Padding is NOT set on the row: a `[&>th]:px-2` here outranks a
+                    `p-0` on the child th (0,1,1 vs 0,1,0), and the facility headers
+                    need to clear it so their button fills the cell. Same trap the
+                    body rows document below. */}
+                <tr className="[&>th]:align-bottom [&>th]:font-medium [&>th]:text-muted-foreground">
+                  <th className={cn("sticky left-0 z-20 bg-muted px-2 py-1.5 text-left", MFG_COL)}>
                     Manufacturer
                   </th>
                   {/* Also frozen: a count with its denominator scrolled off screen
                       gives no clue why the cell is amber. */}
                   <th
                     className={cn(
-                      "sticky z-20 bg-muted text-right shadow-[1px_0_0_var(--color-border)]",
+                      "sticky z-20 bg-muted px-2 py-1.5 text-right shadow-[1px_0_0_var(--color-border)]",
                       TOTAL_LEFT, TOTAL_COL
                     )}
                   >
@@ -248,25 +294,36 @@ export function MfgFacilityMatrix({
                     <th
                       key={f.wh_id}
                       className={cn(
-                        "min-w-32 border-l border-border/60 text-center leading-tight",
+                        "min-w-32 border-l border-border/60 p-0 text-center leading-tight",
                         selected?.whId === f.wh_id && "bg-accent"
                       )}
                     >
-                      <div className="font-medium text-foreground">{f.wh_name}</div>
-                      {/* master_warehouse.code is NULL on every row today, so the
-                          facility code is both the available and the more useful
-                          second line — it is what Uniware is addressed by, and it is
-                          the vocabulary this screen's readers actually use. Upper
-                          case + tracking because it is a machine identifier, not a
-                          word. */}
-                      <div className="font-mono text-[10px] font-normal uppercase tracking-wider text-muted-foreground">
-                        {f.facility_code ?? "no facility code"}
-                      </div>
-                      {/* The dimension that makes one site appear twice. Without it
-                          the two Gurgaon columns look like a duplicate row. */}
-                      <div className="mt-0.5 text-[9px] font-normal uppercase tracking-wide text-muted-foreground/70">
-                        {f.entity_code}
-                      </div>
+                      {/* The whole header is the column drilldown's trigger — the
+                          other half of the ask: a cell configures one manufacturer
+                          here, this configures everyone. A <button> rather than a
+                          click on the <th>, same reason as the cells. */}
+                      <button
+                        type="button"
+                        onClick={() => setSelected({ kind: "facility", whId: f.wh_id })}
+                        title={`Map SKUs for every manufacturer at ${f.wh_name}`}
+                        className="w-full px-2 py-1.5 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      >
+                        <div className="font-medium text-foreground">{f.wh_name}</div>
+                        {/* master_warehouse.code is NULL on every row today, so the
+                            facility code is both the available and the more useful
+                            second line — it is what Uniware is addressed by, and it is
+                            the vocabulary this screen's readers actually use. Upper
+                            case + tracking because it is a machine identifier, not a
+                            word. */}
+                        <div className="font-mono text-[10px] font-normal uppercase tracking-wider text-muted-foreground">
+                          {f.facility_code ?? "no facility code"}
+                        </div>
+                        {/* The dimension that makes one site appear twice. Without it
+                            the two Gurgaon columns look like a duplicate row. */}
+                        <div className="mt-0.5 text-[9px] font-normal uppercase tracking-wide text-muted-foreground/70">
+                          {f.entity_code}
+                        </div>
+                      </button>
                     </th>
                   ))}
                 </tr>
@@ -283,7 +340,7 @@ export function MfgFacilityMatrix({
                   </tr>
                 ) : (
                   visible.map((row) => {
-                    const isRowSel = selected?.mfgId === row.first.mfg_id
+                    const isRowSel = selCell?.mfgId === row.first.mfg_id
                     return (
                       // The row tint goes on the <tr>: the frozen cells are
                       // bg-inherit, so a per-cell tint never reaches them.
@@ -318,7 +375,7 @@ export function MfgFacilityMatrix({
                           const cell = row.cells.get(f.wh_id)
                           if (!cell) return <td key={f.wh_id} />
                           const state = cellState(cell)
-                          const isSel = isRowSel && selected?.whId === f.wh_id
+                          const isSel = isRowSel && selCell?.whId === f.wh_id
                           return (
                             // The state colour lives on the CELL, so the grid reads
                             // as blocks of coverage rather than dots on a field. No
@@ -347,7 +404,7 @@ export function MfgFacilityMatrix({
                                   way to start mapping somewhere new. */}
                               <button
                                 type="button"
-                                onClick={() => setSelected({ mfgId: cell.mfg_id, whId: cell.wh_id })}
+                                onClick={() => setSelected({ kind: "cell", mfgId: cell.mfg_id, whId: cell.wh_id })}
                                 aria-label={
                                   `${cell.mfg_name} at ${cell.wh_name} ${cell.entity_code}: ` +
                                   `${MAP_STATE_LABEL[state]}, ${cell.mapped_skus} of ${cell.total_skus} SKUs mapped`
@@ -393,6 +450,16 @@ export function MfgFacilityMatrix({
         onClose={() => setSelected(null)}
         // force-dynamic page, so a refresh re-derives the matrix and the pills
         // from fresh SQL — no optimistic local state to keep in step.
+        onSaved={() => router.refresh()}
+      />
+
+      {/* The column drilldown. Same slide-over, so only one is ever open — the
+          Selection union is what enforces that. */}
+      <FacilityMapPanel
+        facility={selectedFacility}
+        groups={selectedFacilityGroups}
+        canEdit={canEdit}
+        onClose={() => setSelected(null)}
         onSaved={() => router.refresh()}
       />
     </>
