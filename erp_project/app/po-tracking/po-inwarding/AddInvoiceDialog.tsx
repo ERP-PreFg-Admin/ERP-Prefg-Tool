@@ -50,6 +50,16 @@ const STEP_LABEL: Record<InwardStep, string> = {
   email:   "Warehouse notified",
 }
 
+/** For a skip or a failure — STEP_LABEL is a success sentence, so reusing it
+ *  there titled a skipped attach "Invoice attached in Uniware". */
+const STEP_NOUN: Record<InwardStep, string> = {
+  s3:      "Invoice storage",
+  po:      "Inward POs",
+  uniware: "Uniware PO",
+  docs:    "Uniware attachment",
+  email:   "Warehouse email",
+}
+
 const STEP_PROGRESS: Record<InwardStep, string> = {
   s3:      "Storing invoice…",
   po:      "Creating inward POs…",
@@ -315,8 +325,12 @@ export default function AddInvoiceDialog({
       const outcome = await commitInvoice(file, toInwardPayload(form, rows), (e) => {
         if (e.status === "start") { setSubmitStep(e.step); return }
         if (e.status === "ok")      toast({ title: STEP_LABEL[e.step], description: e.message, variant: "success" })
-        if (e.status === "skipped") toast({ title: STEP_LABEL[e.step], description: e.message, variant: "info" })
-        if (e.status === "failed")  toast({ title: `${STEP_LABEL[e.step]} failed`, description: e.message, variant: "error" })
+        if (e.status === "skipped") toast({ title: `${STEP_NOUN[e.step]} skipped`, description: e.message, variant: "info" })
+        if (e.status === "failed")  toast({ title: `${STEP_NOUN[e.step]} failed`, description: e.message, variant: "error" })
+        // Deliberately the error variant: the step did succeed, but a missing
+        // attachment needs a human to forward it, and info's 8s is too easy to
+        // miss on a screen already stacking four other toasts.
+        if (e.status === "warning") toast({ title: `${STEP_NOUN[e.step]} incomplete`, description: e.message, variant: "error" })
       })
 
       if (!outcome.ok) {

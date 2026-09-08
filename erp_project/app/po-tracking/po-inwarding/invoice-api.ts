@@ -109,7 +109,9 @@ export type InwardStep = "s3" | "po" | "uniware" | "docs" | "email"
 
 export type StepEvent = {
   step: InwardStep
-  status: "start" | "ok" | "failed" | "skipped"
+  /** `warning` = the step happened but not completely — see StepEvent in
+   *  lib/invoice/invoice-inward.ts, which is the source of these. */
+  status: "start" | "ok" | "failed" | "skipped" | "warning"
   message?: string
 }
 

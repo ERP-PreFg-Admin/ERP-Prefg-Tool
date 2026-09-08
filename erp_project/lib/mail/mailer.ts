@@ -703,7 +703,21 @@ export type InwardInvoiceMail = {
  * warehouse with no email on file is a data gap, not a failure of the invoice,
  * which is already committed by the time this runs.
  */
-export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<boolean> {
+export type InwardMailOutcome = {
+  /** False when there was nobody to send to — a data gap, not a failure. */
+  sent: boolean
+  /**
+   * Set when the mail went out but WITHOUT the Uniware PO document.
+   *
+   * Its own field rather than just a log line, because this is the normal case
+   * for 17 of 18 facilities: /po/show only renders POs at the session's own
+   * facility, so every site except GGN_WAREHOUSE silently loses the attachment
+   * (measured 2026-09-08). The caller reports it instead of claiming a clean send.
+   */
+  missingPoDocument?: string
+}
+
+export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<InwardMailOutcome> {
   const ctx = mailerCtx()
   const { mfgId, destination, facility, legalEntityCode, invoiceNo, invoiceDate, uniwarePoCode, invoicePdf, items, senderName } = mail
 
@@ -715,7 +729,7 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
   const mfg = mfgRows[0]
   if (!mfg) {
     logger.warn({ ...ctx, mfgId, message: "sendInwardInvoiceEmail: manufacturer not found" })
-    return false
+    return { sent: false }
   }
 
   // Shared warehouse addresses plus this legal entity's own point of contact.
@@ -730,7 +744,7 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
         ? "sendInwardInvoiceEmail: every recipient is suppressed after an earlier bounce or complaint, skipping"
         : "sendInwardInvoiceEmail: warehouse has no email on file, skipping",
     })
-    return false
+    return { sent: false }
   }
 
   // Subject format left as the MIS team wrote it, even though the audience
@@ -745,7 +759,8 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
   // The Uniware PO document alongside the invoice, so the warehouse has both
   // halves of the paperwork. Best-effort: the goods are already booked and the
   // invoice is the attachment that matters, so a Uniware hiccup downgrades the
-  // mail rather than blocking it.
+  // mail rather than blocking it — but the caller is TOLD it was downgraded.
+  let missingPoDocument: string | undefined
   if (uniwarePoCode) {
     try {
       const poPdf = await fetchPurchaseOrderPdf(uniwarePoCode ,facility)
@@ -753,9 +768,16 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
       const safeCode = uniwarePoCode.replace(/[^a-zA-Z0-9._-]/g, "-")
       attachments.push({ filename: `Uniware-PO-${safeCode}.pdf`, content: poPdf })
     } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err)
+      // Facility included: it is the discriminator. /po/show renders only POs at
+      // the session's own facility, so this failing is a property of the site,
+      // not of this invoice — and reading the message without it sends people
+      // looking for a fault in the PO.
+      missingPoDocument =
+        `Uniware would not produce the PO document for ${uniwarePoCode}` +
+        `${facility ? ` at ${facility}` : ""} — ${reason}`
       logger.error({
-        ...ctx, mfgId, destination, invoiceNo, uniwarePoCode,
-        err: err instanceof Error ? err.message : String(err),
+        ...ctx, mfgId, destination, invoiceNo, uniwarePoCode, facility, err: reason,
         message: "Uniware PO document could not be downloaded — sending without it",
       })
     }
@@ -799,8 +821,12 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<b
 
   logger.info({
     ...ctx, eventId, mfgId, mfg_name: mfg.name, destination, invoiceNo, uniwarePoCode,
-    warehouse_email: allRecipients, message: "Inward invoice email sent to warehouse",
+    warehouse_email: allRecipients, attachmentCount: attachments.length,
+    poDocumentAttached: uniwarePoCode ? !missingPoDocument : undefined,
+    message: "Inward invoice email sent to warehouse",
   })
-  recordProcessedEvent("PO_INWARD_INVOICE_EMAIL", eventId, { mfgId, destination, invoiceNo, uniwarePoCode })
-  return true
+  recordProcessedEvent("PO_INWARD_INVOICE_EMAIL", eventId, {
+    mfgId, destination, invoiceNo, uniwarePoCode, missingPoDocument,
+  })
+  return { sent: true, missingPoDocument }
 }

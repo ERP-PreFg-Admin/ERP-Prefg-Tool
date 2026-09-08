@@ -17,6 +17,9 @@ type ToastFn = (opts: { title: string; description?: string; variant?: Variant }
 
 const ToastContext = createContext<{ toast: ToastFn } | null>(null)
 
+/** Errors stay long enough to read and act on; the rest are acknowledgements. */
+const DURATION_MS: Record<Variant, number> = { error: 20_000, info: 8_000, success: 4_000 }
+
 export function useToast() {
   const ctx = useContext(ToastContext)
   if (!ctx) throw new Error("useToast must be used inside ToastProvider")
@@ -82,8 +85,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   const toast = useCallback<ToastFn>(({ title, description, variant = "info" }) => {
     const id = Math.random().toString(36).slice(2, 9)
-    setToasts((prev) => [...prev.slice(-3), { id, title, description, variant }])
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000)
+    // Room for 5: the invoice commit fires one per step, and a failure on step 4
+    // used to be evicted by step 5 before anyone could read it.
+    setToasts((prev) => [...prev.slice(-4), { id, title, description, variant }])
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), DURATION_MS[variant])
   }, [])
 
   const dismiss = useCallback((id: string) => {

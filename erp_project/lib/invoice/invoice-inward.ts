@@ -40,6 +40,7 @@ import { manufacturers as manufacturersSql } from "@/lib/queries/manufacturers"
 import { skus as skusSql } from "@/lib/queries/skus"
 import { receivePo } from "@/lib/po/po-receive"
 import { mergeInwardLinesBySku, type InwardLine } from "@/lib/invoice/invoice-merge"
+import { describeMailStep } from "@/lib/invoice/invoice-mail-step"
 import { createPurchaseOrder, futureDeliveryDate, uniwareEnabled, uniwareVendorCode } from "@/lib/uniware"
 import { pushInvoicePdfToUniware, docSyncFacilityAllowed } from "@/lib/uniware/document-sync"
 import { UniwareSessionStale } from "@/lib/uniware/web-session"
@@ -59,7 +60,13 @@ export type InwardStep = (typeof INWARD_STEPS)[number]
 
 export type StepEvent = {
   step: InwardStep
-  status: "start" | "ok" | "failed" | "skipped"
+  /**
+   * `warning` is "it happened, but not completely" — distinct from `ok` (clean),
+   * `failed` (did not happen) and `skipped` (deliberately not attempted). Added
+   * for the warehouse mail, which sends without the Uniware PO document at every
+   * facility except GGN_WAREHOUSE and used to report that as a clean success.
+   */
+  status: "start" | "ok" | "failed" | "skipped" | "warning"
   message?: string
   data?: unknown
 }
@@ -511,7 +518,7 @@ export async function runInwardInvoice(
     // receiving warehouse what is arriving, with the invoice we just read
     // attached — reused from the buffer already in hand rather than re-fetched
     // from S3.
-    const sent = await sendInwardInvoiceEmail({
+    const mailed = await sendInwardInvoiceEmail({
       mfgId: Number(mfg_id),
       destination,
       facility,
@@ -528,11 +535,7 @@ export async function runInwardInvoice(
       })),
       senderName,
     })
-    await emit(
-      sent
-        ? { step: "email", status: "ok", message: `${destination} notified` }
-        : { step: "email", status: "skipped", message: `No email on file for ${destination}` }
-    )
+    await emit(describeMailStep(mailed, destination))
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     logger.error({ module: "PO_INVOICE", invoice_no, err: message, message: "Invoice notification email failed" })
