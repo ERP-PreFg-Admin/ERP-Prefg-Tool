@@ -267,12 +267,13 @@ async function writeInvoiceAndPos(
 export async function runInwardInvoice(
   body: InvoiceInward,
   pdf: { buffer: Buffer; filename: string },
-  /** Who filed it — the notification is signed with their name. */
-  user: { id: number; name: string },
+  /** Who filed it — recorded as created_by on every row this writes. Their NAME
+   *  is deliberately not taken: the warehouse notification is signed by the
+   *  system (MAIL_FROM_NAME), so there is nothing here to sign with. */
+  user: { id: number },
   emit: Emit
 ): Promise<InwardOutcome> {
   const userId = user.id
-  const senderName = user.name
   const { invoice_no, mfg_id, destination, line_items } = body
 
   // Validated before anything is written: a rejected batch shouldn't leave an
@@ -533,7 +534,6 @@ export async function runInwardInvoice(
       items: written.poLines.map((l) => ({
         po_no: l.po_no, sku_code: l.sku_code, sku_name: l.sku_name, qty: l.qty,
       })),
-      senderName,
     })
     await emit(describeMailStep(mailed, destination))
   } catch (err) {

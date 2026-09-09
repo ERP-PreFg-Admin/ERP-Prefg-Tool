@@ -85,10 +85,10 @@ export const MAIL_FROM_NAME = process.env.MAIL_FROM_NAME ?? "PEP ERP"
 // suppression list stays silently empty.
 export const SES_CONFIG_SET = process.env.SES_CONFIG_SET ?? "erp-app"
 
-// Job title printed under the sender's 
-// name on inward-invoice emails. The name
-// itself comes from whoever filed the invoice, so only the title is configured.
-export const MAIL_SIGNATURE_TITLE = process.env.MAIL_SIGNATURE_TITLE ?? "MIS Executive"
+// MAIL_SIGNATURE_TITLE USED TO LIVE HERE. The inward-invoice mail signed off with
+// the filer's name and this job title; it now signs as MAIL_FROM_NAME ("PEP ERP"),
+// the same name the From header carries. Nothing reads a title any more. The SSM
+// parameter can stay until the next push-secrets run — an unread env var is inert.
 
 // ── Google OAuth ─────────────────────────────────────────────────────────────
 

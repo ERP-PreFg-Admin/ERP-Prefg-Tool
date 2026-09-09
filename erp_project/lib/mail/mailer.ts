@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer"
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2"
 import {
-  GMAIL_USER, GMAIL_APP_PASSWORD, MAIL_SIGNATURE_TITLE,
+  GMAIL_USER, GMAIL_APP_PASSWORD,
   MAIL_PROVIDER, MAIL_FROM, MAIL_FROM_NAME, SES_CONFIG_SET,
   AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
 } from "@/lib/env"
@@ -692,8 +692,6 @@ export type InwardInvoiceMail = {
   /** The inward POs this invoice created — summarised in the body so the
    *  warehouse can check what to expect without opening the PDF. */
   items: { po_no: string; sku_code: string; sku_name: string | null; qty: number }[]
-  /** Signed by whoever filed the invoice, not a name baked into the repo. */
-  senderName: string
 }
 
 /**
@@ -719,7 +717,7 @@ export type InwardMailOutcome = {
 
 export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<InwardMailOutcome> {
   const ctx = mailerCtx()
-  const { mfgId, destination, facility, legalEntityCode, invoiceNo, invoiceDate, uniwarePoCode, invoicePdf, items, senderName } = mail
+  const { mfgId, destination, facility, legalEntityCode, invoiceNo, invoiceDate, uniwarePoCode, invoicePdf, items } = mail
 
   // Only for the subject line — the manufacturer is not a recipient here.
   const mfgRows = await query<{ code: string; name: string }>(
@@ -802,12 +800,21 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<I
       // Omitted entirely when empty — nodemailer throws on a blank Cc.
       ...(cc.length ? { cc: cc.join(", ") } : {}),
       subject,
+      // Signed by the SYSTEM, not by whoever filed the invoice. The warehouse is
+      // being told what arrived, and replies belong to the inbox this was sent
+      // from — a personal name and job title invited replies to someone who may
+      // not own the invoice any more, and read as a person vouching for an
+      // automated summary. MAIL_FROM_NAME is the same name the From header
+      // already carries, so the signature and the sender agree.
+      //
+      // Note this is a TEMPLATE LITERAL, not JSX: a `{/* … */}` here would be
+      // sent to the warehouse as body text.
       html: `
         <div style="font-family:sans-serif;max-width:620px;margin:auto;color:#111;font-size:14px;line-height:1.6">
           <p style="margin:0">PFA</p>
           ${uniwarePoCode ? `<p style="margin:12px 0 0;font-weight:600">${escapeHtml(uniwarePoCode)}</p>` : ""}
           ${poSection(`Items Inwarded at ${escapeHtml(destination)}`, items)}
-          <p style="margin:20px 0 0">Thanks &amp; Regards<br>${escapeHtml(senderName)}<br>${escapeHtml(MAIL_SIGNATURE_TITLE)}</p>
+          <p style="margin:20px 0 0">Thanks &amp; Regards<br>${escapeHtml(MAIL_FROM_NAME)}</p>
         </div>
       `,
       attachments: attachments.length > 0 ? attachments : undefined,
