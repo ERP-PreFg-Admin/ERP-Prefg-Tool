@@ -5,6 +5,11 @@ import type { ReactNode } from "react"
 export type MaterialMap = {
   rm: Record<number, { code: string | null; name: string }>
   pm: Record<number, { code: string | null; name: string }>
+  /** Component SKUs, for a gift kit's contents lines (mtrl_type='sku' — see
+   *  lib/masters/kit-sku.ts). Optional because callers that only ever show RM/PM
+   *  diffs need not build it; a missing entry renders as "#42", which is why the
+   *  Recipe approval card does build it. */
+  sku?: Record<number, { code: string | null; name: string }>
 }
 
 export type DiffRow = {

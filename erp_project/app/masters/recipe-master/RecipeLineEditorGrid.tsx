@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * Shared RM/PM line-editor grid used by both RecipeCreationWizard.tsx (manual
+ * Shared RM/PM/kit-contents line-editor grid used by both RecipeCreationWizard.tsx (manual
  * entry step) and RecipeMasterComponent.tsx's edit-mode detail panel — one
  * implementation of the repeatable-row-list + running-total UI so the two
  * surfaces can't drift apart.
@@ -16,11 +16,13 @@ import { Lock, Plus, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Callout } from "@/components/ui/callout"
 import { isRmTotalValid, rmTotalMessage } from "@/lib/validation/recipe"
+import { kitUnitsTotal, kitUnitsExceeded, kitUnitsMessage } from "@/lib/masters/kit-sku"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { cn } from "@/lib/utils"
 
 export type RecipeLineRow = {
-  mtrl_type: "rm" | "pm"
+  /** 'sku' is a gift kit's component — see lib/masters/kit-sku.ts. */
+  mtrl_type: "rm" | "pm" | "sku"
   mtrl_id: number | null
   amount: string
   uom: string
@@ -34,22 +36,27 @@ export type RecipeMaterialOption = {
 }
 
 /** RM lines default to "%" (they express a formulation percentage), PM lines
- *  default to "1 pcs" (one piece per unit is the overwhelming case) — both
- *  editable per row. RM's amount is left blank on purpose: there is no sensible
- *  default percentage, and a prefilled one would quietly break the 100% total. */
-export function emptyBomLine(mtrlType: "rm" | "pm"): RecipeLineRow {
+ *  default to "1 pcs" and kit components to "1 units" (one of each is the
+ *  overwhelming case) — all editable per row. RM's amount is left blank on
+ *  purpose: there is no sensible default percentage, and a prefilled one would
+ *  quietly break the 100% total. */
+export function emptyBomLine(mtrlType: RecipeLineRow["mtrl_type"]): RecipeLineRow {
   return {
     mtrl_type: mtrlType,
     mtrl_id: null,
     amount: mtrlType === "rm" ? "" : "1",
-    uom: mtrlType === "rm" ? "%" : "pcs",
+    uom: defaultUom(mtrlType),
   }
 }
 
 /** The uom a line of this type carries unless the user says otherwise — also
  *  the input's placeholder, so an emptied box still reads as what belongs there. */
-export function defaultUom(mtrlType: "rm" | "pm"): string {
-  return mtrlType === "rm" ? "%" : "pcs"
+export function defaultUom(mtrlType: RecipeLineRow["mtrl_type"]): string {
+  if (mtrlType === "rm") return "%"
+  // A kit component is counted, never measured — the same value route.ts forces
+  // on the stored line (KIT_LINE_UOM).
+  if (mtrlType === "sku") return "units"
+  return "pcs"
 }
 
 export function rmTotal(rows: RecipeLineRow[]): number {
@@ -93,7 +100,11 @@ function LineRowCard({
     // RM's amount IS the percentage (see bomLineSchema), so the material's own
     // uom ("kg") must never win here — it would read as kilograms of a line
     // that is really 45.5% of the batch.
-    const uom = row.mtrl_type === "rm" ? "%" : row.uom || mat?.uom || defaultUom("pm")
+    // A component's own uom ("ml") must not win either: the amount is a COUNT of
+    // that SKU, so the line reads "2 units" of a 200 ml body wash.
+    const uom = row.mtrl_type === "rm" || row.mtrl_type === "sku"
+      ? defaultUom(row.mtrl_type)
+      : row.uom || mat?.uom || defaultUom("pm")
     onChange({ ...row, mtrl_id: id, uom })
   }
 
@@ -125,7 +136,7 @@ function LineRowCard({
           getValue={(m) => String(m.id)}
           getLabel={(m) => `${m.name} (${m.code ?? m.id})`}
           searchKeys={["name", "code"]}
-          placeholder={`Search ${row.mtrl_type.toUpperCase()} name or code…`}
+          placeholder={row.mtrl_type === "sku" ? "Search SKU name or code…" : `Search ${row.mtrl_type.toUpperCase()} name or code…`}
         />
       </div>
       <input
@@ -154,6 +165,20 @@ function LineRowCard({
   )
 }
 
+/** Section heading per line type. A kit's contents are neither RM nor PM, and for
+ *  a kit they are the whole recipe, so they get their own name rather than being
+ *  filed under one of the other two. */
+const SECTION_LABEL: Record<RecipeLineRow["mtrl_type"], string> = {
+  rm: "Raw Materials (RM)",
+  pm: "Packing Materials (PM)",
+  sku: "Kit Contents (SKUs)",
+}
+
+/** What one row is called, for the empty state and the add button. */
+const ROW_NOUN: Record<RecipeLineRow["mtrl_type"], string> = {
+  rm: "RM", pm: "PM", sku: "SKU",
+}
+
 function LineSection({
   mtrlType,
   rows,
@@ -161,16 +186,22 @@ function LineSection({
   onChange,
   locked,
   lockNote,
+  optional,
 }: {
-  mtrlType: "rm" | "pm"
+  mtrlType: RecipeLineRow["mtrl_type"]
   rows: RecipeLineRow[]
   materials: RecipeMaterialOption[]
   onChange: (rows: RecipeLineRow[]) => void
   locked?: boolean
   /** Explains where the locked values come from and how to change them. */
   lockNote?: string
+  /** RM on a GIFT KIT: extras alongside the components, not a formulation. The
+   *  99.5-100.5% rule does not apply (route.ts does not apply it either), so the
+   *  running total and its warning are suppressed — a "12% of what?" banner
+   *  nagging about a rule nobody enforces is worse than no banner. */
+  optional?: boolean
 }) {
-  const total = mtrlType === "rm" ? rmTotal(rows) : null
+  const total = mtrlType === "rm" && !optional ? rmTotal(rows) : null
   const balanced = total != null && rows.length > 0 && isRmTotalValid(total)
 
   function updateRow(i: number, next: RecipeLineRow) {
@@ -187,7 +218,8 @@ function LineSection({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="flex items-center gap-1.5 text-sm font-medium">
-          {mtrlType === "rm" ? "Raw Materials (RM)" : "Packing Materials (PM)"}
+          {SECTION_LABEL[mtrlType]}
+          {optional && <span className="text-xs font-normal text-muted-foreground">optional</span>}
           {locked && <Lock className="h-3.5 w-3.5 text-muted-foreground" />}
         </p>
         {total != null && rows.length > 0 && (
@@ -210,13 +242,15 @@ function LineSection({
 
       {rows.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-4 border border-dashed rounded-lg">
-          No {mtrlType.toUpperCase()} lines yet.
+          No {ROW_NOUN[mtrlType]} lines yet.
         </p>
       ) : (
         <div className="space-y-1.5">
           <div className="flex items-center gap-2 px-2 text-xs font-medium text-muted-foreground">
-            <span className="flex-1">Material</span>
-            <span className="w-24 shrink-0">{mtrlType === "rm" ? "Amount (%)" : "Amount"}</span>
+            <span className="flex-1">{mtrlType === "sku" ? "SKU" : "Material"}</span>
+            <span className="w-24 shrink-0">
+              {mtrlType === "rm" ? "Amount (%)" : mtrlType === "sku" ? "Qty" : "Amount"}
+            </span>
             <span className="w-20 shrink-0">UOM</span>
             <span className="w-[26px] shrink-0" />
           </div>
@@ -241,7 +275,7 @@ function LineSection({
           className="w-full rounded-lg border border-dashed border-muted-foreground/40 py-2 text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors flex items-center justify-center gap-1.5"
         >
           <Plus className="h-3.5 w-3.5" />
-          Add {mtrlType.toUpperCase()} line
+          Add {ROW_NOUN[mtrlType]} line
         </button>
       )}
     </div>
@@ -251,27 +285,71 @@ function LineSection({
 export function RecipeLineEditorGrid({
   rmRows,
   pmRows,
+  skuRows,
   onChangeRm,
   onChangePm,
+  onChangeSku,
   rmMaterials,
   pmMaterials,
+  skuMaterials,
   rmLocked,
   rmLockNote,
+  isKit,
+  declaredUnits,
 }: {
   rmRows: RecipeLineRow[]
   pmRows: RecipeLineRow[]
+  /** A gift kit's components. Omitted entirely for every other SKU. */
+  skuRows?: RecipeLineRow[]
   onChangeRm: (rows: RecipeLineRow[]) => void
   onChangePm: (rows: RecipeLineRow[]) => void
+  onChangeSku?: (rows: RecipeLineRow[]) => void
   rmMaterials: RecipeMaterialOption[]
   pmMaterials: RecipeMaterialOption[]
+  skuMaterials?: RecipeMaterialOption[]
   /** This SKU is a non-base variant, so its RM is inherited from the family's
    *  base and can only change there — see lib/masters/variant-rm-lock.ts. PM is
    *  always editable; that's the half that legitimately differs per pack size. */
   rmLocked?: boolean
   rmLockNote?: string
+  /** This SKU is a gift kit (lib/masters/kit-sku.ts): its recipe is the SKUs it
+   *  contains, and RM becomes optional rather than required. */
+  isKit?: boolean
+  /** master_skus.filling — how many units the SKU master says the kit holds.
+   *  Advisory: shown against the actual count, never enforced. */
+  declaredUnits?: number | null
 }) {
+  const kitCount = kitUnitsTotal(skuRows ?? [])
+  // Over the declared count is a REFUSAL — the pack cannot hold it, and the
+  // caller's Next/Save is blocked on the same predicate. Under is only a nudge.
+  const kitOverCap = isKit && kitUnitsExceeded(kitCount, declaredUnits ?? null)
+  const kitUnderCap = isKit && declaredUnits != null && kitCount > 0 && kitCount < declaredUnits
+
   return (
     <div className="space-y-6">
+      {/* Contents FIRST for a kit: it is the recipe, and RM/PM below it are the
+          optional extras. For every other SKU the section is absent entirely
+          rather than rendered empty — an "Add SKU line" button on a body wash
+          would invite exactly the submission route.ts 400s as `not_a_kit`. */}
+      {isKit && skuRows && onChangeSku && (
+        <div className="space-y-2">
+          <LineSection
+            mtrlType="sku"
+            rows={skuRows}
+            materials={skuMaterials ?? []}
+            onChange={onChangeSku}
+          />
+          {declaredUnits != null && (
+            <Callout variant={kitOverCap ? "destructive" : kitUnderCap ? "warning" : "info"}>
+              {kitOverCap
+                ? kitUnitsMessage(kitCount, declaredUnits)
+                : kitUnderCap
+                  ? `This kit holds ${declaredUnits} units; the lines above add up to ${kitCount}. You can save it part-specified.`
+                  : `${kitCount} of ${declaredUnits} units.`}
+            </Callout>
+          )}
+        </div>
+      )}
       <LineSection
         mtrlType="rm"
         rows={rmRows}
@@ -279,6 +357,7 @@ export function RecipeLineEditorGrid({
         onChange={onChangeRm}
         locked={rmLocked}
         lockNote={rmLockNote}
+        optional={isKit}
       />
       <LineSection mtrlType="pm" rows={pmRows} materials={pmMaterials} onChange={onChangePm} />
     </div>

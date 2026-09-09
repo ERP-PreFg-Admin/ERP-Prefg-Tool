@@ -17,6 +17,9 @@
 import { useState } from "react"
 import { useToast } from "@/components/ui/toast"
 import { isRmTotalValid, rmTotalMessage } from "@/lib/validation/recipe"
+import {
+  isKitSku, declaredKitUnits, kitUnitsTotal, kitUnitsExceeded, kitUnitsMessage,
+} from "@/lib/masters/kit-sku"
 import { rmTotal, type RecipeLineRow, type RecipeMaterialOption } from "./RecipeLineEditorGrid"
 import { parseBomCsv } from "./recipe-csv"
 import { uploadPendingArtifacts } from "./recipe-artifact-upload"
@@ -31,11 +34,17 @@ export type PropagationTarget = { sku_id: number; sku_code: string; bom_code: st
 export function useBomWizard({
   rmMaterials,
   pmMaterials,
+  skus,
   onSuccess,
   onEditExisting,
 }: {
   rmMaterials: RecipeMaterialOption[]
   pmMaterials: RecipeMaterialOption[]
+  /** The full SKU rows Step 1 already renders — they carry sku_type,
+   *  subcategory and filling, so whether the picked SKU is a gift kit is
+   *  answerable here with no extra request. Advisory only: create-full
+   *  re-resolves it from the database row. */
+  skus: { id: number; sku_type?: string | null; subcategory?: string | null; filling?: number | string | null }[]
   onSuccess: () => void
   onEditExisting: (bomId: number) => void
 }) {
@@ -55,12 +64,14 @@ export function useBomWizard({
   const [csvErrors, setCsvErrors] = useState<string[]>([])
   const [rmRows, setRmRows] = useState<RecipeLineRow[]>([])
   const [pmRows, setPmRows] = useState<RecipeLineRow[]>([])
+  /** A gift kit's components. Always empty for every other SKU. */
+  const [skuRows, setSkuRows] = useState<RecipeLineRow[]>([])
   const [pendingArtifactFiles, setPendingArtifactFiles] = useState<File[]>([])
   // Only required when existingBomId != null — i.e. Step 2 found this SKU
   // already has an active Recipe, so "Create New Recipe Version" here is really an
   // edit to an established recipe. Not required for a SKU's very first Recipe.
   const [reason, setReason] = useState("")
-  const [changeType, setChangeType] = useState<("rm" | "pm")[]>([])
+  const [changeType, setChangeType] = useState<("rm" | "pm" | "sku")[]>([])
   // Variant-family RM rule, resolved server-side by check-existing the moment a
   // SKU is picked. Advisory here — create-full re-resolves it and rejects an
   // altered RM regardless of what this client did.
@@ -69,7 +80,15 @@ export function useBomWizard({
 
   const rmLocked = rmLock?.locked === true
 
-  const isDirty = skuId != null || rmRows.length > 0 || pmRows.length > 0 || pendingArtifactFiles.length > 0
+  // Which shape of recipe this SKU takes. A gift kit is assembled from other
+  // SKUs and has no formulation, so RM stops being required and the 100% rule
+  // stops applying - see lib/masters/kit-sku.ts.
+  const pickedSku = skus.find((sk) => sk.id === skuId)
+  const isKit = isKitSku(pickedSku)
+  const declaredUnits = isKit ? declaredKitUnits(pickedSku) : null
+
+  const isDirty = skuId != null || rmRows.length > 0 || pmRows.length > 0 ||
+    skuRows.length > 0 || pendingArtifactFiles.length > 0
 
   function resetAll() {
     setStep(1)
@@ -84,6 +103,7 @@ export function useBomWizard({
     setCsvErrors([])
     setRmRows([])
     setPmRows([])
+    setSkuRows([])
     setPendingArtifactFiles([])
     setReason("")
     setChangeType([])
@@ -166,6 +186,11 @@ export function useBomWizard({
     setStep(4)
   }
 
+  // A kit has no CSV path: the template's mtrl_type column only accepts rm/pm
+  // (recipe-csv.ts) and the bulk apply rejects anything else outright. Rather
+  // than half-support it, Step 3 offers Manual only for a kit.
+  const csvAvailable = !isKit
+
   function handleCsvFile(file: File) {
     setCsvErrors([])
     file.text().then((text) => {
@@ -198,30 +223,58 @@ export function useBomWizard({
     else setStep((s) => (s - 1) as WizardStep)
   }
 
-  const rmValid = rmRows.length > 0 && isRmTotalValid(rmTotal(rmRows))
+  // A kit's RM is optional extras, not a formulation, so neither "at least one
+  // line" nor the band applies - the same two rules route.ts skips for it.
+  const rmValid = isKit || (rmRows.length > 0 && isRmTotalValid(rmTotal(rmRows)))
   // Number(), not truthiness: r.amount is a STRING, and "0" is truthy — a line
   // left at 0 sailed past this check and only died on the server's
   // z.coerce.number().positive() as a generic 400.
   const allRmFieldsFilled = rmRows.every((r) => r.mtrl_id && Number(r.amount) > 0)
   const allPmFieldsFilled = pmRows.every((r) => r.mtrl_id && Number(r.amount) > 0)
+  const allSkuFieldsFilled = skuRows.every((r) => r.mtrl_id && Number(r.amount) > 0)
+  // A kit with no contents is not a recipe at all (route.ts 400s
+  // kit_contents_required), and one component picked twice would collapse to a
+  // single row on insert, so both are caught before the submit.
+  const kitUnits = kitUnitsTotal(skuRows)
+  const kitOverCap = isKit && kitUnitsExceeded(kitUnits, declaredUnits)
+  const kitContentsValid = !isKit || (
+    skuRows.length > 0 &&
+    new Set(skuRows.map((r) => r.mtrl_id)).size === skuRows.length &&
+    // The declared unit count is a cap, so Next is blocked above it — the same
+    // treatment the RM band gets. route.ts refuses it too (kit_units_exceeded).
+    !kitOverCap
+  )
   // effective_from is deliberately absent: it's optional, so a recipe can be
   // drafted before its start date is decided.
   const canProceedFromLines =
-    rmValid && allRmFieldsFilled && allPmFieldsFilled && effectiveFrom.trim().length > 0 &&
+    rmValid && allRmFieldsFilled && allPmFieldsFilled &&
+    kitContentsValid && allSkuFieldsFilled && effectiveFrom.trim().length > 0 &&
     (existingBomId == null || (reason.trim().length > 0 && changeType.length > 0))
 
   async function handleSubmit() {
     setError(null)
     if (!skuId) { setError("Select a SKU first."); return }
     if (!effectiveFrom.trim()) { setError("Effective From is required."); return }
-    if (rmRows.length === 0) { setError("At least one RM line is required."); return }
-    if (!isRmTotalValid(rmTotal(rmRows))) {
-      setError(rmTotalMessage(rmTotal(rmRows)))
-      return
+    if (isKit) {
+      if (skuRows.length === 0) { setError("A gift kit needs at least one SKU in it."); return }
+      if (new Set(skuRows.map((r) => r.mtrl_id)).size !== skuRows.length) {
+        setError("The same SKU is listed twice - give it one line with the full quantity.")
+        return
+      }
+      if (declaredUnits != null && kitUnitsExceeded(kitUnits, declaredUnits)) {
+        setError(kitUnitsMessage(kitUnits, declaredUnits))
+        return
+      }
+    } else {
+      if (rmRows.length === 0) { setError("At least one RM line is required."); return }
+      if (!isRmTotalValid(rmTotal(rmRows))) {
+        setError(rmTotalMessage(rmTotal(rmRows)))
+        return
+      }
     }
-    for (const r of [...rmRows, ...pmRows]) {
+    for (const r of [...rmRows, ...pmRows, ...skuRows]) {
       if (!r.mtrl_id || !(Number(r.amount) > 0)) {
-        setError("Every line requires a material and an amount greater than 0.")
+        setError("Every line requires a material or SKU and an amount greater than 0.")
         return
       }
     }
@@ -254,6 +307,7 @@ export function useBomWizard({
           source: entryMethod === "csv" ? "csv" : "manual",
           rm_lines: rmRows.map(toLine),
           pm_lines: pmRows.map(toLine),
+          sku_lines: skuRows.map(toLine),
           artifact_adds: artifactAdds,
           reason: existingBomId != null ? reason.trim() : undefined,
           change_type: existingBomId != null ? changeType : undefined,
@@ -292,6 +346,13 @@ export function useBomWizard({
     setRmRows,
     pmRows,
     setPmRows,
+    skuRows,
+    setSkuRows,
+    isKit,
+    declaredUnits,
+    kitUnits,
+    kitOverCap,
+    csvAvailable,
     pendingArtifactFiles,
     setPendingArtifactFiles,
     reason,

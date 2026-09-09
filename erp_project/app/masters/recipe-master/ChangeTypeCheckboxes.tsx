@@ -1,16 +1,19 @@
 "use client"
 
 /**
- * Shared "Reason for change" + "RM change"/"PM change" checkboxes, required
+ * Shared "Reason for change" + "RM change"/"PM change"/"Kit contents" checkboxes, required
  * whenever a submission is actually editing an established Recipe (see
  * lib/validation/bom.ts's bomCreateFullSchema comment) — used by both
  * RecipeEditDialog (always an edit) and RecipeWizardSteps' Step4/Step5 (only when
  * the picked SKU already has an existing Recipe).
  */
 
-const OPTIONS: { key: "rm" | "pm"; label: string }[] = [
+export type ChangeTypeKey = "rm" | "pm" | "sku"
+
+const OPTIONS: { key: ChangeTypeKey; label: string }[] = [
   { key: "rm", label: "RM change" },
   { key: "pm", label: "PM change" },
+  { key: "sku", label: "Kit contents change" },
 ]
 
 export function ChangeTypeCheckboxes({
@@ -20,19 +23,28 @@ export function ChangeTypeCheckboxes({
   onChangeChangeType,
   disabled,
   hideRm,
+  isKit,
 }: {
   reason: string
   onChangeReason: (v: string) => void
-  changeType: ("rm" | "pm")[]
-  onChangeChangeType: (v: ("rm" | "pm")[]) => void
+  changeType: ChangeTypeKey[]
+  onChangeChangeType: (v: ChangeTypeKey[]) => void
   disabled?: boolean
   /** RM is inherited from this variant family's base and can't change here, so
    *  offering "RM change" would be offering something the server rejects. */
   hideRm?: boolean
+  /** A gift kit (lib/masters/kit-sku.ts). "Kit contents change" is offered only
+   *  here, and only here does it mean anything — every other SKU is refused
+   *  sku_lines outright, so the box would describe an impossible edit. */
+  isKit?: boolean
 }) {
-  const options = hideRm ? OPTIONS.filter((o) => o.key !== "rm") : OPTIONS
+  const options = OPTIONS.filter((o) => {
+    if (o.key === "rm" && hideRm) return false
+    if (o.key === "sku") return Boolean(isKit)
+    return true
+  })
 
-  function toggle(key: "rm" | "pm") {
+  function toggle(key: ChangeTypeKey) {
     onChangeChangeType(
       changeType.includes(key) ? changeType.filter((t) => t !== key) : [...changeType, key]
     )

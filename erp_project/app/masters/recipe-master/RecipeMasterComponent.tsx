@@ -13,7 +13,7 @@
  * current page.
  */
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { useUrlFilters } from "@/lib/useUrlFilters"
 import { History } from "lucide-react"
 import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
@@ -34,6 +34,7 @@ import { type RecipeMaterialOption } from "./RecipeLineEditorGrid"
 import { RecipeTable } from "./RecipeTable"
 import { RecipeDetailPanel } from "./RecipeDetailPanel"
 import { RecipeEditDialog } from "./RecipeEditDialog"
+import { isKitSku, KIT_LINE_UOM } from "@/lib/masters/kit-sku"
 import { useBomDetailPanel } from "./useRecipeDetailPanel"
 import type { AccessLevel } from "@/lib/permissions"
 import type { RecipeListItem, Sku } from "@/types/masters"
@@ -93,6 +94,16 @@ export default function RecipeMasterComponent({
   }
 
   const panel = useBomDetailPanel()
+
+  // The kit-component picker's options, same shape as the RM/PM ones. A kit
+  // cannot contain itself or another kit (route.ts refuses both), so neither is
+  // offered here rather than offered and then rejected.
+  const skuMaterials: RecipeMaterialOption[] = useMemo(
+    () => skus
+      .filter((sk) => sk.id !== panel.detail?.sku_id && !isKitSku(sk))
+      .map((sk) => ({ id: sk.id, code: sk.sku_code, name: sk.name, uom: KIT_LINE_UOM })),
+    [skus, panel.detail?.sku_id]
+  )
   // Row-level approval/audit-trail dialog — distinct from the archived-
   // recipe-content "Recipe History" page linked below.
   const [historyBomId, setHistoryBomId] = useState<number | null>(null)
@@ -207,6 +218,7 @@ export default function RecipeMasterComponent({
               onChangeMtrlType={panel.setActiveMtrlType}
               rmLines={panel.rmLines}
               pmLines={panel.pmLines}
+              skuLines={panel.skuLines}
               rmDetailTotal={panel.rmDetailTotal}
               rmIsBalanced={panel.rmIsBalanced}
               visibleLines={panel.visibleLines}
@@ -234,8 +246,13 @@ export default function RecipeMasterComponent({
         } : undefined}
         rmRows={panel.editRmRows}
         pmRows={panel.editPmRows}
+        skuRows={panel.editSkuRows}
         onChangeRm={panel.setEditRmRows}
         onChangePm={panel.setEditPmRows}
+        onChangeSku={panel.setEditSkuRows}
+        skuMaterials={skuMaterials}
+        isKit={panel.isKit}
+        declaredUnits={panel.declaredUnits}
         effectiveFrom={panel.editEffectiveFrom}
         onChangeEffectiveFrom={panel.setEditEffectiveFrom}
         reason={panel.editReason}

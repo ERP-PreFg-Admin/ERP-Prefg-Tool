@@ -94,6 +94,7 @@ export default function RecipeHistoryClient({
               onChangeMtrlType={panel.setActiveMtrlType}
               rmLines={panel.rmLines}
               pmLines={panel.pmLines}
+              skuLines={panel.skuLines}
               rmDetailTotal={panel.rmDetailTotal}
               rmIsBalanced={panel.rmIsBalanced}
               visibleLines={panel.visibleLines}

@@ -7,6 +7,7 @@
  * editing.
  */
 
+import type { RecipeLineRow } from "../RecipeLineEditorGrid"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { isRmTotalValid } from "@/lib/validation/recipe"
@@ -24,7 +25,7 @@ export function useBomHistoryPanel() {
   const [detail, setDetail]                 = useState<RecipeDetailResponse | null>(null)
   const [detailLoading, setDetailLoading]   = useState(false)
   const [detailError, setDetailError]       = useState<string | null>(null)
-  const [activeMtrlType, setActiveMtrlType] = useState<"rm" | "pm">("rm")
+  const [activeMtrlType, setActiveMtrlType] = useState<RecipeLineRow["mtrl_type"]>("rm")
 
   const detailCache = useRef<Map<number, RecipeDetailResponse>>(new Map())
   const inFlight     = useRef<Map<number, Promise<RecipeDetailResponse>>>(new Map())
@@ -98,9 +99,15 @@ export function useBomHistoryPanel() {
 
   const rmLines       = detail?.lines.filter((l) => l.mtrl_type === "rm") ?? []
   const pmLines        = detail?.lines.filter((l) => l.mtrl_type === "pm") ?? []
+  // A gift kit's archived contents. Without this they were invisible here too —
+  // history_recipe stores them, and a version whose only content was its
+  // component list would have shown as an empty recipe.
+  const skuLines       = detail?.lines.filter((l) => l.mtrl_type === "sku") ?? []
   const rmDetailTotal  = rmLines.reduce((sum, l) => sum + (Number(l.amount) || 0), 0)
   const rmIsBalanced   = rmLines.length > 0 && isRmTotalValid(rmDetailTotal)
-  const visibleLines   = activeMtrlType === "rm" ? rmLines : pmLines
+  const visibleLines   = activeMtrlType === "rm" ? rmLines
+    : activeMtrlType === "sku" ? skuLines
+    : pmLines
 
   function handleRowClick(bomId: number) {
     const nextId = selectedBomId === bomId ? null : bomId
@@ -128,6 +135,7 @@ export function useBomHistoryPanel() {
     setActiveMtrlType,
     rmLines,
     pmLines,
+    skuLines,
     rmDetailTotal,
     rmIsBalanced,
     visibleLines,

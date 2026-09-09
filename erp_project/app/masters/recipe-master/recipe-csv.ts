@@ -34,10 +34,12 @@ const csvCell = (v: unknown) =>
 
 const isoDate = (v: Date | string | null) => (v ? String(v).slice(0, 10) : "")
 
-/** RM first, matching the panel's toggle — `ORDER BY mtrl_type ASC` in SQL puts pm first. */
-const typeRank = (t: string | null) => (t === "rm" ? 0 : 1)
+/** Kit contents, then RM, then PM — matching the panel's toggle order.
+ *  `ORDER BY mtrl_type ASC` in SQL puts pm first, and would bury a gift kit's
+ *  contents (the whole recipe, for a kit) below its optional extras. */
+const typeRank = (t: string | null) => (t === "sku" ? 0 : t === "rm" ? 1 : 2)
 
-/** Every line of one recipe, RM then PM, one row per material. */
+/** Every line of one recipe — kit contents, then RM, then PM, one row each. */
 export function buildRecipeDumpCsv(detail: RecipeDetailResponse): string {
   const header = [
     detail.bom_code, detail.sku_code, detail.sku_name, detail.status,

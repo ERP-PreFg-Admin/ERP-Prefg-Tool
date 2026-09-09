@@ -8,7 +8,7 @@ import { query } from "@/lib/db"
 import { paginate, parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
 import { approvalsSql, entityLabelSql } from "@/lib/queries/approvals"
-import { getActiveRmMaterialOptions, getActivePmMaterialOptions } from "@/lib/cached-reference-data"
+import { getActiveRmMaterialOptions, getActivePmMaterialOptions, getActiveSkuList } from "@/lib/cached-reference-data"
 import { buildMaterialMap } from "../material-map"
 import ApprovalHistoryClient from "./ApprovalHistoryClient"
 
@@ -30,7 +30,7 @@ export default async function ApprovalHistoryPage({
   const pageStart = performance.now()
   console.log(`[AUDIT] Approval History load - page=${page}, size=${size}, module=${moduleFilter ?? "all"}, status=${statusFilter ?? "all"}`)
 
-  const [result, rmRows, pmRows] = await Promise.all([
+  const [result, rmRows, pmRows, skuRows] = await Promise.all([
     paginate<any>(
       approvalsSql.listHistory,
       [moduleFilter, moduleFilter, statusFilter, statusFilter, size, offset],
@@ -41,6 +41,8 @@ export default async function ApprovalHistoryPage({
     ),
     getActiveRmMaterialOptions(),
     getActivePmMaterialOptions(),
+    // Resolves a gift kit's component lines to SKU codes on the approval card.
+    getActiveSkuList(),
   ])
 
   const approvals = await Promise.all(
@@ -73,7 +75,7 @@ export default async function ApprovalHistoryPage({
       pageSize={result.pageSize}
       currentModule={moduleFilter ?? ""}
       currentStatus={statusFilter ?? ""}
-      materialMap={buildMaterialMap(rmRows, pmRows)}
+      materialMap={buildMaterialMap(rmRows, pmRows, skuRows)}
     />
   )
 }

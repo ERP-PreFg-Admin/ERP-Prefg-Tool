@@ -16,6 +16,7 @@ import { formatDate, LOCKED_STATUSES } from "./recipe-format"
 import { buildRecipeDumpCsv } from "./recipe-csv"
 import { StatusBadge } from "@/components/masters/StatusBadge"
 import { SegmentedToggle } from "@/components/ui/segmented-toggle"
+import type { RecipeLineRow } from "./RecipeLineEditorGrid"
 import type { RecipeDetailResponse } from "@/types/masters"
 
 function downloadRecipe(detail: RecipeDetailResponse) {
@@ -47,6 +48,7 @@ export function RecipeDetailPanel({
   onChangeMtrlType,
   rmLines,
   pmLines,
+  skuLines,
   rmDetailTotal,
   rmIsBalanced,
   visibleLines,
@@ -57,8 +59,10 @@ export function RecipeDetailPanel({
   detail: RecipeDetailResponse | null
   detailLoading: boolean
   detailError: string | null
-  activeMtrlType: "rm" | "pm"
-  onChangeMtrlType: (t: "rm" | "pm") => void
+  activeMtrlType: RecipeLineRow["mtrl_type"]
+  /** A gift kit's component lines. Empty for every other recipe. */
+  skuLines: RecipeDetailResponse["lines"]
+  onChangeMtrlType: (t: RecipeLineRow["mtrl_type"]) => void
   rmLines: RecipeDetailResponse["lines"]
   pmLines: RecipeDetailResponse["lines"]
   rmDetailTotal: number
@@ -173,9 +177,14 @@ export function RecipeDetailPanel({
             <div>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-medium text-muted-foreground">Material Lines</p>
-                <SegmentedToggle
+                {/* The kit tab appears only when this recipe HAS contents — a
+                    third empty tab on every ordinary recipe would be noise. */}
+                <SegmentedToggle<RecipeLineRow["mtrl_type"]>
                   size="xs"
                   options={[
+                    ...(skuLines.length > 0
+                      ? [{ key: "sku" as const, label: `Kit (${skuLines.length})` }]
+                      : []),
                     { key: "rm", label: `RM (${rmLines.length})` },
                     { key: "pm", label: `PM (${pmLines.length})` },
                   ]}
@@ -200,7 +209,7 @@ export function RecipeDetailPanel({
 
               {visibleLines.length === 0 ? (
                 <p className="text-sm text-muted-foreground py-4 text-center">
-                  No {activeMtrlType.toUpperCase()} lines found.
+                  No {activeMtrlType === "sku" ? "kit content" : activeMtrlType.toUpperCase()} lines found.
                 </p>
               ) : (
                 <div className="space-y-1.5">

@@ -17,9 +17,12 @@ import { DIFF_OLD_TEXT_CLASS, DIFF_OLD_CELL_CLASS, DIFF_NEW_CELL_CLASS } from ".
 import type { DiffRow, MaterialMap } from "./types"
 import { DocViewButton } from "./DocViewButton"
 
-const TYPE_TAG_COLOR: Record<"RM" | "PM", string> = {
+const TYPE_TAG_COLOR: Record<"RM" | "PM" | "KIT", string> = {
   RM: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/30 dark:text-rose-400 dark:border-rose-900/40",
   PM: "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/30 dark:text-violet-400 dark:border-violet-900/40",
+  // A gift kit's contents. Emerald so it reads as a third thing rather than a
+  // shade of PM — for a kit these lines ARE the recipe.
+  KIT: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-900/40",
 }
 
 /** One consolidated table instead of RM/PM side by side — used where the
@@ -28,7 +31,7 @@ const TYPE_TAG_COLOR: Record<"RM" | "PM", string> = {
  *  leaves material names wrapping badly with the value column mostly empty.
  *  Collapsed by default — a Recipe revision can touch ~30 lines at once, which
  *  would otherwise dominate the whole History table. */
-function ConsolidatedDiffTable({ rows, newOnly }: { rows: (DiffRow & { tag: "RM" | "PM" })[]; newOnly: boolean }) {
+function ConsolidatedDiffTable({ rows, newOnly }: { rows: (DiffRow & { tag: "RM" | "PM" | "KIT" })[]; newOnly: boolean }) {
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -85,13 +88,15 @@ function ConsolidatedDiffTable({ rows, newOnly }: { rows: (DiffRow & { tag: "RM"
 }
 
 type RecipeLineRowDiff = {
-  mtrlType: "rm" | "pm"
+  mtrlType: "rm" | "pm" | "sku"
   mtrlId: string
   removed: boolean
   fields: Record<string, { old: string; new: string }>
 }
 
-const CHANGE_TYPE_LABEL: Record<string, string> = { rm: "RM change", pm: "PM change" }
+const CHANGE_TYPE_LABEL: Record<string, string> = {
+  rm: "RM change", pm: "PM change", sku: "Kit contents change",
+}
 
 function parseBomApprovalItems(items: Approval["items"]) {
   const modeItem = items.find((i) => i.field_name === "__mode__")
@@ -103,12 +108,16 @@ function parseBomApprovalItems(items: Approval["items"]) {
 
   const lineMap = new Map<string, RecipeLineRowDiff>()
   for (const it of items) {
-    const m = it.field_name.match(/^line:(rm|pm):(\d+):(.+)$/)
+    // `sku` is a gift kit's component. This regex is a SECOND, independent copy
+    // of the one in lib/approvals/handlers/recipe.ts — that one decides what gets
+    // written, this one decides what the approver SEES. They must widen together,
+    // or a kit's contents would be applied by an approval that never showed them.
+    const m = it.field_name.match(/^line:(rm|pm|sku):(\d+):(.+)$/)
     if (!m) continue
     const [, mtrlType, mtrlId, field] = m
     const key = `${mtrlType}:${mtrlId}`
     if (!lineMap.has(key)) {
-      lineMap.set(key, { mtrlType: mtrlType as "rm" | "pm", mtrlId, removed: false, fields: {} })
+      lineMap.set(key, { mtrlType: mtrlType as RecipeLineRowDiff["mtrlType"], mtrlId, removed: false, fields: {} })
     }
     const entry = lineMap.get(key)!
     if (field === "__removed__") entry.removed = true
@@ -156,7 +165,7 @@ function parseBomApprovalItems(items: Approval["items"]) {
 
 /** No RM/PM prefix here — the two are already split into their own labeled
  *  columns below, so repeating the tag on every row would be redundant. */
-function materialLabel(mtrlType: "rm" | "pm", mtrlId: string, materialMap?: MaterialMap) {
+function materialLabel(mtrlType: "rm" | "pm" | "sku", mtrlId: string, materialMap?: MaterialMap) {
   const mat = materialMap?.[mtrlType]?.[Number(mtrlId)]
   const code = mat?.code ?? `#${mtrlId}`
   return mat ? `${code} — ${mat.name}` : code
@@ -226,9 +235,12 @@ export function RecipeLineDiffTable({ items, materialMap, hideReason, compact }:
   // one merged list with a tag repeated on every row.
   const rmRows = changedLines.filter((l) => l.mtrlType === "rm").map((l) => lineToDiffRow(l, materialMap))
   const pmRows = changedLines.filter((l) => l.mtrlType === "pm").map((l) => lineToDiffRow(l, materialMap))
+  // A gift kit's contents get their own column: they are neither RM nor PM, and
+  // for a kit this is the ENTIRE recipe, so it cannot be the one thing not shown.
+  const skuRows = changedLines.filter((l) => l.mtrlType === "sku").map((l) => lineToDiffRow(l, materialMap))
   // Only one side present (e.g. an RM-only recipe) spans the full width
   // instead of being stuck in a half-width column with empty space next to it.
-  const bothPresent = rmRows.length > 0 && pmRows.length > 0
+  const bothPresent = [rmRows, pmRows, skuRows].filter((r) => r.length > 0).length > 1
 
   return (
     <div className="space-y-2">
@@ -253,6 +265,7 @@ export function RecipeLineDiffTable({ items, materialMap, hideReason, compact }:
           rows={[
             ...rmRows.map((r) => ({ ...r, tag: "RM" as const })),
             ...pmRows.map((r) => ({ ...r, tag: "PM" as const })),
+            ...skuRows.map((r) => ({ ...r, tag: "KIT" as const })),
           ]}
           newOnly={newOnly}
         />
@@ -272,6 +285,14 @@ export function RecipeLineDiffTable({ items, materialMap, hideReason, compact }:
                 Packing Materials (PM)
               </p>
               <DiffTable rows={pmRows} newOnly={newOnly} />
+            </div>
+          )}
+          {skuRows.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Kit Contents (SKUs)
+              </p>
+              <DiffTable rows={skuRows} newOnly={newOnly} />
             </div>
           )}
         </div>

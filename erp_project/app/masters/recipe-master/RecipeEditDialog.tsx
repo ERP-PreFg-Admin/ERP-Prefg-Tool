@@ -18,7 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select } from "@/components/ui/select"
 import { DatePicker } from "@/components/ui/date-picker"
 import { RecipeLineEditorTable } from "./RecipeLineEditorTable"
-import { ChangeTypeCheckboxes } from "./ChangeTypeCheckboxes"
+import { ChangeTypeCheckboxes, type ChangeTypeKey } from "./ChangeTypeCheckboxes"
 import { RecipeArtifactsAddButton, RecipeArtifactsList } from "./RecipeArtifactsEditor"
 import { rmLockNote } from "./RecipeWizardSteps"
 import { RECIPE_STATUS_VALUES } from "@/lib/validation/recipe"
@@ -42,8 +42,13 @@ export function RecipeEditDialog({
   sku,
   rmRows,
   pmRows,
+  skuRows,
   onChangeRm,
   onChangePm,
+  onChangeSku,
+  skuMaterials,
+  isKit,
+  declaredUnits,
   effectiveFrom,
   onChangeEffectiveFrom,
   reason,
@@ -75,16 +80,22 @@ export function RecipeEditDialog({
   sku?: RecipeSku
   rmRows: RecipeLineRow[]
   pmRows: RecipeLineRow[]
+  skuRows: RecipeLineRow[]
   onChangeRm: (rows: RecipeLineRow[]) => void
   onChangePm: (rows: RecipeLineRow[]) => void
+  onChangeSku: (rows: RecipeLineRow[]) => void
+  skuMaterials: RecipeMaterialOption[]
+  /** This recipe belongs to a gift kit (lib/masters/kit-sku.ts). */
+  isKit: boolean
+  declaredUnits: number | null
   /** Effective From for the NEW version this save will create. */
   effectiveFrom: string
   onChangeEffectiveFrom: (v: string) => void
   /** Required — editing an existing Recipe always needs a reason + change type. */
   reason: string
   onChangeReason: (v: string) => void
-  changeType: ("rm" | "pm")[]
-  onChangeChangeType: (v: ("rm" | "pm")[]) => void
+  changeType: ChangeTypeKey[]
+  onChangeChangeType: (v: ChangeTypeKey[]) => void
   rmMaterials: RecipeMaterialOption[]
   pmMaterials: RecipeMaterialOption[]
   saveError: string | null
@@ -193,6 +204,7 @@ export function RecipeEditDialog({
             onChangeChangeType={onChangeChangeType}
             disabled={saving}
             hideRm={rmLocked}
+            isKit={isKit}
           />
 
           {willPropagate && (
@@ -208,12 +220,17 @@ export function RecipeEditDialog({
           <RecipeLineEditorTable
             rmRows={rmRows}
             pmRows={pmRows}
+            skuRows={skuRows}
             onChangeRm={onChangeRm}
             onChangePm={onChangePm}
+            onChangeSku={onChangeSku}
             rmMaterials={rmMaterials}
             pmMaterials={pmMaterials}
+            skuMaterials={skuMaterials}
             rmLocked={rmLocked}
             rmLockNote={rmLockNote(rmLock)}
+            isKit={isKit}
+            declaredUnits={declaredUnits}
             sku={sku}
           />
         </div>

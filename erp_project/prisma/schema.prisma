@@ -1159,14 +1159,24 @@ enum history_vrm_mtrl_type {
   pm
 }
 
+// 'sku' is a gift kit's component line: mtrl_id is a master_skus.id, amount is
+// a unit count. Added by prisma/alter_details_recipe_mtrl_type_sku.sql.
+// NOTE: the live tables are details_recipe / history_recipe — this model still
+// carries the pre-2026-08 names.
 enum details_bom_mtrl_type {
   rm
   pm
+  sku
 }
 
+// 'sku' is a gift kit's component line: mtrl_id is a master_skus.id, amount is
+// a unit count. Added by prisma/alter_details_recipe_mtrl_type_sku.sql.
+// NOTE: the live tables are details_recipe / history_recipe — this model still
+// carries the pre-2026-08 names.
 enum history_bom_mtrl_type {
   rm
   pm
+  sku
 }
 
 enum details_cost__int_dynamic_mtrl_type {

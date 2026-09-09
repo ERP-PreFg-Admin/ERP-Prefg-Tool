@@ -7,6 +7,8 @@
  * a long scroll of repeated card chrome.
  */
 
+import { cn } from "@/lib/utils"
+import { kitUnitsTotal, kitUnitsExceeded, kitUnitsMessage } from "@/lib/masters/kit-sku"
 import { Lock, Plus, Trash2 } from "lucide-react"
 import {
   Table,
@@ -28,6 +30,17 @@ import {
 const cellInputCls =
   "w-full rounded border border-input bg-background px-2 py-1 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 
+/** Section heading per line type — mirrors SECTION_LABEL in the grid editor. */
+const TABLE_SECTION_LABEL: Record<RecipeLineRow["mtrl_type"], string> = {
+  rm: "Raw Materials (RM)",
+  pm: "Packing Materials (PM)",
+  sku: "Kit Contents (SKUs)",
+}
+
+const TABLE_ROW_NOUN: Record<RecipeLineRow["mtrl_type"], string> = {
+  rm: "RM", pm: "PM", sku: "SKU",
+}
+
 function LineTable({
   mtrlType,
   rows,
@@ -35,15 +48,20 @@ function LineTable({
   onChange,
   locked,
   lockNote,
+  optional,
 }: {
-  mtrlType: "rm" | "pm"
+  mtrlType: RecipeLineRow["mtrl_type"]
+  /** RM on a gift kit: extras, not a formulation, so no running total. */
+  optional?: boolean
   rows: RecipeLineRow[]
   materials: RecipeMaterialOption[]
   onChange: (rows: RecipeLineRow[]) => void
   locked?: boolean
   lockNote?: string
 }) {
-  const total = mtrlType === "rm" ? rmTotal(rows) : null
+  // Suppressed for a kit's optional RM by the caller passing optional — see the
+  // grid's note. A kit's components are counted, not summed to 100%.
+  const total = mtrlType === "rm" && !optional ? rmTotal(rows) : null
   const balanced = total != null && rows.length > 0 && isRmTotalValid(total)
 
   function updateRow(i: number, patch: Partial<RecipeLineRow>) {
@@ -59,7 +77,9 @@ function LineTable({
     const mat = materials.find((m) => m.id === id)
     // RM's amount IS the percentage, so the material's own uom ("kg") must
     // never win here — same rule as RecipeLineEditorGrid's selectMaterial.
-    const uom = mtrlType === "rm" ? "%" : rows[i].uom || mat?.uom || defaultUom("pm")
+    const uom = mtrlType === "rm" || mtrlType === "sku"
+      ? defaultUom(mtrlType)
+      : rows[i].uom || mat?.uom || defaultUom("pm")
     updateRow(i, { mtrl_id: id, uom })
   }
 
@@ -67,7 +87,8 @@ function LineTable({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <p className="flex items-center gap-1.5 text-sm font-medium">
-          {mtrlType === "rm" ? "Raw Materials (RM)" : "Packing Materials (PM)"}
+          {TABLE_SECTION_LABEL[mtrlType]}
+          {optional && <span className="ml-1.5 text-xs font-normal text-muted-foreground">optional</span>}
           {locked && <Lock className="h-3.5 w-3.5 text-muted-foreground" />}
         </p>
         {total != null && rows.length > 0 && (
@@ -96,7 +117,9 @@ function LineTable({
           <TableHeader>
             <TableRow>
               <TableHead className="min-w-45">Material</TableHead>
-              <TableHead className="w-24">{mtrlType === "rm" ? "Amount (%)" : "Amount"}</TableHead>
+              <TableHead className="w-24">
+                {mtrlType === "rm" ? "Amount (%)" : mtrlType === "sku" ? "Qty" : "Amount"}
+              </TableHead>
               <TableHead className="w-20">UOM</TableHead>
               <TableHead className="w-10" />
             </TableRow>
@@ -105,7 +128,7 @@ function LineTable({
             {rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={4} className="text-center text-muted-foreground py-6 text-sm">
-                  No {mtrlType.toUpperCase()} lines yet.
+                  No {TABLE_ROW_NOUN[mtrlType]} lines yet.
                 </TableCell>
               </TableRow>
             ) : (
@@ -134,7 +157,7 @@ function LineTable({
                       getValue={(m) => String(m.id)}
                       getLabel={(m) => `${m.name} (${m.code ?? m.id})`}
                       searchKeys={["name", "code"]}
-                      placeholder={`Search ${mtrlType.toUpperCase()}…`}
+                      placeholder={mtrlType === "sku" ? "Search SKU…" : `Search ${mtrlType.toUpperCase()}…`}
                       className={cellInputCls}
                     />
                   </TableCell>
@@ -191,20 +214,33 @@ function LineTable({
 export function RecipeLineEditorTable({
   rmRows,
   pmRows,
+  skuRows,
   onChangeRm,
   onChangePm,
+  onChangeSku,
   rmMaterials,
   pmMaterials,
+  skuMaterials,
   rmLocked,
   rmLockNote,
+  isKit,
+  declaredUnits,
   sku,
 }: {
   rmRows: RecipeLineRow[]
   pmRows: RecipeLineRow[]
+  /** A gift kit's components. Carried through even when the section is not
+   *  rendered, because a save that omitted them would DELETE the kit's
+   *  contents — this editor always creates a new version from what it holds. */
+  skuRows?: RecipeLineRow[]
   onChangeRm: (rows: RecipeLineRow[]) => void
   onChangePm: (rows: RecipeLineRow[]) => void
+  onChangeSku?: (rows: RecipeLineRow[]) => void
   rmMaterials: RecipeMaterialOption[]
   pmMaterials: RecipeMaterialOption[]
+  skuMaterials?: RecipeMaterialOption[]
+  isKit?: boolean
+  declaredUnits?: number | null
   /** Non-base variant: RM is inherited from the family's base and only editable
    *  there. See lib/masters/variant-rm-lock.ts. */
   rmLocked?: boolean
@@ -215,6 +251,28 @@ export function RecipeLineEditorTable({
   return (
     <div className="space-y-6">
       {sku && <RecipeSkuHeading sku={sku} />}
+      {isKit && skuRows && onChangeSku && (
+        <div className="space-y-2">
+          <LineTable
+            mtrlType="sku"
+            rows={skuRows}
+            materials={skuMaterials ?? []}
+            onChange={onChangeSku}
+          />
+          {declaredUnits != null && (
+            <p className={cn(
+              "text-xs",
+              kitUnitsExceeded(kitUnitsTotal(skuRows), declaredUnits)
+                ? "font-medium text-destructive"
+                : "text-muted-foreground"
+            )}>
+              {kitUnitsExceeded(kitUnitsTotal(skuRows), declaredUnits)
+                ? kitUnitsMessage(kitUnitsTotal(skuRows), declaredUnits)
+                : `${kitUnitsTotal(skuRows)} of ${declaredUnits} units.`}
+            </p>
+          )}
+        </div>
+      )}
       <LineTable
         mtrlType="rm"
         rows={rmRows}
@@ -222,6 +280,7 @@ export function RecipeLineEditorTable({
         onChange={onChangeRm}
         locked={rmLocked}
         lockNote={rmLockNote}
+        optional={isKit}
       />
       <LineTable mtrlType="pm" rows={pmRows} materials={pmMaterials} onChange={onChangePm} />
     </div>

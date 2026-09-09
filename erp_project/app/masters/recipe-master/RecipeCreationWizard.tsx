@@ -9,6 +9,7 @@
  * footer nav.
  */
 
+import { useMemo } from "react"
 import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { type RecipeMaterialOption } from "./RecipeLineEditorGrid"
+import { isKitSku, KIT_LINE_UOM } from "@/lib/masters/kit-sku"
 import { useBomWizard } from "./useRecipeWizard"
 import {
   Step1SkuSelect,
@@ -43,9 +45,26 @@ export function RecipeCreationWizard({
   onSuccess: () => void
   onEditExisting: (bomId: number) => void
 }) {
-  const wizard = useBomWizard({ rmMaterials, pmMaterials, onSuccess, onEditExisting })
+  const wizard = useBomWizard({ rmMaterials, pmMaterials, skus, onSuccess, onEditExisting })
   const { step, loading, canProceedFromLines } = wizard
   const picked = skuOf(skus, wizard.skuId)
+
+  // Every active SKU as the kit-component picker's options, in the same shape
+  // the RM/PM pickers take — so the existing grid renders it with no new
+  // component. A kit cannot contain itself (route.ts 400s kit_contains_itself)
+  // or another kit, so both are filtered out of the list rather than offered and
+  // then rejected.
+  const skuMaterials: RecipeMaterialOption[] = useMemo(
+    () => skus
+      .filter((sk) => sk.id !== wizard.skuId && !isKitSku(sk))
+      .map((sk) => ({
+        id: sk.id,
+        code: sk.sku_code,
+        name: sk.name,
+        uom: KIT_LINE_UOM,
+      })),
+    [skus, wizard.skuId]
+  )
 
   return (
     <>
@@ -117,7 +136,12 @@ export function RecipeCreationWizard({
                   />
                 )}
 
-                {step === 3 && <Step3EntryMethod onChoose={wizard.chooseEntryMethod} />}
+                {step === 3 && (
+                  <Step3EntryMethod
+                    onChoose={wizard.chooseEntryMethod}
+                    csvAvailable={wizard.csvAvailable}
+                  />
+                )}
 
                 {step === 4 && (
                   <Step4LineEntry
@@ -129,10 +153,15 @@ export function RecipeCreationWizard({
                     onCsvFile={wizard.handleCsvFile}
                     rmRows={wizard.rmRows}
                     pmRows={wizard.pmRows}
+                    skuRows={wizard.skuRows}
                     onChangeRm={wizard.setRmRows}
                     onChangePm={wizard.setPmRows}
+                    onChangeSku={wizard.setSkuRows}
                     rmMaterials={rmMaterials}
                     pmMaterials={pmMaterials}
+                    skuMaterials={skuMaterials}
+                    isKit={wizard.isKit}
+                    declaredUnits={wizard.declaredUnits}
                     pendingArtifactFiles={wizard.pendingArtifactFiles}
                     onChangePendingArtifactFiles={wizard.setPendingArtifactFiles}
                     isRevision={wizard.existingBomId != null}
@@ -152,8 +181,12 @@ export function RecipeCreationWizard({
                     effectiveFrom={wizard.effectiveFrom}
                     rmRows={wizard.rmRows}
                     pmRows={wizard.pmRows}
+                    skuRows={wizard.skuRows}
                     rmMaterials={rmMaterials}
                     pmMaterials={pmMaterials}
+                    skuMaterials={skuMaterials}
+                    isKit={wizard.isKit}
+                    declaredUnits={wizard.declaredUnits}
                     isRevision={wizard.existingBomId != null}
                     reason={wizard.reason}
                     changeType={wizard.changeType}

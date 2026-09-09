@@ -15,7 +15,13 @@
  * (the variant fan-out and the CSV bulk upload) both route through here.
  */
 
-export type DiffableLine = { mtrl_type: "rm" | "pm"; mtrl_id: number; amount: number | string; uom?: string | null }
+export type DiffableLine = {
+  /** 'sku' is a gift kit's component — see lib/masters/kit-sku.ts. */
+  mtrl_type: "rm" | "pm" | "sku"
+  mtrl_id: number
+  amount: number | string
+  uom?: string | null
+}
 
 function lineKey(l: DiffableLine): string {
   // Normalize amount to a number before stringifying — the DB returns
@@ -78,15 +84,38 @@ export function resolveRecipeVersions(opts: {
   }
 }
 
-/** Compares the RM-line set and PM-line set independently — any addition, removal, or amount/uom change on a side marks that side changed. */
+/**
+ * Compares the RM-line set and PM-line set independently — any addition, removal,
+ * or amount/uom change on a side marks that side changed.
+ *
+ * ── A GIFT KIT'S CONTENTS COUNT AS A PM-SIDE CHANGE ──────────────────────────
+ * `'sku'` lines are folded into `pmChanged`, not given a version of their own.
+ *
+ * They cannot simply be ignored: a kit has no RM and no PM, so a version that
+ * swapped one component for another would show NEITHER side changed, `pm_version`
+ * would not bump, and two recipes with different contents would carry the SAME
+ * `<sku>-RM<n>-PM<n>` code. "Same version number, different content" is exactly the
+ * integrity hole rm_version exists to close for formulations.
+ *
+ * PM is the right side to fold into: composition is SKU-scoped, precisely as PM is
+ * (a 7-piece gift set is not a 3-piece one), while RM is family-scoped and shared.
+ * The alternative — a third `-SK<n>` segment — would change a user-visible
+ * identifier and every place that reads or displays it, to encode the same fact.
+ *
+ * `rmChanged` is deliberately left alone by 'sku' lines, so a kit never triggers
+ * the variant fan-out: it has no formulation to propagate to anybody.
+ */
 export function diffBomLines(
   oldLines: DiffableLine[],
   newLines: DiffableLine[]
 ): { rmChanged: boolean; pmChanged: boolean } {
   const oldRm = new Set(oldLines.filter((l) => l.mtrl_type === "rm").map(lineKey))
   const newRm = new Set(newLines.filter((l) => l.mtrl_type === "rm").map(lineKey))
-  const oldPm = new Set(oldLines.filter((l) => l.mtrl_type === "pm").map(lineKey))
-  const newPm = new Set(newLines.filter((l) => l.mtrl_type === "pm").map(lineKey))
+  // PM and 'sku' share a set on purpose — see the note above. They can never
+  // collide: lineKey is prefixed with mtrl_type.
+  const pmSide = (l: DiffableLine) => l.mtrl_type === "pm" || l.mtrl_type === "sku"
+  const oldPm = new Set(oldLines.filter(pmSide).map(lineKey))
+  const newPm = new Set(newLines.filter(pmSide).map(lineKey))
 
   const setsDiffer = (a: Set<string>, b: Set<string>) =>
     a.size !== b.size || [...a].some((k) => !b.has(k))

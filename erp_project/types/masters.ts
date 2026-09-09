@@ -502,6 +502,12 @@ export type RecipeDetailResponse = {
   sku_id: number | null;
   sku_code: string | null;
   sku_name: string | null;
+  /** Classification, so the edit panel can answer isKitSku() without a second
+   *  request — see lib/masters/kit-sku.ts. */
+  sku_type?: string | null;
+  subcategory?: string | null;
+  filling?: number | string | null;
+  filling_uom?: string | null;
   status: string | null;
   created_at: Date | string | null;
   effective_from: Date | string | null;

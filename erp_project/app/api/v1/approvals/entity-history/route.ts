@@ -11,7 +11,7 @@ import { query } from "@/lib/db"
 import { approvalsSql, entityLabelSql } from "@/lib/queries/approvals"
 import { historySql } from "@/lib/queries/history"
 import { bom as recipeSql } from "@/lib/queries/recipe"
-import { getActiveRmMaterialOptions, getActivePmMaterialOptions } from "@/lib/cached-reference-data"
+import { getActiveRmMaterialOptions, getActivePmMaterialOptions, getActiveSkuList } from "@/lib/cached-reference-data"
 import { buildMaterialMap } from "@/app/approvals/material-map"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
@@ -59,7 +59,9 @@ export const GET = withGateway({
       // pending-approvals and /approvals/history pages do, so this dialog
       // shows material names/codes instead of falling back to "#123".
       const materialMap = module === "BOM"
-        ? buildMaterialMap(...await Promise.all([getActiveRmMaterialOptions(), getActivePmMaterialOptions()]))
+        ? buildMaterialMap(...await Promise.all([
+            getActiveRmMaterialOptions(), getActivePmMaterialOptions(), getActiveSkuList(),
+          ]))
         : undefined
 
       const approvals = await Promise.all(

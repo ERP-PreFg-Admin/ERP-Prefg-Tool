@@ -41,12 +41,17 @@ export function rmTotalMessage(total: number): string {
   return `RM percentages must total between ${RM_TOTAL_MIN}% and ${RM_TOTAL_MAX}% (currently ${total.toFixed(2)}%).`
 }
 
-// One RM or PM line, as entered manually or parsed from the wizard's CSV step.
-// Effective From/Till are recipe-level (see bomCreateFullSchema's top-level
-// effective_from), not per line — every CSV column here must be present per
-// the "all CSV fields mandatory" requirement.
+// One RM, PM or component-SKU line, as entered manually or parsed from the
+// wizard's CSV step. Effective From/Till are recipe-level (see
+// bomCreateFullSchema's top-level effective_from), not per line — every CSV column
+// here must be present per the "all CSV fields mandatory" requirement.
+//
+// `mtrl_id`'s meaning depends on mtrl_type, as it does in the column itself:
+// master_rm.id, master_pm.id, or master_skus.id for a gift kit's component
+// (lib/masters/kit-sku.ts). `amount` is a percentage for rm, a per-unit quantity
+// for pm, and a unit count for sku.
 export const bomLineSchema = z.object({
-  mtrl_type: z.enum(["rm", "pm"]),
+  mtrl_type: z.enum(["rm", "pm", "sku"]),
   mtrl_id: z.coerce.number().int().positive(),
   amount: z.coerce.number().positive(), // for rm lines, this IS the % value
   uom: z.string().trim().min(1).max(20).nullable().optional(),
@@ -64,7 +69,11 @@ export const bomArtifactAddSchema = z.object({
   file_name: z.string().trim().min(1).max(255),
 })
 
-export const bomChangeTypeSchema = z.enum(["rm", "pm"])
+// "sku" is a change to a gift kit's contents. It gets its own checkbox rather than
+// being folded into "pm" so the reason a version exists reads honestly on the
+// approval card — even though for VERSION NUMBERING a contents change counts as a
+// PM-side change (see resolveRecipeVersions).
+export const bomChangeTypeSchema = z.enum(["rm", "pm", "sku"])
 
 export const bomCreateFullSchema = z
   .object({
@@ -79,8 +88,14 @@ export const bomCreateFullSchema = z
     // update-existing doesn't touch it (the existing header's date stands).
     effective_from: z.string().trim().optional(),
     source: z.enum(["manual", "csv"]),
-    rm_lines: z.array(bomLineSchema).min(1, "At least one RM line is required"),
+    // No .min(1) here any more: a GIFT KIT has no formulation, only component
+    // SKUs (lib/masters/kit-sku.ts). "At least one RM line" moved into the
+    // superRefine below, where it can be applied to the non-kit shape only —
+    // and route.ts re-applies it from the SKU row, which is the real guard.
+    rm_lines: z.array(bomLineSchema),
     pm_lines: z.array(bomLineSchema),
+    // A gift kit's contents. Empty (and required to be empty) for every other SKU.
+    sku_lines: z.array(bomLineSchema).default([]),
     // Artifacts are bundled into this same approval — see
     // lib/approvals/module-handlers.ts bomHandler.applyAndArchive, which is
     // the only place artifacts_recipe rows are actually written/deleted.
@@ -108,13 +123,42 @@ export const bomCreateFullSchema = z
     if (data.pm_lines.some((l) => l.mtrl_type !== "pm")) {
       ctx.addIssue({ code: "custom", path: ["pm_lines"], message: "pm_lines must all have mtrl_type='pm'" })
     }
-    const rmTotal = data.rm_lines.reduce((sum, l) => sum + l.amount, 0)
-    if (!isRmTotalValid(rmTotal)) {
+    if (data.sku_lines.some((l) => l.mtrl_type !== "sku")) {
+      ctx.addIssue({ code: "custom", path: ["sku_lines"], message: "sku_lines must all have mtrl_type='sku'" })
+    }
+    // A component listed twice would be two rows for one (recipe, mtrl_type,
+    // mtrl_id) — the insert's own grain — so the second silently overwrites the
+    // first's quantity and the kit is short. Cheap to catch here, on the shape.
+    const skuIds = data.sku_lines.map((l) => l.mtrl_id)
+    if (new Set(skuIds).size !== skuIds.length) {
       ctx.addIssue({
         code: "custom",
-        path: ["rm_lines"],
-        message: rmTotalMessage(rmTotal),
+        path: ["sku_lines"],
+        message: "The same SKU is listed twice in the kit — give it one line with the full quantity.",
       })
+    }
+    // ── The RM rules, scoped to the non-kit shape ──────────────────────────
+    // The schema cannot know whether sku_id IS a gift kit — only route.ts, which
+    // reads the row, can. What the schema CAN see is which shape this payload
+    // claims to be, and that is enough to apply the rules to every ordinary
+    // recipe here rather than only at the route:
+    //
+    //   sku_lines empty  ⇒ an ordinary formulation ⇒ needs ≥1 RM line summing
+    //                      to the band.
+    //   sku_lines present ⇒ claims to be a kit ⇒ RM is optional and has no total.
+    //
+    // A non-kit SKU cannot use that to dodge anything: route.ts 400s `not_a_kit`
+    // the moment a non-kit sends sku_lines at all, and re-applies both rules from
+    // the SKU row. Two layers, no gap — and the common case is still rejected
+    // before a connection is taken.
+    if (data.sku_lines.length === 0) {
+      if (data.rm_lines.length === 0) {
+        ctx.addIssue({ code: "custom", path: ["rm_lines"], message: "At least one RM line is required" })
+      }
+      const rmTotal = data.rm_lines.reduce((sum, l) => sum + l.amount, 0)
+      if (!isRmTotalValid(rmTotal)) {
+        ctx.addIssue({ code: "custom", path: ["rm_lines"], message: rmTotalMessage(rmTotal) })
+      }
     }
   })
 

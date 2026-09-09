@@ -358,6 +358,65 @@ export const skus = {
    *  Parameters: [sku_id] */
   selectFamilyKeyById: `SELECT brand, base_sku_sno FROM master_skus WHERE id = ? LIMIT 1`,
 
+  /**
+   * Several SKUs by id — validating a gift kit's component list against the SKUs it
+   * claims to contain (see lib/masters/kit-sku.ts).
+   *
+   * Returns the classification columns on purpose: the route refuses a component
+   * that is itself a kit (no nesting, no cycles), and `sku_code` + `filling` are
+   * what the sku_variants rows carry. A component id that resolves to nothing simply
+   * does not come back, and the caller reports it rather than writing a line
+   * pointing at a SKU that does not exist — there is no FK on details_recipe.mtrl_id
+   * to catch it later.
+   *
+   * Needs query(), not execute() — the IN (?) array expansion.
+   * Parameters: [ids]
+   */
+  selectByIds: `
+    SELECT master_skus.id, master_skus.sku_code, master_skus.name,
+           master_skus.sku_type, master_skus.subcategory,
+           master_skus.filling, master_skus.filling_uom, master_skus.status
+    FROM master_skus WHERE id IN (?)
+  `,
+
+  // ── A gift kit's contents, mirrored into sku_variants ────────────────────────
+  //
+  // `sku_variants(parent_sku_id, variant_sku_id, sku_code, size)` already existed
+  // and had never been read or written (prisma/add_sku_is_base_sku.sql:13 records
+  // it as dead). It is the right shape for this and nothing else uses it: a
+  // DIRECTED parent → child link, where the parent is the kit.
+  //
+  // ⚠️ This is NOT the variant family. A family is the symmetric
+  // (brand, base_sku_sno) key, and every active recipe in one must carry the same
+  // rm_version. Putting a kit in its components' family would break that invariant
+  // permanently — the components' formulations already differ from each other. The
+  // two ideas share a word and nothing else.
+  //
+  // Written only at approval time, from the approved line set, since a kit's
+  // contents are not real until the recipe is.
+
+  /** Params: [kit_sku_id] */
+  deleteKitContents: `DELETE FROM sku_variants WHERE parent_sku_id = ?`,
+
+  /**
+   * Replace-insert one kit's components. Paired with deleteKitContents inside one
+   * transaction, so the stored contents always equal the approved recipe's — a
+   * component dropped from a new version leaves no row behind. There is no `status`
+   * column to retire a row with, which is why removal is a delete.
+   *
+   * Fixed placeholder count so it goes through execute() as a prepared statement,
+   * matching mfgFacilityMap.buildUpsertMappings.
+   * Params per row: (parent_sku_id, variant_sku_id, sku_code, size)
+   */
+  buildInsertKitContents(count: number): string {
+    const group = "(?, ?, ?, ?)"
+    return `
+      INSERT INTO sku_variants (parent_sku_id, variant_sku_id, sku_code, size)
+      VALUES ${Array(count).fill(group).join(", ")}
+      ON DUPLICATE KEY UPDATE sku_code = VALUES(sku_code), size = VALUES(size)
+    `
+  },
+
   /** Fetch SKU status by sku_code — used to gate PO creation. Parameters: [sku_code] */
   selectStatusByCode: `SELECT status FROM master_skus WHERE sku_code = ? LIMIT 1`,
 

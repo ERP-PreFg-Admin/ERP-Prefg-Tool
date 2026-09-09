@@ -22,6 +22,10 @@ import { rmTotal, type RecipeLineRow } from "./RecipeLineEditorGrid"
 import { uploadPendingArtifacts } from "./recipe-artifact-upload"
 import type { RecipeDetailResponse } from "@/types/masters"
 import { todayIST } from "@/lib/date"
+import {
+  isKitSku, declaredKitUnits, kitUnitsTotal, kitUnitsExceeded, kitUnitsMessage,
+} from "@/lib/masters/kit-sku"
+import type { ChangeTypeKey } from "./ChangeTypeCheckboxes"
 import type { RmLock } from "@/lib/masters/variant-rm-lock"
 import type { PropagationTarget } from "./useRecipeWizard"
 
@@ -38,19 +42,23 @@ export function useBomDetailPanel() {
   const [detail, setDetail]               = useState<RecipeDetailResponse | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError]     = useState<string | null>(null)
-  const [activeMtrlType, setActiveMtrlType] = useState<"rm" | "pm">("rm")
+  const [activeMtrlType, setActiveMtrlType] = useState<RecipeLineRow["mtrl_type"]>("rm")
 
   const [editMode, setEditMode]           = useState(false)
   const [editSeededFor, setEditSeededFor] = useState<number | null>(null)
   const [editRmRows, setEditRmRows]       = useState<RecipeLineRow[]>([])
   const [editPmRows, setEditPmRows]       = useState<RecipeLineRow[]>([])
+  // A gift kit's components. WITHOUT this array the lines were dropped twice
+  // over: invisible on the panel, and then absent from saveEdit's payload — so
+  // opening a kit recipe here and clicking Save silently emptied the kit.
+  const [editSkuRows, setEditSkuRows]     = useState<RecipeLineRow[]>([])
   // Effective From for the NEW version being created — defaults to today,
   // editable before submit. Not seeded from the predecessor's own date.
   const [editEffectiveFrom, setEditEffectiveFrom] = useState("")
   // Editing an existing Recipe always requires a reason + at least one change
   // type (RM/PM) — see lib/validation/bom.ts's bomCreateFullSchema comment.
   const [editReason, setEditReason]       = useState("")
-  const [editChangeType, setEditChangeType] = useState<("rm" | "pm")[]>([])
+  const [editChangeType, setEditChangeType] = useState<ChangeTypeKey[]>([])
   const [saving, setSaving]               = useState(false)
   const [saveError, setSaveError]         = useState<string | null>(null)
 
@@ -160,7 +168,7 @@ export function useBomDetailPanel() {
     if (!editMode || !detail || detail.recipe_id == null) return
     if (editSeededFor === detail.recipe_id) return
     const toRow = (l: (typeof detail.lines)[number]): RecipeLineRow => ({
-      mtrl_type: (l.mtrl_type as "rm" | "pm") ?? "rm",
+      mtrl_type: (l.mtrl_type as RecipeLineRow["mtrl_type"]) ?? "rm",
       mtrl_id: l.mtrl_id,
       amount: l.amount != null ? String(l.amount) : "",
       uom: l.uom ?? "",
@@ -168,6 +176,7 @@ export function useBomDetailPanel() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds the editable rows once, the first time detail loads in edit mode
     setEditRmRows(detail.lines.filter((l) => l.mtrl_type === "rm").map(toRow))
     setEditPmRows(detail.lines.filter((l) => l.mtrl_type === "pm").map(toRow))
+    setEditSkuRows(detail.lines.filter((l) => l.mtrl_type === "sku").map(toRow))
     setEditStatus(detail.status ?? "")
     setEditEffectiveFrom(todayIST())
     setStatusError(null)
@@ -199,11 +208,20 @@ export function useBomDetailPanel() {
   }, [editMode, detail?.sku_id])
 
   // RM lines are expected to add up to a full 100% formulation.
+  // Which shape this recipe is. Read off the SKU row the detail query now
+  // returns, not guessed from the lines — a kit with its contents temporarily
+  // emptied is still a kit, and must not be held to the RM rules.
+  const isKit = isKitSku(detail)
+  const declaredUnits = isKit ? declaredKitUnits(detail) : null
+
   const rmLines      = detail?.lines.filter((l) => l.mtrl_type === "rm") ?? []
   const pmLines      = detail?.lines.filter((l) => l.mtrl_type === "pm") ?? []
+  const skuLines     = detail?.lines.filter((l) => l.mtrl_type === "sku") ?? []
   const rmDetailTotal = rmLines.reduce((sum, l) => sum + (Number(l.amount) || 0), 0)
   const rmIsBalanced  = rmLines.length > 0 && isRmTotalValid(rmDetailTotal)
-  const visibleLines  = activeMtrlType === "rm" ? rmLines : pmLines
+  const visibleLines  = activeMtrlType === "rm" ? rmLines
+    : activeMtrlType === "sku" ? skuLines
+    : pmLines
 
   /** Toggle selection. */
   function handleRowClick(bomId: number) {
@@ -297,15 +315,34 @@ export function useBomDetailPanel() {
     // No Effective From check: it's optional here too. Editing creates a new
     // version, so requiring it here but not in the creation wizard would make
     // the same field mandatory in one place and not the other.
-    if (editRmRows.length === 0) {
+    if (isKit) {
+      if (editSkuRows.length === 0) {
+        setSaveError("A gift kit needs at least one SKU in it.")
+        return
+      }
+      if (new Set(editSkuRows.map((r) => r.mtrl_id)).size !== editSkuRows.length) {
+        setSaveError("The same SKU is listed twice - give it one line with the full quantity.")
+        return
+      }
+      // The declared unit count caps the contents here too — this surface
+      // creates a new version exactly as the wizard does.
+      const editUnits = kitUnitsTotal(editSkuRows)
+      if (declaredUnits != null && kitUnitsExceeded(editUnits, declaredUnits)) {
+        setSaveError(kitUnitsMessage(editUnits, declaredUnits))
+        return
+      }
+    }
+    if (!isKit && editRmRows.length === 0) {
       setSaveError("At least one RM line is required.")
       return
     }
-    if (!isRmTotalValid(rmTotal(editRmRows))) {
+    // A kit's RM is optional extras, not a formulation - the band does not apply,
+    // exactly as route.ts and the wizard treat it.
+    if (!isKit && !isRmTotalValid(rmTotal(editRmRows))) {
       setSaveError(rmTotalMessage(rmTotal(editRmRows)))
       return
     }
-    for (const r of [...editRmRows, ...editPmRows]) {
+    for (const r of [...editRmRows, ...editPmRows, ...editSkuRows]) {
       if (!r.mtrl_id || !r.amount) {
         setSaveError("Every line requires a material and an amount.")
         return
@@ -347,6 +384,7 @@ export function useBomDetailPanel() {
           source: "manual",
           rm_lines: editRmRows.map(toLine),
           pm_lines: editPmRows.map(toLine),
+          sku_lines: editSkuRows.map(toLine),
           artifact_adds: artifactAdds,
           artifact_removes: pendingArtifactRemoveIds,
           reason: editReason.trim(),
@@ -417,6 +455,11 @@ export function useBomDetailPanel() {
     activeMtrlType,
     setActiveMtrlType,
     editMode,
+    isKit,
+    declaredUnits,
+    skuLines,
+    editSkuRows,
+    setEditSkuRows,
     editRmRows,
     setEditRmRows,
     editPmRows,

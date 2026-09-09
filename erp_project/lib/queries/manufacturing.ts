@@ -497,6 +497,16 @@ export const manufacturingSql = {
    * Rate joins are pinned to status='active' AND this exact mfg_id so a
    * material with multiple rate rows (draft/inactive history, or rates for
    * other manufacturers) can't fan out the join and inflate the SUM.
+   *
+   * ⚠️ Do NOT add `WHERE db.mtrl_type IN ('rm','pm')` here, even though its sibling
+   * selectBomLineDetailByMfg needs exactly that. Every aggregate below is an
+   * explicit `CASE WHEN mtrl_type = 'rm' … WHEN/ELSE 'pm'`, so a 'sku' line (a gift
+   * kit's component — see lib/masters/kit-sku.ts) already contributes 0 to both
+   * costs and to every line count: correct, and correct by construction. A WHERE
+   * filter would instead drop the recipe's only rows for a pure-kit recipe, and the
+   * INNER JOIN would then remove the recipe from the result set entirely — turning
+   * "this kit costs nothing yet" into "this kit does not exist", which is what the
+   * rm_line_count diagnostics exist to tell apart.
    * Params: [mfg_id, mfg_id, mfg_id]
    */
   selectMaterialCostByMfg: `
@@ -605,6 +615,20 @@ export const manufacturingSql = {
    * the export's Detail sheet showed ₹0 lines against a Summary sheet (built
    * from selectMaterialCostByMfg) that showed a real cost. Same workbook,
    * two answers.
+   *
+   * ⚠️ `db.mtrl_type IN ('rm','pm')` is load-bearing, and this is the ONE place it
+   * has to be said. `details_recipe.mtrl_type` also carries 'sku' now — a gift
+   * kit's component SKUs (see lib/masters/kit-sku.ts) — and every consumer of this
+   * query branches `mtrl_type === 'rm' ? rmCost : pmCost`, so a component line
+   * would take the PM branch. The `CASE … ELSE p.pm_code END` above does the same.
+   * `mtrl_id` would then be a master_skus.id looked up in a PM rate map, and those
+   * two id sequences are independent: a collision prices a component at an
+   * unrelated material's rate, silently, inside a SUM. Excluding it here fixes all
+   * three consumers (costing-breakup.ts, [mfgId]/page.tsx, the detailed export) at
+   * once, which is why none of them branch on a third type.
+   *
+   * Consequence, and it is the intended one: a kit with only component lines has no
+   * costing here at all, so it reads as UNCOSTED rather than as costing zero.
    * Params: [mfg_id, mfg_id, mfg_id]
    */
   selectBomLineDetailByMfg: `
@@ -624,5 +648,6 @@ export const manufacturingSql = {
     LEFT  JOIN cost_master_rm_mfg rmm ON rmm.rm_id = db.mtrl_id AND rmm.mfg_id = ? AND rmm.status = 'active' AND db.mtrl_type = 'rm'
     LEFT  JOIN cost_master_pm_mfg pmm ON pmm.pm_id = db.mtrl_id AND pmm.mfg_id = ? AND pmm.status = 'active' AND db.mtrl_type = 'pm'
     WHERE mbm.mfg_id = ? AND mbm.status IN ('active', 'discontinued')
+      AND db.mtrl_type IN ('rm', 'pm')
   `,
 }

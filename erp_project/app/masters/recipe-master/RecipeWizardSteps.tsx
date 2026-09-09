@@ -139,25 +139,36 @@ export function Step2ExistingBom({
   )
 }
 
-export function Step3EntryMethod({ onChoose }: { onChoose: (method: EntryMethod) => void }) {
+export function Step3EntryMethod({ onChoose, csvAvailable = true }: {
+  onChoose: (method: EntryMethod) => void
+  /** False for a gift kit: the CSV template's mtrl_type column only accepts
+   *  rm/pm, so offering the file path would only produce a rejected import. */
+  csvAvailable?: boolean
+}) {
   return (
-    <div className="grid grid-cols-2 gap-3 py-2">
+    <div className={csvAvailable ? "grid grid-cols-2 gap-3 py-2" : "py-2"}>
       <button
         type="button"
         onClick={() => onChoose("manual")}
         className="rounded-lg border border-border p-4 text-left hover:border-primary transition-colors"
       >
         <p className="font-medium text-sm">Enter Manually</p>
-        <p className="text-xs text-muted-foreground mt-1">Add RM and PM lines one by one.</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          {csvAvailable
+            ? "Add RM and PM lines one by one."
+            : "Pick the SKUs this kit contains, and any RM or PM on top."}
+        </p>
       </button>
-      <button
-        type="button"
-        onClick={() => onChoose("csv")}
-        className="rounded-lg border border-border p-4 text-left hover:border-primary transition-colors"
-      >
-        <p className="font-medium text-sm">Upload CSV</p>
-        <p className="text-xs text-muted-foreground mt-1">Import all RM/PM lines from a file.</p>
-      </button>
+      {csvAvailable && (
+        <button
+          type="button"
+          onClick={() => onChoose("csv")}
+          className="rounded-lg border border-border p-4 text-left hover:border-primary transition-colors"
+        >
+          <p className="font-medium text-sm">Upload CSV</p>
+          <p className="text-xs text-muted-foreground mt-1">Import all RM/PM lines from a file.</p>
+        </button>
+      )}
     </div>
   )
 }
@@ -181,10 +192,15 @@ export function Step4LineEntry({
   onCsvFile,
   rmRows,
   pmRows,
+  skuRows,
   onChangeRm,
   onChangePm,
+  onChangeSku,
   rmMaterials,
   pmMaterials,
+  skuMaterials,
+  isKit,
+  declaredUnits,
   pendingArtifactFiles,
   onChangePendingArtifactFiles,
   isRevision,
@@ -203,10 +219,16 @@ export function Step4LineEntry({
   onCsvFile: (file: File) => void
   rmRows: RecipeLineRow[]
   pmRows: RecipeLineRow[]
+  skuRows: RecipeLineRow[]
   onChangeRm: (rows: RecipeLineRow[]) => void
   onChangePm: (rows: RecipeLineRow[]) => void
+  onChangeSku: (rows: RecipeLineRow[]) => void
   rmMaterials: RecipeMaterialOption[]
   pmMaterials: RecipeMaterialOption[]
+  /** Every active SKU, as the component picker's options. */
+  skuMaterials: RecipeMaterialOption[]
+  isKit: boolean
+  declaredUnits: number | null
   pendingArtifactFiles: File[]
   onChangePendingArtifactFiles: (files: File[]) => void
   /** True when the picked SKU already has an active Recipe — this submission
@@ -214,8 +236,8 @@ export function Step4LineEntry({
   isRevision: boolean
   reason: string
   onChangeReason: (v: string) => void
-  changeType: ("rm" | "pm")[]
-  onChangeChangeType: (v: ("rm" | "pm")[]) => void
+  changeType: ("rm" | "pm" | "sku")[]
+  onChangeChangeType: (v: ("rm" | "pm" | "sku")[]) => void
   rmLock: RmLock | null
   propagationTargets: PropagationTarget[]
 }) {
@@ -287,12 +309,17 @@ export function Step4LineEntry({
         <RecipeLineEditorGrid
           rmRows={rmRows}
           pmRows={pmRows}
+          skuRows={skuRows}
           onChangeRm={onChangeRm}
           onChangePm={onChangePm}
+          onChangeSku={onChangeSku}
           rmMaterials={rmMaterials}
           pmMaterials={pmMaterials}
+          skuMaterials={skuMaterials}
           rmLocked={rmLocked}
           rmLockNote={rmLockNote(rmLock)}
+          isKit={isKit}
+          declaredUnits={declaredUnits}
         />
       )}
 
@@ -313,6 +340,7 @@ export function Step4LineEntry({
             changeType={changeType}
             onChangeChangeType={onChangeChangeType}
             hideRm={rmLocked}
+            isKit={isKit}
           />
         </div>
       )}
@@ -368,14 +396,27 @@ function SummaryLineList({
   )
 }
 
+/** A kit's contents total is a COUNT of units, never a percentage. */
+function kitUnitTotal(rows: RecipeLineRow[]): number {
+  return rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
+}
+
+const CHANGE_TYPE_TEXT: Record<"rm" | "pm" | "sku", string> = {
+  rm: "RM change", pm: "PM change", sku: "Kit contents change",
+}
+
 export function Step5Review({
   skus,
   skuId,
   effectiveFrom,
   rmRows,
   pmRows,
+  skuRows,
   rmMaterials,
   pmMaterials,
+  skuMaterials,
+  isKit,
+  declaredUnits,
   isRevision,
   reason,
   changeType,
@@ -387,11 +428,15 @@ export function Step5Review({
   effectiveFrom: string
   rmRows: RecipeLineRow[]
   pmRows: RecipeLineRow[]
+  skuRows: RecipeLineRow[]
   rmMaterials: RecipeMaterialOption[]
   pmMaterials: RecipeMaterialOption[]
+  skuMaterials: RecipeMaterialOption[]
+  isKit: boolean
+  declaredUnits: number | null
   isRevision: boolean
   reason: string
-  changeType: ("rm" | "pm")[]
+  changeType: ("rm" | "pm" | "sku")[]
   rmLock: RmLock | null
   propagationTargets: PropagationTarget[]
 }) {
@@ -414,11 +459,26 @@ export function Step5Review({
         </div>
       </div>
 
+      {/* Contents first for a kit: they are the recipe. The badge counts UNITS,
+          not a percentage, and names the declared count so a 7-unit kit listing
+          5 is visible on the last screen before submit. */}
+      {isKit && (
+        <SummaryLineList
+          title="Kit Contents (SKUs)"
+          rows={skuRows}
+          materials={skuMaterials}
+          totalBadge={`${kitUnitTotal(skuRows)}${declaredUnits != null ? ` of ${declaredUnits}` : ""} units`}
+        />
+      )}
       <SummaryLineList
-        title={rmLocked ? "Raw Materials (RM) — inherited" : "Raw Materials (RM)"}
+        title={
+          rmLocked ? "Raw Materials (RM) — inherited"
+            : isKit ? "Raw Materials (RM) — optional"
+            : "Raw Materials (RM)"
+        }
         rows={rmRows}
         materials={rmMaterials}
-        totalBadge={`${rmTotal(rmRows).toFixed(2)}%`}
+        totalBadge={isKit ? undefined : `${rmTotal(rmRows).toFixed(2)}%`}
       />
       {rmLocked && rmLock.locked && (
         <Callout variant="info">
@@ -447,7 +507,7 @@ export function Step5Review({
           <p className="text-xs text-muted-foreground mt-2">Type of change</p>
           <p className="font-medium">
             {changeType.length > 0
-              ? changeType.map((t) => (t === "rm" ? "RM change" : "PM change")).join(", ")
+              ? changeType.map((t) => CHANGE_TYPE_TEXT[t]).join(", ")
               : "—"}
           </p>
         </div>

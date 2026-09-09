@@ -7,7 +7,7 @@ import { query } from "@/lib/db"
 import { timedQuery } from "@/lib/query-timing"
 import { approvalsSql, entityLabelSql } from "@/lib/queries/approvals"
 import { historySql } from "@/lib/queries/history"
-import { getActiveRmMaterialOptions, getActivePmMaterialOptions } from "@/lib/cached-reference-data"
+import { getActiveRmMaterialOptions, getActivePmMaterialOptions, getActiveSkuList } from "@/lib/cached-reference-data"
 import { buildMaterialMap } from "./material-map"
 import ApprovalsClient from "./ApprovalsClient"
 
@@ -25,10 +25,12 @@ export default async function ApprovalsPage() {
   const pageStart = performance.now()
   console.log(`[AUDIT] Approvals load`)
 
-  const [rows, rmRows, pmRows] = await Promise.all([
+  const [rows, rmRows, pmRows, skuRows] = await Promise.all([
     timedQuery<any>(approvalsSql.listPending, [], { label: "listPending" }),
     getActiveRmMaterialOptions(),
     getActivePmMaterialOptions(),
+    // Resolves a gift kit's component lines to SKU codes on the approval card.
+    getActiveSkuList(),
   ])
   const approvals = await Promise.all(
     rows.map(async (a) => {
@@ -66,7 +68,7 @@ export default async function ApprovalsPage() {
     <ApprovalsClient
       approvals={approvals}
       isApprover={isApprover}
-      materialMap={buildMaterialMap(rmRows, pmRows)}
+      materialMap={buildMaterialMap(rmRows, pmRows, skuRows)}
     />
   )
 }

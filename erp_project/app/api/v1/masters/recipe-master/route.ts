@@ -27,7 +27,11 @@ import { pool, query } from "@/lib/db"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { assertSkuIdInBrandScope } from "@/lib/brand-guard"
-import { bomActionSchema, isRmTotalValid, RM_TOTAL_MIN, RM_TOTAL_MAX } from "@/lib/validation/recipe"
+import { bomActionSchema, isRmTotalValid, rmTotalMessage, RM_TOTAL_MIN, RM_TOTAL_MAX } from "@/lib/validation/recipe"
+import {
+  isKitSku, KIT_LINE_UOM, declaredKitUnits, kitUnitsTotal, kitUnitsExceeded,
+  kitUnitsMessage, type KitSkuFields,
+} from "@/lib/masters/kit-sku"
 import { bom as recipeSql, RECIPE_STATUS_IN_REVIEW } from "@/lib/queries/recipe"
 import { skus as skuSql } from "@/lib/queries/skus"
 import { rawMaterials as rmSql } from "@/lib/queries/raw-materials"
@@ -54,6 +58,11 @@ type RecipeDetailLineRow = {
   [key: string]: unknown
 }
 type SkuLookupRow = { id: number; sku_code: string; status: string }
+/** What create-full needs off a SKU: its code, and enough to answer isKitSku. */
+type KitSkuRow = KitSkuFields & {
+  id: number; sku_code: string; status: string
+  filling: number | string | null; filling_uom: string | null
+}
 type MaterialLookupRow = { id: number; uom: string; status: string }
 
 export const POST = withGateway({
@@ -115,8 +124,87 @@ export const POST = withGateway({
       // A recipe belongs to its SKU's brand, so building one is a write against
       // that brand.
       await assertSkuIdInBrandScope(Number(session.user.id), body.sku_id)
-      logger.info({ ...logCtx, skuId: body.sku_id, mode: body.mode, lineCount: body.rm_lines.length + body.pm_lines.length, message: "Recipe submit started" })
-      recordRawEvent("BOM", eventId, { skuId: body.sku_id, mode: body.mode, lineCount: body.rm_lines.length + body.pm_lines.length, source: body.source })
+      const lineCount = body.rm_lines.length + body.pm_lines.length + body.sku_lines.length
+      logger.info({ ...logCtx, skuId: body.sku_id, mode: body.mode, lineCount, message: "Recipe submit started" })
+      recordRawEvent("BOM", eventId, { skuId: body.sku_id, mode: body.mode, lineCount, source: body.source })
+
+      // ── Which shape of recipe is this? ────────────────────────────────────
+      // A gift kit is assembled from other SKUs and has no formulation; every
+      // other SKU has a formulation whose RM must total ~100%. The two shapes are
+      // mutually exclusive, and WHICH ONE APPLIES IS READ FROM THE DATABASE ROW,
+      // never from the request: the schema only ever sees sku_id, and a caller
+      // that could declare itself a kit could skip the RM rules on any SKU.
+      // Same posture as resolveRmLock below.
+      const skuRows = await query<KitSkuRow>(skuSql.selectById, [body.sku_id])
+      const sku = skuRows[0]
+      if (!sku) throw new ApiError(404, "not_found", "SKU not found.")
+      const isKit = isKitSku(sku)
+
+      if (isKit) {
+        if (body.sku_lines.length === 0) {
+          throw new ApiError(
+            400, "kit_contents_required",
+            `${sku.sku_code} is a gift kit, so its recipe is the SKUs it contains. Add at least one.`
+          )
+        }
+        // The pack size is the cap. master_skus.filling is how many units this
+        // kit holds, so contents totalling more describe a kit that does not
+        // exist — the counterpart of the RM band for this recipe shape. Under is
+        // allowed (a part-specified kit is a normal state); over is not.
+        const declared = declaredKitUnits(sku)
+        const units = kitUnitsTotal(body.sku_lines)
+        if (kitUnitsExceeded(units, declared)) {
+          throw new ApiError(400, "kit_units_exceeded", kitUnitsMessage(units, declared!))
+        }
+      } else {
+        if (body.sku_lines.length > 0) {
+          throw new ApiError(
+            400, "not_a_kit",
+            `${sku.sku_code} is not a gift kit, so it cannot contain other SKUs. Its recipe is RM and PM.`
+          )
+        }
+        // Both rules used to live in the Zod schema. They moved here, unchanged,
+        // because only here is it known that they apply at all — isRmTotalValid
+        // and RM_TOTAL_MIN/MAX are still the single definition of the band.
+        if (body.rm_lines.length === 0) {
+          throw new ApiError(400, "rm_required", "At least one RM line is required.")
+        }
+        const rmTotal = body.rm_lines.reduce((sum, l) => sum + l.amount, 0)
+        if (!isRmTotalValid(rmTotal)) {
+          throw new ApiError(400, "rm_total", rmTotalMessage(rmTotal))
+        }
+      }
+
+      // ── The components exist, are in scope, and are not kits ──────────────
+      if (body.sku_lines.length > 0) {
+        const componentIds = body.sku_lines.map((l) => l.mtrl_id)
+        if (componentIds.includes(body.sku_id)) {
+          throw new ApiError(400, "kit_contains_itself", "A gift kit cannot contain itself.")
+        }
+        const components = await query<KitSkuRow>(skuSql.selectByIds, [componentIds])
+        const found = new Map(components.map((c) => [c.id, c]))
+        const missing = componentIds.filter((id) => !found.has(id))
+        if (missing.length > 0) {
+          // details_recipe.mtrl_id has no FK, so an id pointing at nothing would
+          // be written happily and only surface as a blank line much later.
+          throw new ApiError(400, "unknown_sku", `Unknown SKU id(s) in the kit: ${missing.join(", ")}`)
+        }
+        // Nesting is refused rather than supported: a kit inside a kit makes the
+        // contents a tree, and every reader here (costing, the detail panel, the
+        // sku_variants mirror) is written for one level. Cycles would be worse.
+        const nested = components.filter(isKitSku)
+        if (nested.length > 0) {
+          throw new ApiError(
+            400, "nested_kit",
+            `A gift kit cannot contain another kit: ${nested.map((c) => c.sku_code).join(", ")}.`
+          )
+        }
+        // Each component is a different SKU, so possibly a different brand — and
+        // the caller's brand grant on the KIT says nothing about them.
+        for (const id of componentIds) {
+          await assertSkuIdInBrandScope(Number(session.user.id), id)
+        }
+      }
 
       // ── Variant-family RM rule ────────────────────────────────────────────
       // RM is family-scoped (the same formulation in different pack sizes) and
@@ -126,7 +214,9 @@ export const POST = withGateway({
       // is a convenience, not the guard (sku_id is a guessable integer).
       const family = await query<FamilyMember>(skuSql.selectVariantFamilyBySkuId, [body.sku_id])
       const rmLock = resolveRmLock(body.sku_id, family)
-      const submittedLines: DiffableLine[] = [...body.rm_lines, ...body.pm_lines].map((l) => ({
+      const submittedLines: DiffableLine[] = [
+        ...body.rm_lines, ...body.pm_lines, ...body.sku_lines,
+      ].map((l) => ({
         mtrl_type: l.mtrl_type, mtrl_id: l.mtrl_id, amount: l.amount, uom: l.uom,
       }))
 
@@ -143,7 +233,7 @@ export const POST = withGateway({
         familyRm = {
           version: Number(lineageHead.rm_version ?? 0),
           lines: headLines.map((r) => ({
-            mtrl_type: r.mtrl_type as "rm" | "pm", mtrl_id: r.mtrl_id, amount: r.amount, uom: r.uom,
+            mtrl_type: r.mtrl_type as DiffableLine["mtrl_type"], mtrl_id: r.mtrl_id, amount: r.amount, uom: r.uom,
           })),
         }
       }
@@ -182,10 +272,8 @@ export const POST = withGateway({
         let rmChangedVsPrior = false
 
         if (body.mode === "new-version") {
-          const [skuRows] = await conn.execute(skuSql.selectById, [body.sku_id])
-          const skuRow = (skuRows as { sku_code: string }[])[0]
-          if (!skuRow) throw new ApiError(404, "not_found", "SKU not found.")
-
+          // `sku` was already read and 404'd above, where the kit shape was
+          // resolved — no second lookup.
           const [priorRows] = await conn.execute(recipeSql.selectMostRecentBomForSku, [body.sku_id])
           const prior = (priorRows as MostRecentBomRow[])[0] ?? null
 
@@ -193,10 +281,12 @@ export const POST = withGateway({
           if (prior) {
             const [priorLineRows] = await conn.execute(recipeSql.selectDetailLinesRawByBomId, [prior.id])
             priorLines = (priorLineRows as RecipeDetailLineRow[]).map((r) => ({
-              mtrl_type: r.mtrl_type as "rm" | "pm", mtrl_id: r.mtrl_id, amount: r.amount, uom: r.uom,
+              mtrl_type: r.mtrl_type as DiffableLine["mtrl_type"], mtrl_id: r.mtrl_id, amount: r.amount, uom: r.uom,
             }))
           }
-          const newLines: DiffableLine[] = [...body.rm_lines, ...body.pm_lines].map((l) => ({
+          const newLines: DiffableLine[] = [
+            ...body.rm_lines, ...body.pm_lines, ...body.sku_lines,
+          ].map((l) => ({
             mtrl_type: l.mtrl_type, mtrl_id: l.mtrl_id, amount: l.amount, uom: l.uom,
           }))
           // RM numbers off the FAMILY's lineage, PM off this SKU's own — see
@@ -207,14 +297,14 @@ export const POST = withGateway({
           const { rmVersion, pmVersion } = resolveRecipeVersions({
             prior, priorLines, newLines, familyRm,
           })
-          bomCode = `${skuRow.sku_code}-RM${rmVersion}-PM${pmVersion}`
+          bomCode = `${sku.sku_code}-RM${rmVersion}-PM${pmVersion}`
 
           // A prior Recipe exists for this SKU — this submission is really an
           // edit to an established recipe, so require the submitter to say
           // why and what kind of change it is. The very first Recipe ever
           // created for a SKU (prior === null) has nothing to explain yet.
           if (prior && (!body.reason?.trim() || !body.change_type?.length)) {
-            throw new ApiError(400, "reason_required", "A reason and type of change (RM/PM) are required when revising an existing Recipe.")
+            throw new ApiError(400, "reason_required", "A reason and type of change (RM/PM, or kit contents) are required when revising an existing Recipe.")
           }
 
           const [result] = await conn.execute(recipeSql.insertBomHeaderWithVersions, [
@@ -238,7 +328,7 @@ export const POST = withGateway({
           // and change type are mandatory here (unlike new-version's first-
           // Recipe-for-a-SKU exemption above).
           if (!body.reason?.trim() || !body.change_type?.length) {
-            throw new ApiError(400, "reason_required", "A reason and type of change (RM/PM) are required when revising an existing Recipe.")
+            throw new ApiError(400, "reason_required", "A reason and type of change (RM/PM, or kit contents) are required when revising an existing Recipe.")
           }
           await conn.execute(recipeSql.setBomStatus, [RECIPE_STATUS_IN_REVIEW, bomId])
         }
@@ -285,7 +375,18 @@ export const POST = withGateway({
           logger.info({ ...logCtx, bomId, skuId: body.sku_id, targets: propagationTargets.map((t) => t.sku_code), message: "Variant RM change staged to fan out to siblings" })
         }
 
-        const allLines = [...body.rm_lines, ...body.pm_lines]
+        // sku_lines ride the SAME `line:<type>:<id>:<field>` staging as rm/pm — the
+        // grammar was already keyed on mtrl_type, so a kit's contents need no new
+        // mechanism, only the widened parser at the other end.
+        //
+        // Their uom is FORCED to 'units' rather than taken from the request: a
+        // component is counted, and letting a caller store "kg" against a line whose
+        // amount is a piece count would be a unit nobody could act on later.
+        const allLines = [
+          ...body.rm_lines,
+          ...body.pm_lines,
+          ...body.sku_lines.map((l) => ({ ...l, uom: KIT_LINE_UOM })),
+        ]
         const seenKeys = new Set<string>()
         for (const line of allLines) {
           const key = `${line.mtrl_type}:${line.mtrl_id}`

@@ -123,18 +123,23 @@ export const bom = {
    * Fetch ALL matching Recipe rows for export (no LIMIT/OFFSET).
    * Same WHERE clause as selectPaginated.
    *
-   * Resolves the material's code and name from master_rm / master_pm the same
-   * way selectDetailLinesByBomId does — a bare mtrl_id is meaningless in a
+   * Resolves the material's code and name from master_rm / master_pm / master_skus
+   * the same way selectDetailLinesByBomId does — a bare mtrl_id is meaningless in a
    * downloaded dump. The joins add no placeholders, so the param array is
    * unchanged (tests/unit/recipe-export-params.test.ts pins that).
+   *
+   * The third join is master_skus, for a gift kit's component lines
+   * (mtrl_type='sku' — see lib/masters/kit-sku.ts). Without it every component
+   * exports as a blank code and name, because a 'sku' row matches neither of the
+   * other two joins and COALESCE(NULL, NULL) is NULL.
    * Params: [like×4, brandScope×2, type×2, status×2]
    */
   selectAllFiltered: `
     SELECT
       b.bom_code, bd.recipe_id, s.sku_code, s.name AS sku_name,
       bd.mtrl_id, bd.mtrl_type, bd.uom, bd.amount,
-      COALESCE(rm.rm_code, pm.pm_code) AS mtrl_code,
-      COALESCE(rm.name, pm.name) AS mtrl_name,
+      COALESCE(rm.rm_code, pm.pm_code, msk.sku_code) AS mtrl_code,
+      COALESCE(rm.name, pm.name, msk.name) AS mtrl_name,
       NULL AS mtrl_cost, bd.status AS material_status, b.status AS bom_status,
       b.effective_from, b.effective_till, bd.last_updated,
       b.created_by
@@ -143,6 +148,7 @@ export const bom = {
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
     LEFT JOIN master_rm AS rm ON rm.id = bd.mtrl_id AND bd.mtrl_type = 'rm'
     LEFT JOIN master_pm AS pm ON pm.id = bd.mtrl_id AND bd.mtrl_type = 'pm'
+    LEFT JOIN master_skus AS msk ON msk.id = bd.mtrl_id AND bd.mtrl_type = 'sku'
     WHERE (? IS NULL OR b.bom_code LIKE ? OR s.sku_code LIKE ? OR s.name LIKE ?)
       AND (? IS NULL OR s.brand_id IS NULL OR s.brand_id IN (?))
       AND (? IS NULL OR bd.mtrl_type = ?)
@@ -337,6 +343,11 @@ export const bom = {
    */
   selectHeaderById: `
     SELECT b.id AS recipe_id, b.bom_code, b.sku_id, s.sku_code, s.name AS sku_name,
+      -- The edit panel is a second door into this recipe and has to know which
+      -- SHAPE it is: a gift kit has component lines and no formulation, so it
+      -- cannot be held to the RM rules (lib/masters/kit-sku.ts). filling is the
+      -- declared unit count, shown against the actual one.
+      s.sku_type, s.subcategory, s.filling, s.filling_uom,
       b.status, b.created_at,
       b.effective_from, b.effective_till
     FROM master_recipe AS b
@@ -346,8 +357,13 @@ export const bom = {
 
   /**
    * All material lines for a Recipe, for the detail side-panel. Params: [recipe_id]
-   * Resolves the material's name/code from master_rm or master_pm depending
-   * on mtrl_type, since details_recipe only stores a bare mtrl_id.
+   * Resolves the material's name/code from master_rm, master_pm or master_skus
+   * depending on mtrl_type, since details_recipe only stores a bare mtrl_id.
+   *
+   * The master_skus join is a gift kit's component lines (mtrl_type='sku'). It also
+   * carries `status`, so a component SKU that was later discontinued shows the same
+   * stale-material warning an RM would — a kit whose contents no longer exist is
+   * exactly as broken as a recipe citing a dead material.
    */
   selectDetailLinesByBomId: `
     SELECT
@@ -356,14 +372,15 @@ export const bom = {
       NULL AS mtrl_cost, bd.status AS material_status, b.status AS bom_status,
       bd.last_updated,
       b.created_by,
-      COALESCE(rm.name, pm.name) AS mtrl_name,
-      COALESCE(rm.rm_code, pm.pm_code) AS mtrl_code,
-      COALESCE(rm.status, pm.status) AS mtrl_master_status
+      COALESCE(rm.name, pm.name, msk.name) AS mtrl_name,
+      COALESCE(rm.rm_code, pm.pm_code, msk.sku_code) AS mtrl_code,
+      COALESCE(rm.status, pm.status, msk.status) AS mtrl_master_status
     FROM details_recipe AS bd
     INNER JOIN master_recipe AS b ON b.id = bd.recipe_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
     LEFT JOIN master_rm AS rm ON rm.id = bd.mtrl_id AND bd.mtrl_type = 'rm'
     LEFT JOIN master_pm AS pm ON pm.id = bd.mtrl_id AND bd.mtrl_type = 'pm'
+    LEFT JOIN master_skus AS msk ON msk.id = bd.mtrl_id AND bd.mtrl_type = 'sku'
     WHERE bd.recipe_id = ?
     ORDER BY bd.mtrl_type ASC, bd.mtrl_id ASC
   `,
@@ -676,14 +693,15 @@ export const bom = {
       h.mtrl_cost, h.status AS material_status, b.status AS bom_status,
       h.last_updated,
       b.created_by,
-      COALESCE(rm.name, pm.name) AS mtrl_name,
-      COALESCE(rm.rm_code, pm.pm_code) AS mtrl_code,
-      COALESCE(rm.status, pm.status) AS mtrl_master_status
+      COALESCE(rm.name, pm.name, msk.name) AS mtrl_name,
+      COALESCE(rm.rm_code, pm.pm_code, msk.sku_code) AS mtrl_code,
+      COALESCE(rm.status, pm.status, msk.status) AS mtrl_master_status
     FROM history_recipe AS h
     INNER JOIN master_recipe AS b ON b.id = h.recipe_id
     LEFT JOIN master_skus AS s ON s.id = b.sku_id
     LEFT JOIN master_rm AS rm ON rm.id = h.mtrl_id AND h.mtrl_type = 'rm'
     LEFT JOIN master_pm AS pm ON pm.id = h.mtrl_id AND h.mtrl_type = 'pm'
+    LEFT JOIN master_skus AS msk ON msk.id = h.mtrl_id AND h.mtrl_type = 'sku'
     WHERE h.recipe_id = ?
     ORDER BY h.last_updated DESC, h.mtrl_type ASC, h.mtrl_id ASC
   `,

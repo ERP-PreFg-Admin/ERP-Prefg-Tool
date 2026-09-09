@@ -62,7 +62,8 @@ import logger from "@/lib/logger"
 import { type DiffItem, type ModuleHandler, s3KeyOf } from "./types"
 
 type RecipeLineDiff = {
-  mtrlType: "rm" | "pm"
+  /** 'sku' is a gift kit's component (lib/masters/kit-sku.ts). */
+  mtrlType: "rm" | "pm" | "sku"
   mtrlId: number
   removed: boolean
   fields: Record<string, string> // field -> new_value
@@ -84,12 +85,17 @@ function parseBomLineItems(items: DiffItem[]): {
   const artifactAdds: RecipeArtifactAdd[] = []
   const artifactRemoveIds: number[] = []
   for (const it of items) {
-    const lineMatch = it.field_name.match(/^line:(rm|pm):(\d+):(.+)$/)
+    // `sku` is a gift kit's component. ⚠️ The SAME grammar is parsed a second
+    // time, independently, by app/approvals/approval-card/RecipeLineDiffTable.tsx
+    // to render the diff an approver reads. Widen both or neither: leave that one
+    // behind and a kit's contents are applied on approval but invisible in the
+    // review, which is worse than either failing.
+    const lineMatch = it.field_name.match(/^line:(rm|pm|sku):(\d+):(.+)$/)
     if (lineMatch) {
       const [, mtrlType, mtrlIdStr, field] = lineMatch
       const key = `${mtrlType}:${mtrlIdStr}`
       if (!lineMap.has(key)) {
-        lineMap.set(key, { mtrlType: mtrlType as "rm" | "pm", mtrlId: Number(mtrlIdStr), removed: false, fields: {} })
+        lineMap.set(key, { mtrlType: mtrlType as RecipeLineDiff["mtrlType"], mtrlId: Number(mtrlIdStr), removed: false, fields: {} })
       }
       const entry = lineMap.get(key)!
       if (field === "__removed__") entry.removed = true
@@ -106,10 +112,10 @@ function parseBomLineItems(items: DiffItem[]): {
   return { mode, lines: [...lineMap.values()], artifactAdds, artifactRemoveIds }
 }
 
-type RecipeLine = { mtrl_type: "rm" | "pm"; mtrl_id: number; amount: number; uom: string | null }
+type RecipeLine = { mtrl_type: "rm" | "pm" | "sku"; mtrl_id: number; amount: number; uom: string | null }
 
 /** A details_recipe row as read back — amount is DECIMAL, so a string. */
-type StoredRecipeLine = { mtrl_type: "rm" | "pm"; mtrl_id: number; amount: string | number; uom: string | null }
+type StoredRecipeLine = { mtrl_type: "rm" | "pm" | "sku"; mtrl_id: number; amount: string | number; uom: string | null }
 
 /**
  * This SKU's variant family's current RM and the version it sits at, or null
@@ -433,6 +439,10 @@ export const bomHandler: ModuleHandler = {
     // sibling the RM lines EXACTLY as approved here — resolved values, after the
     // currentByKey fallback, not the raw approval_items.
     const approvedRmLines: RecipeLine[] = []
+    // A gift kit's contents, as approved — mirrored into sku_variants below. Same
+    // reason as approvedRmLines: resolved values after the currentByKey fallback,
+    // not the raw approval_items.
+    const approvedSkuLines: RecipeLine[] = []
 
     for (const line of lines) {
       if (line.removed) continue // update-existing only: line dropped, don't reinsert
@@ -442,6 +452,9 @@ export const bomHandler: ModuleHandler = {
       const uom = line.fields.uom ?? cur?.uom ?? null
       if (line.mtrlType === "rm") {
         approvedRmLines.push({ mtrl_type: "rm", mtrl_id: line.mtrlId, amount, uom })
+      }
+      if (line.mtrlType === "sku") {
+        approvedSkuLines.push({ mtrl_type: "sku", mtrl_id: line.mtrlId, amount, uom })
       }
       await conn.execute(recipeSql.insertDetailLine, [
         entityId, line.mtrlType, line.mtrlId, amount, uom, "active", approverId,
@@ -492,6 +505,47 @@ export const bomHandler: ModuleHandler = {
       // (resolved from active_bom_id) goes stale the moment a new version
       // is approved.
       await conn.execute(skuSql.setActiveBomId, [entityId, header.sku_id])
+
+      // ── A gift kit's contents, mirrored into sku_variants ─────────────────
+      // Written HERE and nowhere else, for the same reason details_recipe lines
+      // are: a kit's contents are not real until the recipe is approved, so
+      // submitting a composition must leave nothing behind if it is rejected.
+      //
+      // Replace, not merge: the stored contents must equal the approved recipe's,
+      // or a component dropped in this version keeps a row forever. sku_variants
+      // has no status column to retire one with.
+      //
+      // ⚠️ This is the DIRECTED parent→child table, not the variant family. The
+      // family is the symmetric (brand, base_sku_sno) key whose members must all
+      // carry one rm_version; a kit and its components could never satisfy that.
+      // See lib/masters/kit-sku.ts and lib/queries/skus.ts's note.
+      if (approvedSkuLines.length > 0) {
+        const componentIds = approvedSkuLines.map((l) => l.mtrl_id)
+        // .query, not .execute — IN (?) array expansion.
+        const [componentRows] = await conn.query(skuSql.selectByIds, [componentIds])
+        const byId = new Map(
+          (componentRows as { id: number; sku_code: string; filling: number | string | null; filling_uom: string | null }[])
+            .map((r) => [r.id, r])
+        )
+        await conn.execute(skuSql.deleteKitContents, [header.sku_id])
+        const params = approvedSkuLines.flatMap((l) => {
+          const c = byId.get(l.mtrl_id)
+          // `size` is the component's own pack size, which is what makes the
+          // stored row readable without a join — "Coffee Face Wash / 100 ml".
+          const size = c?.filling != null ? `${c.filling}${c.filling_uom ? ` ${c.filling_uom}` : ""}` : null
+          return [header.sku_id, l.mtrl_id, c?.sku_code ?? null, size]
+        })
+        await conn.execute(skuSql.buildInsertKitContents(approvedSkuLines.length), params)
+        logger.info({
+          module: "BOM", bomId: entityId, skuId: header.sku_id,
+          components: approvedSkuLines.length, message: "Gift kit contents mirrored to sku_variants",
+        })
+      } else if (mode === "update-existing") {
+        // A version that removed every component leaves no contents behind. Only
+        // on update-existing: a new-version submit for a NON-kit SKU must not
+        // wipe a kit's rows, and a non-kit SKU has none to wipe anyway.
+        await conn.execute(skuSql.deleteKitContents, [header.sku_id])
+      }
 
       // Read the sibling ids BEFORE deactivating — MariaDB's UPDATE has no
       // RETURNING, so this is the only way to know which Recipes are about to
