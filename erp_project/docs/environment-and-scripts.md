@@ -41,7 +41,6 @@ Required to send PO PDFs to manufacturers via Gmail SMTP.
 |----------|----------|---------|---------|
 | `GMAIL_USER` | Yes | — | Gmail address used as the sender (e.g. `procurement@mcaffeine.com`) |
 | `GMAIL_APP_PASSWORD` | Yes | — | [Gmail App Password](https://support.google.com/accounts/answer/185833) — not the account password. 2FA must be enabled on the account. |
-| `MAIL_SIGNATURE_TITLE` | No | `MIS Executive` | Job title printed under the sender's name on inward-invoice emails. The name itself comes from whoever filed the invoice, so only the title is configured. |
 
 ### Nanonets (invoice extraction)
 

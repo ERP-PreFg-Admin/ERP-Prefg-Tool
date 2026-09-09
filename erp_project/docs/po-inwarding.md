@@ -62,6 +62,25 @@ The cost is row locks held across the Uniware call for a second or two. Acceptab
 {"done":true,"outcome":{"ok":true,"created":[...],"received":[...],"uniwarePoCode":"..."}}
 ```
 
+A step carries one of **four** statuses, and the difference between the last two
+is the point:
+
+| status | means |
+|---|---|
+| `ok` | it happened, completely |
+| `failed` | it did not happen |
+| `skipped` | deliberately not attempted (no email on file, Uniware not configured) |
+| `warning` | **it happened, but not completely** |
+
+`warning` exists for the warehouse mail. `/po/show` renders only POs at the
+session's own facility, so at every facility except `GGN_WAREHOUSE` the mail goes
+out **without** the Uniware PO document attached (measured 2026-09-08) — and that
+used to report as a clean `ok`. `sendInwardInvoiceEmail` now returns
+`{ sent, missingPoDocument }` and `describeMailStep` (`lib/invoice/invoice-mail-step.ts`,
+pure and unit-tested) turns it into the event. The dialog shows it as an ERROR
+toast even though the step succeeded: a missing attachment needs a human to
+forward it, and info's 8s is too easy to miss behind four other toasts.
+
 The HTTP status is always `200` once streaming starts: headers are on the wire before a later step can fail, so **failure travels as an event, not a status code**. Both routes set `runtime = "nodejs"` and `maxDuration = 300`.
 
 ---
@@ -260,7 +279,9 @@ Deliberately not `sendMfgSelectionEmail`: that one reports PO status *to the man
 - Employee rows never carry a `legal_entity_code`, so the shared-address arm of `selectByWarehouseForEntity` already includes them for every entity.
 - Attachments: the original invoice PDF, plus the Uniware PO document when it can be fetched (best-effort — the goods are already booked).
 - Subject: `Create PO : <MFG NAME> || Invoice No : <no> || <D-MON-YY>`, left as the MIS team wrote it.
-- Signed with the filer's own name plus `MAIL_SIGNATURE_TITLE` (default `MIS Executive`).
+- Signed `PEP ERP` — `MAIL_FROM_NAME`, the same name the From header carries. Not the
+  filer's own name: the warehouse is being told what arrived, and replies belong to
+  the sending inbox rather than to whoever happened to file the invoice.
 - **No recipients on file returns `false`, it does not throw** — a warehouse with no email is a data gap, not a failure of an already-committed invoice. The check is that To **and** CC are both empty: a site whose only entry is a CC'd employee is still notified.
 
 ---

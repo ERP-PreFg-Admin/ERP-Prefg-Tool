@@ -337,17 +337,43 @@ bom (header)
 ├── bom_code → version identifier
 ├── effective_from / effective_till → validity window (recipe-level)
 └── bom_details[] (line items)
-    ├── mtrl_type: "rm" or "pm"
-    ├── mtrl_id: FK to rm or pm
-    ├── amount: quantity per batch
+    ├── mtrl_type: "rm" | "pm" | "sku"
+    ├── mtrl_id: master_rm.id | master_pm.id | master_skus.id  (NO foreign key)
+    ├── amount: RM % | PM per-unit qty | kit unit count
     └── mtrl_cost: cost per unit
 ```
+
+### Two recipe shapes: formulation, and gift kit
+
+Most SKUs get a **formulation** — RM lines totalling 99.5–100.5% plus PM. A
+**gift kit** is assembled from other SKUs instead, so its lines are
+`mtrl_type = 'sku'` where `mtrl_id` is a `master_skus.id` and `amount` is a unit
+count. RM and PM stay available as optional extras (a filler, a sleeve).
+
+`isKitSku` in `lib/masters/kit-sku.ts` is the only definition of "is this a kit":
+`sku_type = 'Gift Kit'` **and** `subcategory = 'Kit'`. Both columns are needed —
+one prod SKU carries the type by mistake and still needs its formulation. The
+wizard reads it off the SKU row it already holds; `create-full` **re-resolves it
+from the database**, because a client that could declare itself a kit could switch
+off the RM rules on anything.
+
+`master_skus.filling` is the kit's declared **unit count** (a 3-unit kit is a box
+with three things in it) and it is the **cap** on the contents: over it is a 400
+`kit_units_exceeded`, exactly it is fine, under it saves with a warning so a
+part-specified kit stays workable. Nesting, self-reference and duplicate
+components are all refused, and every component is brand-scope checked on its own.
+
+A contents change versions as a **PM-side** change, so `bom_code` keeps its
+`RM<n>-PM<n>` shape — without that, two recipes with different contents would
+share a code. Costing ignores `'sku'` lines entirely for now, so a kit reads as
+**uncosted** rather than as costing zero. On approval the contents are also
+mirrored into `sku_variants` with the kit as parent.
 
 > **Recipe-level effective dates:** `effective_from`/`effective_till` moved from the line level to the BOM header (`master_recipe`) — there is one validity window per recipe, not one per RM/PM line. `effective_from` is entered when the BOM is created/edited as a new version; `effective_till` is set automatically to the approval date when the recipe is discontinued or superseded. `details_recipe`/`history_recipe` still carry the same two columns for legacy rows predating this change (surfaced read-only on the BOM History page), but new lines no longer populate them.
 
 ### Bulk BOM Upload via CSV
 
-`BOMMasterComponent.tsx` offers a `CsvImportDialog` (fields in `bom-bulk-fields.ts` → `BOM_BULK_CSV_FIELDS`) for creating many BOM lines across SKUs in one file: `sku_code`, optional `bom_code` (auto-generated if blank), `effective_from` (once per SKU group), `mtrl_type` (rm/pm), `mtrl_code`, `amount`, `uom`. Like the rate-master bulk uploads above, `POST /api/v1/masters/recipe-master` with `action: "bulk"` doesn't insert immediately — it stages the whole file as one `BOM_BULK` pending approval (`stageBulkUploadApproval`); the real per-row inserts happen in that module's `applyAndArchive` handler on approval. A separate `check_duplicates` action does the preview-time deep check (SKU/material code existence, RM%-total per SKU group) before the user uploads.
+`BOMMasterComponent.tsx` offers a `CsvImportDialog` (fields in `bom-bulk-fields.ts` → `BOM_BULK_CSV_FIELDS`) for creating many BOM lines across SKUs in one file: `sku_code`, optional `bom_code` (auto-generated if blank), `effective_from` (once per SKU group), `mtrl_type` (**rm/pm only** — gift kits are manual entry, and both the parser and `bomBulkHandler` reject `sku` rows loudly rather than half-supporting them), `mtrl_code`, `amount`, `uom`. Like the rate-master bulk uploads above, `POST /api/v1/masters/recipe-master` with `action: "bulk"` doesn't insert immediately — it stages the whole file as one `BOM_BULK` pending approval (`stageBulkUploadApproval`); the real per-row inserts happen in that module's `applyAndArchive` handler on approval. A separate `check_duplicates` action does the preview-time deep check (SKU/material code existence, RM%-total per SKU group) before the user uploads.
 
 ### Status Lifecycle
 
@@ -360,7 +386,7 @@ A SKU can have multiple BOMs (different versions or different manufacturing site
 
 ### BOM Code Versioning — `<sku_code>RM<n>PM<n>`
 
-`master_recipe.rm_version` and `pm_version` bump **independently**: creating a new BOM version increments only the side (RM lines or PM lines) that actually changed versus the SKU's immediately-prior BOM. `lib/masters/bom-version.ts`' `diffBomLines` compares the RM-line set and the PM-line set separately — any addition, removal, or `amount`/`uom` change on a side marks that side changed.
+`master_recipe.rm_version` and `pm_version` bump **independently**: creating a new BOM version increments only the side (RM lines or PM lines) that actually changed versus the SKU's immediately-prior BOM. `lib/masters/recipe-version.ts`' `diffBomLines` compares the RM-line set and the PM-line set separately — any addition, removal, or `amount`/`uom` change on a side marks that side changed. A gift kit's `'sku'` lines are folded into the **PM** set: composition is SKU-scoped exactly as PM is, and leaving them out of both sets meant a contents change bumped nothing and reused the same `bom_code`.
 
 Applies to **new (non-backfilled), non-bulk** BOMs only — the `new-version` path in `app/api/v1/masters/recipe-master/route.ts`. Both columns default to `1`, so pre-existing rows are untouched (`prisma/add_manufacturing_v2_columns.sql`).
 

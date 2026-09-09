@@ -936,6 +936,7 @@ Handles both `"new-version"` and `"update-existing"` modes. Runs in a **transact
   "effective_from": "2025-01-01",
   "rm_lines": [ { "mtrl_type": "rm", "mtrl_id": 23, "amount": 5.0, "uom": "kg" } ],
   "pm_lines": [ { "mtrl_type": "pm", "mtrl_id": 8, "amount": 1, "uom": "pcs" } ],
+  "sku_lines": [],
   "artifact_adds": [],
   "artifact_removes": [],
   "source": "manual"
@@ -943,6 +944,21 @@ Handles both `"new-version"` and `"update-existing"` modes. Runs in a **transact
 ```
 
 For `"update-existing"`, pass `bom_id` instead of `bom_code`/`effective_from`; the diff is computed against the BOM's current lines instead of "nothing".
+
+**`sku_lines` is a gift kit's contents** — `{ "mtrl_type": "sku", "mtrl_id": <master_skus.id>,
+"amount": <units>, "uom": "units" }`. Defaults to `[]`, so a caller that predates
+kits is unaffected. Which rules apply is resolved from the SKU ROW server-side,
+never from the request:
+
+| | non-kit SKU | gift kit (`sku_type = 'Gift Kit'` and `subcategory = 'Kit'`) |
+|---|---|---|
+| `rm_lines` | ≥1, totalling 99.5–100.5% | optional, no total rule |
+| `sku_lines` | must be empty → 400 `not_a_kit` | ≥1 → else 400 `kit_contents_required` |
+
+Kit-specific 400s: `kit_units_exceeded` (contents above `master_skus.filling`, the
+kit's declared unit count — inclusive bound, under is allowed),
+`kit_contains_itself`, `nested_kit`, `unknown_sku`. Every component is also checked
+against the caller's brand scope individually.
 
 ```json
 // Response 200

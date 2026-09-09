@@ -116,7 +116,8 @@ The least-covered flow — external services, long-running, and it books stock. 
 | 6.14 | Map a line to an `inactive`/`discontinued` SKU | Refused with a message naming the SKU and its status | | |
 | 6.15 | Unset the `UNIWARE_*` vars and submit | Uniware step reports **skipped**; the invoice still commits | | |
 | 6.16 | Submit for a warehouse with **no** `entity_emails` row | Mail step reports skipped; the invoice still commits (goods are physically here) | | |
-| 6.17 | Check the warehouse email | Correct subject; the original invoice PDF attached; the Uniware PO document attached when available; a SKU summary in the body; signed with the filer's name | | |
+| 6.17 | Check the warehouse email | Correct subject; the original invoice PDF attached; a SKU summary in the body; signed `PEP ERP` (not the filer's name) | | |
+| 6.17a | Check the Uniware PO document | Attached only at `GGN_WAREHOUSE`. Everywhere else `/po/show` will not render it, so the mail goes without it and the dialog must report the `email` step as **incomplete** (an error-styled toast), not as a clean success | | |
 | 6.18 | Check the Uniware PO code | Stored on `invoice_mfg` **and** on every inward PO from that invoice | | |
 | 6.19 | Open the Invoice History dialog and expand a row | Header, line items, and both PO links per line | | |
 | 6.20 | Force a failure (e.g. bad Uniware credentials) | The failure is reported as a step event; the DB is rolled back and the S3 object removed — **no half-committed invoice** | | |
@@ -149,6 +150,27 @@ The least-covered flow — external services, long-running, and it books stock. 
 | 8.8 | Re-save a BOM with lines in a different order | **No** version bump — order is not a change | | |
 | 8.9 | Check RM line amounts round-trip | A formulation percentage isn't rounded away (`details_recipe.amount` is `DECIMAL(12,4)`) | | |
 | 8.10 | Download a bulk template, upload it with 2 valid and 2 invalid rows | Invalid rows flagged with reasons and downloadable; only valid rows stage | | |
+
+### 8a. Gift-kit recipes
+
+A gift kit (`sku_type = 'Gift Kit'` **and** `subcategory = 'Kit'`) is assembled from
+other SKUs, so its recipe is a contents list rather than a formulation. Use
+`MCFGKIT0087F0007_S` (declared 7 units) unless a smaller kit is easier.
+
+| # | Steps | Expected | P/F | Notes |
+|---|-------|----------|-----|-------|
+| 8a.1 | Pick a gift kit in the Recipe wizard | A **Kit Contents (SKUs)** section appears first; RM is marked *optional*; the CSV entry option is gone | | |
+| 8a.2 | Pick an ordinary SKU | No contents section at all; RM still required and still has to total 99.5–100.5% | | |
+| 8a.3 | Add components and submit with **no RM** | Accepted — this was impossible before | | |
+| 8a.4 | Add more units than the kit declares (8 into a 7-unit kit) | Destructive callout naming both numbers, Next/Save disabled; the API refuses it as `kit_units_exceeded` even if forced | | |
+| 8a.5 | Add fewer than declared | Warning only — a part-specified kit still saves | | |
+| 8a.6 | Try to add the kit to itself, or another kit | Neither is offered in the picker; the API refuses both (`kit_contains_itself`, `nested_kit`) | | |
+| 8a.7 | Review the approval card | A **Kit Contents** column listing each component by SKU code — not `#42`, and not missing | | |
+| 8a.8 | Approve it, then reopen the recipe detail panel | A **Kit** tab lists the components; `sku_variants` has one row per component with the kit as `parent_sku_id` | | |
+| 8a.9 | Open the approved kit recipe in the detail panel, change nothing, Save | The contents **survive**. (They used to be silently deleted — the panel posted only rm/pm lines.) | | |
+| 8a.10 | Approve a version with one component removed | `sku_variants` drops that row; the stored contents equal the approved recipe | | |
+| 8a.11 | Look at the kit in Agreed Final Costing | Reads as **uncosted**, NOT as costing ₹0. Component lines contribute nothing and must not appear in the per-line breakup or the detailed export | | |
+| 8a.12 | Regression: an ordinary SKU's costing | Byte-identical to before the kit work — this is what proves the costing exclusion changed nothing else | | |
 
 ## 9. Manufacturing cost manager
 

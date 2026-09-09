@@ -173,7 +173,16 @@ about it trip people up:
 > `app/api/v1/manufacturing/facility-map/route.ts` — and is pinned by
 > `tests/db/mfg-facility-map.test.ts`. Delete either and the hazard returns unguarded.
 
-Reads go through the matrix on `/po-tracking/mfg-overview`; writes are **direct, with
+Reads go through the matrix on `/po-tracking/mfg-overview`, which has **two**
+drilldowns onto the same slide-over: a CELL (one manufacturer at one facility)
+and a COLUMN — click the facility header for every manufacturer there, collapsed
+to `name · mapped/total · state`. The column save posts one `set-map` per
+manufacturer, sequentially, so every guard the cell path has applies unchanged
+and a group that fails does not undo the ones already committed. Contents:
+`FacilityMapPanel.tsx`, with the tick rows shared via `SkuTickList.tsx` and the
+grouping in `mapping-state.ts` (`facilityGroups`, pure and tested).
+
+Writes are **direct, with
 no approval flow**, matching the parent relation (`master_recipe_mfg`, see
 `app/api/v1/manufacturing/lines/route.ts:5`).
 
@@ -182,8 +191,15 @@ no approval flow**, matching the parent relation (`master_recipe_mfg`, see
 Two SKUs are variants iff they share **both** `master_skus.brand` and
 `master_skus.base_sku_sno`. That key is **symmetric** — every member holds the
 *same* `base_sku_sno`; it is not a pointer to a base row. `base_sku_sno` is
-never written by app code (upstream ETL owns it), and `sku_variants`
-(which *does* have `parent_sku_id`) is dead: zero reads, zero writes.
+never written by app code (upstream ETL owns it).
+
+> ⚠️ **`sku_variants` is a DIFFERENT idea that shares the word.** It is no longer
+> dead — it now stores a **gift kit's contents** (`parent_sku_id` = the kit,
+> `variant_sku_id` = a component), written only by `bomHandler.applyAndArchive`.
+> A variant *family* is the symmetric `(brand, base_sku_sno)` key below, whose
+> members must all carry one `rm_version`; a kit and its components could never
+> satisfy that, which is exactly why kit membership is NOT expressed as a family.
+> See the gift-kit section further down.
 
 A family is the same formulation in different pack sizes, so **RM is identical
 across the family and only PM differs**. Recipe Master enforces that:
@@ -240,9 +256,70 @@ skipped rather than taking the whole approval down.
 > was added because that is what supersession stamps — scoping it to `inactive`
 > alone meant approving a new version left its predecessor in no list at all.
 
+### Gift kits — a recipe made of SKUs, not materials
+
+A **gift kit** is assembled from other SKUs. `isKitSku` in
+**`lib/masters/kit-sku.ts`** is the single definition: `master_skus.sku_type =
+'Gift Kit'` **AND** `subcategory = 'Kit'`, trimmed and case-insensitive (both
+columns are free-text autocomplete, not enums). Both are needed — one prod SKU
+(`MCaf208_WB`, a 200 ml body wash) carries the type by mistake and must keep its
+formulation. `master_skus.filling` is the kit's **unit count**, not a volume.
+
+**`details_recipe.mtrl_type` is `ENUM('rm','pm','sku')`.** A `'sku'` line is a
+component: `mtrl_id` is a `master_skus.id`, `amount` is a unit count, `uom` is
+forced to `'units'` server-side. Same grain as before —
+one row per `(recipe_id, mtrl_type, mtrl_id)`. Migration:
+`prisma/alter_details_recipe_mtrl_type_sku.sql`, on `details_recipe` **and**
+`history_recipe`.
+
+Which rules apply is decided **from the SKU row, server-side** — never from the
+request, since the schema only sees `sku_id`:
+
+| | non-kit | gift kit |
+|---|---|---|
+| RM | ≥1 line, total 99.5–100.5% | optional, **no total rule** |
+| `sku_lines` | 400 `not_a_kit` | ≥1, else 400 `kit_contents_required` |
+| Contents cap | — | 400 `kit_units_exceeded` above `filling` (inclusive; under is allowed and warned) |
+
+Component guards, all in `create-full`: each component through
+`assertSkuIdInBrandScope` (they are other SKUs, possibly other brands), no
+self-reference, **no nested kits**, no duplicate component.
+
+**A contents change counts as a PM-side change for versioning.** `diffBomLines`
+folds `'sku'` lines into `pmChanged`, so `pm_version` bumps and `bom_code` keeps
+its `<sku>-RM<n>-PM<n>` shape. Without that, two recipes with different contents
+would carry the same code. `rmChanged` deliberately ignores them, so a kit never
+triggers the variant fan-out — it has no formulation to propagate.
+
+> ⚠️ **Costing ignores `'sku'` lines, and that exclusion lives in ONE query.**
+> `manufacturingSql.selectBomLineDetailByMfg` filters `mtrl_type IN ('rm','pm')`;
+> it feeds `costing-breakup.ts`, `[mfgId]/page.tsx` and the detailed export, all
+> of which branch `mtrl_type === 'rm' ? rmCost : pmCost` and would otherwise price
+> a component as PM against whatever `master_pm` row shares its id. Do **not** add
+> the same filter to `selectMaterialCostByMfg` — its explicit `CASE WHEN` already
+> contributes zero, and a `WHERE` there would drop a pure-kit recipe out of the
+> result set entirely, turning "uncosted" into "does not exist". A kit therefore
+> reads as **uncosted, not zero-cost**; rolling component costs up is a separate,
+> deliberate change.
+
+**Two independent parsers read the `line:<type>:<id>:<field>` grammar** —
+`lib/approvals/handlers/recipe.ts` (what gets written) and
+`app/approvals/approval-card/RecipeLineDiffTable.tsx` (what the approver sees).
+Widen both or neither; `app/approvals/material-map.ts` needs its `sku` bucket too
+or components render as `#42`.
+
+On approval, `bomHandler.applyAndArchive` also mirrors the contents into
+**`sku_variants`** (kit as `parent_sku_id`), replace-style — delete then insert,
+since that table has no `status` column. Nothing reads it yet; the contents are
+visible on the recipe detail panel's **Kit** tab.
+
+Kits are **manual entry only** — the CSV template and `bomBulkHandler` still
+accept `rm`/`pm` only, and both reject anything else loudly.
+
 ### ENUM columns
 
-Status columns are `ENUM` in MySQL. Inserting an unknown value **silently fails** (or errors in strict mode) and rolls back the transaction. When adding a new status value (e.g. `in_review`, `draft`) you must:
+Status columns — and `details_recipe.mtrl_type` — are `ENUM` in MySQL. Inserting an
+unknown value **silently fails** (or errors in strict mode) and rolls back the transaction. When adding a new status value (e.g. `in_review`, `draft`) you must:
 
 1. `ALTER TABLE <table> MODIFY COLUMN status ENUM('active', 'inactive', 'in_review', 'draft') DEFAULT 'active';`
 2. Update the matching enum in `prisma/schema.prisma` to stay in sync.
@@ -552,6 +629,7 @@ scope: { type: "invoice", from: ({ params }) => params.id },
 | `lib/queries/` | SQL strings grouped by domain (see table above) |
 | `lib/approvals/module-handlers.ts` | Strategy pattern — approval logic per module |
 | `lib/masters/variant-rm-lock.ts` | `resolveRmLock` / `rmPropagationTargets` — RM belongs to the variant family, PM to the SKU. Pure; the route must re-resolve it server-side |
+| `lib/masters/kit-sku.ts` | `isKitSku` (which SKUs are gift kits) + `kitUnitsExceeded` (`master_skus.filling` is the cap on the contents). Pure; the route re-resolves it from the DB row, never from the request |
 | `lib/master-routes/edit-match.ts` | "Is this CSV row an edit?" — exact business-code match only |
 | `app/api/v1/approvals/[id]/route.ts` | Approve / reject handler (uses MODULE_HANDLERS) |
 | `app/api/v1/approvals/entity/route.ts` | GET rejection info for edit dialogs |

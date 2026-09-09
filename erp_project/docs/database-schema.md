@@ -214,11 +214,34 @@ erDiagram
 
 **`details_sku`** — Extended product attributes (dimensions, MRP, EAN code, GST). One-to-one with `skus`. `curr_bom_id` points to the currently active BOM. `demand_type` enum: `A`, `B`, `C`, `NPL` (New Product Launch).
 
-**`sku_variants`** — Hierarchical relationships between SKU sizes. Composite unique key `(parent_sku_id, variant_sku_id)`.
+**`sku_variants`** — **A gift kit's contents**: `parent_sku_id` is the kit,
+`variant_sku_id` a SKU inside it. Composite unique key `(parent_sku_id,
+variant_sku_id)`; `sku_code` and `size` are denormalised copies of the component's.
+Written only by `bomHandler.applyAndArchive`, replace-style (delete then insert),
+because there is no `status` column to retire a row with.
+
+> ⚠️ Despite the name this is **not** the SKU *variant family*. A family is the
+> symmetric `(master_skus.brand, master_skus.base_sku_sno)` key, whose members must
+> all carry one `rm_version`; this table is a directed parent→child link. The table
+> was dead until gift-kit recipes landed (2026-09) and was reused precisely because
+> it collides with none of the family machinery.
 
 **`bom`** (Bill of Materials) — A recipe linking an SKU to a manufacturing site with a versioned BOM code. `status` enum: `draft`, `active`, `inactive`, `in_review`, `discontinued`, `rejected`. `effective_from` / `effective_till` bound the date range the recipe version is valid for.
 
-**`bom_details`** — Individual material line items within a BOM. `mtrl_type` is either `rm` (raw material) or `pm` (packing material); `mtrl_id` is the FK to the respective `rm` or `pm` table. `status` enum: `active`, `inactive`, `discontinued`.
+**`bom_details`** (live name `details_recipe`) — Individual line items within a
+recipe. `mtrl_type` is `rm` (raw material), `pm` (packing material) or **`sku`** (a
+gift kit's component — see `lib/masters/kit-sku.ts`). `status` enum: `active`,
+`inactive`, `discontinued`.
+
+`mtrl_id` points at `master_rm`, `master_pm` or `master_skus` depending on
+`mtrl_type` — and there is **no foreign key**, so an id that resolves to nothing is
+inserted happily and only surfaces later as a blank line. That is why `create-full`
+validates component ids itself. Every read resolves the name/code with three
+conditional `LEFT JOIN`s (`COALESCE(rm.rm_code, pm.pm_code, msk.sku_code)`).
+
+`amount` means three different things by type: a formulation **percentage** for
+`rm` (the recipe's rm lines must total 99.5–100.5%), a per-unit **quantity** for
+`pm`, and a **unit count** for `sku` (capped by `master_skus.filling`).
 
 **`bom_history`** — Immutable audit trail of every material line that was ever in a BOM. Written when a BOM detail is modified. `approved_by` / `approved_on` record who approved the change and when.
 

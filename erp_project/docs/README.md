@@ -59,7 +59,7 @@ These docs capture ongoing architectural decisions. Do not edit them without con
 | MFG Cost Manager | Live (2 tabs are placeholders: Common RMs, Vendor Ing Mapping) | `app/manufacturing/` |
 | PO Tracking — FG POs Tracking | Live | `app/po-tracking/po-procurement/` |
 | PO Tracking — PO Inwarding + invoice inwarding | Live | `app/po-tracking/po-inwarding/` |
-| PO Tracking — MFG Overview | Live | `app/po-tracking/mfg-overview/` |
+| PO Tracking — MFG Overview (capacity + the SKU × Facility mapping matrix, cell **and** column drilldowns) | Live | `app/po-tracking/mfg-overview/` |
 | PO Tracking — RM/PM Procurement | Stub | `app/po-tracking/rm-pm-procurement/` |
 | Finance & Accounting | Stub | `app/finance/` |
 | HR & Payroll | Stub | `app/hr-payroll/` |
@@ -81,3 +81,21 @@ These docs capture ongoing architectural decisions. Do not edit them without con
   code is still `BOM` — see [Database Schema](./database-schema.md#the-2026-08-rename).
 - **New page** — `/po-tracking/invoices`, every supplier invoice with its line items
   and the POs each line resolved to. Documented in [PO Inwarding](./po-inwarding.md).
+- **2026-09 · Gift-kit recipes** — a kit is assembled from other SKUs, so
+  `details_recipe.mtrl_type` gained a third value, `sku`, where `mtrl_id` is a
+  `master_skus.id` and `amount` a unit count capped by `master_skus.filling`. RM
+  becomes optional for a kit and its 100% rule does not apply. Costing ignores the
+  new lines, so a kit reads as uncosted rather than zero-cost. `sku_variants` — dead
+  until now — stores the contents, kit as parent. See
+  [Masters Module](./masters-module.md) and `lib/masters/kit-sku.ts`.
+- **2026-09 · Facility-wise SKU mapping** — the MFG × Facility matrix drills down by
+  COLUMN as well as by cell: click a facility header to set up every manufacturer
+  there in one pass. One `set-map` POST per manufacturer, so every existing guard
+  applies unchanged. Design note: [Facility Map Drilldown](./facility-map-drilldown-plan.md).
+- **2026-09 · Inward mail tells the truth** — the warehouse notification reports a
+  fourth step status, `warning` ("it happened, but not completely"), because at 17 of
+  18 facilities Uniware will not render the PO document and the mail goes without it.
+  It is also now signed `PEP ERP` rather than by whoever filed the invoice.
+- **2026-09 · Uniware auth** — the refresh grant is gone. The tenant keeps ONE live
+  token per user, so refreshing 401s every other holder; the password grant returns
+  the same token and the cache is capped at 5 minutes. See `lib/uniware/auth.ts`.

@@ -118,7 +118,9 @@ sequenceDiagram
 | `lib/uniware.ts` | Unicommerce OAuth + purchase-order create/fetch |
 | `lib/po/po-receive.ts` | Shared goods-receipt logic — tolerance, auto-close, `history_pos` row. Used by both the manual and invoice paths |
 | `lib/costing/final-costing.ts` | The Agreed Final Costing formula, in one place: RM % of fill weight, PM per unit, per-side wastage, total |
-| `lib/masters/bom-version.ts` | `diffBomLines` — independent RM/PM version bumps behind the `<sku>RM<n>PM<n>` BOM code |
+| `lib/masters/recipe-version.ts` | `resolveRecipeVersions` / `diffBomLines` — independent RM/PM version bumps behind the `<sku>-RM<n>-PM<n>` recipe code. RM counts against the variant FAMILY's lineage, PM against the SKU's own prior; a gift kit's contents count as a PM-side change |
+| `lib/masters/variant-rm-lock.ts` | `resolveRmLock` / `rmDrift` — RM belongs to the `(brand, base_sku_sno)` variant family, PM to the SKU. Pure; every write path re-resolves it server-side |
+| `lib/masters/kit-sku.ts` | `isKitSku` / `kitUnitsExceeded` — which SKUs are gift kits (assembled from other SKUs rather than raw material), and the `master_skus.filling` cap on their contents |
 | `lib/logger.ts` | Winston structured logger — console (pretty) + daily-rotate file transports. Import as `import logger from "@/lib/logger"` in any route or server-side file. |
 | `lib/mail/mailer.ts` | PO email dispatch via Gmail SMTP (nodemailer). `fetchPoData()` shared between email send and PDF preview. |
 | `lib/s3.ts` | S3 helpers: presigned URLs, file upload/download, fire-and-forget event writes |
