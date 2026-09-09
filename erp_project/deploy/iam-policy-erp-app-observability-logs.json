@@ -11,16 +11,26 @@
     "independently reviewable and can be detached without touching the deploy",
     "path that ECR, SSM and EC2 depend on.",
     "",
+    "THE GROUP NAMES ARE /erp-app/test AND /erp-app/prod — verified live",
+    "2026-09-09, one group per environment, each with one stream per instance per",
+    "file ('<instance>/app', '/error', '/bootstrap').",
+    "",
+    "An earlier version of this file scoped to '/erp/*', taken from",
+    "deploy/cloudwatch-agent-config.json. That group DOES NOT EXIST, and '/erp/*'",
+    "does not match '/erp-app/prod' — so the policy would have denied every call",
+    "while looking correct. The repo's agent config has drifted from what is",
+    "deployed; see the note at the foot of this file.",
+    "",
     "WHY SCOPED, when every statement in the deploy policy uses '*':",
     "these keys already carry ssm:SendCommand with AWS-RunShellScript on both app",
     "instances plus read/write on all /erp-app/* secrets (see the SECURITY NOTE in",
     "iam-policy-erp-app-runtime-ses.json). Application logs are the app's own",
     "output and carry user names, email addresses, PO numbers and request paths,",
-    "so the marginal grant is held to the two groups the CloudWatch agent writes:",
-    "/erp/app and /erp/bootstrap (deploy/cloudwatch-agent-config.json).",
+    "so the marginal grant is held to the /erp-app/ groups.",
     "",
     "Do NOT widen Resource to '*' to reach an unrelated log group — add a second",
-    "statement naming that group instead.",
+    "statement naming that group instead. The account holds unrelated groups",
+    "(/aws-glue/*, others) that this app has no business reading.",
     "",
     "BOTH ARNs are required. FilterLogEvents authorises against the log-group ARN,",
     "but the ':log-stream:*' form is what several logs actions check, and omitting",
@@ -33,7 +43,16 @@
     "Requests tab — faster, and joined to users, which Insights cannot do.",
     "",
     "This grants READ only. Nothing in the app writes to CloudWatch Logs; the",
-    "agent on the instance does that under the instance role, not these keys."
+    "agent on the instance does that under the instance role, not these keys.",
+    "",
+    "── REPO DRIFT, NOT FIXED HERE ──────────────────────────────────────────────",
+    "deploy/cloudwatch-agent-config.json and deploy/user-data.sh both still write",
+    "log_group_name '/erp/app' and '/erp/bootstrap'. Live reality is",
+    "'/erp-app/{test,prod}' with bootstrap as a STREAM, not its own group. The",
+    "live instances were evidently reconfigured after the launch template was",
+    "baked, so rebuilding an instance from that template would start writing to",
+    "'/erp/app' — splitting the logs in two and silently breaking this policy.",
+    "Worth reconciling as a deploy change; deliberately left alone here."
   ],
   "Version": "2012-10-17",
   "Statement": [
@@ -46,8 +65,8 @@
         "logs:DescribeLogStreams"
       ],
       "Resource": [
-        "arn:aws:logs:ap-south-1:157320387454:log-group:/erp/*",
-        "arn:aws:logs:ap-south-1:157320387454:log-group:/erp/*:log-stream:*"
+        "arn:aws:logs:ap-south-1:157320387454:log-group:/erp-app/*",
+        "arn:aws:logs:ap-south-1:157320387454:log-group:/erp-app/*:log-stream:*"
       ]
     },
     {

@@ -1,11 +1,16 @@
-// Log search for /observability > Logs — the /erp/app CloudWatch group.
+// Log search for /observability > Logs — the /erp-app/{test,prod} groups.
 //
 // Same contract as lib/services/infra.ts: AWS failures come back as data, only
 // the access check throws.
 
 import { ApiError } from "@/lib/gateway/errors"
 import { resolveAccess } from "@/lib/permissions"
-import { filterLogEvents, APP_LOG_GROUP, type LogEvent } from "@/lib/aws/cloudwatch"
+import {
+  filterLogEvents,
+  listAppLogGroups,
+  defaultLogGroup,
+  type LogEvent,
+} from "@/lib/aws/cloudwatch"
 import logger from "@/lib/logger"
 
 const PAGE_SLUG = "/observability"
@@ -26,8 +31,8 @@ export type ParsedLog = {
 }
 
 export type LogSearch =
-  | { ok: true; events: ParsedLog[]; truncated: boolean; group: string }
-  | { ok: false; error: string; group: string }
+  | { ok: true; events: ParsedLog[]; truncated: boolean; group: string; groups: string[] }
+  | { ok: false; error: string; group: string; groups: string[] }
 
 /**
  * Winston writes JSON, so a field match is exact rather than a substring scan —
@@ -74,30 +79,47 @@ function parse(e: LogEvent): ParsedLog {
 export async function searchLogs(
   userId: number,
   roles: string[],
-  opts: { hours: number; requestId?: string; level?: LogLevel; q?: string }
+  opts: { hours: number; requestId?: string; level?: LogLevel; q?: string; group?: string }
 ): Promise<LogSearch> {
   const access = await resolveAccess(userId, roles, PAGE_SLUG)
   if (access === "none") {
     throw new ApiError(403, "forbidden", "You do not have access to observability.")
   }
 
+  // Discovered rather than trusted: the requested group must be one that exists
+  // under the /erp-app/ prefix, so a crafted ?group= can't read an unrelated
+  // group the credentials happen to reach.
+  let groups: string[] = []
+  try {
+    groups = await listAppLogGroups()
+  } catch (err) {
+    logger.warn({
+      module: "OBSERVABILITY",
+      message: "DescribeLogGroups failed",
+      error: (err as Error).message,
+    })
+  }
+  const fallback = defaultLogGroup()
+  const group = opts.group && groups.includes(opts.group) ? opts.group : fallback
+
   const to = new Date()
   const from = new Date(to.getTime() - opts.hours * 3_600_000)
   const pattern = buildPattern(opts.requestId ?? "", opts.level ?? "all", opts.q ?? "")
 
   try {
-    const events = await filterLogEvents({ from, to, pattern, limit: LIMIT })
+    const events = await filterLogEvents({ from, to, pattern, limit: LIMIT, logGroup: group })
     return {
       ok: true,
       // Newest first: FilterLogEvents returns ascending, and a log reader wants
       // the most recent line at the top.
       events: events.map(parse).reverse(),
       truncated: events.length >= LIMIT,
-      group: APP_LOG_GROUP,
+      group,
+      groups,
     }
   } catch (err) {
     const error = (err as Error).message
-    logger.error({ module: "OBSERVABILITY", message: "FilterLogEvents failed", error, pattern })
-    return { ok: false, error, group: APP_LOG_GROUP }
+    logger.error({ module: "OBSERVABILITY", message: "FilterLogEvents failed", error, pattern, group })
+    return { ok: false, error, group, groups }
   }
 }

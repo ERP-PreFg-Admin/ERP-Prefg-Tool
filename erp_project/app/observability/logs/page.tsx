@@ -1,4 +1,4 @@
-// /observability > Logs — search the /erp/app CloudWatch group.
+// /observability > Logs — search the /erp-app/{test,prod} CloudWatch groups.
 //
 // The filter form is a plain GET form, so this page ships no client JS: the
 // browser turns it into the same ?requestId=&level=&q= URL the Requests tab
@@ -53,6 +53,7 @@ export default async function ObservabilityLogsPage({
     requestId,
     level,
     q,
+    group: str(sp.group),
   })
 
   return (
@@ -66,9 +67,9 @@ export default async function ObservabilityLogsPage({
           options={WINDOWS.map((w) => ({ key: w.key, label: w.label }))}
           active={active}
           getHref={(key) =>
-            `/observability/logs?w=${key}${requestId ? `&requestId=${requestId}` : ""}${
-              level !== "all" ? `&level=${level}` : ""
-            }${q ? `&q=${encodeURIComponent(q)}` : ""}`
+            `/observability/logs?w=${key}&group=${encodeURIComponent(result.group)}${
+              requestId ? `&requestId=${requestId}` : ""
+            }${level !== "all" ? `&level=${level}` : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}`
           }
           size="xs"
         />
@@ -82,6 +83,24 @@ export default async function ObservabilityLogsPage({
           <span className="text-xs text-muted-foreground">Request ID</span>
           <Input name="requestId" defaultValue={requestId} placeholder="uuid from the Requests tab" className="w-72 font-mono text-xs" />
         </label>
+        {/* One group per environment. Shown only when more than one exists, so
+            a single-environment account doesn't get a one-option select. */}
+        {result.groups.length > 1 && (
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">Environment</span>
+            <select
+              name="group"
+              defaultValue={result.group}
+              className="h-9 rounded-md border border-input bg-transparent px-2 font-mono text-xs"
+            >
+              {result.groups.map((g) => (
+                <option key={g} value={g}>
+                  {g.replace("/erp-app/", "")}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="flex flex-col gap-1">
           <span className="text-xs text-muted-foreground">Level</span>
           <select

@@ -14,12 +14,29 @@ import {
 import {
   CloudWatchLogsClient,
   FilterLogEventsCommand,
+  DescribeLogGroupsCommand,
 } from "@aws-sdk/client-cloudwatch-logs"
-import { AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY } from "@/lib/env"
+import { AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, APP_ENV } from "@/lib/env"
 
-/** The group the CloudWatch agent ships Winston's files to — both the app and
- *  error streams land here (deploy/cloudwatch-agent-config.json). */
-export const APP_LOG_GROUP = "/erp/app"
+// Groups are per environment — /erp-app/test and /erp-app/prod — each holding
+// one stream per instance per file: "<instance>/app", "/error", "/bootstrap".
+//
+// NOT "/erp/app", which is what deploy/cloudwatch-agent-config.json and
+// user-data.sh still say. Verified live 2026-09-09: that group does not exist.
+// The repo's agent config has drifted from what is actually deployed.
+export const LOG_GROUP_PREFIX = "/erp-app/"
+
+/** This deployment's own group. A developer can switch to the other one. */
+export const defaultLogGroup = () => `${LOG_GROUP_PREFIX}${APP_ENV}`
+
+/** Discovered, not hardcoded — the same reasoning as instance names, and
+ *  DescribeLogGroups is already granted. */
+export async function listAppLogGroups(): Promise<string[]> {
+  const res = await logsClient().send(
+    new DescribeLogGroupsCommand({ logGroupNamePrefix: LOG_GROUP_PREFIX })
+  )
+  return (res.logGroups ?? []).map((g) => g.logGroupName).filter((n): n is string => !!n).sort()
+}
 
 const credentials = () => ({
   accessKeyId: AWS_ACCESS_KEY_ID,
@@ -113,7 +130,7 @@ export async function filterLogEvents(opts: {
 }): Promise<LogEvent[]> {
   const res = await logsClient().send(
     new FilterLogEventsCommand({
-      logGroupName: opts.logGroup ?? APP_LOG_GROUP,
+      logGroupName: opts.logGroup ?? defaultLogGroup(),
       startTime: opts.from.getTime(),
       endTime: opts.to.getTime(),
       filterPattern: opts.pattern || undefined,
