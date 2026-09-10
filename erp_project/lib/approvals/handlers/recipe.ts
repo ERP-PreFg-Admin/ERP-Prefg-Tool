@@ -50,7 +50,7 @@ import { rawMaterials as rmSql } from "@/lib/queries/raw-materials"
 import { packingMaterials as pmSql } from "@/lib/queries/packing-materials"
 import { bom as recipeSql } from "@/lib/queries/recipe"
 import { approvalsSql } from "@/lib/queries/approvals"
-import { diffBomLines, resolveRecipeVersions, type DiffableLine } from "@/lib/masters/recipe-version"
+import { diffBomLines, resolveRecipeVersions, recipeCode, type DiffableLine } from "@/lib/masters/recipe-version"
 import { describeRmDrift, rmLineageHead, resolveRmLock, type FamilyMember } from "@/lib/masters/variant-rm-lock"
 import { isRmTotalValid } from "@/lib/validation/recipe"
 import { deleteFile } from "@/lib/s3"
@@ -185,7 +185,7 @@ export async function createRecipeVersion(
     raisedBy: number
     reason: string | null
     changeType: ("rm" | "pm")[]
-    /** Explicit bom_code (bulk CSV only); otherwise <sku>-RM<n>-PM<n>. */
+    /** Explicit bom_code (bulk CSV only); otherwise recipeCode() decides it. */
     bomCode?: string | null
     /** Appended to the "Recipe discontinued" log line, e.g. "bulk upload". */
     supersededBy: string
@@ -243,7 +243,7 @@ export async function createRecipeVersion(
   }
 
   const { rmVersion, pmVersion } = resolveRecipeVersions({ prior, priorLines, newLines, familyRm })
-  const bomCode = opts.bomCode?.trim() || `${skuCode}-RM${rmVersion}-PM${pmVersion}`
+  const bomCode = opts.bomCode?.trim() || recipeCode(skuCode, { rmVersion, pmVersion }, newLines)
 
   // Same "reason/change_type required once a prior Recipe exists" rule the
   // single-Recipe wizard enforces — a bulk upload or a fanned-out variant

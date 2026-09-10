@@ -173,14 +173,22 @@ about it trip people up:
 > `app/api/v1/manufacturing/facility-map/route.ts` — and is pinned by
 > `tests/db/mfg-facility-map.test.ts`. Delete either and the hazard returns unguarded.
 
-Reads go through the matrix on `/po-tracking/mfg-overview`, which has **two**
-drilldowns onto the same slide-over: a CELL (one manufacturer at one facility)
-and a COLUMN — click the facility header for every manufacturer there, collapsed
-to `name · mapped/total · state`. The column save posts one `set-map` per
-manufacturer, sequentially, so every guard the cell path has applies unchanged
-and a group that fails does not undo the ones already committed. Contents:
-`FacilityMapPanel.tsx`, with the tick rows shared via `SkuTickList.tsx` and the
-grouping in `mapping-state.ts` (`facilityGroups`, pure and tested).
+Reads go through the matrix on `/po-tracking/mfg-overview`. The two axes do
+different jobs, and that split is deliberate:
+
+- **Click a CELL** → the mapping drilldown for that one (manufacturer, facility).
+  Mapping is per pair, so this is where it belongs (`MfgFacilityMapPanel.tsx`).
+- **Click a COLUMN HEADER** → **sync that facility from Uniware**, not a mapping
+  panel. One facility's Vendor Item Master export already covers *every*
+  manufacturer at it — that is the grain Uniware reports — so the facility axis is
+  naturally a pull, not an edit. It opens `SyncFacilityMapDialog` in controlled
+  mode with that single facility; the toolbar button opens the same dialog for all
+  18. Disabled on a facility with no `facility_code`: there is nothing to ask
+  Uniware about.
+
+> A facility-wide *mapping* panel was built and then removed (2026-09): mapping
+> across manufacturers in one save duplicated what the cells already do, while the
+> thing actually wanted per facility was the sync.
 
 Writes are **direct, with
 no approval flow**, matching the parent relation (`master_recipe_mfg`, see
@@ -277,19 +285,38 @@ request, since the schema only sees `sku_id`:
 
 | | non-kit | gift kit |
 |---|---|---|
-| RM | ≥1 line, total 99.5–100.5% | optional, **no total rule** |
+| RM | ≥1 line, total 99.5–100.5% | **none at all** — 400 `kit_has_rm` |
 | `sku_lines` | 400 `not_a_kit` | ≥1, else 400 `kit_contents_required` |
 | Contents cap | — | 400 `kit_units_exceeded` above `filling` (inclusive; under is allowed and warned) |
+
+`kit_has_rm` and `not_a_kit` are exact mirrors: a kit's recipe is its components
+plus PM, everything else's is RM plus PM, and neither may borrow the other's
+shape. RM was briefly *optional* on a kit rather than forbidden; it was never
+used (zero kit recipes carried an RM line on either schema) and the wizard now
+omits the section entirely, so a kit that reaches here with `rm_lines` is a
+hand-made request, not a submission.
 
 Component guards, all in `create-full`: each component through
 `assertSkuIdInBrandScope` (they are other SKUs, possibly other brands), no
 self-reference, **no nested kits**, no duplicate component.
 
 **A contents change counts as a PM-side change for versioning.** `diffBomLines`
-folds `'sku'` lines into `pmChanged`, so `pm_version` bumps and `bom_code` keeps
-its `<sku>-RM<n>-PM<n>` shape. Without that, two recipes with different contents
-would carry the same code. `rmChanged` deliberately ignores them, so a kit never
-triggers the variant fan-out — it has no formulation to propagate.
+folds `'sku'` lines into `pmChanged`, so `pm_version` bumps. Without that, two
+recipes with different contents would carry the same code. `rmChanged`
+deliberately ignores them, so a kit never triggers the variant fan-out — it has
+no formulation to propagate.
+
+**A kit's code is `<sku>_KIT_PM<n>`, not `<sku>-RM<n>-PM<n>`** — e.g.
+`MGKIT62_ACG_S_KIT_PM1`. `recipeCode()` in `lib/masters/recipe-version.ts` is
+the single place that decides, and it keys on **whether the lines contain any
+RM**, not on `isKitSku` — so the code can never contradict its own contents, and
+a non-kit (which always has ≥1 RM line, `rm_required`) can never reach the kit
+form. The `RM1` it used to carry named lines the recipe did not have and could
+never advance: `resolveRecipeVersions` bumps RM only when the RM set changes,
+and an empty set never differs from an empty set. `rm_version` is still stored
+as 1 — only the printed code drops it. Nothing parses `bom_code`; it is
+displayed, fuzzy-searched and stored, which is what made the shape safe to
+change. It fits `VARCHAR(50)`: the longest live kit SKU code is 18 chars.
 
 > ⚠️ **Costing ignores `'sku'` lines, and that exclusion lives in ONE query.**
 > `manufacturingSql.selectBomLineDetailByMfg` filters `mtrl_type IN ('rm','pm')`;

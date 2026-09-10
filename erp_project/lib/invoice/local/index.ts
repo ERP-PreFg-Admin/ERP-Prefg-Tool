@@ -1,14 +1,19 @@
 import type { ParsedInvoice, ParsedLineItem } from "@/types/invoice"
-import { parseHeader } from "./header"
-import { parseTallyRows } from "./tally"
+import { parseHeader, totalQuantities } from "./header"
+import { parseTallyRows, tallyBlocks } from "./tally"
 import { parseCheryl, matchesCheryl } from "./cheryl"
 import { parseJainam, matchesJainam } from "./jainam"
 import { parseCharges, chargesTotal, type ParsedCharge } from "./charges"
+import { applyEwayGoods, parseEwayTotals } from "./eway"
 
 const GST_MULTIPLES = [1, 1.05, 1.12, 1.18, 1.28]
 
 const ROW_TOLERANCE = 1
 const RATIO_TOLERANCE = 0.005
+/** Rupees. Used where two printings of the same figure are compared. */
+const MONEY_TOLERANCE = 1
+/** Quantities are DECIMAL(12,3); anything under this is float noise. */
+const QTY_TOLERANCE = 0.001
 
 /**
  * Layouts are matched on structural markers rather than the supplier's name, so
@@ -19,11 +24,20 @@ const RATIO_TOLERANCE = 0.005
  * Business One heads its item table — so the specific layouts must be tried
  * first. With tally first, Jainam was parsed as Tally and rejected.
  */
-const LAYOUTS: { name: string; matches: (text: string) => boolean; parse: (text: string) => ParsedInvoice }[] = [
+type Layout = {
+  name: string
+  matches: (text: string) => boolean
+  parse: (text: string) => ParsedInvoice
+  /** How many rows the supplier numbered, where the layout numbers them. */
+  numberedRows?: (text: string) => number
+}
+
+const LAYOUTS: Layout[] = [
   { name: "cheryl", matches: matchesCheryl, parse: parseCheryl },
   { name: "jainam", matches: matchesJainam, parse: parseJainam },
   { name: "tally", matches: (t) => /Description of Goods|Description of\b/i.test(t),
-    parse: (t) => ({ ...parseHeader(t), line_items: parseTallyRows(t), extra: {} }) },
+    parse: (t) => ({ ...parseHeader(t), line_items: parseTallyRows(t), extra: {} }),
+    numberedRows: (t) => tallyBlocks(t).length },
 ]
 
 export type LocalParseResult =
@@ -94,6 +108,17 @@ export function parseLocallyVerbose(text: string): LocalParseResult {
   if (!parsed.date) return { ok: false, layout: name, reason: "no invoice date" }
   if (parsed.line_items.length === 0) return { ok: false, layout: name, reason: "no line items" }
 
+  // The supplier numbers its rows, so it has already told us how many there
+  // are. A block that yielded no item used to vanish into the filter.
+  const numbered = layout.numberedRows?.(text) ?? parsed.line_items.length
+  if (numbered !== parsed.line_items.length) {
+    return {
+      ok: false,
+      layout: name,
+      reason: `the item table numbers ${numbered} rows but only ${parsed.line_items.length} could be read`,
+    }
+  }
+
   const broken = parsed.line_items.filter((i) => !rowReconciles(i))
   if (broken.length) {
     return {
@@ -103,16 +128,58 @@ export function parseLocallyVerbose(text: string): LocalParseResult {
     }
   }
 
+  // No total is not "nothing to check against" — it is the one figure every
+  // downstream check reconciles to, and without it the gate below passes
+  // anything. Refusing sends the invoice to the metered extractor instead.
+  if (!parsed.total_amount) return { ok: false, layout: name, reason: "no invoice total to reconcile against" }
+
   const charges = parseCharges(text)
+  const sum = parsed.line_items.reduce((s, i) => s + (i.amount ?? 0), 0) + chargesTotal(charges)
 
   if (!invoiceReconciles(parsed.line_items, charges, parsed.total_amount)) {
-    const sum = parsed.line_items.reduce((s, i) => s + (i.amount ?? 0), 0) + chargesTotal(charges)
     return {
       ok: false,
       layout: name,
       reason: `line sum ${sum.toFixed(2)} does not reconcile with total ${parsed.total_amount}`,
     }
   }
+
+  // The e-Way bill prints both figures again. Exact, unlike the ratio test
+  // above, whose 0.005 window on 1.18 hides a line worth up to 0.42% of the
+  // invoice.
+  const eway = parseEwayTotals(text)
+  if (eway.taxable != null && Math.abs(eway.taxable - sum) > MONEY_TOLERANCE) {
+    return {
+      ok: false,
+      layout: name,
+      reason: `line sum ${sum.toFixed(2)} but the e-Way bill declares ${eway.taxable.toFixed(2)} taxable`,
+    }
+  }
+  if (eway.total != null && Math.abs(eway.total - parsed.total_amount) > MONEY_TOLERANCE) {
+    return {
+      ok: false,
+      layout: name,
+      reason: `invoice total ${parsed.total_amount} but the e-Way bill declares ${eway.total.toFixed(2)}`,
+    }
+  }
+
+  // The grand-total row carries the summed quantity. Integer, GST-free, and
+  // quantity is what becomes received stock — the strongest check available.
+  const declaredQty = totalQuantities(text)
+  const qtySum = parsed.line_items.reduce((s, i) => s + (i.qty ?? 0), 0)
+  if (declaredQty.length && !declaredQty.some((q) => Math.abs(q - qtySum) < QTY_TOLERANCE)) {
+    return {
+      ok: false,
+      layout: name,
+      reason: `line quantities total ${qtySum} but the invoice totals ${declaredQty.join(" / ")}`,
+    }
+  }
+
+  // Second opinion from the e-Way bill's goods table, where the document
+  // carries one: same count, same amounts, and it lends its product name to a
+  // line whose description the item table failed to read.
+  const ewayReason = applyEwayGoods(parsed.line_items, text)
+  if (ewayReason) return { ok: false, layout: name, reason: ewayReason }
 
   // Carried through so the review screen can show them. Not folded into
   // `extra`: these are money that changes the invoice total, not a stray field.
@@ -123,7 +190,6 @@ export function parseLocallyVerbose(text: string): LocalParseResult {
   // present, and a single derived rate would be wrong for it — so leave those
   // exactly as read and let the drift warning do its job.
   if (parsed.line_items.every((i) => i.gst_percent == null)) {
-    const sum = parsed.line_items.reduce((s, i) => s + (i.amount ?? 0), 0) + chargesTotal(charges)
     const gst = inferGstPercent(sum, parsed.total_amount)
     if (gst != null) {
       for (const item of parsed.line_items) item.gst_percent = gst

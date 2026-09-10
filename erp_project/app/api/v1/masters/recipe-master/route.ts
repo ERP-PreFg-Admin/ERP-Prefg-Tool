@@ -41,7 +41,7 @@ import { STATUS } from "@/lib/constants"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { stageBulkUploadApproval, uploadRowsAsCsv } from "@/lib/master-routes/bulk-approval"
-import { diffBomLines, resolveRecipeVersions, type DiffableLine } from "@/lib/masters/recipe-version"
+import { diffBomLines, resolveRecipeVersions, recipeCode, type DiffableLine } from "@/lib/masters/recipe-version"
 import { describeRmDrift, resolveRmLock, rmLineageHead, rmPropagationTargets, type FamilyMember } from "@/lib/masters/variant-rm-lock"
 import { monthIST, normalizeDateCell } from "@/lib/date"
 
@@ -155,6 +155,16 @@ export const POST = withGateway({
         const units = kitUnitsTotal(body.sku_lines)
         if (kitUnitsExceeded(units, declared)) {
           throw new ApiError(400, "kit_units_exceeded", kitUnitsMessage(units, declared!))
+        }
+        // The mirror of not_a_kit below. A kit is assembled, not formulated —
+        // its components arrive already made, so there is no RM to state. The
+        // wizard hides the band for a kit; this is the guard, since sku_id is
+        // a guessable integer.
+        if (body.rm_lines.length > 0) {
+          throw new ApiError(
+            400, "kit_has_rm",
+            `${sku.sku_code} is a gift kit, so its recipe is the SKUs it contains and their PM. RM does not apply.`
+          )
         }
       } else {
         if (body.sku_lines.length > 0) {
@@ -297,7 +307,7 @@ export const POST = withGateway({
           const { rmVersion, pmVersion } = resolveRecipeVersions({
             prior, priorLines, newLines, familyRm,
           })
-          bomCode = `${sku.sku_code}-RM${rmVersion}-PM${pmVersion}`
+          bomCode = recipeCode(sku.sku_code, { rmVersion, pmVersion }, newLines)
 
           // A prior Recipe exists for this SKU — this submission is really an
           // edit to an established recipe, so require the submitter to say

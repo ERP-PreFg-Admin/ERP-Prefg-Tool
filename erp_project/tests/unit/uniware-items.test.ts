@@ -50,6 +50,22 @@ test("distinct SKUs are left alone, in first-seen order", () => {
   assert.deepEqual(merged.map((i) => i.quantity), [5, 2])
 })
 
+test("a PO's Reference No travels as a custom field, never as a body key", () => {
+  // purchaseOrder/create has NO reference field. Sending `referenceNumber` in
+  // the body 400s with `Unrecognized field "referenceNumber" (Class
+  // com.uniware.core.api.purchase.CreatePurchaseOrderRequest)` — verified
+  // against TEST_FACILITY on 2026-09-10, with a control create succeeding.
+  // The tenant registers "ReferenceNo" as a PO custom field instead.
+  const payload = buildPurchaseOrder({
+    vendorCode: "V1",
+    customFields: { ReferenceNo: "RP/L/26-27/1182" },
+    items: [{ itemSKU: "A", quantity: 1, unitPrice: 10 }],
+  })
+
+  assert.equal("referenceNumber" in payload, false)
+  assert.deepEqual(payload.customFieldValues, [{ name: "ReferenceNo", value: "RP/L/26-27/1182" }])
+})
+
 test("buildPurchaseOrder never emits the same itemSKU twice", () => {
   const payload = buildPurchaseOrder({
     vendorCode: "Test_Vendor",

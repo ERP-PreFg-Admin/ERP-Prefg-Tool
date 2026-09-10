@@ -107,13 +107,15 @@ export async function searchLogs(
   const pattern = buildPattern(opts.requestId ?? "", opts.level ?? "all", opts.q ?? "")
 
   try {
-    const events = await filterLogEvents({ from, to, pattern, limit: LIMIT, logGroup: group })
+    const { events, more } = await filterLogEvents({ from, to, pattern, limit: LIMIT, logGroup: group })
     return {
       ok: true,
       // Newest first: FilterLogEvents returns ascending, and a log reader wants
       // the most recent line at the top.
       events: events.map(parse).reverse(),
-      truncated: events.length >= LIMIT,
+      // `more` covers the case the count can't: the scan stopped at the page
+      // cap with the window unfinished, even though fewer than LIMIT matched.
+      truncated: more || events.length >= LIMIT,
       group,
       groups,
     }

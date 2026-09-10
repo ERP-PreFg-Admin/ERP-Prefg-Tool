@@ -1,14 +1,14 @@
 "use client"
 
 /**
- * The SKU tick rows, shared by both mapping drilldowns: one (manufacturer,
- * facility) pair in MfgFacilityMapPanel, and every manufacturer at one facility in
- * FacilityMapPanel.
+ * The SKU tick rows of the mapping drilldown (MfgFacilityMapPanel), split out to
+ * keep the row markup away from that panel's vendor-code, callout and save logic.
  *
- * Presentation plus a toggle callback — the panels own what is tickable and how the
- * ticks are keyed (the facility panel's set spans manufacturers, so a bare sku_id
- * would collide between two of them). Hence `isTicked`/`onToggle` take the row
- * rather than an id.
+ * Presentation plus a toggle callback — the panel owns what is tickable, and
+ * `isTicked`/`onToggle` take the ROW rather than an id. (They were row-based
+ * because a second, facility-wide panel keyed its ticks by (mfg, sku); that panel
+ * was removed in 2026-09, and the row-based signature is kept because it costs
+ * nothing and does not assume the caller's key.)
  *
  * The one rule that lives HERE, because it is universal: an already-mapped SKU is
  * genuinely `disabled`, not merely styled that way. Unicommerce has no un-map, so a

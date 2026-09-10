@@ -97,7 +97,6 @@ export default function RecipeHistoryClient({
               skuLines={panel.skuLines}
               rmDetailTotal={panel.rmDetailTotal}
               rmIsBalanced={panel.rmIsBalanced}
-              visibleLines={panel.visibleLines}
               canEdit={false}
               onClose={panel.closeDetail}
               onEdit={() => {}}

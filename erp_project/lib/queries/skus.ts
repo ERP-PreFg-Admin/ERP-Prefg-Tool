@@ -166,7 +166,7 @@ export const skus = {
    *
    * Each member's ACTIVE Recipe rides along, the same LEFT JOIN
    * selectVariantFamilyBySkuId uses. The popup is where the family's RM owner is
-   * designated, and `bom_code` is `<sku>-RM<n>-PM<n>` — so the codes side by side
+   * designated, and `bom_code` is `<sku>-RM<n>-PM<n>` (`<sku>_KIT_PM<n>` for a gift kit, which has no RM) — so the codes side by side
    * are what make "is this family in step on RM" answerable on the screen where
    * you act on it. LEFT, because a member with no recipe is normal and must not
    * drop out of its own family.

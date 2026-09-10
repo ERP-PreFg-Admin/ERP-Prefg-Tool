@@ -121,25 +121,51 @@ export type LogEvent = { timestamp: Date | null; stream: string | null; message:
  * SQL on the Requests tab. `pattern` is a CloudWatch filter pattern; Winston
  * writes JSON, so `{ $.requestId = "…" }` and `{ $.level = "error" }` both work.
  */
+/**
+ * MUST follow nextToken. FilterLogEvents returns a PAGE of the scan, not the
+ * matches: over a sparse window it hands back an empty page plus a token
+ * meaning "nothing here, keep going". A single call therefore reports "no
+ * matching lines" while matches sit further in — verified the hard way against
+ * this very group.
+ *
+ * Capped at MAX_PAGES so a wide window can't stall the page; hitting the cap is
+ * reported as truncation rather than silently looking like the end.
+ */
+const MAX_PAGES = 10
+
 export async function filterLogEvents(opts: {
   from: Date
   to: Date
   pattern?: string
   limit?: number
   logGroup?: string
-}): Promise<LogEvent[]> {
-  const res = await logsClient().send(
-    new FilterLogEventsCommand({
-      logGroupName: opts.logGroup ?? defaultLogGroup(),
-      startTime: opts.from.getTime(),
-      endTime: opts.to.getTime(),
-      filterPattern: opts.pattern || undefined,
-      limit: opts.limit ?? 200,
-    })
-  )
-  return (res.events ?? []).map((e) => ({
-    timestamp: e.timestamp ? new Date(e.timestamp) : null,
-    stream: e.logStreamName ?? null,
-    message: e.message ?? "",
-  }))
+}): Promise<{ events: LogEvent[]; more: boolean }> {
+  const limit = opts.limit ?? 200
+  const out: LogEvent[] = []
+  let token: string | undefined
+  let pages = 0
+
+  do {
+    const res = await logsClient().send(
+      new FilterLogEventsCommand({
+        logGroupName: opts.logGroup ?? defaultLogGroup(),
+        startTime: opts.from.getTime(),
+        endTime: opts.to.getTime(),
+        filterPattern: opts.pattern || undefined,
+        limit: limit - out.length,
+        nextToken: token,
+      })
+    )
+    for (const e of res.events ?? []) {
+      out.push({
+        timestamp: e.timestamp ? new Date(e.timestamp) : null,
+        stream: e.logStreamName ?? null,
+        message: e.message ?? "",
+      })
+    }
+    token = res.nextToken
+    pages++
+  } while (token && out.length < limit && pages < MAX_PAGES)
+
+  return { events: out, more: Boolean(token) }
 }

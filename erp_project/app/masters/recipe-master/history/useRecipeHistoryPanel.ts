@@ -105,9 +105,6 @@ export function useBomHistoryPanel() {
   const skuLines       = detail?.lines.filter((l) => l.mtrl_type === "sku") ?? []
   const rmDetailTotal  = rmLines.reduce((sum, l) => sum + (Number(l.amount) || 0), 0)
   const rmIsBalanced   = rmLines.length > 0 && isRmTotalValid(rmDetailTotal)
-  const visibleLines   = activeMtrlType === "rm" ? rmLines
-    : activeMtrlType === "sku" ? skuLines
-    : pmLines
 
   function handleRowClick(bomId: number) {
     const nextId = selectedBomId === bomId ? null : bomId
@@ -138,7 +135,6 @@ export function useBomHistoryPanel() {
     skuLines,
     rmDetailTotal,
     rmIsBalanced,
-    visibleLines,
     prefetchDetail,
     handleRowClick,
     closeDetail,

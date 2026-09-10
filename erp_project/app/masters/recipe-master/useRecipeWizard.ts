@@ -31,6 +31,9 @@ export type EntryMethod = "manual" | "csv"
 /** A sibling variant that a base-SKU RM change will re-version on approval. */
 export type PropagationTarget = { sku_id: number; sku_code: string; bom_code: string | null }
 
+/** Module scope so the "a kit has no RM" substitution keeps one identity. */
+const EMPTY_ROWS: RecipeLineRow[] = []
+
 export function useBomWizard({
   rmMaterials,
   pmMaterials,
@@ -81,11 +84,18 @@ export function useBomWizard({
   const rmLocked = rmLock?.locked === true
 
   // Which shape of recipe this SKU takes. A gift kit is assembled from other
-  // SKUs and has no formulation, so RM stops being required and the 100% rule
-  // stops applying - see lib/masters/kit-sku.ts.
+  // SKUs and has no formulation, so it takes no RM at all - see
+  // lib/masters/kit-sku.ts.
   const pickedSku = skus.find((sk) => sk.id === skuId)
   const isKit = isKitSku(pickedSku)
   const declaredUnits = isKit ? declaredKitUnits(pickedSku) : null
+
+  // Derived rather than cleared on selection, because rmRows has several ways
+  // in — picking a SKU, stepping back and picking a different one, the
+  // inherited-RM seeding. A kit reads as having none through every one of them,
+  // so nothing stale can reach a payload route.ts would 400 as kit_has_rm
+  // against a section the submitter can no longer see.
+  const effectiveRmRows = isKit ? EMPTY_ROWS : rmRows
 
   const isDirty = skuId != null || rmRows.length > 0 || pmRows.length > 0 ||
     skuRows.length > 0 || pendingArtifactFiles.length > 0
@@ -223,13 +233,13 @@ export function useBomWizard({
     else setStep((s) => (s - 1) as WizardStep)
   }
 
-  // A kit's RM is optional extras, not a formulation, so neither "at least one
-  // line" nor the band applies - the same two rules route.ts skips for it.
+  // A kit has no RM, so neither "at least one line" nor the band applies - the
+  // same two rules route.ts skips for it.
   const rmValid = isKit || (rmRows.length > 0 && isRmTotalValid(rmTotal(rmRows)))
   // Number(), not truthiness: r.amount is a STRING, and "0" is truthy — a line
   // left at 0 sailed past this check and only died on the server's
   // z.coerce.number().positive() as a generic 400.
-  const allRmFieldsFilled = rmRows.every((r) => r.mtrl_id && Number(r.amount) > 0)
+  const allRmFieldsFilled = effectiveRmRows.every((r) => r.mtrl_id && Number(r.amount) > 0)
   const allPmFieldsFilled = pmRows.every((r) => r.mtrl_id && Number(r.amount) > 0)
   const allSkuFieldsFilled = skuRows.every((r) => r.mtrl_id && Number(r.amount) > 0)
   // A kit with no contents is not a recipe at all (route.ts 400s
@@ -272,7 +282,7 @@ export function useBomWizard({
         return
       }
     }
-    for (const r of [...rmRows, ...pmRows, ...skuRows]) {
+    for (const r of [...effectiveRmRows, ...pmRows, ...skuRows]) {
       if (!r.mtrl_id || !(Number(r.amount) > 0)) {
         setError("Every line requires a material or SKU and an amount greater than 0.")
         return
@@ -305,7 +315,7 @@ export function useBomWizard({
           sku_id: skuId,
           effective_from: effectiveFrom.trim(),
           source: entryMethod === "csv" ? "csv" : "manual",
-          rm_lines: rmRows.map(toLine),
+          rm_lines: effectiveRmRows.map(toLine),
           pm_lines: pmRows.map(toLine),
           sku_lines: skuRows.map(toLine),
           artifact_adds: artifactAdds,

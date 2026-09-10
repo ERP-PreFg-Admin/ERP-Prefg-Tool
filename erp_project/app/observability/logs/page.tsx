@@ -156,7 +156,7 @@ export default async function ObservabilityLogsPage({
         <div className="space-y-1">
           {result.truncated && (
             <Callout variant="info">
-              Showing the most recent 200 lines only — narrow the window or the filter to see more.
+              More lines match than are shown — narrow the window or the filter to see the rest.
             </Callout>
           )}
           {result.events.map((e, i) => (

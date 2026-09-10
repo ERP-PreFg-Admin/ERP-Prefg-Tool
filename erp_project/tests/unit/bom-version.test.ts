@@ -3,7 +3,7 @@
 // genuinely different recipe — and the bom_code is what production quotes.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { diffBomLines, resolveRecipeVersions, type DiffableLine } from "../../lib/masters/recipe-version"
+import { diffBomLines, resolveRecipeVersions, recipeCode, type DiffableLine } from "../../lib/masters/recipe-version"
 
 const rm = (id: number, amount: number | string, uom = "kg"): DiffableLine =>
   ({ mtrl_type: "rm", mtrl_id: id, amount, uom })
@@ -206,4 +206,39 @@ test("a family at version 0 (no recipe yet) behaves like no family", () => {
     resolveRecipeVersions({ prior: null, priorLines: [], newLines: BASE, familyRm: null }),
     { rmVersion: 1, pmVersion: 1 }
   )
+})
+
+/* ── the code's shape ─────────────────────────────────────────────────────── */
+
+const sku = (id: number, amount = 1): DiffableLine =>
+  ({ mtrl_type: "sku", mtrl_id: id, amount, uom: "units" })
+
+test("an ordinary recipe carries both version segments", () => {
+  assert.equal(recipeCode("MCaf208", { rmVersion: 2, pmVersion: 3 }, BASE), "MCaf208-RM2-PM3")
+})
+
+test("a recipe with no RM is marked _KIT_ and carries only a PM number", () => {
+  // A gift kit is assembled from finished SKUs. `RM1` there named lines it did
+  // not have, and could never move off 1 — an empty RM set never differs from
+  // an empty RM set, so resolveRecipeVersions would hold it there forever.
+  // Fits VARCHAR(50) with room to spare on the longest live kit SKU code.
+  const kit = [sku(11), sku(12), pm(10, 1)]
+  assert.equal(recipeCode("MGKIT62_ACG_S", { rmVersion: 1, pmVersion: 4 }, kit), "MGKIT62_ACG_S_KIT_PM4")
+})
+
+test("the kit's PM number still advances as its contents change", () => {
+  // diffBomLines folds 'sku' lines into the PM side on purpose, so two kits
+  // with different contents cannot share a code.
+  const v1 = [sku(11), sku(12)]
+  const v2 = [sku(11), sku(13)]
+  const { rmVersion, pmVersion } = resolveRecipeVersions({
+    prior: { rm_version: 1, pm_version: 1 }, priorLines: v1, newLines: v2, familyRm: null,
+  })
+  assert.equal(recipeCode("MGKIT62_ACG_S", { rmVersion, pmVersion }, v2), "MGKIT62_ACG_S_KIT_PM2")
+})
+
+test("a PM-only recipe is judged by its lines, not by a flag it was passed", () => {
+  // Keyed on the lines so the code cannot contradict its own contents.
+  assert.equal(recipeCode("X", { rmVersion: 9, pmVersion: 1 }, [pm(10, 1)]), "X_KIT_PM1")
+  assert.equal(recipeCode("X", { rmVersion: 9, pmVersion: 1 }, [rm(1, 100), pm(10, 1)]), "X-RM9-PM1")
 })

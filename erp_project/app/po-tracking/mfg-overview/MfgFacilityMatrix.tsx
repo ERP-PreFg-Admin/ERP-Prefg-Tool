@@ -10,6 +10,14 @@
  * mapping is edited. That split is deliberate — see the note in
  * MfgFacilityMapPanel.tsx.
  *
+ * The two axes do DIFFERENT jobs. A cell is a (manufacturer, facility) pair, which
+ * is the grain mapping actually has. A COLUMN HEADER instead pulls that facility
+ * from Uniware: one Vendor Item Master export covers every manufacturer at the
+ * facility, so the facility axis is naturally a sync rather than an edit. Clicking a
+ * header therefore opens SyncFacilityMapDialog for that one facility, NOT a mapping
+ * panel — a facility-wide mapping panel existed briefly and was removed, because
+ * mapping across manufacturers in one save only duplicated the cells.
+ *
  * A raw <table> rather than components/ui/table.tsx, because that one wraps every
  * table in <ScrollFade axis="x"> (table.tsx:7), which hides the scrollbar in favour
  * of an edge fade. At 20 columns the scrollbar IS the affordance. Sticky-column
@@ -27,11 +35,10 @@ import { SearchInput } from "@/components/masters/SearchInput"
 import { MasterToolbar, MasterToolbarActions } from "@/components/masters/MasterToolbar"
 import { cn } from "@/lib/utils"
 import {
-  cellState, cellLabel, needsPush, summarise, matchesSearch, facilityGroups,
+  cellState, cellLabel, needsPush, summarise, matchesSearch,
   MAP_STATES, MAP_STATE_CELL, MAP_STATE_BLOCK, MAP_STATE_DOT, MAP_STATE_LABEL,
 } from "./mapping-state"
 import { MfgFacilityMapPanel } from "./MfgFacilityMapPanel"
-import { FacilityMapPanel } from "./FacilityMapPanel"
 import { SyncFacilityMapDialog } from "./SyncFacilityMapDialog"
 import type { MfgFacilityCell, MfgFacilitySkuRow } from "@/types/masters"
 
@@ -60,17 +67,6 @@ export type MappingRow = {
   un_seen_at: string | null
 }
 
-/**
- * What the drilldown is open on. A cell (one manufacturer × one facility) or a
- * whole facility column — never both, since they are the same slide-over.
- *
- * Both carry `whId`, which is what the column highlight reads, so it works for
- * either without asking which kind it is.
- */
-type Selection =
-  | { kind: "cell"; mfgId: number; whId: number }
-  | { kind: "facility"; whId: number }
-
 /** Facility column widths. `left-*` offsets below are derived from these, so the
  *  two cannot be changed independently — hence one place. */
 const MFG_COL = "w-56 min-w-56"
@@ -91,9 +87,10 @@ export function MfgFacilityMatrix({
 }) {
   const router = useRouter()
   const [search, setSearch] = useState("")
-  const [selected, setSelected] = useState<Selection | null>(null)
-  const selCell = selected?.kind === "cell" ? selected : null
-  const selFacility = selected?.kind === "facility" ? selected : null
+  const [selected, setSelected] = useState<{ mfgId: number; whId: number } | null>(null)
+  /** The facility whose Uniware sync dialog is open, by facility_code. Clicking a
+   *  column header syncs that facility — it does NOT open a mapping panel. */
+  const [syncFacility, setSyncFacility] = useState<MfgFacilityCell | null>(null)
 
   /** The facility columns, in the order the server sent them (MWH before CWH,
    *  then name, then entity). Derived from the cells so there is no second source
@@ -156,14 +153,13 @@ export function MfgFacilityMatrix({
     [visible]
   )
 
-  const selectedCell = selCell
-    ? rows.find((r) => r.first.mfg_id === selCell.mfgId)?.cells.get(selCell.whId) ?? null
+  const selectedCell = selected
+    ? rows.find((r) => r.first.mfg_id === selected.mfgId)?.cells.get(selected.whId) ?? null
     : null
 
   /**
    * One manufacturer's live lines, each flagged with its mapping state at one
-   * facility. Both panels are built from this, so a SKU cannot look mapped in one
-   * and unmapped in the other.
+   * facility — the drilldown panel's whole SKU list, built without a fetch.
    */
   const skuRowsFor = useCallback(
     (mfgId: number, whId: number): MfgFacilitySkuRow[] => {
@@ -191,27 +187,9 @@ export function MfgFacilityMatrix({
   )
 
   const selectedSkus = useMemo<MfgFacilitySkuRow[]>(
-    () => (selCell ? skuRowsFor(selCell.mfgId, selCell.whId) : []),
-    [selCell, skuRowsFor]
+    () => (selected ? skuRowsFor(selected.mfgId, selected.whId) : []),
+    [selected, skuRowsFor]
   )
-
-  /** The column drilldown's groups: every manufacturer at the selected facility,
-   *  attention-first. Derived from the same maps as the cell panel. */
-  const selectedFacilityGroups = useMemo(() => {
-    if (!selFacility) return []
-    const whId = selFacility.whId
-    const cellsAt = rows
-      .map((r) => r.cells.get(whId))
-      .filter((c): c is MfgFacilityCell => Boolean(c))
-    return facilityGroups(
-      cellsAt,
-      new Map(cellsAt.map((c) => [c.mfg_id, skuRowsFor(c.mfg_id, whId)]))
-    )
-  }, [selFacility, rows, skuRowsFor])
-
-  const selectedFacility = selFacility
-    ? facilities.find((f) => f.wh_id === selFacility.whId) ?? null
-    : null
 
   return (
     <>
@@ -295,18 +273,28 @@ export function MfgFacilityMatrix({
                       key={f.wh_id}
                       className={cn(
                         "min-w-32 border-l border-border/60 p-0 text-center leading-tight",
-                        selected?.whId === f.wh_id && "bg-accent"
+                        (selected?.whId === f.wh_id || syncFacility?.wh_id === f.wh_id) && "bg-accent"
                       )}
                     >
-                      {/* The whole header is the column drilldown's trigger — the
-                          other half of the ask: a cell configures one manufacturer
-                          here, this configures everyone. A <button> rather than a
-                          click on the <th>, same reason as the cells. */}
+                      {/* The whole header PULLS this facility from Uniware — one
+                          export covers every manufacturer at it, because that is the
+                          grain Uniware reports. It does not open a mapping panel:
+                          mapping is per (manufacturer, facility) and lives on the
+                          cells. Disabled without a facility_code — there is nothing
+                          to ask Uniware about. A <button> rather than a click on the
+                          <th>, same reason as the cells. */}
                       <button
                         type="button"
-                        onClick={() => setSelected({ kind: "facility", whId: f.wh_id })}
-                        title={`Map SKUs for every manufacturer at ${f.wh_name}`}
-                        className="w-full px-2 py-1.5 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                        disabled={!canEdit || !f.facility_code}
+                        onClick={() => setSyncFacility(f)}
+                        title={
+                          !f.facility_code
+                            ? `${f.wh_name} has no Unicommerce facility code, so it cannot be synced`
+                            : canEdit
+                              ? `Sync ${f.wh_name} from Uniware — every manufacturer at this facility`
+                              : undefined
+                        }
+                        className="w-full px-2 py-1.5 enabled:hover:bg-accent disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                       >
                         <div className="font-medium text-foreground">{f.wh_name}</div>
                         {/* master_warehouse.code is NULL on every row today, so the
@@ -340,7 +328,7 @@ export function MfgFacilityMatrix({
                   </tr>
                 ) : (
                   visible.map((row) => {
-                    const isRowSel = selCell?.mfgId === row.first.mfg_id
+                    const isRowSel = selected?.mfgId === row.first.mfg_id
                     return (
                       // The row tint goes on the <tr>: the frozen cells are
                       // bg-inherit, so a per-cell tint never reaches them.
@@ -375,7 +363,7 @@ export function MfgFacilityMatrix({
                           const cell = row.cells.get(f.wh_id)
                           if (!cell) return <td key={f.wh_id} />
                           const state = cellState(cell)
-                          const isSel = isRowSel && selCell?.whId === f.wh_id
+                          const isSel = isRowSel && selected?.whId === f.wh_id
                           return (
                             // The state colour lives on the CELL, so the grid reads
                             // as blocks of coverage rather than dots on a field. No
@@ -404,7 +392,7 @@ export function MfgFacilityMatrix({
                                   way to start mapping somewhere new. */}
                               <button
                                 type="button"
-                                onClick={() => setSelected({ kind: "cell", mfgId: cell.mfg_id, whId: cell.wh_id })}
+                                onClick={() => setSelected({ mfgId: cell.mfg_id, whId: cell.wh_id })}
                                 aria-label={
                                   `${cell.mfg_name} at ${cell.wh_name} ${cell.entity_code}: ` +
                                   `${MAP_STATE_LABEL[state]}, ${cell.mapped_skus} of ${cell.total_skus} SKUs mapped`
@@ -453,15 +441,19 @@ export function MfgFacilityMatrix({
         onSaved={() => router.refresh()}
       />
 
-      {/* The column drilldown. Same slide-over, so only one is ever open — the
-          Selection union is what enforces that. */}
-      <FacilityMapPanel
-        facility={selectedFacility}
-        groups={selectedFacilityGroups}
-        canEdit={canEdit}
-        onClose={() => setSelected(null)}
-        onSaved={() => router.refresh()}
-      />
+      {/* Mounted only while open, so the dialog can read its resume record in a
+          state initialiser — there is no server render to mismatch. */}
+      {syncFacility?.facility_code && (
+        <SyncFacilityMapDialog
+          open
+          onOpenChange={(o) => { if (!o) setSyncFacility(null) }}
+          facilities={[{
+            code: syncFacility.facility_code,
+            label: `${syncFacility.wh_name} · ${syncFacility.entity_code}`,
+          }]}
+          onSynced={() => router.refresh()}
+        />
+      )}
     </>
   )
 }

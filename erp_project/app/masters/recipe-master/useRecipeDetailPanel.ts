@@ -29,6 +29,9 @@ import type { ChangeTypeKey } from "./ChangeTypeCheckboxes"
 import type { RmLock } from "@/lib/masters/variant-rm-lock"
 import type { PropagationTarget } from "./useRecipeWizard"
 
+/** Module scope so the "a kit has no RM" substitution keeps one identity. */
+const EMPTY_ROWS: RecipeLineRow[] = []
+
 export function useBomDetailPanel() {
   const router       = useRouter()
   const pathname     = usePathname()
@@ -213,15 +216,16 @@ export function useBomDetailPanel() {
   // emptied is still a kit, and must not be held to the RM rules.
   const isKit = isKitSku(detail)
   const declaredUnits = isKit ? declaredKitUnits(detail) : null
+  // A kit has no RM — the editor hides the section, and this keeps any rows
+  // loaded from an older version out of the payload route.ts would 400 as
+  // kit_has_rm. Mirrors effectiveRmRows in useRecipeWizard.ts.
+  const effectiveRmRows = isKit ? EMPTY_ROWS : editRmRows
 
   const rmLines      = detail?.lines.filter((l) => l.mtrl_type === "rm") ?? []
   const pmLines      = detail?.lines.filter((l) => l.mtrl_type === "pm") ?? []
   const skuLines     = detail?.lines.filter((l) => l.mtrl_type === "sku") ?? []
   const rmDetailTotal = rmLines.reduce((sum, l) => sum + (Number(l.amount) || 0), 0)
   const rmIsBalanced  = rmLines.length > 0 && isRmTotalValid(rmDetailTotal)
-  const visibleLines  = activeMtrlType === "rm" ? rmLines
-    : activeMtrlType === "sku" ? skuLines
-    : pmLines
 
   /** Toggle selection. */
   function handleRowClick(bomId: number) {
@@ -336,13 +340,13 @@ export function useBomDetailPanel() {
       setSaveError("At least one RM line is required.")
       return
     }
-    // A kit's RM is optional extras, not a formulation - the band does not apply,
-    // exactly as route.ts and the wizard treat it.
+    // A kit has no RM, so the band does not apply - exactly as route.ts and the
+    // wizard treat it.
     if (!isKit && !isRmTotalValid(rmTotal(editRmRows))) {
       setSaveError(rmTotalMessage(rmTotal(editRmRows)))
       return
     }
-    for (const r of [...editRmRows, ...editPmRows, ...editSkuRows]) {
+    for (const r of [...effectiveRmRows, ...editPmRows, ...editSkuRows]) {
       if (!r.mtrl_id || !r.amount) {
         setSaveError("Every line requires a material and an amount.")
         return
@@ -382,7 +386,7 @@ export function useBomDetailPanel() {
           sku_id: skuId,
           effective_from: editEffectiveFrom.trim(),
           source: "manual",
-          rm_lines: editRmRows.map(toLine),
+          rm_lines: effectiveRmRows.map(toLine),
           pm_lines: editPmRows.map(toLine),
           sku_lines: editSkuRows.map(toLine),
           artifact_adds: artifactAdds,
@@ -488,7 +492,6 @@ export function useBomDetailPanel() {
     pmLines,
     rmDetailTotal,
     rmIsBalanced,
-    visibleLines,
     prefetchDetail,
     handleRowClick,
     closeDetail,

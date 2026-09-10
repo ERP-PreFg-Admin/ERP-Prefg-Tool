@@ -186,7 +186,6 @@ function LineSection({
   onChange,
   locked,
   lockNote,
-  optional,
 }: {
   mtrlType: RecipeLineRow["mtrl_type"]
   rows: RecipeLineRow[]
@@ -195,13 +194,8 @@ function LineSection({
   locked?: boolean
   /** Explains where the locked values come from and how to change them. */
   lockNote?: string
-  /** RM on a GIFT KIT: extras alongside the components, not a formulation. The
-   *  99.5-100.5% rule does not apply (route.ts does not apply it either), so the
-   *  running total and its warning are suppressed — a "12% of what?" banner
-   *  nagging about a rule nobody enforces is worse than no banner. */
-  optional?: boolean
 }) {
-  const total = mtrlType === "rm" && !optional ? rmTotal(rows) : null
+  const total = mtrlType === "rm" ? rmTotal(rows) : null
   const balanced = total != null && rows.length > 0 && isRmTotalValid(total)
 
   function updateRow(i: number, next: RecipeLineRow) {
@@ -219,7 +213,6 @@ function LineSection({
       <div className="flex items-center justify-between">
         <p className="flex items-center gap-1.5 text-sm font-medium">
           {SECTION_LABEL[mtrlType]}
-          {optional && <span className="text-xs font-normal text-muted-foreground">optional</span>}
           {locked && <Lock className="h-3.5 w-3.5 text-muted-foreground" />}
         </p>
         {total != null && rows.length > 0 && (
@@ -313,7 +306,7 @@ export function RecipeLineEditorGrid({
   rmLocked?: boolean
   rmLockNote?: string
   /** This SKU is a gift kit (lib/masters/kit-sku.ts): its recipe is the SKUs it
-   *  contains, and RM becomes optional rather than required. */
+   *  contains plus their PM. No RM section is offered at all. */
   isKit?: boolean
   /** master_skus.filling — how many units the SKU master says the kit holds.
    *  Advisory: shown against the actual count, never enforced. */
@@ -327,10 +320,10 @@ export function RecipeLineEditorGrid({
 
   return (
     <div className="space-y-6">
-      {/* Contents FIRST for a kit: it is the recipe, and RM/PM below it are the
-          optional extras. For every other SKU the section is absent entirely
-          rather than rendered empty — an "Add SKU line" button on a body wash
-          would invite exactly the submission route.ts 400s as `not_a_kit`. */}
+      {/* Contents FIRST for a kit: it is the recipe, with PM below it. For
+          every other SKU the section is absent entirely rather than rendered
+          empty — an "Add SKU line" button on a body wash would invite exactly
+          the submission route.ts 400s as `not_a_kit`. */}
       {isKit && skuRows && onChangeSku && (
         <div className="space-y-2">
           <LineSection
@@ -350,15 +343,20 @@ export function RecipeLineEditorGrid({
           )}
         </div>
       )}
-      <LineSection
-        mtrlType="rm"
-        rows={rmRows}
-        materials={rmMaterials}
-        onChange={onChangeRm}
-        locked={rmLocked}
-        lockNote={rmLockNote}
-        optional={isKit}
-      />
+      {/* A kit is assembled from finished SKUs, not formulated, so it has no RM
+          at all — the section is absent rather than shown empty, the same way
+          the contents section is absent for everything else. route.ts 400s an
+          RM line on a kit as `kit_has_rm`. */}
+      {!isKit && (
+        <LineSection
+          mtrlType="rm"
+          rows={rmRows}
+          materials={rmMaterials}
+          onChange={onChangeRm}
+          locked={rmLocked}
+          lockNote={rmLockNote}
+        />
+      )}
       <LineSection mtrlType="pm" rows={pmRows} materials={pmMaterials} onChange={onChangePm} />
     </div>
   )

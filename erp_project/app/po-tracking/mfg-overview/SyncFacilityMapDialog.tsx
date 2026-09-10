@@ -20,6 +20,12 @@
  * Nothing else is stored: the CSV lives briefly in server memory inside
  * lib/mfg-facility-sync.ts and is never written down, so there is no file to delete
  * afterwards.
+ *
+ * ── Two ways in ─────────────────────────────────────────────────────────────
+ * Its own toolbar button, for every facility in turn; or CONTROLLED with a single
+ * facility, which is what clicking a column header on the matrix does. Same run
+ * loop either way — one facility's export already covers every manufacturer at
+ * that facility, because that is the grain Uniware reports.
  */
 
 import { useCallback, useState } from "react"
@@ -80,15 +86,31 @@ const ICON: Record<FacilityState["status"], typeof Check> = {
 export function SyncFacilityMapDialog({
   facilities,
   onSynced,
+  open: openProp,
+  onOpenChange,
 }: {
   /** Facility codes to sync, in the matrix's own column order. */
   facilities: { code: string; label: string }[]
   onSynced: () => void
+  /** Controlled mode. When given, the component renders NO trigger button of its
+   *  own — the caller owns opening it (the matrix's column headers do). */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }) {
   const { toast } = useToast()
-  const [open, setOpen] = useState(false)
+  const controlled = openProp !== undefined
+  const [openSelf, setOpenSelf] = useState(false)
+  const open = controlled ? openProp : openSelf
+  const setOpen = (v: boolean) => (controlled ? onOpenChange?.(v) : setOpenSelf(v))
   const [busy, setBusy] = useState(false)
-  const [run, setRun] = useState<Run | null>(null)
+  // Uncontrolled: seeded by openDialog() below, because localStorage does not
+  // exist during the server render. Controlled: the caller mounts this component
+  // only when opening it, so there IS no server render to mismatch and the
+  // initialiser can read the store directly.
+  const [run, setRun] = useState<Run | null>(() => (openProp !== undefined ? load() : null))
+  /** One facility is the column-header case: singular copy, and the button says
+   *  what it will do rather than "all facilities". */
+  const single = facilities.length === 1
 
   /**
    * Open, reading any interrupted run back from localStorage.
@@ -223,9 +245,23 @@ export function SyncFacilityMapDialog({
       variant: failed === 0 ? "success" : "info",
     })
 
-    // A clean run has nothing left to resume, so the record goes. A run with
-    // problems keeps it, which is what makes "Retry failed" possible.
-    if (failed === 0) { save(null); setRun(null) }
+    // A clean run has nothing left to resume, so its entries go. A run with
+    // problems keeps them, which is what makes "Retry failed" possible.
+    //
+    // Only the facilities THIS run covered are dropped: a single-facility sync
+    // from a column header shares the store with a full run, and clearing the
+    // whole record would throw away the resume state of an interrupted sweep.
+    if (failed === 0) {
+      setRun((current) => {
+        if (!current) return null
+        const rest = Object.fromEntries(
+          Object.entries(current.byFacility).filter(([code]) => !targets.includes(code))
+        )
+        const next = Object.keys(rest).length > 0 ? { ...current, byFacility: rest } : null
+        save(next)
+        return next
+      })
+    }
   }
 
   const states = run?.byFacility ?? {}
@@ -240,21 +276,29 @@ export function SyncFacilityMapDialog({
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={openDialog}>
-        <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-        Sync from Uniware
-      </Button>
+      {!controlled && (
+        <Button variant="outline" size="sm" onClick={openDialog}>
+          <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+          Sync from Uniware
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={(o) => { if (!busy) setOpen(o) }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Sync mapping from Uniware</DialogTitle>
+            <DialogTitle>
+              {single
+                ? `Sync ${facilities[0].label} from Uniware`
+                : "Sync mapping from Uniware"}
+            </DialogTitle>
           </DialogHeader>
 
           <p className="text-sm text-muted-foreground">
-            Runs Unicommerce&apos;s Vendor Item Master export for each facility in turn, then
-            matches what comes back against our manufacturers and SKUs. Nothing is downloaded to
-            your machine and no copy is kept.
+            Runs Unicommerce&apos;s Vendor Item Master export for{" "}
+            {single ? "this facility" : "each facility in turn"}, then matches what comes back
+            against our manufacturers and SKUs. One facility&apos;s export covers{" "}
+            <strong>every manufacturer</strong> at it — that is the grain Uniware reports.
+            Nothing is downloaded to your machine and no copy is kept.
           </p>
 
           <Callout variant="info">
@@ -351,7 +395,9 @@ export function SyncFacilityMapDialog({
                 ? "Syncing…"
                 : doneCount > 0 && unfinished.length > 0
                   ? `Continue (${unfinished.length} left)`
-                  : "Sync all facilities"}
+                  : single
+                    ? "Sync this facility"
+                    : "Sync all facilities"}
             </Button>
           </DialogFooter>
         </DialogContent>

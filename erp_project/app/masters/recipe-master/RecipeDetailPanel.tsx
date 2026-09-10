@@ -51,7 +51,6 @@ export function RecipeDetailPanel({
   skuLines,
   rmDetailTotal,
   rmIsBalanced,
-  visibleLines,
   canEdit,
   onClose,
   onEdit,
@@ -67,11 +66,18 @@ export function RecipeDetailPanel({
   pmLines: RecipeDetailResponse["lines"]
   rmDetailTotal: number
   rmIsBalanced: boolean
-  visibleLines: RecipeDetailResponse["lines"]
   canEdit: boolean
   onClose: () => void
   onEdit: (bomId: number) => void
 }) {
+  // A gift kit has no RM — route.ts 400s an RM line on one as `kit_has_rm` —
+  // so the tab is not offered. Both panels open on "rm", so the shown tab is
+  // resolved here rather than in their state: derived from the lines that
+  // actually exist, it cannot drift from the tabs actually rendered.
+  const showRm = rmLines.length > 0 || skuLines.length === 0
+  const tab = activeMtrlType === "rm" && !showRm ? "sku" : activeMtrlType
+  const visibleLines = tab === "rm" ? rmLines : tab === "sku" ? skuLines : pmLines
+
   return (
     <Card className="max-h-[calc(100vh-3rem)] flex flex-col">
       <CardHeader className="pb-3 shrink-0">
@@ -185,15 +191,15 @@ export function RecipeDetailPanel({
                     ...(skuLines.length > 0
                       ? [{ key: "sku" as const, label: `Kit (${skuLines.length})` }]
                       : []),
-                    { key: "rm", label: `RM (${rmLines.length})` },
+                    ...(showRm ? [{ key: "rm" as const, label: `RM (${rmLines.length})` }] : []),
                     { key: "pm", label: `PM (${pmLines.length})` },
                   ]}
-                  active={activeMtrlType}
+                  active={tab}
                   onSelect={onChangeMtrlType}
                 />
               </div>
 
-              {activeMtrlType === "rm" && rmLines.length > 0 && (
+              {tab === "rm" && rmLines.length > 0 && (
                 <div
                   className={cn(
                     "flex items-center justify-between rounded-lg px-3 py-2 mb-2 text-xs font-medium",
@@ -209,7 +215,7 @@ export function RecipeDetailPanel({
 
               {visibleLines.length === 0 ? (
                 <p className="text-sm text-muted-foreground py-4 text-center">
-                  No {activeMtrlType === "sku" ? "kit content" : activeMtrlType.toUpperCase()} lines found.
+                  No {tab === "sku" ? "kit content" : tab.toUpperCase()} lines found.
                 </p>
               ) : (
                 <div className="space-y-1.5">

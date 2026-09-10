@@ -76,10 +76,35 @@ function sellerName(lines: string[]): string | null {
   return clean(raw?.replace(/\s*-?\s*\([^)]*\)\s*$/, ""))
 }
 
-function grandTotal(lines: string[]): number | null {
+function totalLine(lines: string[]): string | undefined {
   const withGlyph = lines.find((l) => /^Total\b/i.test(l) && new RegExp(RUPEE).test(l))
-  const anyTotal = lines.find((l) => /^Total\b/i.test(l) && MONEY.test(l))
-  return num((withGlyph ?? anyTotal)?.match(MONEY)?.[0])
+  return withGlyph ?? lines.find((l) => /^Total\b/i.test(l) && MONEY.test(l))
+}
+
+function grandTotal(lines: string[]): number | null {
+  return num(totalLine(lines)?.match(MONEY)?.[0])
+}
+
+// (?![A-Za-z]) rather than \b: Aroma prints "304.0000 PCS19.00 BOX", and a
+// digit is a word character, so \b never fires after that first unit.
+const UNIT_QTY = /([\d,]+(?:\.\d+)?)\s*(?:nos|pcs|box|units?|kgs?|ltrs?)(?![A-Za-z])/gi
+
+/**
+ * Every summed quantity printed on the grand-total row — "Total ī17,84,361.00
+ * 28,736.0 nos" gives 28736. Aroma prints two ("304 PCS", "19 BOX"), one per
+ * unit the invoice bills in, so this returns all of them and the caller only
+ * needs one to match.
+ *
+ * The money and the quantity run together in the extracted text, so the grand
+ * total is stripped off by its two decimal places before scanning.
+ */
+export function totalQuantities(text: string): number[] {
+  const line = totalLine(text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean))
+  if (!line) return []
+
+  const money = line.match(MONEY)
+  const rest = money ? line.slice((money.index ?? 0) + money[0].length) : line
+  return [...rest.matchAll(UNIT_QTY)].map((m) => num(m[1])).filter((n): n is number => n !== null)
 }
 
 export type ParsedHeader = {

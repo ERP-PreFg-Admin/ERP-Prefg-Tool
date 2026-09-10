@@ -421,8 +421,10 @@ export async function runInwardInvoice(
         currencyCode: body.currency || "INR",
         // Almost always omitted here: expectedOn is the invoice date, which is
         // in the past because the goods have already shipped, and Uniware only
-        // accepts a future deliveryDate. The real date rides in a custom field
-        // below rather than being faked forward.
+        // accepts a future deliveryDate. Not faked forward — the true date
+        // lives on our invoice, and Uniware has no field on the PO that holds
+        // it (the invoiceDate custom field it used to ride in was never
+        // registered on the tenant).
         deliveryDate: futureDeliveryDate(written.expectedOn),
         items: written.poLines.map((l) => ({
           itemSKU: l.sku_code,
@@ -430,14 +432,19 @@ export async function runInwardInvoice(
           unitPrice: l.unitPrice ?? 0,
           maxRetailPrice: l.mrp,
         })),
+        // ReferenceNo and ReferenceOrder are the ONLY two custom fields
+        // registered on the tenant. An unregistered one is accepted and
+        // silently dropped, so a successful create never proves a value
+        // landed — invoiceNo and invoiceDate were sent here for months and
+        // stored nowhere. Verified against TEST_FACILITY, 2026-09-10.
         customFields: {
-          invoiceNo: invoice_no,
-          invoiceDate: written.expectedOn,
+          // The PO's "Reference No". A custom field, not a body key:
+          // purchaseOrder/create has no reference field and 400s on
+          // `referenceNumber` as an unrecognized field.
+          ReferenceNo: invoice_no,
           // One field, comma-separated: the POs on our side the goods were
           // inwarded against, so a single Uniware PO can be traced back to the
-          // several orders it settles. Sent as a custom field rather than a body
-          // key — buildPurchaseOrder only forwards documented keys, and Uniware
-          // rejects the rest.
+          // several orders it settles.
           ...(referenceOrders ? { ReferenceOrder: referenceOrders } : {}),
         },
       })

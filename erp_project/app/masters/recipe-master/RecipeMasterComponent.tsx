@@ -221,7 +221,6 @@ export default function RecipeMasterComponent({
               skuLines={panel.skuLines}
               rmDetailTotal={panel.rmDetailTotal}
               rmIsBalanced={panel.rmIsBalanced}
-              visibleLines={panel.visibleLines}
               canEdit={canEdit}
               onClose={panel.closeDetail}
               onEdit={panel.openEditMode}

@@ -264,7 +264,14 @@ The code is stamped onto every inward PO the invoice created (`buildSetUniwarePo
 
 We deliberately **do not** send our own `purchaseOrderCode` on create: leaving it out lets the facility's own series number the PO (e.g. `GM/2627/PO/2006`), which is the reference the manufacturer recognises and the one quoted in the notification email. It exists nowhere else, which is why it is stored.
 
-Because one Uniware PO settles several of ours, it carries a **`ReferenceOrder`** custom field: a single comma-separated list of the `purchase_orders.po_no` values the goods were inwarded against (deduped, in line order — a FIFO split means several invoice lines can settle the same PO). It travels in `customFieldValues` rather than as a body key, because `buildPurchaseOrder` only forwards documented keys and Uniware rejects the rest. If the facility hasn't got that custom field configured, moving it into the body payload is a one-line change.
+The mirrored PO carries two custom fields, and `customFieldValues` is the only channel available for either — `purchaseOrder/create` takes no reference field of any kind, and an unrecognised body key is a hard 400 (`Unrecognized field "referenceNumber" (Class com.uniware.core.api.purchase.CreatePurchaseOrderRequest), not marked as ignorable`; eleven candidate names were probed against TEST_FACILITY on 2026-09-10 and every one was rejected). Moving either into the body payload is **not** an option.
+
+| Custom field | Shows in Uniware as | Carries |
+|---|---|---|
+| `ReferenceNo` | Reference No | The supplier's invoice number — what the warehouse reconciles the PO against |
+| `ReferenceOrder` | ReferenceOrder | Comma-separated `purchase_orders.po_no` values the goods were inwarded against (deduped, in line order — a FIFO split means several invoice lines can settle the same PO), so one Uniware PO traces back to the several orders it settles |
+
+> ⚠️ **These two are the only ones registered on the tenant, and an unregistered custom field is accepted and silently dropped.** A successful create therefore never proves a value landed. `invoiceNo` and `invoiceDate` were sent here for months and stored nowhere; they were removed once a read-back showed the PO carrying neither. Before adding a third, register it in Uniware and confirm with `getPurchaseOrderDetails` that it comes back.
 
 `uniwareEnabled()` is false when the `UNIWARE_*` vars are unset, and the mirror step is then **skipped** rather than failing — the app boots and inwards invoices without Uniware configured.
 

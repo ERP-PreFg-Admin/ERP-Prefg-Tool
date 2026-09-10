@@ -85,6 +85,37 @@ export function resolveRecipeVersions(opts: {
 }
 
 /**
+ * The stored `bom_code`, and the ONE place its shape is decided.
+ *
+ *   ordinary   `<sku>-RM<n>-PM<n>`     MCaf208_WB-RM1-PM1
+ *   gift kit   `<sku>_KIT_PM<n>`       MGKIT62_ACG_S_KIT_PM1
+ *
+ * A kit is assembled from finished SKUs and has no formulation (route.ts 400s
+ * an RM line on one as `kit_has_rm`), so it carries no RM segment: the `RM1` it
+ * used to show named lines it did not have, and could never advance —
+ * `resolveRecipeVersions` bumps RM only when the RM set changes, and an empty
+ * set never differs from an empty set. `_KIT_` marks the shape so a kit's code
+ * is recognisable on sight rather than only by the absent segment.
+ *
+ * Keyed on the lines rather than on isKitSku so the code cannot disagree with
+ * its own contents; a non-kit always has at least one RM line (`rm_required`),
+ * so only a kit can reach the kit form.
+ *
+ * Fits `master_recipe.bom_code` VARCHAR(50): the longest live kit SKU code is
+ * 18 chars, leaving ~27 with the suffix.
+ */
+export function recipeCode(
+  skuCode: string,
+  versions: { rmVersion: number; pmVersion: number },
+  lines: DiffableLine[]
+): string {
+  const hasRm = lines.some((l) => l.mtrl_type === "rm")
+  return hasRm
+    ? `${skuCode}-RM${versions.rmVersion}-PM${versions.pmVersion}`
+    : `${skuCode}_KIT_PM${versions.pmVersion}`
+}
+
+/**
  * Compares the RM-line set and PM-line set independently — any addition, removal,
  * or amount/uom change on a side marks that side changed.
  *

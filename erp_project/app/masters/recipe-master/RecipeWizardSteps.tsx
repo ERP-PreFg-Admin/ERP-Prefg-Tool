@@ -156,7 +156,7 @@ export function Step3EntryMethod({ onChoose, csvAvailable = true }: {
         <p className="text-xs text-muted-foreground mt-1">
           {csvAvailable
             ? "Add RM and PM lines one by one."
-            : "Pick the SKUs this kit contains, and any RM or PM on top."}
+            : "Pick the SKUs this kit contains, and the PM it ships in."}
         </p>
       </button>
       {csvAvailable && (
@@ -339,7 +339,7 @@ export function Step4LineEntry({
             onChangeReason={onChangeReason}
             changeType={changeType}
             onChangeChangeType={onChangeChangeType}
-            hideRm={rmLocked}
+            hideRm={rmLocked || isKit}
             isKit={isKit}
           />
         </div>
@@ -470,16 +470,15 @@ export function Step5Review({
           totalBadge={`${kitUnitTotal(skuRows)}${declaredUnits != null ? ` of ${declaredUnits}` : ""} units`}
         />
       )}
-      <SummaryLineList
-        title={
-          rmLocked ? "Raw Materials (RM) — inherited"
-            : isKit ? "Raw Materials (RM) — optional"
-            : "Raw Materials (RM)"
-        }
-        rows={rmRows}
-        materials={rmMaterials}
-        totalBadge={isKit ? undefined : `${rmTotal(rmRows).toFixed(2)}%`}
-      />
+      {/* A kit has no RM to review. */}
+      {!isKit && (
+        <SummaryLineList
+          title={rmLocked ? "Raw Materials (RM) — inherited" : "Raw Materials (RM)"}
+          rows={rmRows}
+          materials={rmMaterials}
+          totalBadge={`${rmTotal(rmRows).toFixed(2)}%`}
+        />
+      )}
       {rmLocked && rmLock.locked && (
         <Callout variant="info">
           RM comes from <span className="font-mono">{rmLock.ownerSkuCode}</span> and is submitted

@@ -59,7 +59,7 @@ These docs capture ongoing architectural decisions. Do not edit them without con
 | MFG Cost Manager | Live (2 tabs are placeholders: Common RMs, Vendor Ing Mapping) | `app/manufacturing/` |
 | PO Tracking — FG POs Tracking | Live | `app/po-tracking/po-procurement/` |
 | PO Tracking — PO Inwarding + invoice inwarding | Live | `app/po-tracking/po-inwarding/` |
-| PO Tracking — MFG Overview (capacity + the SKU × Facility mapping matrix, cell **and** column drilldowns) | Live | `app/po-tracking/mfg-overview/` |
+| PO Tracking — MFG Overview (capacity + the SKU × Facility mapping matrix; cells map a pair, column headers sync that facility from Uniware) | Live | `app/po-tracking/mfg-overview/` |
 | PO Tracking — RM/PM Procurement | Stub | `app/po-tracking/rm-pm-procurement/` |
 | Finance & Accounting | Stub | `app/finance/` |
 | HR & Payroll | Stub | `app/hr-payroll/` |
@@ -88,10 +88,11 @@ These docs capture ongoing architectural decisions. Do not edit them without con
   new lines, so a kit reads as uncosted rather than zero-cost. `sku_variants` — dead
   until now — stores the contents, kit as parent. See
   [Masters Module](./masters-module.md) and `lib/masters/kit-sku.ts`.
-- **2026-09 · Facility-wise SKU mapping** — the MFG × Facility matrix drills down by
-  COLUMN as well as by cell: click a facility header to set up every manufacturer
-  there in one pass. One `set-map` POST per manufacturer, so every existing guard
-  applies unchanged. Design note: [Facility Map Drilldown](./facility-map-drilldown-plan.md).
+- **2026-09 · Facility column headers sync from Uniware** — clicking a facility header
+  on the MFG × Facility matrix runs that facility's Vendor Item Master export, which
+  covers every manufacturer at it. Mapping stays on the cells, where the (manufacturer,
+  facility) grain actually lives. A facility-wide *mapping* panel was tried first and
+  removed — it duplicated the cells.
 - **2026-09 · Inward mail tells the truth** — the warehouse notification reports a
   fourth step status, `warning` ("it happened, but not completely"), because at 17 of
   18 facilities Uniware will not render the PO document and the mail goes without it.

@@ -203,7 +203,7 @@ export function RecipeEditDialog({
             changeType={changeType}
             onChangeChangeType={onChangeChangeType}
             disabled={saving}
-            hideRm={rmLocked}
+            hideRm={rmLocked || isKit}
             isKit={isKit}
           />
 

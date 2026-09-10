@@ -21,7 +21,10 @@ const TABLE_END = new RegExp(
     String.raw`^Tax Amount`,
     String.raw`^Company['’]s PAN`,
     String.raw`^Declaration`,
-    String.raw`^Total\b`,
+    // The totals row, which always carries money — not Kain's note line
+    // "TOTAL NO OF BOXES - 229 BOXES X 36 NOS", which used to end the table
+    // one row early.
+    String.raw`^Total\b(?=.*${MONEY})`,
     String.raw`^(Output|OUTPUT)\s+(IGST|CGST|SGST)`,
     String.raw`^continued to page`,
     String.raw`^This is a Computer`,
@@ -99,7 +102,12 @@ function itemFrom(block: string[]): ParsedLineItem | null {
   }
 }
 
-export function parseTallyRows(text: string): ParsedLineItem[] {
+/**
+ * The item table split into one block per numbered row. Exported so the parse
+ * gate can compare how many rows the supplier numbered against how many we
+ * managed to read.
+ */
+export function tallyBlocks(text: string): string[][] {
   const lines = text.split(/\r?\n/)
 
   const start = lines.findIndex((l) => TABLE_START.test(l))
@@ -107,6 +115,11 @@ export function parseTallyRows(text: string): ParsedLineItem[] {
 
   const blocks: string[][] = []
   let current: string[] | null = null
+  let expected = 1
+  // A multi-page invoice reprints the whole letterhead between one page's
+  // footer and the next page's table header. ZYMO's address starts "3 rd
+  // floor," there, which reads as row 3 — so rows only count inside the table.
+  let inTable = true
 
   for (const raw of lines.slice(start + 1)) {
     const line = raw.trim()
@@ -114,17 +127,33 @@ export function parseTallyRows(text: string): ParsedLineItem[] {
 
     if (TABLE_END.test(line)) {
       current = null
+      inTable = false
       continue
     }
 
-    if (SERIAL.test(line)) {
+    if (TABLE_START.test(line)) {
+      current = null
+      inTable = true
+      continue
+    }
+
+    // Serials run 1, 2, 3… Anything else opening with a number belongs to the
+    // row it follows — a description wrapping onto "200 ml", a pack line
+    // "24 X 267 BOX = 6408 NOS", an e-Way row starting with its HSN. Splitting
+    // on those stranded the description in one block and the money in the next.
+    if (inTable && Number(line.match(SERIAL)?.[1]) === expected) {
       current = [line]
       blocks.push(current)
+      expected++
       continue
     }
 
     current?.push(line)
   }
 
-  return blocks.map(itemFrom).filter((item): item is ParsedLineItem => item !== null)
+  return blocks
+}
+
+export function parseTallyRows(text: string): ParsedLineItem[] {
+  return tallyBlocks(text).map(itemFrom).filter((item): item is ParsedLineItem => item !== null)
 }
