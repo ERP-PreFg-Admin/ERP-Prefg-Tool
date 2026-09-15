@@ -194,47 +194,6 @@ function InvoiceShortCell({ inv }: { inv: InvoiceHistoryHeader }) {
 }
 
 /**
- * Qty − (Accepted + Rejected): billed but never accounted for at the dock.
- *
- * Deliberately NOT the same thing as Rejected. Rejected arrived and was refused;
- * short never arrived. One is a quality claim against the manufacturer, the
- * other is a delivery shortfall — different conversations, with different people.
- *
- * The colour rule is what stops it lying. Before any receipt exists the whole
- * line is technically outstanding, so a plain amber number would paint every
- * un-received invoice as short when nothing is wrong yet. It only earns colour
- * once something HAS been received and a gap remains.
- *
- * A negative shows as-is rather than clamped to zero: the warehouse accepted
- * more than was billed, which is worth seeing and not worth hiding.
- */
-function ShortQtyCell({ line }: { line: InvoiceHistoryItem }) {
-  // No inward PO means no receipt can key to this line — nothing to subtract.
-  if (line.po_id == null) {
-    return <td className="text-right tabular-nums text-muted-foreground">—</td>
-  }
-
-  const accepted = Number(line.grn_accepted ?? 0)
-  const rejected = Number(line.grn_rejected ?? 0)
-  const short    = Number(line.qty ?? 0) - accepted - rejected
-  const anyReceipt = accepted + rejected > 0
-
-  return (
-    <td
-      className={cn(
-        "text-right tabular-nums",
-        short > 0 && anyReceipt
-          ? "font-medium text-amber-700 dark:text-amber-400"
-          : "text-muted-foreground"
-      )}
-      title={anyReceipt ? undefined : "Nothing received against this line yet"}
-    >
-      {qty(short)}
-    </td>
-  )
-}
-
-/**
  * The receipts booked against one invoice, grouped by GRN.
  *
  * A different document from the line items, which is why it is a separate view
@@ -720,13 +679,6 @@ export default function InvoiceGroupTable({
                                       is what grn_items_uniware.po_id joins on. */}
                                   <th className="text-right">Accepted</th>
                                   <th className="text-right">Rejected</th>
-                                  {/* Qty − (Accepted + Rejected): what was
-                                      billed but never accounted for at the
-                                      dock. Distinct from Rejected — rejected
-                                      arrived and was refused, short never
-                                      arrived at all, and they are chased from
-                                      different people. */}
-                                  <th className="text-right">Short Qty</th>
                                   {/* Unicommerce's own two, mirrored by the
                                       sync. Only these — received and rejected
                                       above already say the same thing from the
@@ -787,7 +739,6 @@ export default function InvoiceGroupTable({
                                         ? <span className="text-muted-foreground">—</span>
                                         : qty(li.grn_rejected ?? 0)}
                                     </td>
-                                    <ShortQtyCell line={li} />
                                     {/* NULL is "never asked", not zero — the
                                         sync stamps un_line_synced_at, so a dash
                                         here means Uniware has not answered about
