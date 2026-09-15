@@ -7,15 +7,15 @@
  * permanent new role. This file replaces that with a declared list.
  *
  * ── Shape ─────────────────────────────────────────────────────────────────
- * Twelve org roles: four domains (RM · PM · Production · Cost) x three
- * designations (Head · Lead · Executive), keyed as `${domain}_${designation}`.
+ * Fifteen org roles: five domains (RM · PM · Production · Cost · Warehouse) x
+ * three designations (Head · Lead · Executive), keyed as `${domain}_${designation}`.
  * Plus two system roles, `developer` and `admin`, which have no designation
  * because they aren't org positions.
  *
  * The key is a single lowercase string on purpose. `user_roles` has a composite
  * PK of (user_id, role), the JWT carries `roles: string[]`, and resolveAccess
  * matches on the string — so encoding designation *into* the key means no schema
- * change, no new column, and each of the twelve is independently grantable.
+ * change, no new column, and each of the fifteen is independently grantable.
  *
  * ── What a role does NOT do ───────────────────────────────────────────────
  * Nothing in the app branches on a role name; there is no `if (role === ...)`
@@ -23,6 +23,10 @@
  * (see lib/permissions.ts resolveAccess). `approver: true` on Head is
  * descriptive — it documents why Heads are seeded `editor` on /approvals, and
  * drives a UI hint. The actual gate is still the page permission.
+ *
+ * Adding a domain to DOMAINS is the whole change: ROLES, the admin pickers, the
+ * Zod enums and seed-permissions all derive from it. Re-run seed-permissions.ts
+ * so the new Head gets /approvals.
  */
 
 export const DOMAINS = [
@@ -30,6 +34,7 @@ export const DOMAINS = [
   { key: "pm", label: "Packing Material" },
   { key: "production", label: "Production" },
   { key: "cost", label: "Cost" },
+  { key: "warehouse", label: "Warehouse" },
 ] as const
 
 export const DESIGNATIONS = [

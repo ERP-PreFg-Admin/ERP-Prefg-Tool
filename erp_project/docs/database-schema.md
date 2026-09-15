@@ -625,7 +625,7 @@ Schema changes applied straight to RDS are kept as commented SQL files alongside
 |------|--------|-------------|
 | `add_user_entity_scope.sql` | `user_entity_scope` table | Yes |
 | `add_activity_log.sql` | `activity_log` table + bootstrap `/admin` permission rows | Yes |
-| `migrate_role_taxonomy.sql` | Remap/clear roles to the `lib/roles.ts` taxonomy; reset `page_permissions` to developer/admin + the four Heads on `/approvals` | Yes |
+| `migrate_role_taxonomy.sql` | Remap/clear roles to the `lib/roles.ts` taxonomy; reset `page_permissions` to developer/admin + every Head on `/approvals` | Yes |
 | `add_supplier_invoices.sql` | `invoice_mfg` + `invoice_items_mfg` | Yes |
 | `add_inward_po_type.sql` | `purchase_orders.po_type` ← adds `inward` | Yes |
 | `add_invoice_item_reference_po.sql` | `invoice_items_mfg.received_against_po_id` + backfill from the old single-link shape | No |

@@ -9,7 +9,7 @@
 // lib/permissions.ts' parent-walk to fall back to, which makes them
 // deny-by-default with no way to fix it from inside the UI:
 //   /admin      -> developer + admin, or nobody can open the admin panel
-//   /approvals  -> the four Heads, since approvals are done by Head
+//   /approvals  -> every Head, since approvals are done by Head
 //
 // Idempotent. Safe to re-run.
 import 'dotenv/config'

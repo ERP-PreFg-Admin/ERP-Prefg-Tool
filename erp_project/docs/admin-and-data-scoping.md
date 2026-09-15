@@ -21,7 +21,7 @@ Every tab reads server-side (`page.tsx` → `lib/queries/*`), the same way maste
 
 Roles used to be **free text**: `user_roles.role` and `page_permissions.role` are plain `VARCHAR(100)`, and the list the admin UI offered was *derived* by unioning those two tables. A typo in the Users dialog silently created a permanent new role that then showed up for everyone. `lib/roles.ts` replaces that with a declared list.
 
-**14 roles** = 4 domains × 3 designations, plus 2 system roles:
+**17 roles** = 5 domains × 3 designations, plus 2 system roles:
 
 | | Head | Lead | Executive |
 |---|---|---|---|
@@ -29,12 +29,13 @@ Roles used to be **free text**: `user_roles.role` and `page_permissions.role` ar
 | Packing Material | `pm_head` | `pm_lead` | `pm_executive` |
 | Production | `production_head` | `production_lead` | `production_executive` |
 | Cost | `cost_head` | `cost_lead` | `cost_executive` |
+| Warehouse | `warehouse_head` | `warehouse_lead` | `warehouse_executive` |
 
 System roles (no designation — they gate the tool, not a position in the org): `developer`, `admin`.
 
-The key is a single lowercase string on purpose: `user_roles` has a composite PK of `(user_id, role)`, the JWT carries `roles: string[]`, and `resolveAccess` matches on the string — so encoding the designation *into* the key means no schema change, no new column, and each of the fourteen is independently grantable.
+The key is a single lowercase string on purpose: `user_roles` has a composite PK of `(user_id, role)`, the JWT carries `roles: string[]`, and `resolveAccess` matches on the string — so encoding the designation *into* the key means no schema change, no new column, and each of the fifteen is independently grantable.
 
-**What a role does not do:** nothing in the app branches on a role name — there is no `if (role === ...)` anywhere. A role's only power is the `page_permissions` rows attached to it. `approver: true` on Head is descriptive: it documents why the four `*_head` roles are seeded `editor` on `/approvals`, and drives a UI hint. The actual gate is still the page permission.
+**What a role does not do:** nothing in the app branches on a role name — there is no `if (role === ...)` anywhere. A role's only power is the `page_permissions` rows attached to it. `approver: true` on Head is descriptive: it documents why the `*_head` roles are seeded `editor` on `/approvals`, and drives a UI hint. The actual gate is still the page permission.
 
 Derived helpers (all computed from the role keys a user holds, so nothing can disagree with what `resolveAccess` reads): `designationsOf`, `domainsOf`, `roleLabel`, `APPROVER_ROLES`, `ROLE_KEYS` (for `z.enum` validation on the users and permissions routes), and `isKnownRole` — false for any legacy string still sitting in a schema that hasn't had the migration applied, which the Users table flags rather than rendering as if it were real.
 
@@ -45,7 +46,7 @@ Derived helpers (all computed from the role keys a user holds, so nothing can di
 1. Remaps users on retired roles (`"cost creator"` → `cost_executive`, `"production executive"` → `production_executive`, …). `INSERT IGNORE` + `DELETE` rather than `UPDATE`, because `user_roles`' PK is `(user_id, role)` and updating a row to a role the user already holds would violate it. Note the live schema held role names **with spaces** while `seed-permissions.ts` had historically seeded underscored variants nobody held — every statement matches both spellings.
 2. Deletes every role outside the taxonomy. Users keep their account and their per-user overrides; they just hold no role until one is assigned in `/admin`.
 3. Clears `page_permissions` for every role except `developer`/`admin` — deliberately, because access is granted from the tool now. This also drops the old `"production head"` grants, whose name collides with the new `production_head` role and would otherwise carry 11 inherited grants forward invisibly. `user_page_permissions` is untouched.
-4. Re-seeds the one org rule: the four Heads get `editor` on `/approvals`.
+4. Re-seeds the one org rule: every Head gets `editor` on `/approvals`.
 
 `scripts/_check-role-taxonomy.ts` asserts nothing outside the taxonomy survived (via `usersSql.selectRoleStringsInUse`, which exists only for that check).
 
@@ -65,7 +66,7 @@ Three stacked pieces, all "pick one thing, edit its pages down a list":
 2. **Role permissions** → `page_permissions`.
 3. **Per-user overrides** → `user_page_permissions`.
 
-The role panel used to be a role × page matrix; with 14 roles that meant 15 columns × 23 pages of dropdowns and horizontal scrolling to set one cell, so it's now a role picker plus a vertical page list — the same shape as the other two panels.
+The role panel used to be a role × page matrix; with 17 roles that meant 18 columns × 23 pages of dropdowns and horizontal scrolling to set one cell, so it's now a role picker plus a vertical page list — the same shape as the other two panels.
 
 Both editable panels use one 4-state control:
 
