@@ -4,9 +4,10 @@ import { rawMaterials } from "@/lib/queries/raw-materials"
 import { parseS3Import } from "@/lib/import-s3"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
-import { insertApprovalWithItems, applyVendorRateApproval, applyMfgRateApproval, toRmParams, findFuzzyMakeMatch } from "@/lib/master-routes/material-utils"
+import { insertApprovalWithItems, applyVendorRateApproval, applyMfgRateApproval, toRmParams, findFuzzyMakeMatch, fuzzyMakeSuggestion } from "@/lib/master-routes/material-utils"
 import { stageRmBulkRows } from "@/lib/approvals/handlers/raw-materials"
 import { fetchEditMatchCandidates, findBestEditMatch, type EditCandidate } from "@/lib/master-routes/edit-match"
+import { findNameCollision, collisionMessage, sameNameMakes, type MaterialRow } from "@/lib/masters/material-duplicates"
 import { roundToWholeNumber, roundToTwoDecimals } from "@/lib/numeric"
 import { todayIST, monthIST } from "@/lib/date"
 
@@ -176,13 +177,37 @@ export async function rmCheckDuplicatesBulk(body: any, ctx: object): Promise<Nex
       if (match) editMatches[i] = { id: match.id, code: match.code, current: match }
     })
 
+    // One read of the whole master (~1k rows), not a query per row: the name
+    // key is computed in JS, so this also replaces N round-trips with one.
+    // `seen` grows as we go, so two rows INSIDE the same file that normalise
+    // alike flag each other — the file is as likely a source of the duplicate
+    // as the table is.
+    const existing: MaterialRow[] = (await query<any>(rawMaterials.selectAll))
+      .map((r) => ({ id: r.id, code: r.rm_code, name: r.name, make: r.make }))
+    const seen: MaterialRow[] = [...existing]
+
     for (let i = 0; i < rows.length; i++) {
       if (editMatches[i]) continue
       const row = rows[i]
       const make = String(row.make ?? "").trim()
       const name = String(row.name ?? "").trim()
-      if (!name || !make) continue
-      const suggestion = await findFuzzyMakeMatch(name, row.type, make)
+      if (!name) continue
+
+      // Name collision first: it is the stronger claim. If this material is
+      // already here under this make, a "did you mean a different make?"
+      // suggestion on top would only muddy it.
+      const clash = findNameCollision(seen, name, make)
+      if (clash) {
+        duplicates[i] = [collisionMessage(clash, name)]
+        continue
+      }
+      seen.push({ id: 0, code: `row ${i + 1}`, name, make })
+
+      if (!make) continue
+      // Same name, different make — is the make a typo of one already in use?
+      // In memory against the same normalised key, so this now fires on
+      // "Gmoist BT99" vs "Gmoist BT 99", which the old exact-name SQL missed.
+      const suggestion = fuzzyMakeSuggestion(sameNameMakes(existing, name, make), make)
       if (suggestion) duplicates[i] = [`Make "${make}" is close to existing "${suggestion}" for this material — did you mean "${suggestion}"?`]
     }
     return NextResponse.json({ duplicates, editMatches })

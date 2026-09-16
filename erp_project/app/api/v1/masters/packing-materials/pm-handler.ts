@@ -8,6 +8,7 @@ import logger from "@/lib/logger"
 import { insertApprovalWithItems, applyVendorRateApproval, applyMfgRateApproval, generateMaterialCode, toPmParams } from "@/lib/master-routes/material-utils"
 import { stagePmBulkRows } from "@/lib/approvals/handlers/packing-materials"
 import { fetchEditMatchCandidates, findBestEditMatch, type EditCandidate } from "@/lib/master-routes/edit-match"
+import { findNameCollision, collisionMessage, type MaterialRow } from "@/lib/masters/material-duplicates"
 import { roundToWholeNumber, roundToTwoDecimals } from "@/lib/numeric"
 import { todayIST, monthIST } from "@/lib/date"
 
@@ -543,6 +544,22 @@ export async function pmCheckDuplicatesBulk(body: { rows?: Record<string, unknow
       const match = findBestEditMatch(row, candidates, "pm_code")
       if (match) editMatches[i] = { id: match.id, code: match.code, current: match }
     })
+
+    // master_pm has no make column, so the key is the name alone — which is
+    // what catches its duplicated "Mono Carton EDP (Fein) …" cartons. `seen`
+    // grows so two rows in the same file flag each other too.
+    const seen: MaterialRow[] = (await query<any>(packingMaterials.selectAll))
+      .map((r) => ({ id: r.id, code: r.pm_code, name: r.name }))
+
+    rows.forEach((row, i) => {
+      if (editMatches[i]) return
+      const name = String(row.name ?? "").trim()
+      if (!name) return
+      const clash = findNameCollision(seen, name)
+      if (clash) duplicates[i] = [collisionMessage(clash, name)]
+      else seen.push({ id: 0, code: `row ${i + 1}`, name })
+    })
+
     return NextResponse.json({ duplicates, editMatches })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)

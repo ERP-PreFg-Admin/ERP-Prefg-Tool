@@ -9,9 +9,27 @@ import type { PoolConnection } from "mysql2/promise"
 const MAKE_FUZZY_THRESHOLD = 0.3
 
 /**
+ * Ranks `existingMakes` against a newly typed one and returns the closest if
+ * it reads as a typo ("addni" vs "Adani"), else null.
+ *
+ * Split out from findFuzzyMakeMatch so the bulk CSV check — which already
+ * holds the whole master in memory and must not run a query per row — ranks
+ * candidates by exactly the same rule as the single-row wizard check.
+ */
+export function fuzzyMakeSuggestion(existingMakes: string[], candidateMake: string): string | null {
+  const candidate = candidateMake.trim()
+  if (!candidate || existingMakes.length === 0) return null
+  const fuse = new Fuse(existingMakes, { threshold: MAKE_FUZZY_THRESHOLD, ignoreLocation: true })
+  return fuse.search(candidate)[0]?.item ?? null
+}
+
+/**
  * Fuzzy-matches a newly typed RM make against makes already used for the
  * same name + type. Returns the closest existing make if it's a near-typo
  * of `candidateMake` (and not already an exact match), else null.
+ *
+ * Single-row path only (the Add-material wizard). The bulk CSV check uses
+ * sameNameMakes + fuzzyMakeSuggestion against its in-memory copy instead.
  */
 export async function findFuzzyMakeMatch(
   name: string,
@@ -23,11 +41,7 @@ export async function findFuzzyMakeMatch(
 
   const rows = await query<{ make: string }>(rawMaterials.selectMakesByNameType, [name.trim(), type?.trim() || ""])
   const makes = rows.map((r) => r.make).filter((m) => m.toLowerCase() !== candidate.toLowerCase())
-  if (makes.length === 0) return null
-
-  const fuse = new Fuse(makes, { threshold: MAKE_FUZZY_THRESHOLD, ignoreLocation: true })
-  const [best] = fuse.search(candidate)
-  return best?.item ?? null
+  return fuzzyMakeSuggestion(makes, candidate)
 }
 
 /**
