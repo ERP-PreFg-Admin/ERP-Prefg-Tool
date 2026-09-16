@@ -1,8 +1,18 @@
 // ── SKU ──────────────────────────────────────────────────────────────────────
 
 import { skus as skuSql } from "@/lib/queries/skus"
-import { STATUS } from "@/lib/constants"
-import { type ModuleHandler, buildFieldMap } from "./types"
+import { type ModuleHandler, buildFieldMap, approvedStatus } from "./types"
+import { applyApprovedColumns, type ColumnTarget } from "./apply-columns"
+
+/** Everything an approved SKU edit may write. filling/mrp are numeric columns —
+ *  a cleared field arrives as "" and applyApprovedColumns writes NULL. */
+const SKU_TARGET: ColumnTarget = {
+  table: "master_skus", key: "id",
+  columns: [
+    "name", "brand", "category", "subcategory", "sku_type",
+    "filling", "filling_uom", "mrp", "status",
+  ],
+}
 
 export const skuHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
@@ -15,25 +25,12 @@ export const skuHandler: ModuleHandler = {
   async applyAndArchive(conn, entityId, items) {
     const fieldMap = buildFieldMap(items)
     const [rows] = await conn.execute(skuSql.selectById, [entityId])
-    const cur = (rows as Record<string, unknown>[])[0]
-    if (!cur) throw new Error(`SKU ${entityId} not found`)
+    if (!(rows as unknown[])[0]) throw new Error(`SKU ${entityId} not found`)
 
-    // filling/mrp are INT columns: an approved "cleared" field arrives as "" and
-    // MySQL rejects that, so empty means NULL here.
-    const num = (v: string | undefined, current: unknown): string | number | null =>
-      v === undefined ? (current as number | null) ?? null : v.trim() === "" ? null : v
-
-    await conn.execute(skuSql.updateSku, [
-      fieldMap.name        ?? cur.name,
-      fieldMap.brand       ?? cur.brand       ?? null,
-      fieldMap.category    ?? cur.category    ?? null,
-      fieldMap.subcategory ?? cur.subcategory ?? null,
-      fieldMap.sku_type    ?? cur.sku_type    ?? null,
-      num(fieldMap.filling, cur.filling),
-      fieldMap.filling_uom ?? cur.filling_uom ?? null,
-      num(fieldMap.mrp, cur.mrp),
-      STATUS.ACTIVE,
-      entityId,
-    ])
+    // status is forced, not diffed: the row is 'in_review' by now and has to
+    // leave it whether or not the submitter touched the field.
+    await applyApprovedColumns(conn, SKU_TARGET, fieldMap, entityId, {
+      status: approvedStatus(fieldMap.status),
+    })
   },
 }

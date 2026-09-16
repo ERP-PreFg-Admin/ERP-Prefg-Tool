@@ -10,12 +10,23 @@ import { STATUS } from "@/lib/constants"
 import { findDuplicateBankingField, insertMfgWithGeneratedCode } from "@/lib/master-routes/material-utils"
 import { insertHistoryEntry } from "@/lib/master-routes/history-utils"
 import { findEditMatchForRow } from "@/lib/master-routes/edit-match"
-import { type ModuleHandler, buildFieldMap } from "./types"
+import { type ModuleHandler, buildFieldMap, approvedStatus } from "./types"
+import { applyApprovedColumns, type ColumnTarget } from "./apply-columns"
 import {  bulkHandler } from "./bulk-envelope"
 
-const MFG_DOC_FIELDS = new Set([
-  "gst_certificate_key", "cancelled_cheque_key", "pan_card_key", "misc_document_key",
-])
+/** Everything an approved MFG edit may write. Doc keys sit on details_mfg too,
+ *  so there is no separate document pass any more. */
+const MFG_BASE: ColumnTarget = {
+  table: "master_mfgs", key: "id", columns: ["name"],
+}
+const MFG_DETAILS: ColumnTarget = {
+  table: "details_mfg", key: "mfg_id",
+  columns: [
+    "location", "gst_number", "status", "registered_name", "zone",
+    "bank_name", "ifsc_number", "account_number", "email",
+    "gst_certificate_key", "cancelled_cheque_key", "pan_card_key", "misc_document_key",
+  ],
+}
 
 export const mfgHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
@@ -24,44 +35,14 @@ export const mfgHandler: ModuleHandler = {
   async applyAndArchive(conn, entityId, items) {
     const fieldMap = buildFieldMap(items)
     const [rows] = await conn.execute(mfgSql.selectById, [entityId])
-    const cur = (rows as any[])[0]
-    if (!cur) throw new Error(`Manufacturer ${entityId} not found`)
+    if (!(rows as unknown[])[0]) throw new Error(`Manufacturer ${entityId} not found`)
 
-    const hasFieldChange = items.some((i) => !MFG_DOC_FIELDS.has(i.field_name))
-    const hasDocChange   = items.some((i) =>  MFG_DOC_FIELDS.has(i.field_name))
-
-    if (hasFieldChange) {
-      await conn.execute(mfgSql.updateMfg, [fieldMap.name ?? cur.name, entityId])
-      await conn.execute(mfgSql.updateMfgDetails, [
-        fieldMap.location        ?? cur.location        ?? null,
-        fieldMap.gst_number      ?? cur.gst_number      ?? null,
-        STATUS.ACTIVE,
-        fieldMap.registered_name ?? cur.registered_name ?? null,
-        fieldMap.zone            ?? cur.zone            ?? null,
-        fieldMap.bank_name       ?? cur.bank_name       ?? null,
-        fieldMap.ifsc_number     ?? cur.ifsc_number     ?? null,
-        fieldMap.account_number  ?? cur.account_number  ?? null,
-        fieldMap.email           ?? cur.email           ?? null,
-        entityId,
-      ])
-    }
-
-    if (hasDocChange) {
-      // Approval items store null as "" — convert back before writing to DB
-      const docVal = (field: string) => fieldMap[field] || cur[field] || null
-      await conn.execute(mfgSql.updateDocuments, [
-        docVal("gst_certificate_key"),
-        docVal("cancelled_cheque_key"),
-        docVal("pan_card_key"),
-        docVal("misc_document_key"),
-        entityId,
-      ])
-    }
-
-    // If only doc fields changed, updateMfgDetails wasn't called — set active explicitly
-    if (!hasFieldChange) {
-      await conn.execute(mfgSql.setStatus, [STATUS.ACTIVE, entityId])
-    }
+    await applyApprovedColumns(conn, MFG_BASE, fieldMap, entityId)
+    // status is forced, not diffed: the row is 'in_review' by now and has to
+    // leave it whether or not the submitter touched the field.
+    await applyApprovedColumns(conn, MFG_DETAILS, fieldMap, entityId, {
+      status: approvedStatus(fieldMap.status),
+    })
   },
 }
 

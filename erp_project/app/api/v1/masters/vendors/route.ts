@@ -44,6 +44,7 @@ import { pool, query } from "@/lib/db"
 import { vendors } from "@/lib/queries/vendors"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { insertHistoryEntry } from "@/lib/master-routes/history-utils"
+import { withStatusPreserved } from "@/lib/master-routes/status-preserve"
 import { parseS3Import } from "@/lib/import-s3"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
@@ -298,7 +299,7 @@ export const POST = withGateway({
 
         const itemsToRecord = isDraftResubmit
           ? Object.entries(proposed).filter(([, v]) => v !== "")
-          : diff
+          : withStatusPreserved(diff, proposed, current.status)
         for (const [field, newVal] of itemsToRecord) {
           await conn.execute(approvalsSql.insertApprovalItem, [
             approvalId,

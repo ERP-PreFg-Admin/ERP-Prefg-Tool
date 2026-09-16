@@ -6,6 +6,7 @@
 
 import type { PoolConnection } from "mysql2/promise"
 import { todayIST } from "@/lib/date"
+import { STATUS } from "@/lib/constants"
 
 export type DiffItem = { field_name: string; old_value: string; new_value: string }
 
@@ -26,6 +27,17 @@ export interface ModuleHandler {
 
 export function buildFieldMap(items: DiffItem[]): Record<string, string> {
   return Object.fromEntries(items.map((i) => [i.field_name, i.new_value]))
+}
+
+/**
+ * The status an approval may actually apply.
+ *
+ * Only `inactive` survives; everything else lands on `active`. A draft resubmit
+ * records every field, so fieldMap can carry `rejected` or `in_review` — writing
+ * either back would strand the record in a workflow state no edit can leave.
+ */
+export function approvedStatus(value: string | undefined): string {
+  return value === STATUS.INACTIVE ? STATUS.INACTIVE : STATUS.ACTIVE
 }
 
 /**
