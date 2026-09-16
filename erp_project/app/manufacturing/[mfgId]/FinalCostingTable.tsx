@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useState } from "react"
+import { Fragment, useMemo, useState } from "react"
 import Link from "next/link"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/table"
 import { TableEmpty } from "@/components/ui/empty-state"
 import { DownloadButton } from "@/components/masters/DownloadButton"
+import { SearchInput } from "@/components/masters/SearchInput"
 import type { FinalCostingRow, FinalCostingComparisonRow } from "@/types/masters"
 import {
   CostingHeadRow, CostingCells, ScenarioLabelRow, ScenarioHeadRow,
@@ -56,11 +57,27 @@ export default function FinalCostingTable({
   /** One per row, same index alignment — what the Actions column opens. */
   breakups: CostingBreakup[]
 }) {
+  // Over ALL rows, not the filtered set: "cheapest" is a fact about this
+  // manufacturer's costing, so searching must not crown a new best.
   const best = bestTotalIndex(rows)
   // Single-open, same shape as the invoice desk's history table — comparing one
   // SKU against the vendor rates is the question, not comparing two SKUs. The
   // panel is part of the state so the two expansions share one slot.
   const [open, setOpen] = useState<{ id: number; panel: Panel } | null>(null)
+  const [search, setSearch] = useState("")
+
+  // Carries each row's ORIGINAL index: scenarios[].rows and breakups are built
+  // as rows.map(...) and read by position, so re-indexing a filtered list would
+  // pair a SKU with another SKU's breakup.
+  const visible = useMemo(() => {
+    const indexed = rows.map((r, i) => ({ r, i }))
+    const q = search.trim().toLowerCase()
+    if (!q) return indexed
+    return indexed.filter(({ r }) =>
+      (r.sku_code ?? "").toLowerCase().includes(q) ||
+      (r.sku_name ?? "").toLowerCase().includes(q)
+    )
+  }, [rows, search])
 
   function show(id: number, panel: Panel) {
     setOpen(open?.id === id && open.panel === panel ? null : { id, panel })
@@ -79,6 +96,12 @@ export default function FinalCostingTable({
           label="Final Costing"
         />
       </div>
+      <SearchInput
+        value={search}
+        onChange={setSearch}
+        placeholder="Search SKU code or name…"
+        className="sm:max-w-xs"
+      />
       <Card>
         <CardContent className="p-0">
             <Table>
@@ -87,20 +110,27 @@ export default function FinalCostingTable({
               </TableHeader>
               <TableBody>
                 <ScenarioLabelRow label="Agreed rate — this manufacturer (MRM)" colSpan={COL_COUNT} />
-                {rows.length === 0 ? (
+                {visible.length === 0 ? (
                   <TableEmpty
                     colSpan={COL_COUNT}
                     action={
-                      <Button variant="outline" size="sm" asChild>
-                        <Link href={`/manufacturing/${mfgId}?tab=active`}>Add SKUs</Link>
-                      </Button>
+                      rows.length === 0 ? (
+                        <Button variant="outline" size="sm" asChild>
+                          <Link href={`/manufacturing/${mfgId}?tab=active`}>Add SKUs</Link>
+                        </Button>
+                      ) : (
+                        <Button variant="outline" size="sm" onClick={() => setSearch("")}>
+                          Clear search
+                        </Button>
+                      )
                     }
                   >
-                    No active SKUs to cost yet — costing starts from the SKUs assigned to this
-                    manufacturer.
+                    {rows.length === 0
+                      ? "No active SKUs to cost yet — costing starts from the SKUs assigned to this manufacturer."
+                      : `No SKU matches “${search.trim()}”.`}
                   </TableEmpty>
                 ) : (
-                  rows.map((r, i) => {
+                  visible.map(({ r, i }) => {
                     const shown = open?.id === r.recipe_id ? open.panel : null
                     const toggleScenarios = () => show(r.recipe_id, "scenarios")
                     return (
