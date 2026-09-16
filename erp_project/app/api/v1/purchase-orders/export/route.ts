@@ -8,7 +8,9 @@
  * Query params (all optional, same names the page already puts in the URL):
  *   format      — "csv" (default) | "xlsx"
  *   search      — matches PO No. / Mfg code / Mfg name / SKU code / SKU name
- *   status      — PO status tab
+ *   status      — PO status tab. "all" clears the filter and "inward" is not a
+ *                 status at all — it selects po_type, matching PO Inwarding's
+ *                 tabs. Both go through inwardTabFilters().
  *   mfgCode     — exact manufacturer code
  *   poType      — "normal" | "impromptu"
  *   dateFrom    — PO date >=
@@ -30,7 +32,7 @@
 
 import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { purchaseOrdersSql, buildFilterParams } from "@/lib/queries/purchase-orders"
+import { purchaseOrdersSql, buildFilterParams, inwardTabFilters } from "@/lib/queries/purchase-orders"
 import { buildCsv, buildXlsx, buildExportFilename } from "@/lib/export"
 import { PO_PROCUREMENT_EXPORT_COLUMNS } from "@/lib/export-configs"
 import { withGateway } from "@/lib/gateway/with-gateway"
@@ -45,9 +47,7 @@ export const GET = withGateway({
     const sp          = req.nextUrl.searchParams
     const format      = sp.get("format") === "xlsx" ? "xlsx" : "csv"
     const search      = sp.get("search")      ?? ""
-    const status      = sp.get("status")      ?? ""
     const mfgCode     = sp.get("mfgCode")     ?? ""
-    const poType      = sp.get("poType")      ?? ""
     const dateFrom    = sp.get("dateFrom")    ?? ""
     const dateTo      = sp.get("dateTo")      ?? ""
     const sku         = sp.get("sku")         ?? ""
@@ -55,6 +55,10 @@ export const GET = withGateway({
     const sortBy      = sp.get("sortBy")      ?? "date"
     const sortDir     = sp.get("sortDir") === "asc" ? "asc" : "desc"
     const excludeInward = sp.get("excludeInward") === "1"
+
+    // Read the tabs the same way PO Inwarding's page does, or the Inward tab
+    // exports status='inward' — a status no row has — and downloads nothing.
+    const { status, poType } = inwardTabFilters(sp.get("status"), sp.get("poType"))
 
     // destEntity was missing here, so an export taken while the destination
     // filter named a legal entity returned BOTH entities' rows — Pep's Mumbai

@@ -1014,6 +1014,25 @@ export function statusMatchValues(status: string | null): [unknown, unknown, unk
 }
 
 /**
+ * The PO Inwarding tab set, translated into filters.
+ *
+ * "inward" is a po_type, not a status — it spans every status. "all" opts out of
+ * the default status filter. Shared because the page and the CSV export both
+ * have to do this: the export didn't, so it sent status='inward', which matches
+ * no row, and the Inward tab downloaded an empty file.
+ */
+export function inwardTabFilters(
+  statusFilter: string | null,
+  poType: string | null,
+): { status: string | null; poType: string | null } {
+  const isInwardTab = statusFilter === "inward"
+  return {
+    status: statusFilter === "all" || isInwardTab ? null : statusFilter || null,
+    poType: isInwardTab ? "inward" : poType || null,
+  }
+}
+
+/**
  * Build the 27-element param array for selectPaginated / countPaginated.
  * All-null values disable the corresponding filter.
  *

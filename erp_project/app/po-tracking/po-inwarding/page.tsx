@@ -8,7 +8,7 @@ import { resolveAccess } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { parsePaginationParams } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
-import { purchaseOrdersSql, buildFilterParams, buildStatusCountParams } from "@/lib/queries/purchase-orders"
+import { purchaseOrdersSql, buildFilterParams, buildStatusCountParams, inwardTabFilters } from "@/lib/queries/purchase-orders"
 import { getPoDropdownOptions } from "@/lib/cached-reference-data"
 import { filterByScope } from "@/lib/scope"
 import { getViewScope } from "@/lib/brand-view"
@@ -54,9 +54,8 @@ export default async function PoInwardingPage({
   // "inward" is not a status at all — it selects on po_type, so that every PO
   // an invoice raised is reachable in one click. An invoice books those in
   // already complete, which would otherwise hide them from the default tab.
-  const isInwardTab = statusFilter === "inward"
-  const status      = statusFilter === "all" || isInwardTab ? null : statusFilter || null
-  const poTypeParam = isInwardTab ? "inward" : poType || null
+  // Shared with the CSV export, which has to read the tabs the same way.
+  const { status, poType: poTypeParam } = inwardTabFilters(statusFilter, poType)
 
   const scope = await getViewScope(userId)
   const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poTypeParam, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, false, scope, destEntity || null)
