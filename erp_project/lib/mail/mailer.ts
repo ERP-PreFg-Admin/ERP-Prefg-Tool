@@ -15,7 +15,7 @@ import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { entityEmails } from "@/lib/queries/entity-emails"
 import { emailSuppressionsSql } from "@/lib/queries/email-suppressions"
 import { splitRecipients, type RecipientRow } from "@/lib/mail/recipients"
-import { fetchPurchaseOrderPdf } from "@/lib/uniware"
+import { fetchPurchaseOrderPdf, UniwareSessionStale } from "@/lib/uniware"
 import { buildMultiSheetXlsx, type ExportColumn } from "@/lib/export"
 import { assertAttachmentsWithinLimit } from "@/lib/mail/mail-limits"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
@@ -707,10 +707,9 @@ export type InwardMailOutcome = {
   /**
    * Set when the mail went out but WITHOUT the Uniware PO document.
    *
-   * Its own field rather than just a log line, because this is the normal case
-   * for 17 of 18 facilities: /po/show only renders POs at the session's own
-   * facility, so every site except GGN_WAREHOUSE silently loses the attachment
-   * (measured 2026-09-08). The caller reports it instead of claiming a clean send.
+   * Used to be the normal case for 17 of 18 facilities — /po/show serves only the
+   * session's own facility and the session sat on GGN_WAREHOUSE. It is switched
+   * per fetch now, so this means a dead session or a real Uniware failure.
    */
   missingPoDocument?: string
 }
@@ -767,15 +766,15 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<I
       attachments.push({ filename: `Uniware-PO-${safeCode}.pdf`, content: poPdf })
     } catch (err: unknown) {
       const reason = err instanceof Error ? err.message : String(err)
-      // Facility included: it is the discriminator. /po/show renders only POs at
-      // the session's own facility, so this failing is a property of the site,
-      // not of this invoice — and reading the message without it sends people
-      // looking for a fault in the PO.
+      // The session, not the PO, is what usually fails now — and an expired one
+      // is the only cause a human can fix, so lead with it.
+      const stale = err instanceof UniwareSessionStale
       missingPoDocument =
+        (stale ? "The Uniware session has expired — renew it with the extension, then use Sync Documents. " : "") +
         `Uniware would not produce the PO document for ${uniwarePoCode}` +
         `${facility ? ` at ${facility}` : ""} — ${reason}`
       logger.error({
-        ...ctx, mfgId, destination, invoiceNo, uniwarePoCode, facility, err: reason,
+        ...ctx, mfgId, destination, invoiceNo, uniwarePoCode, facility, stale, err: reason,
         message: "Uniware PO document could not be downloaded — sending without it",
       })
     }
@@ -812,7 +811,9 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<I
       html: `
         <div style="font-family:sans-serif;max-width:620px;margin:auto;color:#111;font-size:14px;line-height:1.6">
           <p style="margin:0">PFA</p>
-          ${uniwarePoCode ? `<p style="margin:12px 0 0;font-weight:600">${escapeHtml(uniwarePoCode)}</p>` : ""}
+          <p style="margin:12px 0 0;font-weight:600">
+            ${uniwarePoCode ? `${escapeHtml(uniwarePoCode)}<br>` : ""}Invoice No: ${escapeHtml(invoiceNo)}
+          </p>
           ${poSection(`Items Inwarded at ${escapeHtml(destination)}`, items)}
           <p style="margin:20px 0 0">Thanks &amp; Regards<br>${escapeHtml(MAIL_FROM_NAME)}</p>
         </div>

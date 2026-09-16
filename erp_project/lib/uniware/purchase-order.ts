@@ -1,10 +1,12 @@
 import logger from "../logger";
 import { uniwareStatusFallback } from "./errors";
 import { getToken } from "./auth";
-import { authHeaders } from "./facility";
+import { authHeaders, uniwareFacility } from "./facility";
 import { buildPurchaseOrder } from "./po-builder";
 import type { UniwarePoInput } from "./po-builder";
 import { BASE, TIMEOUT_MS, PO_CREATE_PATH, PO_DETAILS_PATH, PO_DOCUMENT_PATH } from "./endpoints";
+import { switchFacilityWithCookie } from "./facility-switch";
+import { requireUniwareWebCookie, withCookieSession } from "./web-session";
 
 export async function createPurchaseOrder(po: UniwarePoInput): Promise<{ purchaseOrderCode: string }> {
     const token = await getToken()
@@ -55,48 +57,38 @@ export async function createPurchaseOrder(po: UniwarePoInput): Promise<{ purchas
 }
 
 
-
-/**
- * The PO as Unicommerce renders it, for attaching to the manufacturer's mail.
- *
- * `/po/show` is the web UI's print view, not a REST endpoint — but it accepts
- * the same bearer token, verified against prod: it answers
- * `application/pdf`. That is why this can be a plain fetch and needs no browser.
- *
- * ── THE SEPARATOR IS LOAD-BEARING ────────────────────────────────────────────
- * This read `?code=...$legacy=1` — a `$` where the `&` should be — so the whole
- * thing went out as ONE parameter named `code` with the value
- * "HLPL/2627/5663$legacy=1". Uniware answered 200 with its 5004-byte SPA shell
- * instead of the PDF, and the %PDF- guard below then threw "expected a PDF, got
- * text/html". Every PO document attachment failed that way.
- *
- * URLSearchParams rather than hand-built now, so a separator cannot be mistyped
- * again, and it encodes the slashes in a PO code for free.
- */
+/** Cookie, not bearer: /po/show serves whichever facility the SESSION is on, and
+ *  only the web session can be switched. */
 export async function fetchPurchaseOrderPdf(code: string , facility ? : string) : Promise<Buffer> {
-    const token =await getToken()
-    const query = new URLSearchParams({ code, legacy: "1" })
-    const url = `${BASE}${PO_DOCUMENT_PATH}?${query}`
+    // Switch + fetch must not interleave with another caller's switch.
+    return withCookieSession(async () => {
+        const cookie = await requireUniwareWebCookie()
+        return fetchPurchaseOrderPdfWithCookie(cookie, code, facility)
+    })
+}
 
-    const res = await fetch(url , {
-        headers :authHeaders(token , facility),
-        signal :AbortSignal.timeout(TIMEOUT_MS)
+/** Split out so a unit test can drive it without the DB. Does NOT lock — callers
+ *  outside fetchPurchaseOrderPdf must hold withCookieSession themselves. */
+export async function fetchPurchaseOrderPdfWithCookie(
+    cookie: string, code: string, facility?: string
+): Promise<Buffer> {
+    await switchFacilityWithCookie(cookie, uniwareFacility(facility))
+
+    const query = new URLSearchParams({ code, legacy: "1" })
+    const res = await fetch(`${BASE}${PO_DOCUMENT_PATH}?${query}`, {
+        headers: { Cookie: cookie },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
     })
 
     const buf = Buffer.from(await res.arrayBuffer())
+    if (!res.ok) throw new Error(`Uniware PO document ${code}: HTTP ${res.status}`)
 
-    if(!res.ok)  {
-        throw new Error(`Uniware PO document ${code}: HTTP ${res.status}`)
-    }
-
-    if(buf.subarray(0 , 5).toString("latin1") !== "%PDF-") {
+    if (buf.subarray(0, 5).toString("latin1") !== "%PDF-") {
         const ct = res.headers.get("content-type") ?? "unknown"
         throw new Error(`Uniware PO document ${code}: expected a PDF, got ${ct} (${buf.length} bytes)`)
     }
     return buf
 }
-
-
 /** One PO line's quantities as Unicommerce reports them, keyed by SKU. */
 export type UniwarePoLineQty = {
     sku: string
@@ -104,21 +96,6 @@ export type UniwarePoLineQty = {
     qcPassQty: number
 }
 
-/**
- * What Uniware currently says about one mirrored PO.
- *
- * Returns the GRN count and the per-line quantities alongside the status,
- * because the SAME call already carries all three — getPurchaseOrderDetails
- * answers with `inflowReceiptsCount` and `purchaseOrderItems[]` beside
- * `statusCode` (this response is FLAT, unlike getInflowReceipt next door).
- *
- * That is what makes both cheap. The GRN sweep is 1+N calls per PO, so knowing
- * which POs have receipts at all costs nothing here; and pending/QC-pass, which
- * have no local equivalent, arrive without a second request. See
- * lib/uniware/grn-sync.ts and prisma/add_po_uniware_line_qty.sql.
- *
- * grnCount 0 means nothing has been received yet, however approved the PO looks.
- */
 export async function fetchPurchaseOrderStatus(
     code : string , facility?: string
 ) : Promise<{ status: string; grnCount: number; lines: UniwarePoLineQty[] }> {
@@ -156,20 +133,12 @@ export async function fetchPurchaseOrderStatus(
     }
     if(!data.statusCode) throw new Error(`Uniware returned no statusCode for ${code}`)
 
-    // Coerced rather than required: unlike the GRN payload's quantities, a
-    // missing count here is safely read as "none" — the sweep simply skips the
-    // PO, and the next status sync will pick it up if that was wrong.
     const grnCount = Number(data.inflowReceiptsCount ?? 0)
 
     const num = (v: unknown) => {
         const n = Number(v ?? 0)
         return Number.isFinite(n) ? n : 0
     }
-
-    // Lines WITHOUT a SKU are dropped rather than kept with a blank key: the SKU
-    // is the only thing that maps a Uniware line to one of our inward POs, so a
-    // line without one can be stored nowhere. `itemSKU` is confirmed live on PO
-    // items (unlike on receipt items — see grn-map.ts).
     const lines: UniwarePoLineQty[] = (data.purchaseOrderItems ?? [])
         .filter((i) => typeof i.itemSKU === "string" && i.itemSKU.trim() !== "")
         .map((i) => ({

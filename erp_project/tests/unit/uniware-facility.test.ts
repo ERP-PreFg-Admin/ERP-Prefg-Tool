@@ -74,8 +74,6 @@ function stubFetch(respond: () => Response): Captured {
 }
 
 const okCreate = () => Response.json({ successful: true, purchaseOrderCode: "GM/2627/PO/2006" })
-/** res.ok plus the %PDF- magic bytes fetchPurchaseOrderPdf checks for. */
-const okPdf = () => new Response(Buffer.from("%PDF-1.4\nnot really a pdf\n"), { status: 200 })
 
 test("createPurchaseOrder sends the PO's own facility as the Facility header", async () => {
   const { createPurchaseOrder } = await import("../../lib/uniware")
@@ -135,18 +133,47 @@ test("create does not approve — the warehouse owns that step in Uniware", asyn
   assert.ok(!cap.urls[0].includes("/approve"), cap.urls[0])
 })
 
-test("fetchPurchaseOrderPdf sends the facility it was given", async () => {
-  // /po/show is Uniware's own web print view and is facility-scoped like the
-  // REST endpoints. Fetching a PO minted in facility B while sending Facility: A
-  // 302s to /login, and the magic-byte guard then throws — which lib/mail/mailer.ts
-  // catches, logging and sending the mail without the PDF. Silent forever.
-  const { fetchPurchaseOrderPdf } = await import("../../lib/uniware")
-  const cap = stubFetch(okPdf)
+test("fetchPurchaseOrderPdf switches the session first, both calls on the cookie", async () => {
+  // /po/show serves whatever facility the SESSION is on and IGNORES the Facility
+  // header (measured 2026-09-15), so the switch is the whole mechanism — and it
+  // has to ride the same session as the fetch. Getting it wrong is silent:
+  // lib/mail/mailer.ts catches the failure and sends the mail without the PDF.
+  const { fetchPurchaseOrderPdfWithCookie } = await import("../../lib/uniware")
+  const seen: { url: string; cookie: string | undefined; body: string | undefined }[] = []
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    seen.push({
+      url: String(input),
+      cookie: new Headers(init?.headers).get("Cookie") ?? undefined,
+      body: typeof init?.body === "string" ? init.body : undefined,
+    })
+    if (String(input).includes("switchfacility")) return Response.json({ successful: true })
+    return new Response(Buffer.from("%PDF-1.4\n"), { status: 200 })
+  }) as unknown as typeof fetch
 
-  const buf = await fetchPurchaseOrderPdf("GM/2627/PO/2006", "mCaff_Kolkata2")
+  const buf = await fetchPurchaseOrderPdfWithCookie("JSESSIONID=abc", "GM/2627/PO/2006", "mCaff_Kolkata2")
 
-  assert.equal(cap.facility, "mCaff_Kolkata2")
+  assert.equal(seen.length, 2)
+  // Absolute, not `includes` — an unexpanded `${}` in the template compiles fine
+  // and would still contain the path.
+  assert.equal(seen[0].url, "https://uniware.test/data/user/switchfacility")
+  assert.equal(JSON.parse(seen[0].body ?? "{}").facilityCode, "mCaff_Kolkata2")
+  assert.ok(seen[1].url.includes("/po/show"), seen[1].url)
+  assert.ok(seen.every((s) => s.cookie === "JSESSIONID=abc"), "both calls carry the cookie")
   assert.equal(buf.subarray(0, 5).toString("latin1"), "%PDF-")
+})
+
+test("a logged-out switch is UniwareSessionStale, not a generic failure", async () => {
+  // mailer.ts swallows every error into missingPoDocument, so the one failure a
+  // human can actually fix has to stay distinguishable there.
+  const { switchFacilityWithCookie, UniwareSessionStale } = await import("../../lib/uniware")
+  globalThis.fetch = (async () =>
+    Response.json({ successful: false, errors: [{ message: "USER_NOT_LOGGED_IN" }] }, { status: 401 })
+  ) as unknown as typeof fetch
+
+  await assert.rejects(
+    () => switchFacilityWithCookie("JSESSIONID=dead", "MUM_WAREHOUSE2"),
+    (e: unknown) => e instanceof UniwareSessionStale
+  )
 })
 
 test("on prod, the sandbox facility is refused rather than sent", async () => {
@@ -177,11 +204,18 @@ test("on prod, a resolved vendor code beats UNIWARE_VENDOR_CODE", async () => {
   assert.throws(() => uniwareVendorCode("  "), /Refusing a production Uniware call/)
 })
 
-test("fetchPurchaseOrderPdf falls back to UNIWARE_FACILITY when given none", async () => {
-  const { fetchPurchaseOrderPdf } = await import("../../lib/uniware")
-  const cap = stubFetch(okPdf)
+test("with no facility given, the switch targets UNIWARE_FACILITY", async () => {
+  const { fetchPurchaseOrderPdfWithCookie } = await import("../../lib/uniware")
+  let switchBody = ""
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    if (String(input).includes("switchfacility")) {
+      switchBody = String(init?.body ?? "")
+      return Response.json({ successful: true })
+    }
+    return new Response(Buffer.from("%PDF-1.4\n"), { status: 200 })
+  }) as unknown as typeof fetch
 
-  await fetchPurchaseOrderPdf("GM/2627/PO/2006")
+  await fetchPurchaseOrderPdfWithCookie("JSESSIONID=abc", "GM/2627/PO/2006")
 
-  assert.equal(cap.facility, "ENV_FALLBACK_FACILITY")
+  assert.equal(JSON.parse(switchBody).facilityCode, "ENV_FALLBACK_FACILITY")
 })

@@ -1,5 +1,7 @@
 import { UNIWARE_SANDBOX_FACILITY , UNIWARE_SANDBOX , UNIWARE_FACILITY , UNIWARE_SANDBOX_VENDOR , UNIWARE_VENDOR_CODE} from "../env"
 import { UniwareToken } from "./auth"
+
+
 export function uniwareFacility(resolved?: string): string {
   if (UNIWARE_SANDBOX) return UNIWARE_SANDBOX_FACILITY
 
@@ -14,20 +16,6 @@ export function uniwareFacility(resolved?: string): string {
   return facility
 }
 
-/**
- * Mirrors uniwareFacility() exactly, and for the same reason.
- *
- * It used to read `UNIWARE_VENDOR_CODE || resolved`, which put the env var
- * AHEAD of a resolved code — and UNIWARE_VENDOR_CODE defaults to Test_Vendor.
- * On prod, with the var unset in SSM, every push therefore went out as
- * Test_Vendor whatever the caller had looked up, and Uniware answered
- * "Vendor [Test_Vendor] is not configured for the facility [GGN_WAREHOUSE]".
- * The resolved value wins now; the env var is only the fallback.
- *
- * `resolved` is a UNIWARE vendor code (un_code_mfg_sku_wh_map.un_mfg_code),
- * never master_mfgs.code — the two are different identifiers and Uniware
- * rejects the latter the same way.
- */
 export function uniwareVendorCode(resolved?: string): string {
   if (UNIWARE_SANDBOX) return UNIWARE_SANDBOX_VENDOR
 

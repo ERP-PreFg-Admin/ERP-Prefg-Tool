@@ -30,23 +30,6 @@ import { BASE, TIMEOUT_MS, OAUTH_TOKEN_PATH } from "./endpoints"
 const TOKEN_EXPIRY_BUFFER_S = 300
 const DEFAULT_EXPIRES_IN_S = 43199
 
-/**
- * The longest a cached token is trusted, whatever `expires_in` says.
- *
- * The token's own life is ~12h, but per the header note it can be invalidated at
- * any moment by anything else using the account — and nothing tells us. Trusting
- * `expires_in` meant a container could hold a dead token for half a day, with
- * every Uniware call answering "Not authorised — check the Uniware credentials"
- * (uniwareStatusFallback maps both 401 and 403 to that). Prod sat in exactly that
- * state on 2026-09-08 while test worked, because test had refreshed.
- *
- * Re-reading is one GET that returns the SAME token, so the cap costs at most one
- * extra round trip per sync run and bounds the blackout at this window.
- *
- * ponytail: a short cache, not a retry-on-401 wrapper. Every call site builds its
- * own fetch, so a wrapper is a six-file change; this is one line and closes the
- * 12-hour hole. Add the wrapper if a sweep is ever seen to die mid-run.
- */
 const MAX_CACHE_MS = 5 * 60_000
 
 // No refreshToken field: the response carries one, but keeping it invited the

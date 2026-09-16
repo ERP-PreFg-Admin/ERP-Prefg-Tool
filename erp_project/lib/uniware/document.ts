@@ -19,7 +19,7 @@
 
 import { UNIWARE_USER_NAME } from "../env"
 import { BASE, DOC_AUTH_PATH, DOCS_DOWNLOAD_PATH, DOCS_LIST_PATH, DOCS_UPLOAD_ACK_PATH, DOCS_UPLOAD_PATH, TIMEOUT_MS } from "./endpoints"
-import { requireUniwareWebCookie, UniwareSessionStale } from "./web-session"
+import { requireUniwareWebCookie, UniwareSessionStale, withCookieSession } from "./web-session"
 
 export const DOC_MAX_BYTES = 2 * 1024 * 1024
 
@@ -107,8 +107,10 @@ async function mintWithCookie(cookie: string, identifier: string): Promise<DocCa
 }
 
 export async function mintCapability(uniwarePoCode : string) : Promise<DocCapability> {
-    const cookie = await requireUniwareWebCookie()
-    return mintWithCookie(cookie, `PO-${uniwarePoCode}`)
+    return withCookieSession(async () => {
+        const cookie = await requireUniwareWebCookie()
+        return mintWithCookie(cookie, `PO-${uniwarePoCode}`)
+    })
 }
 
 /**

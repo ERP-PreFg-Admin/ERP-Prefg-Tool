@@ -150,12 +150,13 @@ test("the PO document URL sends code and legacy as SEPARATE parameters", async (
   // Nothing could catch it: the URL is a template string, so it compiled, linted
   // and type-checked, and only the network boundary knew. Same class of bug as
   // tests/unit/nanonets-endpoints.test.ts guards against.
-  const { fetchPurchaseOrderPdf } = await import("../../lib/uniware")
+  const { fetchPurchaseOrderPdfWithCookie } = await import("../../lib/uniware")
   let requested = ""
   globalThis.fetch = (async (input: unknown) => {
     if (String(input).includes("/oauth/token")) {
       return Response.json({ access_token: "test-token", expires_in: 43199 })
     }
+    if (String(input).includes("switchfacility")) return Response.json({ successful: true })
     requested = String(input)
     // A minimal well-formed PDF so the %PDF- guard passes.
     return new Response(Buffer.from("%PDF-1.4\n"), {
@@ -163,7 +164,7 @@ test("the PO document URL sends code and legacy as SEPARATE parameters", async (
     })
   }) as unknown as typeof fetch
 
-  await fetchPurchaseOrderPdf("GM/2627/PO/2006", "TEST_FACILITY")
+  await fetchPurchaseOrderPdfWithCookie("JSESSIONID=x", "GM/2627/PO/2006", "TEST_FACILITY")
 
   const url = new URL(requested)
   assert.equal(url.pathname, "/po/show")
@@ -178,18 +179,19 @@ test("a non-PDF body is rejected rather than mailed as an attachment", async () 
   // What the tenant actually returns for a malformed request: 200, HTML, its app
   // shell. Sending that to a manufacturer as "your purchase order" is worse than
   // failing, so the magic-bytes check has to stay.
-  const { fetchPurchaseOrderPdf } = await import("../../lib/uniware")
+  const { fetchPurchaseOrderPdfWithCookie } = await import("../../lib/uniware")
   globalThis.fetch = (async (input: unknown) => {
     if (String(input).includes("/oauth/token")) {
       return Response.json({ access_token: "test-token", expires_in: 43199 })
     }
+    if (String(input).includes("switchfacility")) return Response.json({ successful: true })
     return new Response("<!DOCTYPE HTML><html><head><title>Uniware</title>", {
       status: 200, headers: { "content-type": "text/html;charset=UTF-8" },
     })
   }) as unknown as typeof fetch
 
   await assert.rejects(
-    () => fetchPurchaseOrderPdf("GM/2627/PO/2006", "TEST_FACILITY"),
+    () => fetchPurchaseOrderPdfWithCookie("JSESSIONID=x", "GM/2627/PO/2006", "TEST_FACILITY"),
     /expected a PDF, got text\/html/
   )
 })
