@@ -147,10 +147,6 @@ def download_csv(file_path_url):
             time.sleep(DOWNLOAD_RETRY_WAIT)
     raise RuntimeError(f"Download failed after {DOWNLOAD_MAX_RETRIES} attempts.")
 
-# Unicommerce's export CSV header for the item/SKU code doesn't always match
-# the "skuCode" export-column key it was requested with — try known aliases
-# (case-insensitive) before giving up. Update this list once you see the
-# actual header names printed below (if none match).
 ITEM_CODE_COL_CANDIDATES = [
     "skuCode", "SKU Code", "Sku Code", "SKUCode", "Product Code",
     "Item SkuCode", "Item Sku Code", "SKU", "itemtypeSku",
