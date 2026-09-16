@@ -215,9 +215,6 @@ export default function VendorsClient({
                 <TableHead>Registered Name</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Location</TableHead>
-                <TableHead>Zone</TableHead>
-                <TableHead>GST Number</TableHead>
-                <TableHead>Bank</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="w-20">Actions</TableHead>
               </TableRow>
@@ -225,7 +222,7 @@ export default function VendorsClient({
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-10">
+                  <TableCell colSpan={7} className="text-center py-10">
                     <EmptyState hasFilters={!!hasFilters} filteredMessage="No vendors match your filters." />
                   </TableCell>
                 </TableRow>
@@ -239,9 +236,6 @@ export default function VendorsClient({
                       <Badge variant="outline">{row.type?.toUpperCase()}</Badge>
                     </TableCell>
                     <TableCell>{row.location ?? "—"}</TableCell>
-                    <TableCell>{row.zone ?? "—"}</TableCell>
-                    <TableCell>{row.gst_number ?? "—"}</TableCell>
-                    <TableCell>{row.bank_name ?? "—"}</TableCell>
                     <TableCell><StatusBadge status={row.status} /></TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
