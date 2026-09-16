@@ -22,6 +22,7 @@ import {
 } from "@/lib/masters/kit-sku"
 import { rmTotal, type RecipeLineRow, type RecipeMaterialOption } from "./RecipeLineEditorGrid"
 import { parseBomCsv } from "./recipe-csv"
+import { decodeUpload } from "@/lib/csv"
 import { uploadPendingArtifacts } from "./recipe-artifact-upload"
 import type { RmLock } from "@/lib/masters/variant-rm-lock"
 
@@ -203,8 +204,10 @@ export function useBomWizard({
 
   function handleCsvFile(file: File) {
     setCsvErrors([])
-    file.text().then((text) => {
-      const { rows, errors } = parseBomCsv(text, rmMaterials, pmMaterials)
+    // arrayBuffer + decodeUpload, not file.text(): text() is always UTF-8 and an
+    // Excel-saved CSV is windows-1252 — ® / ™ decode to U+FFFD and stay that way.
+    file.arrayBuffer().then((bytes) => {
+      const { rows, errors } = parseBomCsv(decodeUpload(bytes), rmMaterials, pmMaterials)
       if (errors.length > 0) {
         setCsvErrors(errors)
         return

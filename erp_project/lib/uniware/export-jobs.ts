@@ -1,6 +1,7 @@
 import { getToken } from "./auth";
 import { envelopeError, type ExportEnvelope } from "./envelope";
 import { BASE, TIMEOUT_MS, EXPORT_JOB_CREATE_PATH, EXPORT_JOB_STATUS_PATH } from "./endpoints";
+import { decodeUpload } from "@/lib/csv";
 
 export const EXPORT_COLUMNS_KEY = "exportColums"
 
@@ -160,7 +161,10 @@ export async function downloadExportCsv(filePath: string): Promise<string> {
   })
   if (!res.ok) throw new Error(`Downloading the export failed (HTTP ${res.status})`)
 
-  const text = await res.text()
+  // decodeUpload, not res.text(): fetch's text() is UTF-8 unconditionally (it
+  // ignores the Content-Type charset), so a windows-1252 export would lose its
+  // ® / ™ to U+FFFD exactly as an Excel-saved upload did. Same bug, other door.
+  const text = decodeUpload(await res.arrayBuffer())
   const head = text.slice(0, 200).toLowerCase()
   if (head.includes("<html") || head.includes("<!doctype")) {
     throw new Error("The export download returned an HTML page, not a CSV — the session was not accepted.")

@@ -26,7 +26,7 @@ import {
   normalizeHeader,
   describeHeaderMismatch,
 } from "./field-config"
-import { normalizeCell, excelCellText } from "@/lib/csv"
+import { normalizeCell, excelCellText, decodeUpload } from "@/lib/csv"
 import { useEditGuard } from "@/components/AccessContext"
 
 export function CsvImportDialog({
@@ -126,10 +126,12 @@ export function CsvImportDialog({
       return
     }
 
+    // readAsArrayBuffer + decodeUpload, not readAsText: readAsText assumes UTF-8
+    // and an Excel-saved CSV is windows-1252, so ® / ™ arrived as U+FFFD.
     const reader = new FileReader()
     reader.onload = (ev) => {
       try {
-        const parsed = parseCSV(ev.target?.result as string, fields)
+        const parsed = parseCSV(decodeUpload(ev.target?.result as ArrayBuffer), fields)
         setRows(parsed)
         if (enableDuplicateCheck && parsed.length > 0) checkDuplicates(parsed)
       } catch (err) {
@@ -138,7 +140,7 @@ export function CsvImportDialog({
       }
     }
     reader.onerror = () => setError("Could not read that file.")
-    reader.readAsText(file)
+    reader.readAsArrayBuffer(file)
   }
 
   /**

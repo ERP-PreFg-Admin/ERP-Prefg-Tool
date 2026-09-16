@@ -1,6 +1,6 @@
 import { getFileBuffer } from "@/lib/s3"
 import ExcelJS from "exceljs"
-import { parseCsvObjects, normalizeCell, normalizeHeader, excelCellText } from "@/lib/csv"
+import { parseCsvObjects, normalizeCell, normalizeHeader, excelCellText, decodeUpload } from "@/lib/csv"
 
 export type ImportRow = Record<string, string>
 
@@ -33,7 +33,9 @@ function parseCsvBuffer(buffer: Buffer): ImportRow[] {
   // Lower-casing alone yields `pm code`, which matches nothing — so an edit
   // sheet was read as all-new records. Same normalisation the browser importer
   // applies (components/masters/field-config.ts).
-  return parseCsvObjects(buffer.toString("utf-8"), normalizeHeader)
+  // decodeUpload, not toString("utf-8"): an Excel-saved CSV is windows-1252 and
+  // toString silently turned ® / ™ into U+FFFD on the way into master_rm.
+  return parseCsvObjects(decodeUpload(buffer), normalizeHeader)
 }
 
 async function parseXlsxBuffer(buffer: Buffer): Promise<ImportRow[]> {

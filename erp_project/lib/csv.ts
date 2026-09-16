@@ -18,6 +18,28 @@
  * a comma or a newline means is whether we are currently inside quotes.
  */
 
+/**
+ * Upload bytes -> text. Every CSV must come through here before parsing.
+ *
+ * Excel on Windows saves "CSV" as windows-1252, not UTF-8. There `®` is the
+ * single byte 0xAE and `™` is 0x99 — neither is valid UTF-8, so decoding the
+ * file as UTF-8 substitutes U+FFFD and the original character is gone for good.
+ * That is how `Carbopol® Aqua SF-1` reached master_rm stored as `Carbopol�
+ * Aqua SF-1`; the same file saved as "CSV UTF-8" landed correctly, which is why
+ * only some rows are damaged.
+ *
+ * Strict UTF-8 first so a genuine UTF-8 file is never misread — windows-1252
+ * maps all 256 bytes, so it can decode anything and must only be the fallback.
+ */
+export function decodeUpload(bytes: ArrayBuffer | Uint8Array): string {
+  const buf = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buf)
+  } catch {
+    return new TextDecoder("windows-1252").decode(buf)
+  }
+}
+
 /** Rows of raw cells, exactly as written. No trimming — see `normalizeCell`. */
 export function parseCsvRows(text: string): string[][] {
   // Excel writes a UTF-8 BOM. Left in place it becomes part of the first

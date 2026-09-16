@@ -9,7 +9,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
   parseCsvRows, parseCsvObjects, normalizeCell, isBlankRow, normalizeHeader, describeCsvShape,
-  excelCellText,
+  excelCellText, decodeUpload,
 } from "../../lib/csv"
 
 test("a newline inside a quoted cell does not start a new row", () => {
@@ -244,4 +244,33 @@ test("the default mapper still lower-cases only — the Uniware sync depends on 
   const [row] = parseCsvObjects("Vendor Code,Item Type SKU\nAROVEA_,MC-100")
   assert.equal(row["vendor code"], "AROVEA_")
   assert.equal(row["item type sku"], "MC-100")
+})
+
+// Reported from the RM master: `Carbopol® Aqua SF-1 OS polymer` was stored with a
+// literal U+FFFD where the ® should be. Excel saves CSV as windows-1252, where
+// ® is the single byte 0xAE — invalid UTF-8, so a UTF-8 decode destroys it.
+test("a windows-1252 CSV keeps its registered and trademark signs", () => {
+  // The bytes Excel actually writes: ® is 0xAE, ™ is 0x99.
+  const cp1252 = Buffer.from(
+    ["rm_code,name", "RM-1,Carbopol\xAE Aqua", "RM-2,FOAMYSENSE\x99 N60K"].join("\n"),
+    "latin1",
+  )
+  const rows = parseCsvObjects(decodeUpload(cp1252), normalizeHeader)
+  assert.equal(rows[0].name, "Carbopol® Aqua")
+  assert.equal(rows[1].name, "FOAMYSENSE™ N60K")
+})
+
+test("a UTF-8 CSV is not misread as windows-1252", () => {
+  const utf8 = Buffer.from(
+    ["rm_code,name", "RM-1,Carbopol® Aqua", "RM-2,CELLOSIZE™ E4M"].join("\n"),
+    "utf-8",
+  )
+  const rows = parseCsvObjects(decodeUpload(utf8), normalizeHeader)
+  assert.equal(rows[0].name, "Carbopol® Aqua")
+  assert.equal(rows[1].name, "CELLOSIZE™ E4M")
+})
+
+test("decodeUpload strips the UTF-8 BOM Excel writes", () => {
+  const bom = Buffer.from(["﻿rm_code,name", "RM-1,Glycerin"].join("\n"), "utf-8")
+  assert.equal(parseCsvObjects(decodeUpload(bom), normalizeHeader)[0].rm_code, "RM-1")
 })
