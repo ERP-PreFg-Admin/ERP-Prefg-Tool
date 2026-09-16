@@ -128,6 +128,7 @@ export async function pmCreate(body: PmCreateBody, userId: number, ctx: object):
           body.rate_status || "active",
           body.effective_from?.trim() || today,
           body.effective_to?.trim() || null,
+          body.mfg_id ? Number(body.mfg_id) : null,
         ])
         logger.info({ ...logCtx, message: "Vendor rate tab: rate inserted", pmId, vendor_code: body.vendor_code?.trim() })
       } else {
@@ -287,6 +288,7 @@ export async function pmCreateFull(body: PmCreateFullBody, userId: number, ctx: 
           v.curr_rate ? roundToTwoDecimals(v.curr_rate) : null,
           v.moq ? roundToWholeNumber(v.moq) : null,
           v.rate_uom?.trim() || null, "active", today, null,
+          v.mfg_id ? Number(v.mfg_id) : null,
         ])
         logger.info({ ...logCtx, message: "create-full: vendor rate inserted", pmId, vendor_id: vendorId })
       }
@@ -374,6 +376,7 @@ export async function pmAddRates(body: PmAddRatesBody, userId: number, ctx: obje
             v.curr_rate ? roundToTwoDecimals(v.curr_rate) : null,
             v.moq ? roundToWholeNumber(v.moq) : null,
             v.rate_uom?.trim() || null, "active", today, null,
+            v.mfg_id ? Number(v.mfg_id) : null,
           ])
           logger.info({ ...logCtx, message: "vendor rate inserted (new)", pmId, vendor_id: vendorId })
         }

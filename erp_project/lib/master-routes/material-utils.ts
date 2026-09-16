@@ -281,9 +281,9 @@ export async function applyVendorRateApproval(
     ["moq", existing.moq, v.moq],
     ["uom", existing.uom, v.rate_uom],
     ["effective_from", existing.effective_from, v.effective_from || today],
-    // mfg_id only exists on cost_master_rm_ven (informational vendor→manufacturer
-    // tag) — cost_master_pm_ven has no such column, so skip it for PM_VRM.
-    ...(moduleVrm === "RM_VRM" ? [["mfg_id", existing.mfg_id, v.mfg_id] as [string, unknown, unknown]] : []),
+    // Informational vendor→manufacturer tag, on both cost_master_rm_ven and
+    // cost_master_pm_ven (prisma/add_pm_ven_mfg_id.sql).
+    ["mfg_id", existing.mfg_id, v.mfg_id],
   ] as [string, unknown, unknown][]).filter(([, o, n]) => String(o ?? "") !== String(n ?? ""))
   if (diff.length === 0) return null
 

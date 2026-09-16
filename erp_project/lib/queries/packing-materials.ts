@@ -201,9 +201,11 @@ export const packingMaterials = {
       pmv.vendor_id, pmv.vendor_code,
       pmv.curr_rate, pmv.moq,
       pmv.uom, pmv.status,
-      pmv.effective_from, pmv.effective_to
+      pmv.effective_from, pmv.effective_to,
+      pmv.mfg_id, mm.name AS mfg_name, mm.code AS mfg_code
     FROM cost_master_pm_ven AS pmv
     INNER JOIN master_pm AS p ON pmv.pm_id = p.id
+    LEFT JOIN master_mfgs AS mm ON mm.id = pmv.mfg_id
     WHERE (? IS NULL OR p.pm_code LIKE ? OR p.name LIKE ?)
       AND (? IS NULL OR pmv.status = ?)
       AND (? IS NULL OR p.type = ?)
@@ -223,9 +225,11 @@ export const packingMaterials = {
       pmv.vendor_id, pmv.vendor_code,
       pmv.curr_rate, pmv.moq,
       pmv.uom, pmv.status,
-      pmv.effective_from, pmv.effective_to
+      pmv.effective_from, pmv.effective_to,
+      pmv.mfg_id, mm.name AS mfg_name, mm.code AS mfg_code
     FROM cost_master_pm_ven AS pmv
     INNER JOIN master_pm AS p ON pmv.pm_id = p.id
+    LEFT JOIN master_mfgs AS mm ON mm.id = pmv.mfg_id
     WHERE (? IS NULL OR p.pm_code LIKE ? OR p.name LIKE ?)
       AND (? IS NULL OR pmv.status = ?)
       AND (? IS NULL OR p.type = ?)
@@ -384,10 +388,12 @@ export const packingMaterials = {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `,
 
-  /** Parameters: [pm_id, vendor_id, vendor_code, curr_rate, moq, uom, status, effective_from, effective_to] */
+  /** `mfg_id` is an optional, informational vendor→manufacturer tag — it is NOT
+   *  part of the rate key (see checkVendorRate), so it never forks a rate row.
+   *  Parameters: [pm_id, vendor_id, vendor_code, curr_rate, moq, uom, status, effective_from, effective_to, mfg_id] */
   insertVendorRate: `
-    INSERT INTO cost_master_pm_ven (pm_id, vendor_id, vendor_code, curr_rate, moq, uom, status, effective_from, effective_to)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO cost_master_pm_ven (pm_id, vendor_id, vendor_code, curr_rate, moq, uom, status, effective_from, effective_to, mfg_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   /** Parameters: [pm_id, mfg_id, mfg_code, curr_rate, uom, status, effective_from] */
@@ -417,7 +423,7 @@ export const packingMaterials = {
    * Parameters: [pm_id, vendor_id, moq]
    */
   checkVendorRate: `
-    SELECT id, vendor_id, curr_rate, moq, uom, status, effective_from, effective_to
+    SELECT id, vendor_id, curr_rate, moq, uom, status, effective_from, effective_to, mfg_id
     FROM cost_master_pm_ven WHERE pm_id = ? AND vendor_id = ? AND moq = ? LIMIT 1
   `,
 
@@ -427,9 +433,9 @@ export const packingMaterials = {
     VALUES ('pm', ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
-  /** Update an existing pm_vrm row. Parameters: [curr_rate, moq, uom, status, effective_from, id] */
+  /** Update an existing pm_vrm row. Parameters: [curr_rate, moq, uom, status, effective_from, mfg_id, id] */
   updateVendorRate: `
-    UPDATE cost_master_pm_ven SET curr_rate = ?, moq = ?, uom = ?, status = ?, effective_from = ?, effective_to = NULL, updated_on = NOW()
+    UPDATE cost_master_pm_ven SET curr_rate = ?, moq = ?, uom = ?, status = ?, effective_from = ?, mfg_id = ?, effective_to = NULL, updated_on = NOW()
     WHERE id = ?
   `,
 
@@ -528,7 +534,7 @@ export const packingMaterials = {
    *  Parameters: [id]
    */
   selectVendorRateById: `
-    SELECT id, pm_id, vendor_id, curr_rate, moq, uom, effective_from, effective_to, status
+    SELECT id, pm_id, vendor_id, curr_rate, moq, uom, effective_from, effective_to, status, mfg_id
     FROM cost_master_pm_ven WHERE id = ? LIMIT 1
   `,
 

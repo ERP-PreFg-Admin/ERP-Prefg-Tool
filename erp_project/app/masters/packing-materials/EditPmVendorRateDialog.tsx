@@ -11,7 +11,7 @@ import { CostImpactAlert } from "@/components/masters/CostImpactAlert"
 import { RejectionBanner, type RejectionInfo } from "@/components/masters/ApprovalBanners"
 import { RemarksField, RATE_REMARK_PRESETS } from "@/components/masters/RemarksField"
 import { Select } from "@/components/ui/select"
-import type { PMVendor } from "@/types/masters"
+import type { PMVendor, Mfg } from "@/types/masters"
 import { todayIST } from "@/lib/date"
 
 /** Module scope, not inside the component: it uses no state, and declaring it
@@ -24,10 +24,12 @@ function toDateStr(val: unknown): string {
 
 export function EditPmVendorRateDialog({
   row,
+  manufacturers,
   onSuccess,
   onClose,
 }: {
   row: PMVendor | null
+  manufacturers: Mfg[]
   onSuccess: () => void
   onClose: () => void
 }) {
@@ -38,6 +40,7 @@ export function EditPmVendorRateDialog({
     uom: "",
     effective_from: "",
     effective_to: "",
+    mfg_id: "" as string,
   })
   const [remarks, setRemarks] = useState("")
   const [saving, setSaving] = useState(false)
@@ -56,6 +59,7 @@ export function EditPmVendorRateDialog({
         uom: row.uom ?? "",
         effective_from: toDateStr(row.effective_from),
         effective_to: toDateStr(row.effective_to),
+        mfg_id: row.mfg_id ? String(row.mfg_id) : "",
       })
       setRemarks("")
       setSubmitted(false)
@@ -110,6 +114,7 @@ export function EditPmVendorRateDialog({
             rate_uom: form.uom,
             effective_from: form.effective_from,
             effective_to: form.effective_to || null,
+            mfg_id: form.mfg_id ? Number(form.mfg_id) : null,
             remarks: remarks.trim(),
           }],
         }),
@@ -194,6 +199,20 @@ export function EditPmVendorRateDialog({
               {form.effective_from && form.effective_from < today && (
                 <p className="text-xs text-destructive">Date cannot be in the past.</p>
               )}
+            </div>
+            <div className="grid gap-1 col-span-2">
+              <Label>Manufacturer</Label>
+              <Select
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                value={form.mfg_id}
+                onChange={(e) => set("mfg_id", e.target.value)}
+                disabled={!canEdit}
+              >
+                <option value="">None</option>
+                {manufacturers.map((m) => (
+                  <option key={m.mfg_id} value={m.mfg_id}>{m.name} ({m.code})</option>
+                ))}
+              </Select>
             </div>
           </div>
 

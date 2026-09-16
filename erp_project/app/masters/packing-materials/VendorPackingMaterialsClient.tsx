@@ -29,6 +29,7 @@ function buildVendorColumns(vendors: Vendor[]): ColumnDef[] {
   { key: "name",           label: "Name",           sortAs: "text", className: "font-medium", render: (r) => <TruncatedCell value={r.name} label="Name" /> },
   { key: "type",           label: "Type",           sortAs: "text", width: "100px" },
   { key: "vendor_code",    label: "Vendor",         sortAs: "text", render: (r) => nameByVendorId.get(r.vendor_id as number) ?? (r.vendor_code as string | null) ?? "—" },
+  { key: "mfg_name",       label: "Manufacturer",   sortAs: "text", render: (r) => (r.mfg_name as string | null) ?? "—" },
   { key: "curr_rate",      label: "Current Rate",   sortAs: "num",  width: "145px", render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
   { key: "moq",            label: "MOQ",            sortAs: "num",  width: "90px", render: (r) => r.moq != null ? String(Math.round(Number(r.moq))) : "—" },
   { key: "uom",            label: "UOM",            sortAs: "text", width: "90px", className: "uppercase text-xs text-muted-foreground" },
@@ -139,6 +140,7 @@ export default function VendorPackingMaterialsClient({
       />
       <EditPmVendorRateDialog
         row={editRow}
+        manufacturers={manufacturers}
         onSuccess={() => { setEditRow(null); window.location.reload() }}
         onClose={() => setEditRow(null)}
       />

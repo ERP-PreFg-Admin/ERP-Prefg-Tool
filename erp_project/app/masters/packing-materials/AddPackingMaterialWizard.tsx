@@ -37,6 +37,7 @@ type VendorEntry = {
   curr_rate: string
   moq: string
   rate_uom: string
+  mfg_id: number | null
 }
 
 type MfgEntry = {
@@ -50,7 +51,7 @@ type MfgEntry = {
 const UOM_OPTIONS = ["kg", "g", "l", "ml", "pcs", "m"]
 
 const DEFAULT_VENDOR_ENTRY: VendorEntry = {
-  vendor_id: null, vendor_code: "", curr_rate: "", moq: "", rate_uom: "pcs",
+  vendor_id: null, vendor_code: "", curr_rate: "", moq: "", rate_uom: "pcs", mfg_id: null,
 }
 
 const DEFAULT_MFG_ENTRY: MfgEntry = {
@@ -210,6 +211,7 @@ export function AddPackingMaterialWizard({
           curr_rate: Number(v.curr_rate),
           moq: Number(v.moq),
           rate_uom: v.rate_uom,
+          mfg_id: v.mfg_id,
         })),
         manufacturers: mfgPayload,
       }
@@ -277,6 +279,12 @@ export function AddPackingMaterialWizard({
     )
     const moq = vendorEntries[index]?.moq ?? ""
     checkExistingRate(index, vendorId || null, moq)
+  }
+
+  function selectMfgForVendor(index: number, mfgId: number) {
+    setVendorEntries((prev) =>
+      prev.map((e, i) => (i === index ? { ...e, mfg_id: mfgId || null } : e))
+    )
   }
 
   function updateVendorEntry(index: number, field: keyof VendorEntry, value: string) {
@@ -422,6 +430,7 @@ export function AddPackingMaterialWizard({
                     <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                       <div className={cn(vendorRowGridCls, "px-1 text-xs font-medium text-muted-foreground")}>
                         <span>Vendor *</span>
+                        <span>Manufacturer</span>
                         <span>Rate (₹) *</span>
                         <span>MOQ *</span>
                         <span>UOM</span>
@@ -439,6 +448,18 @@ export function AddPackingMaterialWizard({
                               {pmVendors.map((v) => (
                                 <option key={v.vendor_id} value={v.vendor_id}>
                                   {v.name} ({v.code})
+                                </option>
+                              ))}
+                            </Select>
+                            <Select
+                              className={inputCls}
+                              value={entry.mfg_id ?? ""}
+                              onChange={(e) => selectMfgForVendor(i, Number(e.target.value))}
+                            >
+                              <option value="">None</option>
+                              {mfgOptions.map((m) => (
+                                <option key={m.mfg_id} value={m.mfg_id}>
+                                  {m.name} ({m.code})
                                 </option>
                               ))}
                             </Select>
@@ -633,7 +654,7 @@ const inputCls =
 const labelCls = "block text-xs font-medium mb-1"
 
 // Single-line row grid: Vendor | Rate | MOQ | UOM | remove-button
-const vendorRowGridCls = "grid grid-cols-[2fr_1fr_1fr_0.8fr_auto] gap-2"
+const vendorRowGridCls = "grid grid-cols-[2fr_2fr_1fr_1fr_0.8fr_auto] gap-2"
 
 // Single-line row grid: Manufacturer | Rate | UOM | Effective From | remove-button
 const mfgRowGridCls = "grid grid-cols-[2fr_1fr_0.8fr_1fr_auto] gap-2"

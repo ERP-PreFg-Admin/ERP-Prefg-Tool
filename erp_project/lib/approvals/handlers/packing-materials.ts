@@ -68,6 +68,7 @@ export const pmVrmHandler: ModuleHandler = {
       fieldMap.uom            ?? cur.uom,
       STATUS.ACTIVE,
       fieldMap.effective_from ?? cur.effective_from,
+      fieldMap.mfg_id         !== undefined ? (fieldMap.mfg_id ? Number(fieldMap.mfg_id) : null) : cur.mfg_id,
       entityId,
     ])
   },
@@ -261,8 +262,8 @@ export async function stagePmBulkRows(
 }
 
 // Bulk PM × Vendor rate upload — one CSV row = one cost_master_pm_ven row.
-// cost_master_pm_ven has no mfg_id column (unlike cost_master_rm_ven), so there's no
-// manufacturer tag here.
+// The CSV template carries no mfg_code column, so the manufacturer tag is left
+// NULL here and set from the UI instead (same as the RM template's is optional).
 export const pmVrmBulkHandler = bulkHandler("PM_VRM_BULK", {
   applyRow: async (row, { conn }) => {
     const pmCode = row.pm_code?.trim()
@@ -289,6 +290,7 @@ export const pmVrmBulkHandler = bulkHandler("PM_VRM_BULK", {
       // Optional: a blank date means the rate applies from now. Rows staged
       // before the upload-time stamp was added can still arrive blank.
       normalizeDateCell(row.effective_from) || todayIST(), normalizeDateCell(row.effective_to) || null,
+      null,
     ])
     return "inserted"
   },

@@ -1004,6 +1004,7 @@ model pm_vrm_dynamic {
   moq            Decimal?              @db.Decimal(12, 3)
   uom            String?               @db.VarChar(20)
   status         pm_vrm_dynamic_status @default(draft)
+  mfg_id         Int?
   master_pm      master_pm             @relation(fields: [pm_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "pm_vrm_dynamic_ibfk_1")
   master_vendors master_vendors        @relation(fields: [vendor_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "pm_vrm_dynamic_ibfk_2")
 
@@ -1011,6 +1012,7 @@ model pm_vrm_dynamic {
   @@index([vendor_id], map: "vendor_id")
   @@index([status, effective_from], map: "idx_pm_vrm_status_eff")
   @@index([status, curr_rate], map: "idx_pm_vrm_status_rate")
+  @@index([mfg_id], map: "idx_pm_ven_mfg")
 }
 
 model rm_mrm_fixed {

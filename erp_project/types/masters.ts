@@ -390,6 +390,10 @@ export type PMVendor = {
   status: string | null
   effective_from: string | null
   effective_to: string | null
+  /** Informational vendor→manufacturer tag — not part of the rate key. */
+  mfg_id: number | null
+  mfg_name: string | null
+  mfg_code: string | null
 }
 
 /** Product Material rate row joined with MANUFACTURER rate master (`pm_mrm`).
