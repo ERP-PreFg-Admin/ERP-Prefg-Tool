@@ -1,7 +1,13 @@
 "use client"
 
-// One button that refreshes every mirrored PO's Uniware status AND pulls the
-// goods receipts booked against the ones that have any.
+// One button that refreshes the Uniware status of the POs the caller is looking
+// at, AND pulls the goods receipts booked against the ones that have any.
+//
+// Scoped, not "every mirrored PO": it forwards the page's own filter and the
+// server resolves it through the same predicate the list uses, so "sync these"
+// covers exactly the rows on screen. An unfiltered sweep over every
+// manufacturer is minutes of sequential Uniware calls and is now admin-only —
+// the nightly job covers normal operation.
 //
 // Both in one press on purpose: the status pass learns inflowReceiptsCount for
 // free from the call it already makes, so the receipts cost nothing to find and
@@ -23,7 +29,19 @@ import { Button } from "@/components/ui/button"
 import { apiErrorMessage } from "@/lib/api-error-message"
 import { summariseSync, type SyncResult, type SyncSummary } from "./sync-summary"
 
-export default function SyncUniwareButton({ onDone }: { onDone?: () => void }) {
+/** The invoices tab's filter, forwarded so the sweep covers what is on screen. */
+export type SyncFilter = {
+  search?: string
+  mfgCode?: string
+  destination?: string
+  dateFrom?: string
+  dateTo?: string
+}
+
+export default function SyncUniwareButton(
+  { onDone, filter, label = "Sync Uniware" }:
+  { onDone?: () => void; filter?: SyncFilter; label?: string },
+) {
   const [busy, setBusy]       = useState(false)
   const [summary, setSummary] = useState<SyncSummary | null>(null)
 
@@ -31,7 +49,14 @@ export default function SyncUniwareButton({ onDone }: { onDone?: () => void }) {
     setBusy(true)
     setSummary(null)
     try {
-      const res  = await fetch("/api/v1/purchase-orders/uniware-status", { method: "POST" })
+      // Always `scoped`. The body-less form still exists server-side but is a
+      // cross-scope admin sweep — from a page, "sync" means the caller's own
+      // rows, and an empty filter here is still bounded by their entity scope.
+      const res  = await fetch("/api/v1/purchase-orders/uniware-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scoped: true, ...filter }),
+      })
       const data = await res.json().catch(() => ({}))
       // apiErrorMessage rather than `data.error`: withGateway puts the useful
       // half in `details`, and reading only `error` threw it away.
@@ -55,7 +80,7 @@ export default function SyncUniwareButton({ onDone }: { onDone?: () => void }) {
         {busy
           ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
           : <RefreshCw className="h-3.5 w-3.5" />}
-        {busy ? "Syncing…" : "Sync Uniware"}
+        {busy ? "Syncing…" : label}
       </Button>
       {/* Inline rather than a toast: the run takes seconds and the reader is
           already looking at this row of the toolbar.

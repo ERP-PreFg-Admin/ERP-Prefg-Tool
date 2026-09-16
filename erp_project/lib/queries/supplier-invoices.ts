@@ -24,6 +24,54 @@ import { scopeParams, type UserScope } from "@/lib/scope"
 // Params: [search×3, scopeParams(mfgIds), scopeParams(warehouseNames),
 //          scopeParams(brandIds) ×2 — the flag is read twice, once per arm,
 //          mfgCode×2, destination×2, dateFrom×2, dateTo×2]
+/**
+ * Uniware states a purchase order never leaves.
+ *
+ * Exported because the GRN and document sweeps want the same rule, and two
+ * copies would eventually disagree about what "finished" means.
+ */
+export const TERMINAL_UNIWARE_STATUSES = ["COMPLETE", "CANCELLED"] as const
+
+/** How long a terminal PO stays skipped before it is re-read once anyway. */
+export const TERMINAL_RECHECK_DAYS = 30
+
+/**
+ * Which mirrored invoices a status sweep should still ASK Uniware about.
+ *
+ * The sweep used to take every mirrored invoice, so a PO closed months ago was
+ * re-fetched on every run — and because every PO eventually reaches COMPLETE,
+ * that pile only ever grows. Measured on prod: 11 of 52 invoices were already
+ * COMPLETE, and those 11 carried 11 of the 12 expensive `1+N` receipt walks, so
+ * most of a run's cost was spent re-confirming answers that were already final.
+ *
+ * Skipping them makes a run cost a function of OPEN work rather than of
+ * history, which is the only reason this stops getting slower as invoices
+ * accumulate. It is not permanent: a terminal PO not checked in
+ * TERMINAL_RECHECK_DAYS is re-admitted, so one amended after closing is still
+ * eventually re-read.
+ *
+ * `uniware_status IS NULL` is the never-synced case and must always qualify.
+ */
+const SYNC_CANDIDATE_PREDICATE = `
+  si.uniware_po_code IS NOT NULL
+    AND (si.uniware_status IS NULL
+         OR si.uniware_status NOT IN (${TERMINAL_UNIWARE_STATUSES.map((s) => `'${s}'`).join(", ")})
+         OR si.uniware_synced_at IS NULL
+         OR si.uniware_synced_at < NOW() - INTERVAL ${TERMINAL_RECHECK_DAYS} DAY)
+`
+
+/**
+ * Least-recently-checked first, never-synced before everything.
+ *
+ * Replaces `id DESC`, which meant the run's LIMIT always re-took the same
+ * newest rows and older ones were never reached again once the mirrored set
+ * passed the cap. `uniware_synced_at IS NOT NULL` sorts 0 for NULL, so ASC puts
+ * the never-synced at the front without a NULLS FIRST clause MySQL lacks.
+ */
+const SYNC_CANDIDATE_ORDER = `
+  si.uniware_synced_at IS NOT NULL, si.uniware_synced_at ASC, si.id DESC
+`
+
 const INVOICE_WHERE = `
   WHERE (? IS NULL OR si.invoice_no LIKE ? OR m.name LIKE ?)
     AND (? IS NULL OR si.mfg_id      IN (?))
@@ -166,8 +214,29 @@ export const supplierInvoicesSql = {
   selectAllForStatusSync: `
     SELECT si.id, si.uniware_po_code, si.destination, si.buyer_gstin
     FROM invoice_mfg si
-    WHERE si.uniware_po_code IS NOT NULL
-    ORDER BY si.id DESC
+    WHERE ${SYNC_CANDIDATE_PREDICATE}
+    ORDER BY ${SYNC_CANDIDATE_ORDER}
+    LIMIT ?
+  `,
+
+  /**
+   * The same candidates, narrowed to what the caller is LOOKING at — the
+   * invoices tab's own filter, so "sync these" and "show these" cannot drift.
+   *
+   * Takes INVOICE_WHERE's 15 params from buildInvoiceParams, which already
+   * folds in the user's mfg / destination / brand scope. That is why this takes
+   * a filter rather than a list of ids: a body of ids would have to be
+   * re-checked one by one against scope (ids are guessable integers), whereas a
+   * filter can only ever resolve to rows the caller can already see.
+   * Parameters: [...buildInvoiceParams(...), limit]
+   */
+  selectForStatusSyncByFilter: `
+    SELECT si.id, si.uniware_po_code, si.destination, si.buyer_gstin
+    FROM invoice_mfg si
+    INNER JOIN master_mfgs m ON m.id = si.mfg_id
+    ${INVOICE_WHERE}
+      AND ${SYNC_CANDIDATE_PREDICATE}
+    ORDER BY ${SYNC_CANDIDATE_ORDER}
     LIMIT ?
   `,
 

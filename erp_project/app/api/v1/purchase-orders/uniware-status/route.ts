@@ -31,15 +31,41 @@ export const runtime = "nodejs"
 export const maxDuration = 300
 
 import { NextResponse } from "next/server"
+import { z } from "zod"
 import { query, execute } from "@/lib/db"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
-import { supplierInvoicesSql } from "@/lib/queries/supplier-invoices"
+import { supplierInvoicesSql, buildInvoiceParams } from "@/lib/queries/supplier-invoices"
 import { uniwareGrn } from "@/lib/queries/uniware-grn"
 import { fetchPurchaseOrderStatus, uniwareEnabled } from "@/lib/uniware"
 import { requireFacilityForInvoice } from "@/lib/uniware/facility-resolve"
 import { syncGrnsForInvoice } from "@/lib/uniware/grn-sync"
+import { getViewScope } from "@/lib/brand-view"
+import { resolveAccess } from "@/lib/permissions"
 import logger from "@/lib/logger"
+
+/** Same slug app/api/v1/admin/* gates on. */
+const ADMIN_PAGE = "/admin"
+
+/**
+ * The invoices tab's own filter, so "sync these" means the same set as
+ * "show these". Every field optional: a body-less POST is still the full sweep
+ * the button used to do, which is now admin-only (see the handler).
+ *
+ * A FILTER, deliberately, not a list of invoice ids. buildInvoiceParams folds
+ * the caller's mfg/destination/brand scope into the same predicate the list
+ * uses, so a filter can only ever resolve to rows they can already see. A body
+ * of ids would need re-checking one at a time — ids are guessable integers, and
+ * "it came from a filtered page" guards nothing on a user-supplied body.
+ */
+const syncFilterSchema = z.object({
+  scoped:      z.boolean().optional(),
+  search:      z.string().trim().max(200).nullish(),
+  mfgCode:     z.string().trim().max(50).nullish(),
+  destination: z.string().trim().max(100).nullish(),
+  dateFrom:    z.string().trim().max(20).nullish(),
+  dateTo:      z.string().trim().max(20).nullish(),
+})
 
 // ponytail: a flat cap rather than a cursor or a job queue. At one request per PO
 // this is the most that fits in maxDuration; when the mirrored set outgrows it,
@@ -72,12 +98,36 @@ type Row = {
 
 export const POST = withGateway({
   access: { pageSlug: "/po-tracking", level: "editor" },
-  handler: async ({ ctx }) => {
+  schema: syncFilterSchema,
+  handler: async ({ body, session, ctx }) => {
     if (!uniwareEnabled()) {
       throw new ApiError(400, "uniware_unconfigured", "Uniware is not configured on this environment.")
     }
 
-    const rows = await query<Row>(supplierInvoicesSql.selectAllForStatusSync, [MAX_PER_RUN + 1])
+    // `scoped` is the invoices tab asking for "what I am looking at". Without
+    // it this is the unfiltered sweep over everything, which is now a recovery
+    // tool rather than a daily one — the nightly job covers normal operation,
+    // and at 17 manufacturers this costs minutes. Editor on /po-tracking is not
+    // enough for that; /admin is the gate the admin routes already use.
+    let rows: Row[]
+    if (body.scoped) {
+      const scope = await getViewScope(Number(session.user.id))
+      const params = buildInvoiceParams(body.search ?? null, scope, {
+        mfgCode:     body.mfgCode     ?? null,
+        destination: body.destination ?? null,
+        dateFrom:    body.dateFrom    ?? null,
+        dateTo:      body.dateTo      ?? null,
+      })
+      rows = await query<Row>(supplierInvoicesSql.selectForStatusSyncByFilter, [...params, MAX_PER_RUN + 1])
+    } else {
+      const level = await resolveAccess(Number(session.user.id), session.user.roles ?? [], ADMIN_PAGE)
+      if (level !== "editor") {
+        throw new ApiError(403, "forbidden",
+          "A full Uniware sweep is admin-only. Use Sync on the invoices tab to refresh what you are viewing.")
+      }
+      rows = await query<Row>(supplierInvoicesSql.selectAllForStatusSync, [MAX_PER_RUN + 1])
+    }
+
     const truncated = rows.length > MAX_PER_RUN
     const batch = truncated ? rows.slice(0, MAX_PER_RUN) : rows
 

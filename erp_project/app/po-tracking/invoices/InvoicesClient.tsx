@@ -98,7 +98,20 @@ export default function InvoicesClient({
             </Button>
           )}
           <div className="ml-auto flex items-center gap-3">
-            <SyncUniwareButton onDone={() => setReloadKey((k) => k + 1)} />
+            {/* The live filter, so the sweep covers exactly the invoices being
+                looked at. Resolved server-side against the same INVOICE_WHERE
+                the list uses, so the two sets cannot drift. */}
+            <SyncUniwareButton
+              label="Sync these"
+              filter={{
+                ...(search.trim() ? { search: search.trim() } : {}),
+                ...(mfgCode     ? { mfgCode }     : {}),
+                ...(destination ? { destination } : {}),
+                ...(dateFrom    ? { dateFrom }    : {}),
+                ...(dateTo      ? { dateTo }      : {}),
+              }}
+              onDone={() => setReloadKey((k) => k + 1)}
+            />
             <SyncDocumentsButton onDone={() => setReloadKey((k) => k + 1)} />
             {/* The search and filters are component state, not URL params, and
                 DownloadButton only reads useSearchParams — extraParams is how
