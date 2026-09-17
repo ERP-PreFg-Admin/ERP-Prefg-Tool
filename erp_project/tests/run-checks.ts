@@ -37,6 +37,7 @@ const DB = [
   "_check-entity-scope",
   "_check-admin-panel",
   "_check-inward-count",
+  "_check-invoice-reconciliation",
 ]
 
 /** Hit a third-party API or the DWH. Run these by hand when touching that code. */

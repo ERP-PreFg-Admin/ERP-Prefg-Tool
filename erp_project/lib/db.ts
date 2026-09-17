@@ -23,6 +23,25 @@ export const pool =
     connectTimeout: 10000,
   });
 
+// STRICT_TRANS_TABLES, per connection rather than on the RDS parameter group:
+// scoped to this app, and revertible with a deploy instead of an instance-wide
+// change affecting every client.
+//
+// Without it MySQL silently repairs bad writes instead of rejecting them, and
+// two production data losses came from exactly that. An invalid ENUM value
+// becomes '': purchase_orders.status on MPO-OO113593 went blank, which made a
+// 49,352-unit order invisible to the FIFO matcher and cost 34,188 units across
+// 14 invoices. details_recipe.mtrl_type did the same to 24 gift-kit lines when
+// a migration had not been applied. Both were silent for weeks.
+//
+// Over-long strings truncate the same way. master_rm.inci_name had to be
+// widened to VARCHAR(1000) before this could be turned on — see
+// prisma/widen_rm_inci_name.sql. Check that no other column is silently
+// truncating before adding a mode here.
+pool.on("connection", (conn) => {
+  conn.query("SET SESSION sql_mode = CONCAT(@@sql_mode, ',STRICT_TRANS_TABLES')");
+});
+
 if (NODE_ENV !== "production") {
   globalForPool.dbPool = pool;
 }
