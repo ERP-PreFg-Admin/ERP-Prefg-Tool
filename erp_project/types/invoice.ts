@@ -143,6 +143,26 @@ export type InvoiceHistoryHeader = {
   /** Rejected qty priced from the inward PO's unit_price, which is the
    *  invoice's own rate. Excludes receipt lines that matched no PO of ours. */
   grn_rejected_value?: string | number | null
+  /* ── The match's other two legs — PO and INV (list query only) ────────────
+   * Fed to threeWayMatch() in lib/invoice/three-way.ts; nothing reads them raw. */
+  /** Σ amount × (1 + gst%), to check against invoice_total. */
+  lines_value?:        string | number
+  /** Lines carrying no received_against_po_id. >0 greys the PO leg. */
+  po_unlinked_lines?:  number
+  /** Distinct EXISTING parent POs settled. 0 = PO not on file. */
+  po_count?:           number
+  /** CSV of legs a human signed off, e.g. "inv,po". NULL = none, which is the
+   *  common case: absence of a row is the unverified state. */
+  verified_legs?:      string | null
+}
+
+/** One leg's physical sign-off, for the drilldown. */
+export type InvoiceLegVerification = {
+  leg:              "po" | "pod" | "inv"
+  verified_at:      string
+  remarks:          string | null
+  verified_by:      number
+  verified_by_name: string | null
 }
 
 /** One line of a historical invoice, with both PO links resolved. */
@@ -201,6 +221,9 @@ export type InvoiceGrnLine = {
   po_no:             string | null
   quantity:          string | number
   rejected_qty:      string | number
+  /** OUR rate, off the inward PO — a receipt carries no price. NULL = unknown
+   *  value, never zero, so an unpriced line is not shown as a ₹0 loss. */
+  po_unit_price:     string | number | null
   batch_code:        string | null
   expiry:            string | null
   mfg_date:          string | null

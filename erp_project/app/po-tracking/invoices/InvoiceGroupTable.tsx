@@ -16,7 +16,7 @@
 // Extracted from InvoiceHistoryDialog so the dialog and /po-tracking/invoices
 // render the same table rather than two that drift.
 
-import { Fragment, useCallback, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import { ChevronDown, ChevronRight, ExternalLink, FileText, Loader2, RotateCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -26,6 +26,9 @@ import { SectionHead } from "../po-inwarding/InvoiceFields"
 import UniwareStatusBadge from "../UniwareStatusBadge"
 import type { InvoiceHistoryHeader, InvoiceHistoryItem, InvoiceGrnLine, InvoiceDocument } from "@/types/invoice"
 import { IST, todayIST } from "@/lib/date"
+import type { MatchBadge } from "@/lib/invoice/three-way"
+import { PaymentCell, ThreeWayChips, matchOf } from "./ThreeWayCells"
+import ThreeWayDialog from "./ThreeWayDialog"
 
 const num = (v: unknown) => (v == null || v === "" ? null : Number(v))
 
@@ -117,83 +120,6 @@ function AgeingCell({ inv }: { inv: InvoiceHistoryHeader }) {
 }
 
 /**
- * What the warehouse accepted, against what was billed.
- *
- * Three states, deliberately distinguished — collapsing them is how "0 rejected"
- * comes to mean both "clean receipt" and "we never asked":
- *
- *   never synced   an em dash. Nothing known either way.
- *   nothing yet    "awaiting receipt" — receipts synced, no goods booked.
- *   received       accepted, and rejected only when there IS a rejection.
- *
- * Rejected earns colour; accepted does not. A number that always renders in red
- * stops being a signal.
- */
-function GrnCell({ inv }: { inv: InvoiceHistoryHeader }) {
-  const count    = Number(inv.grn_count ?? 0)
-  const accepted = Number(inv.grn_accepted ?? 0)
-  const rejected = Number(inv.grn_rejected ?? 0)
-  const value    = num(inv.grn_rejected_value)
-
-  if (count === 0 && accepted === 0 && rejected === 0) {
-    return (
-      <span className="text-muted-foreground" title="No goods receipt synced for this invoice">—</span>
-    )
-  }
-  if (accepted === 0 && rejected === 0) {
-    return <span className="text-muted-foreground">awaiting receipt</span>
-  }
-
-  return (
-    <span title={`${count} goods receipt${count === 1 ? "" : "s"}`}>
-      <span className="font-medium">{qty(accepted)}</span>
-      {rejected > 0 && (
-        <>
-          <span className="text-muted-foreground"> / </span>
-          <span
-            className="font-medium text-amber-700 dark:text-amber-400"
-            title={value != null && value > 0 ? `Rejected value ₹${money(value)}` : undefined}
-          >
-            {qty(rejected)}
-            {value != null && value > 0 && <span className="ml-1 font-normal">(₹{money(value)})</span>}
-          </span>
-        </>
-      )}
-      {count > 1 && <span className="ml-1 text-[11px] text-muted-foreground">×{count}</span>}
-    </span>
-  )
-}
-
-/**
- * Short Qty for a whole invoice: billed, less what the warehouse accounted for.
- *
- * Same rule as the per-line cell below, one level up — see it for why colour is
- * withheld until something has actually been received.
- */
-function InvoiceShortCell({ inv }: { inv: InvoiceHistoryHeader }) {
-  const billed   = Number(inv.billed_qty ?? 0)
-  const accepted = Number(inv.grn_accepted ?? 0)
-  const rejected = Number(inv.grn_rejected ?? 0)
-  const anyReceipt = accepted + rejected > 0
-
-  // Nothing billed means nothing to be short of — an invoice with no lines.
-  if (billed === 0) return <span className="text-muted-foreground">—</span>
-
-  const short = billed - accepted - rejected
-  return (
-    <span
-      className={cn(
-        short > 0 && anyReceipt && "font-medium text-amber-700 dark:text-amber-400",
-        !anyReceipt && "text-muted-foreground"
-      )}
-      title={anyReceipt ? `${qty(billed)} billed` : "Nothing received against this invoice yet"}
-    >
-      {qty(short)}
-    </span>
-  )
-}
-
-/**
  * The receipts booked against one invoice, grouped by GRN.
  *
  * A different document from the line items, which is why it is a separate view
@@ -225,6 +151,12 @@ function GrnSection({ lines }: { lines: InvoiceGrnLine[] }) {
       {[...byGrn.entries()].map(([code, rows]) => {
         const accepted = rows.reduce((t, r) => t + Number(r.quantity ?? 0), 0)
         const rejected = rows.reduce((t, r) => t + Number(r.rejected_qty ?? 0), 0)
+        // Only the priced lines contribute. A line with no rate is unknown
+        // value, so it is left out of the total rather than counted as zero —
+        // the same rule rejectedAmount() follows in lib/uniware/grn-totals.ts.
+        const rejectedValue = rows.reduce(
+          (t, r) => t + (r.po_unit_price == null ? 0 : Number(r.rejected_qty ?? 0) * Number(r.po_unit_price)), 0)
+        const unpriced = rows.some((r) => r.po_unit_price == null)
         const head = rows[0]
         return (
           <div key={code} className="rounded-md border border-border">
@@ -245,7 +177,16 @@ function GrnSection({ lines }: { lines: InvoiceGrnLine[] }) {
                 {rejected > 0 && (
                   <>
                     <span className="text-muted-foreground"> / </span>
-                    <span className="font-medium text-amber-700 dark:text-amber-400">{qty(rejected)} rejected</span>
+                    <span className="font-medium text-amber-700 dark:text-amber-400">
+                      {qty(rejected)} rejected
+                      {rejectedValue > 0 && ` (₹${money(rejectedValue)})`}
+                    </span>
+                    {/* Said out loud, or the total silently understates the loss. */}
+                    {unpriced && (
+                      <span className="ml-1 text-muted-foreground" title="Some receipt lines have no rate on their inward PO">
+                        + unpriced
+                      </span>
+                    )}
                   </>
                 )}
               </span>
@@ -260,6 +201,10 @@ function GrnSection({ lines }: { lines: InvoiceGrnLine[] }) {
                   <th>Expiry</th>
                   <th className="text-right">Accepted</th>
                   <th className="text-right">Rejected</th>
+                  {/* Our own rate off the inward PO — the receipt has none. */}
+                  <th className="text-right">Rate</th>
+                  <th className="text-right">Accepted ₹</th>
+                  <th className="text-right">Rejected ₹</th>
                 </tr>
               </thead>
               <tbody>
@@ -284,6 +229,21 @@ function GrnSection({ lines }: { lines: InvoiceGrnLine[] }) {
                       Number(r.rejected_qty ?? 0) > 0 && "font-medium text-amber-700 dark:text-amber-400"
                     )}>
                       {qty(r.rejected_qty)}
+                    </td>
+                    {/* A dash, never ₹0: an unpriced line is unknown value, and
+                        "₹0" beside 150 rejected units reads as "no loss". */}
+                    <td className="text-right tabular-nums text-muted-foreground">
+                      {r.po_unit_price == null ? "—" : money(r.po_unit_price)}
+                    </td>
+                    <td className="text-right tabular-nums">
+                      {r.po_unit_price == null ? "—" : money(Number(r.quantity ?? 0) * Number(r.po_unit_price))}
+                    </td>
+                    <td className={cn(
+                      "text-right tabular-nums",
+                      Number(r.rejected_qty ?? 0) > 0 && r.po_unit_price != null &&
+                        "font-medium text-amber-700 dark:text-amber-400"
+                    )}>
+                      {r.po_unit_price == null ? "—" : money(Number(r.rejected_qty ?? 0) * Number(r.po_unit_price))}
                     </td>
                   </tr>
                 ))}
@@ -347,6 +307,8 @@ export default function InvoiceGroupTable({
   reloadKey = 0,
   emptyHint,
   className,
+  matchFilter,
+  onTally,
 }: {
   /** Server-side filter on invoice_no / manufacturer name. */
   search?: string
@@ -362,6 +324,11 @@ export default function InvoiceGroupTable({
   /** Shown when there are no invoices — the two hosts word this differently. */
   emptyHint?: React.ReactNode
   className?: string
+  /** Match badges to keep. Empty = all. Applied to the PAGE, not the query —
+   *  the match is derived in TS, so the server can't filter on it. */
+  matchFilter?: MatchBadge[]
+  /** Reports this page's badge tally up, so the host can caption it honestly. */
+  onTally?: (t: { shown: number; counts: Partial<Record<MatchBadge, number>> }) => void
 }) {
   const [invoices, setInvoices] = useState<InvoiceHistoryHeader[]>([])
   const [total, setTotal]       = useState(0)
@@ -373,6 +340,8 @@ export default function InvoiceGroupTable({
 
   /** Expanded invoice id → its lines (undefined while loading). */
   const [expanded, setExpanded] = useState<number | null>(null)
+  /** The row whose three-way drilldown is open. */
+  const [matchFor, setMatchFor] = useState<InvoiceHistoryHeader | null>(null)
   const [items, setItems]       = useState<Record<number, InvoiceHistoryItem[]>>({})
   /** Receipt lines for the expanded invoice, keyed like `items`. */
   const [grns, setGrns] = useState<Record<number, InvoiceGrnLine[]>>({})
@@ -432,6 +401,13 @@ export default function InvoiceGroupTable({
       .finally(() => setLoading(false))
   }
 
+  /** Re-read the current page in place, keeping the offset — a verification
+   *  changes a badge, not which invoices match. */
+  const refreshPage = useCallback(
+    () => fetchPage(offset).then((d) => apply(d, offset)).catch(() => {}),
+    [fetchPage, offset, apply]
+  )
+
   /** Separate from toggle so the error state has something to retry. */
   async function loadItems(id: number) {
     setItemsError("")
@@ -460,6 +436,25 @@ export default function InvoiceGroupTable({
     setItemsError("")
     if (!items[id]) void loadItems(id) // lines don't change once written, so cache
   }
+
+  // Matched once per page, not per cell: the chips, the badge, the filter and
+  // the tally must all read the same verdict for a row.
+  const matched = useMemo(
+    () => invoices.map((inv) => ({ inv, m: matchOf(inv) })),
+    [invoices]
+  )
+  const visible = useMemo(
+    () => (matchFilter?.length ? matched.filter((r) => matchFilter.includes(r.m.badge)) : matched),
+    [matched, matchFilter]
+  )
+
+  // Reported in an effect, not during render — this sets state in the parent.
+  useEffect(() => {
+    if (!onTally) return
+    const counts: Partial<Record<MatchBadge, number>> = {}
+    for (const { m } of matched) counts[m.badge] = (counts[m.badge] ?? 0) + 1
+    onTally({ shown: matched.length, counts })
+  }, [matched, onTally])
 
   /** Open the original PDF via a short-lived presigned URL. */
   async function openOriginal(key: string) {
@@ -496,15 +491,15 @@ export default function InvoiceGroupTable({
               {/* Unicommerce's own status for that PO, and the button that asks
                   again. On the invoice row for the same reason the code is. */}
               <th>Uniware Status</th>
-              {/* What the warehouse ACCEPTED, beside what was billed. Next to
-                  the status because it answers the question the status only
+              {/* The reconciliation, in one place: ordered, billed, received.
+                  Next to the status because it answers what the status only
                   hints at — "approved" says nothing about whether goods
-                  arrived, and rejected quantity appears nowhere else. */}
-              <th className="text-right">Accepted / Rejected</th>
-              {/* Billed, less what the warehouse accounted for. Beside
-                  Accepted/Rejected because the three only mean anything read
-                  together — and short is the one that has to be chased. */}
-              <th className="text-right">Short Qty</th>
+                  arrived. Click it for the verdict and the documents; a column
+                  of its own repeated what the chips and the dialog already say. */}
+              <th>3-way (PO · INV · GRN)</th>
+              {/* Derived from the match, not a payment record — the ERP stores
+                  no payment state. See PaymentStatus in lib/invoice/three-way.ts. */}
+              <th>Payment</th>
               <th>Manufacturer</th>
               <th>Destination</th>
               <th className="text-right">Total</th>
@@ -524,9 +519,11 @@ export default function InvoiceGroupTable({
               </td></tr>
             )}
 
-            {!loading && invoices.length === 0 && (
+            {!loading && visible.length === 0 && (
               <tr><td colSpan={13} className="px-2 py-8 text-center text-muted-foreground">
-                {search.trim()
+                {invoices.length > 0
+                  ? "No invoices on this page carry that match status."
+                  : search.trim()
                   ? `No invoices match “${search.trim()}”.`
                   : filterQuery
                   ? "No invoices match these filters."
@@ -534,7 +531,7 @@ export default function InvoiceGroupTable({
               </td></tr>
             )}
 
-            {!loading && invoices.map((inv) => {
+            {!loading && visible.map(({ inv, m }) => {
               const isOpen = expanded === inv.id
               const lines  = items[inv.id]
               return (
@@ -573,11 +570,11 @@ export default function InvoiceGroupTable({
                         syncedAt={inv.uniware_synced_at}
                       />
                     </td>
-                    <td className="whitespace-nowrap text-right tabular-nums">
-                      <GrnCell inv={inv} />
+                    <td className="whitespace-nowrap">
+                      <ThreeWayChips m={m} onOpen={() => setMatchFor(inv)} />
                     </td>
-                    <td className="whitespace-nowrap text-right tabular-nums">
-                      <InvoiceShortCell inv={inv} />
+                    <td className="whitespace-nowrap">
+                      <PaymentCell m={m} />
                     </td>
                     <td className="max-w-56">
                       <div className="truncate" title={inv.mfg_name}>{inv.mfg_name}</div>
@@ -686,10 +683,11 @@ export default function InvoiceGroupTable({
                                       names makes a reader trust neither. */}
                                   <th className="text-right">Pending (UC)</th>
                                   <th className="text-right">QC Pass (UC)</th>
-                                  {/* No Inward PO column: it repeats across the
-                                      lines of one SKU and says nothing the
-                                      Uniware code on the invoice row doesn't. */}
                                   <th>Received against</th>
+                                  {/* The inward PO this line raised. Last,
+                                      because it repeats across the lines of
+                                      one SKU. */}
+                                  <th>Inward PO</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -760,6 +758,9 @@ export default function InvoiceGroupTable({
                                         </>
                                       ) : <span className="text-muted-foreground">—</span>}
                                     </td>
+                                    <td className="whitespace-nowrap font-mono">
+                                      {li.po_no ?? <span className="text-muted-foreground">—</span>}
+                                    </td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -798,6 +799,17 @@ export default function InvoiceGroupTable({
           Next
         </Button>
       </div>
+
+      {/* Keyed so each invoice gets a fresh mount, which is what lets the dialog
+          start in its loading state instead of setting it inside an effect. */}
+      <ThreeWayDialog
+        key={matchFor?.id ?? "none"}
+        invoice={matchFor}
+        onClose={() => setMatchFor(null)}
+        // A sign-off changes the row's badge, and rows are fetched client-side,
+        // so the list has to be told rather than refreshed by the router.
+        onChanged={() => void refreshPage()}
+      />
     </div>
   )
 }

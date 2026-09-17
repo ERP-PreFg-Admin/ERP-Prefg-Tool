@@ -93,7 +93,6 @@ export type Reconciliation = {
  * to re-derive which case it is looking at.
  */
 export function reconcile(input: {
-  orderedQty: number | string | null
   invoicedQty: number | string | null
   accepted: number | string | null
   rejected: number | string | null

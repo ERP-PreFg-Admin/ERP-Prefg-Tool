@@ -150,7 +150,7 @@ test("lines with no PO are skipped, never folded into another PO's totals", () =
 /* ── Reconciliation ─────────────────────────────────────────────────────────── */
 
 test("the three-way gap: invoiced but not yet handled is awaited", () => {
-  const r = reconcile({ orderedQty: 5000, invoicedQty: 5000, accepted: 4850, rejected: 150 })
+  const r = reconcile({ invoicedQty: 5000, accepted: 4850, rejected: 150 })
   assert.equal(r.awaited, 0)
   assert.equal(r.overReceipt, 0)
   assert.equal(r.rejectRate, 150 / 5000)
@@ -159,19 +159,19 @@ test("the three-way gap: invoiced but not yet handled is awaited", () => {
 test("awaited and overReceipt are one-sided, never a signed difference", () => {
   // They mean opposite things operationally — chase the manufacturer vs query
   // the warehouse — so neither may go negative to express the other.
-  const short = reconcile({ orderedQty: 100, invoicedQty: 100, accepted: 60, rejected: 10 })
+  const short = reconcile({ invoicedQty: 100, accepted: 60, rejected: 10 })
   assert.equal(short.awaited, 30)
   assert.equal(short.overReceipt, 0)
 
-  const over = reconcile({ orderedQty: 100, invoicedQty: 100, accepted: 110, rejected: 5 })
+  const over = reconcile({ invoicedQty: 100, accepted: 110, rejected: 5 })
   assert.equal(over.awaited, 0)
   assert.equal(over.overReceipt, 15)
 })
 
 test("reject rate is null before anything is received, not 0%", () => {
   // A 0% badge on a PO nothing has arrived against reads as a clean receipt.
-  assert.equal(reconcile({ orderedQty: 100, invoicedQty: 100, accepted: 0, rejected: 0 }).rejectRate, null)
-  assert.equal(reconcile({ orderedQty: 100, invoicedQty: 100, accepted: 100, rejected: 0 }).rejectRate, 0)
+  assert.equal(reconcile({ invoicedQty: 100, accepted: 0, rejected: 0 }).rejectRate, null)
+  assert.equal(reconcile({ invoicedQty: 100, accepted: 100, rejected: 0 }).rejectRate, 0)
 })
 
 test("rejected value uses our invoice rate, and is null when unpriced", () => {

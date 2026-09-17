@@ -108,6 +108,15 @@ const INVOICE_LIST_BODY = `
          -- It is the minuend of Short Qty — billed, less whatever the warehouse
          -- accounted for below.
          COALESCE(SUM(sii.qty), 0)       AS billed_qty,
+         -- The lines' own value, to check against the header's invoice_total.
+         -- Grossed by gst: invoice_total is the payable, amount is taxable.
+         COALESCE(SUM(sii.amount * (1 + COALESCE(sii.gst_percent, 0) / 100)), 0)
+           AS lines_value,
+         -- The sii.id test is load-bearing: this is a LEFT JOIN, so an invoice
+         -- with no lines yields one all-NULL row, and NULL IS NULL would count
+         -- it as an unlinked line.
+         COALESCE(SUM(sii.id IS NOT NULL AND sii.received_against_po_id IS NULL), 0)
+           AS po_unlinked_lines,
          -- ── What the warehouse actually accepted (grn_uniware) ─────────────
          -- SCALAR SUBQUERIES, not joins. This query already LEFT JOINs
          -- invoice_items_mfg and GROUP BYs si.id, so a second join would
@@ -143,7 +152,30 @@ const INVOICE_LIST_BODY = `
             FROM grn_items_uniware i
             JOIN grn_uniware g      ON g.id  = i.grn_id
             JOIN purchase_orders po ON po.id = i.po_id
-           WHERE g.invoice_id = si.id) AS grn_rejected_value
+           WHERE g.invoice_id = si.id) AS grn_rejected_value,
+         -- ── The PO leg: whether every line settled a real order ────────────
+         -- NB: never a question mark in these comments — mysql2 reads one as a
+         -- placeholder even inside a comment, shifting every param after it.
+         -- tests/unit/invoice-filters.test.ts is what catches that.
+         -- Presence only, no ordered quantity. One PO is settled by up to 20
+         -- invoices, so SUM(po.qty) over them is not "ordered for this invoice"
+         -- and any comparison against it reads short on nearly every row. The
+         -- per-PO figures live on the lines (received_against_qty).
+         --
+         -- Counted through purchase_orders, not off the column: dev carries
+         -- lines pointing at deleted POs, and a dangling id read as "PO on
+         -- file" while its ordered quantity summed to 0. COUNT(DISTINCT) skips NULLs, so
+         -- an invoice that settled nothing reads 0 — "PO not on file".
+         (SELECT COUNT(DISTINCT po.id)
+            FROM invoice_items_mfg x
+            JOIN purchase_orders po ON po.id = x.received_against_po_id
+           WHERE x.invoice_id = si.id) AS po_count,
+         -- Which legs a human has physically signed off, as a CSV of leg names.
+         -- No row means unverified, so NULL here is the common case and the
+         -- correct reading — there is deliberately no verified=0 row to find.
+         (SELECT GROUP_CONCAT(v.leg ORDER BY v.leg)
+            FROM invoice_leg_verification v
+           WHERE v.invoice_id = si.id) AS verified_legs
   FROM invoice_mfg si
   INNER JOIN master_mfgs m ON m.id = si.mfg_id
   LEFT JOIN users u ON u.id = si.created_by
@@ -454,6 +486,10 @@ export const supplierInvoicesSql = {
            ref.po_no    AS received_against_po_no,
            ref.qty      AS received_against_qty,
            ref.received_qty AS received_against_received_qty,
+           -- No ref.unit_price here on purpose: all 123 procurement POs on prod
+           -- were bulk-imported by direct SQL and carry NULL, so an "agreed
+           -- rate" column is 100% dashes and an off-contract check can never
+           -- fire. Add it back when POs start being raised with a price.
            -- ── What the warehouse accepted against THIS line ────────────────
            -- Keyed on sii.po_id, the inward PO this line raised. That resolves
            -- 1:1 only because mergeInwardLinesBySku raises one inward PO per
@@ -493,12 +529,80 @@ export const supplierInvoicesSql = {
     SELECT g.grn_code, g.status_code, g.vendor_invoice_no, g.grn_created_at,
            i.line_no, i.sku_code, i.po_id, i.quantity, i.rejected_qty,
            i.batch_code, i.expiry, i.mfg_date,
-           po.po_no
+           po.po_no,
+           -- A receipt carries no price of its own — Uniware does not report one
+           -- on an inflow line. This is OUR rate: the inward PO's unit_price,
+           -- written from the invoice at inward time, which is the number a
+           -- debit note would be raised against. NULL stays NULL, so an
+           -- unpriced line reads as unknown value rather than zero.
+           po.unit_price AS po_unit_price
     FROM grn_uniware g
     INNER JOIN grn_items_uniware i ON i.grn_id = g.id
     LEFT  JOIN purchase_orders po  ON po.id   = i.po_id
     WHERE g.invoice_id = ?
     ORDER BY g.grn_created_at DESC, g.id DESC, i.line_no ASC
+  `,
+
+  /**
+   * Just the figures threeWayMatch() reads, for one invoice.
+   *
+   * A narrow twin of the list query's match columns, so the verify route can
+   * re-derive server-side whether a leg is even on file. Kept beside them
+   * deliberately: change one and this must change with it, or the screen and
+   * the guard will disagree about what is signable.
+   * Parameters: [invoice_id]
+   */
+  selectInvoiceForMatch: `
+    SELECT si.id, si.invoice_total,
+           COUNT(sii.id)             AS item_count,
+           COALESCE(SUM(sii.qty), 0) AS billed_qty,
+           COALESCE(SUM(sii.amount * (1 + COALESCE(sii.gst_percent, 0) / 100)), 0) AS lines_value,
+           COALESCE(SUM(sii.id IS NOT NULL AND sii.received_against_po_id IS NULL), 0) AS po_unlinked_lines,
+           (SELECT COUNT(*) FROM grn_uniware g WHERE g.invoice_id = si.id) AS grn_count,
+           (SELECT COALESCE(SUM(i.quantity), 0) FROM grn_items_uniware i
+              JOIN grn_uniware g ON g.id = i.grn_id WHERE g.invoice_id = si.id) AS grn_accepted,
+           (SELECT COALESCE(SUM(i.rejected_qty), 0) FROM grn_items_uniware i
+              JOIN grn_uniware g ON g.id = i.grn_id WHERE g.invoice_id = si.id) AS grn_rejected,
+           (SELECT COUNT(DISTINCT po.id) FROM invoice_items_mfg x
+              JOIN purchase_orders po ON po.id = x.received_against_po_id
+             WHERE x.invoice_id = si.id) AS po_count
+    FROM invoice_mfg si
+    LEFT JOIN invoice_items_mfg sii ON sii.invoice_id = si.id
+    WHERE si.id = ?
+    GROUP BY si.id
+  `,
+
+  /**
+   * Who physically signed off which leg of one invoice's three-way match.
+   * Parameters: [invoice_id]
+   */
+  selectLegVerifications: `
+    SELECT v.leg, v.verified_at, v.remarks, v.verified_by, u.name AS verified_by_name
+    FROM invoice_leg_verification v
+    LEFT JOIN users u ON u.id = v.verified_by
+    WHERE v.invoice_id = ?
+    ORDER BY v.leg
+  `,
+
+  /**
+   * Record a physical verification. Re-verifying the same leg OVERWRITES, so
+   * "who last signed this off" has exactly one answer rather than a pile of
+   * rows to sort — the audit trail for the action itself is activity_log.
+   * Parameters: [invoice_id, leg, verified_by, remarks]
+   */
+  upsertLegVerification: `
+    INSERT INTO invoice_leg_verification (invoice_id, leg, verified_by, remarks)
+    VALUES (?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      verified_by = VALUES(verified_by),
+      verified_at = CURRENT_TIMESTAMP,
+      remarks     = VALUES(remarks)
+  `,
+
+  /** Withdraw a verification. Absence of a row IS unverified.
+   *  Parameters: [invoice_id, leg] */
+  deleteLegVerification: `
+    DELETE FROM invoice_leg_verification WHERE invoice_id = ? AND leg = ?
   `,
 }
 
