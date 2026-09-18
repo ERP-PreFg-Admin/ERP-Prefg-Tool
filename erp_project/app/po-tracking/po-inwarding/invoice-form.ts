@@ -4,6 +4,7 @@
 // exercised) without rendering anything.
 
 import { matchMfg, matchSku, matchWarehouse, toDateInputValue } from "@/lib/invoice/invoice-mapping"
+import { MATCH_TOLERANCE } from "@/lib/invoice/three-way"
 import type { OpenPoOption, ParsedCharge, ParsedInvoice } from "@/types/invoice"
 import type { MfgOption, SkuOption, WarehouseOption } from "../po-procurement/po-types"
 
@@ -341,7 +342,10 @@ export function collectProblems(
   form: InvoiceForm,
   rows: Row[],
   poById: Map<string, OpenPoOption>,
-  shortages: Shortage[] = []
+  shortages: Shortage[] = [],
+  /** Tax-inclusive sum of freight etc. — outside line_items but inside the
+   *  printed total, so the reconciliation below has to add it back. */
+  chargeSum = 0
 ): string[] {
   const out: string[] = []
   if (!form.invoiceNo.trim()) out.push("Invoice number is required.")
@@ -411,8 +415,41 @@ export function collectProblems(
       out.push(`Qty ${roundTo(qty, 3)} exceeds the ${Number(po.remaining)} outstanding on ${po.po_no}. Re-match to fix.`)
     }
   }
+
+  // The lines must account for the invoice's own printed total.
+  //
+  // This is the check whose absence let 17 invoices commit short — ~42,600
+  // units, ₹29 lakh. Deleting a row is the only way past an unmatched line, and
+  // nothing re-derived the total afterwards, so an invoice could store a header
+  // of ₹19,59,098 against ₹12,06,359 of lines and look perfectly healthy. Both
+  // figures were already on screen; nothing compared them. See
+  // docs/invoice-line-loss-audit-2026-09.md.
+  //
+  // A BLOCK, not a warning: the previous behaviour was a warning, and it was
+  // ignored 17 times. If the goods genuinely have no open PO, the answer is to
+  // raise one — not to record an invoice that contradicts itself.
+  const printedTotal = Number(form.invoiceTotal)
+  if (printedTotal > 0) {
+    const accounted = sumLineItems(rows) + chargeSum
+    const gap = Math.abs(printedTotal - accounted)
+    if (gap > printedTotal * MATCH_TOLERANCE) {
+      const short = printedTotal > accounted
+      out.push(
+        `Line items come to ${fmtMoney(accounted)} but the invoice total is ` +
+        `${fmtMoney(printedTotal)} — ${fmtMoney(gap)} ${short ? "unaccounted" : "over"}. ` +
+        (short
+          ? "A line is missing or short. Every line on the invoice has to be recorded, even if its PO is exhausted."
+          : "A line is duplicated or over-quantified.")
+      )
+    }
+  }
+
   return out
 }
+
+/** Indian digit grouping, matching what the totals panel already shows. */
+const fmtMoney = (n: number) =>
+  `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 /**
  * Sum of the lines, compared against the printed invoice total to warn about drift.

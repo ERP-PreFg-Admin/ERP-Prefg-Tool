@@ -300,16 +300,17 @@ export default function AddInvoiceDialog({
 
   // ── Phase 3: validate + create ────────────────────────────────────────────
   const poById   = useMemo(() => new Map(openPos.map((p) => [String(p.id), p])), [openPos])
-  const problems = useMemo(
-    () => collectProblems(form, rows, poById, shortages),
-    [form, rows, poById, shortages]
-  )
   const lineSum  = useMemo(() => sumLineItems(rows), [rows])
   // Freight and the like are inside the invoice total but outside line_items,
   // so they have to be added back before the sum-vs-total check means anything.
+  // Declared before `problems` because collectProblems now runs that check.
   const chargeSum = useMemo(
     () => sumCharges(charges, goodsGstPercent(rows)),
     [charges, rows]
+  )
+  const problems = useMemo(
+    () => collectProblems(form, rows, poById, shortages, chargeSum),
+    [form, rows, poById, shortages, chargeSum]
   )
   const matched  = useMemo(() => matchSummary(form, rows, shortages), [form, rows, shortages])
   const receiveCount = useMemo(() => rows.filter((r) => r.reference_po_id).length, [rows])

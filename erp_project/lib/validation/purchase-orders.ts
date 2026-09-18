@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { todayIST } from "@/lib/date"
+import { MATCH_TOLERANCE } from "@/lib/invoice/three-way"
 
 /** CSV rows arrive as raw strings from CsvImportDialog's client-side parse; the
  * route re-serializes them to CSV, uploads to S3, and stages a PO_BULK
@@ -126,6 +127,48 @@ export const invoiceInwardSchema = z.object({
     )
     .min(1, "At least one line item is required."),
 })
+  /**
+   * The lines must account for the invoice's own printed total.
+   *
+   * Server-side as well as in the dialog, for the usual reason: the dialog
+   * greying out a button is never the guard. This endpoint takes a JSON body.
+   *
+   * Grossing each line by its OWN gst_percent, rather than trusting
+   * `total_amount`: the parser frequently writes the taxable figure into both
+   * `amount` and `total_amount`, so treating the latter as tax-inclusive
+   * understates the sum by the GST and would reject healthy invoices. This is
+   * the same formula scripts/_check-invoice-reconciliation.ts uses, which runs
+   * clean over all 65 live invoices — the 4 it flags are genuinely short.
+   *
+   * Charges (freight) are inside the printed total but are not posted, so they
+   * land inside MATCH_TOLERANCE rather than being added back. That is what the
+   * 2% band is absorbing; a manufacturer billing heavy freight would need the
+   * charge total sent up before this could be tightened.
+   */
+  .superRefine((inv, ctx) => {
+    const total = Number(inv.invoice_total)
+    if (!Number.isFinite(total) || total <= 0) return // nothing to reconcile against
+
+    const accounted = inv.line_items.reduce((sum, li) => {
+      const amount = Number(li.amount ?? li.total_amount ?? 0)
+      if (!Number.isFinite(amount)) return sum
+      const gst = Number(li.gst_percent ?? 0)
+      return sum + amount * (1 + (Number.isFinite(gst) ? gst : 0) / 100)
+    }, 0)
+
+    const gap = Math.abs(total - accounted)
+    if (gap <= total * MATCH_TOLERANCE) return
+
+    const money = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["line_items"],
+      message:
+        `Line items come to ₹${money(accounted)} but the invoice total is ₹${money(total)} — ` +
+        `₹${money(gap)} ${total > accounted ? "unaccounted" : "over"}. ` +
+        `Every line on the invoice must be recorded, even if its PO is exhausted.`,
+    })
+  })
 
 export const poSendMailSchema = z.object({
   po_ids: z.array(z.union([z.number(), z.string()])).min(1, "Select at least one PO to send mail for."),
