@@ -12,7 +12,7 @@
 // throw, and no test here makes a network call.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mergeItemsBySku, buildPurchaseOrder } from "../../lib/uniware"
+import { mergeItemsBySku, buildPurchaseOrder, punchPlusDays, futureDeliveryDate, INWARD_PO_VALIDITY_DAYS } from "../../lib/uniware"
 
 test("repeated SKUs collapse to one line with the quantities summed", () => {
   const merged = mergeItemsBySku([
@@ -92,4 +92,56 @@ test("a zero-quantity row is still rejected, not merged away", () => {
     }),
     /items\[1\]\.quantity must be > 0/
   )
+})
+
+/* ── Inward PO validity window ──────────────────────────────────────────────── */
+
+test("punchPlusDays lands exactly N days after the punch, as a date", () => {
+  const now = new Date("2026-09-18T10:30:00.000Z")
+  assert.equal(punchPlusDays(15, now), "2026-10-03")
+  assert.equal(INWARD_PO_VALIDITY_DAYS, 15)
+})
+
+test("the date is the IST one, not the UTC one", () => {
+  // 20:00 UTC is 01:30 IST the NEXT day. Formatting in UTC would date the PO a
+  // day early for every punch between 00:00 and 05:30 IST — correct on a laptop
+  // in India, wrong in the UTC container.
+  assert.equal(punchPlusDays(15, new Date("2026-09-18T20:00:00.000Z")), "2026-10-04")
+  assert.equal(punchPlusDays(15, new Date("2026-09-18T18:29:00.000Z")), "2026-10-03")
+  // 18:30 UTC is exactly midnight IST — the tipping point.
+  assert.equal(punchPlusDays(15, new Date("2026-09-18T18:30:00.000Z")), "2026-10-04")
+})
+
+test("the window is always in the future — the reason deliveryDate was dropped before", () => {
+  // futureDeliveryDate(invoiceDate) returned undefined on every inward PO,
+  // because an inward PO is raised against goods that already arrived.
+  assert.ok(new Date(punchPlusDays(INWARD_PO_VALIDITY_DAYS)).getTime() > Date.now())
+  assert.equal(futureDeliveryDate("2020-01-01"), undefined)
+})
+
+test("it crosses a month and a DST-free year boundary cleanly", () => {
+  assert.equal(punchPlusDays(15, new Date("2026-12-25T00:00:00.000Z")), "2027-01-09")
+  assert.equal(punchPlusDays(15, new Date("2026-02-20T00:00:00.000Z")), "2026-03-07")
+})
+
+test("buildPurchaseOrder emits both dates, and drops them when absent", () => {
+  const withDates = buildPurchaseOrder({
+    vendorCode: "V1",
+    deliveryDate: punchPlusDays(15, new Date("2026-09-18T00:00:00.000Z")),
+    expiryDate: punchPlusDays(15, new Date("2026-09-18T00:00:00.000Z")),
+    items: [{ itemSKU: "A", quantity: 1, unitPrice: 10 }],
+  })
+  // Date only — no time component reaches Uniware, which discards it anyway.
+  assert.equal(withDates.deliveryDate, "2026-10-03")
+  assert.equal(withDates.expiryDate, "2026-10-03")
+  assert.doesNotMatch(String(withDates.deliveryDate), /T|Z/)
+
+  // Undefined must be ABSENT, not null: Uniware treats an explicit null as a
+  // value and rejects some of them.
+  const without = buildPurchaseOrder({
+    vendorCode: "V1",
+    items: [{ itemSKU: "A", quantity: 1, unitPrice: 10 }],
+  })
+  assert.ok(!("deliveryDate" in without))
+  assert.ok(!("expiryDate" in without))
 })

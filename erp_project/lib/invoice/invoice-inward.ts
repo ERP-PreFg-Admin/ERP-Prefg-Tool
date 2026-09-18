@@ -41,7 +41,7 @@ import { skus as skusSql } from "@/lib/queries/skus"
 import { receivePo } from "@/lib/po/po-receive"
 import { mergeInwardLinesBySku, type InwardLine } from "@/lib/invoice/invoice-merge"
 import { describeMailStep } from "@/lib/invoice/invoice-mail-step"
-import { createPurchaseOrder, futureDeliveryDate, uniwareEnabled, uniwareVendorCode } from "@/lib/uniware"
+import { createPurchaseOrder, INWARD_PO_VALIDITY_DAYS, punchPlusDays, uniwareEnabled, uniwareVendorCode } from "@/lib/uniware"
 import { pushInvoicePdfToUniware, docSyncFacilityAllowed } from "@/lib/uniware/document-sync"
 import { UniwareSessionStale } from "@/lib/uniware/web-session"
 import { UNIWARE_SANDBOX } from "@/lib/env"
@@ -419,13 +419,18 @@ export async function runInwardInvoice(
         facility : facility,
         vendorCode: uniwareVendorCode(vendorCode),
         currencyCode: body.currency || "INR",
-        // Almost always omitted here: expectedOn is the invoice date, which is
-        // in the past because the goods have already shipped, and Uniware only
-        // accepts a future deliveryDate. Not faked forward — the true date
-        // lives on our invoice, and Uniware has no field on the PO that holds
-        // it (the invoiceDate custom field it used to ride in was never
-        // registered on the tenant).
-        deliveryDate: futureDeliveryDate(written.expectedOn),
+        // ── Both dated 15 days from the punch, not from the invoice ──────
+        // expectedOn is the INVOICE date, which is always in the past here:
+        // an inward PO is raised against goods that already arrived. Uniware
+        // only accepts a future deliveryDate, so futureDeliveryDate() returned
+        // undefined every time and the PO went up with neither date — leaving
+        // it open indefinitely with nothing to receive against.
+        //
+        // Not faked backwards either: the true invoice date lives on our own
+        // invoice and rides up as the ReferenceNo custom field. These two say
+        // how long the Uniware PO stays actionable, which is a different fact.
+        deliveryDate: punchPlusDays(INWARD_PO_VALIDITY_DAYS),
+        expiryDate: punchPlusDays(INWARD_PO_VALIDITY_DAYS),
         items: written.poLines.map((l) => ({
           itemSKU: l.sku_code,
           quantity: l.qty,

@@ -3,7 +3,7 @@ export type { UniwareToken } from "./auth"
 
 export { uniwareFacility, uniwareVendorCode } from "./facility"
 
-export { futureDeliveryDate, mergeItemsBySku, buildPurchaseOrder } from "./po-builder"
+export { futureDeliveryDate, punchPlusDays, INWARD_PO_VALIDITY_DAYS, mergeItemsBySku, buildPurchaseOrder } from "./po-builder"
 export type { UniwarePoItem, UniwarePoInput } from "./po-builder"
 
 export { createPurchaseOrder, fetchPurchaseOrderPdf, fetchPurchaseOrderPdfWithCookie, fetchPurchaseOrderStatus, pushPurchaseOrders } from "./purchase-order"
