@@ -98,6 +98,7 @@ model purchase_orders {
   @@index([bom_id], map: "bom_id")
   @@index([mfg_id], map: "mfg_id")
   @@index([reference_po], map: "idx_po_reference_po")
+  grnItemsUniwares grn_items_uniware[] @relation(map: "fk_grn_item_po")
 }
 
 /**
