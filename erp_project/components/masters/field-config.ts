@@ -2,7 +2,7 @@
 // every master-data page. Declare a list of MasterField once per entity and
 // pass it to <AddRecordDialog> and <CsvImportDialog>.
 
-import { parseCsvRows, normalizeCell, isBlankRow, normalizeHeader, describeCsvShape } from "@/lib/csv"
+import { parseCsvRows, normalizeCell, isBlankRow, normalizeHeader, describeCsvShape, isCommentCell } from "@/lib/csv"
 
 // Re-exported: this used to live here, and it is the contract the server-side
 // importer (lib/import-s3.ts) has to share — so it now lives in lib/csv.ts.
@@ -104,6 +104,9 @@ export function emptyForm(fields: MasterField[]): Record<string, string> {
  */
 export function buildRows(rawRows: Record<string, string>[], fields: MasterField[]): ParsedRow[] {
   const cols = csvFields(fields)
+  // Legend lines from buildTemplate, left in the file. Dropped rather than
+  // reported as five rows missing every required column.
+  rawRows = rawRows.filter((r) => !isCommentCell(Object.values(r)[0]))
   const dupKeys = cols.filter((f) => f.duplicateKey)
 
   const rows: ParsedRow[] = rawRows.map((raw) => {
@@ -243,9 +246,25 @@ export function buildFlaggedCsv(rows: ParsedRow[], fields: MasterField[]): strin
 }
 
 /** Build a CSV template string (header row + one sample row) from the fields. */
+/**
+ * The blank file to fill in: header, one sample row, then a legend naming the
+ * permitted values of every dropdown column.
+ *
+ * The legend exists because the dialog knew the allowed values and the
+ * DOWNLOADED FILE did not, so someone filling it in offline typed a guess and
+ * found out at upload. Generated from the same `options` the validator reads,
+ * so the file can never advertise a value the validator then rejects.
+ *
+ * Legend lines start with `#`, and isCommentCell drops them on the way back in
+ * — on the browser preview and the server-side apply alike — so leaving them in
+ * the file is harmless rather than several junk rows.
+ */
 export function buildTemplate(fields: MasterField[]): string {
   const cols = csvFields(fields)
   const header = cols.map((f) => f.key).join(",")
   const sample = cols.map((f) => f.sample ?? f.default ?? "").join(",")
-  return `${header}\n${sample}`
+  const legend = cols
+    .filter((f) => f.options?.length)
+    .map((f) => `# ${f.key}: ${f.options!.map((o) => o.value).join(" | ")}`)
+  return [header, sample, ...legend].join("\n")
 }

@@ -249,6 +249,20 @@ export function normalizeHeader(s: string): string {
  * `normalizeHeader` would rewrite to `vendor_code` / `item_type_sku` and quietly
  * stop matching. Callers that want key-style headers ask for them.
  */
+/**
+ * A template legend line, not data.
+ *
+ * buildTemplate writes the permitted values of each dropdown column as trailing
+ * `#` lines. They come back when someone uploads the template unedited, and a
+ * `#` has never begun a real SKU, PM or vendor code.
+ *
+ * Deliberately NOT applied inside parseCsvObjects: that also reads Uniware's
+ * own exports, and silently dropping a row there would be a data loss we could
+ * not see. Callers on the bulk-upload path opt in.
+ */
+export const isCommentCell = (cell: unknown): boolean =>
+  typeof cell === "string" && cell.trimStart().startsWith("#")
+
 export function parseCsvObjects(
   text: string,
   mapHeader: (h: string) => string = (h) => h.toLowerCase(),

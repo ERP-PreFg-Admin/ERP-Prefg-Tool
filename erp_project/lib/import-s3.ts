@@ -1,6 +1,6 @@
 import { getFileBuffer } from "@/lib/s3"
 import ExcelJS from "exceljs"
-import { parseCsvObjects, normalizeCell, normalizeHeader, excelCellText, decodeUpload } from "@/lib/csv"
+import { parseCsvObjects, normalizeCell, normalizeHeader, excelCellText, decodeUpload, isCommentCell } from "@/lib/csv"
 
 export type ImportRow = Record<string, string>
 
@@ -14,13 +14,14 @@ export async function parseS3Import(key: string): Promise<ImportRow[]> {
   const buffer = await getFileBuffer(key)
   const ext    = key.split(".").pop()?.toLowerCase()
 
-  if (ext === "csv") {
-    return parseCsvBuffer(buffer as unknown as Buffer)
-  }
-  if (ext === "xlsx") {
-    return parseXlsxBuffer(buffer as unknown as Buffer)
-  }
-  throw new Error(`Unsupported file type: .${ext}`)
+  let rows: ImportRow[]
+  if (ext === "csv")       rows = parseCsvBuffer(buffer as unknown as Buffer)
+  else if (ext === "xlsx") rows = await parseXlsxBuffer(buffer as unknown as Buffer)
+  else throw new Error(`Unsupported file type: .${ext}`)
+
+  // buildTemplate's legend lines, if the uploader left them in. The browser
+  // preview drops them too, so the approver and the apply see the same rows.
+  return rows.filter((r) => !isCommentCell(Object.values(r)[0]))
 }
 
 function parseCsvBuffer(buffer: Buffer): ImportRow[] {
