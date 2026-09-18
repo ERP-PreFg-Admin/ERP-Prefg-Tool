@@ -7,19 +7,17 @@
 import { CreditCard, FileText, Package } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { threeWayMatch, type Leg, type LegState, type LegVerification, type PaymentStatus, type ThreeWayMatch } from "@/lib/invoice/three-way"
-import type { InvoiceHistoryHeader } from "@/types/invoice"
+import { parseVerifiedLegs, threeWayMatch, type Leg, type LegState, type PaymentStatus, type ThreeWayMatch } from "@/lib/invoice/three-way"
 
-/** "inv,po" → { inv: true, po: true }. NULL/absent means nothing verified. */
-export function parseVerifiedLegs(csv: string | null | undefined): LegVerification {
-  const set = new Set((csv ?? "").split(",").filter(Boolean))
-  return { po: set.has("po"), pod: set.has("pod"), inv: set.has("inv") }
-}
+// Re-exported so the dialog keeps importing it from here.
+export { parseVerifiedLegs }
+import type { InvoiceHistoryHeader } from "@/types/invoice"
 
 /** One row's match. Exported so the dialog and the summary line agree with the cell. */
 export function matchOf(inv: InvoiceHistoryHeader): ThreeWayMatch {
   return threeWayMatch({
     verified: parseVerifiedLegs(inv.verified_legs),
+    paymentStatus: inv.payment_status ?? null,
     billedQty:       inv.billed_qty        ?? 0,
     poCount:         inv.po_count          ?? 0,
     poUnlinkedLines: inv.po_unlinked_lines ?? 0,
@@ -96,27 +94,58 @@ export function ThreeWayChips({ m, onOpen }: { m: ThreeWayMatch; onOpen: () => v
   )
 }
 
-const PAYMENT_BADGE: Record<PaymentStatus, "success" | "warning" | "destructive" | "secondary"> = {
-  ready:   "success",
-  pending: "secondary",
-  blocked: "destructive",
-  on_hold: "warning",
+const PAYMENT_BADGE: Record<PaymentStatus, "success" | "warning" | "destructive" | "secondary" | "info" | "outline"> = {
+  awaiting_documents:    "warning",
+  awaiting_verification: "outline",
+  blocked:               "destructive",
+  pending:               "secondary",
+  initiated:             "info",
+  approved:              "info",
+  completed:             "success",
 }
 
 /**
- * Whether the paperwork clears this invoice for payment.
+ * Where the invoice sits on the way to being paid, and the way to move it.
  *
- * Derived from the match, never stored — the title says so, because a column
- * headed Payment invites being read as "this was paid" and nothing in the ERP
- * records that.
+ * The dashed border marks a DERIVED state — the match's reading of the
+ * paperwork, which nobody has overridden. Once a person sets a state it renders
+ * solid, because "the documents look fine" and "finance has approved this" are
+ * different claims and the column has to keep them apart.
  */
-export function PaymentCell({ m }: { m: ThreeWayMatch }) {
+export function PaymentCell({ m, utr, onOpen }: {
+  m: ThreeWayMatch
+  utr?: string | null
+  onOpen: () => void
+}) {
   return (
-    <Badge
-      variant={PAYMENT_BADGE[m.payment]}
-      title={`${m.paymentLabel} — derived from the three-way match. No payment is recorded in the ERP.`}
+    <button
+      onClick={(e) => { e.stopPropagation(); onOpen() }}
+      className="block text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-md"
+      title={m.paymentIsManual
+        ? `${m.paymentLabel} — set by hand. Click to change.`
+        : `${m.paymentLabel} — from the three-way match, nobody has set it. Click to change.`}
     >
-      {m.paymentLabel}
-    </Badge>
+      <Badge
+        variant={PAYMENT_BADGE[m.payment]}
+        className={cn("cursor-pointer hover:opacity-80", !m.paymentIsManual && "border border-dashed")}
+      >
+        {m.paymentLabel}
+      </Badge>
+      {/* The bank reference is the proof the money moved — it belongs beside
+          Completed, not hidden in a dialog. */}
+      {utr && (
+        <span className="mt-0.5 block max-w-32 truncate font-mono text-[10px] text-muted-foreground" title={`UTR ${utr}`}>
+          {utr}
+        </span>
+      )}
+      {m.paymentAheadOfDocuments && (
+        <span
+          className="mt-0.5 block text-[10px] text-amber-700 dark:text-amber-400"
+          title="Moved past Pending while the three-way match is not clear"
+        >
+          ahead of documents
+        </span>
+      )}
+    </button>
   )
 }

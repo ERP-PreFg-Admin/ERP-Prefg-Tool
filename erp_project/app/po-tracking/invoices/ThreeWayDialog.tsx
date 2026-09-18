@@ -12,13 +12,14 @@ import { Check, CreditCard, ExternalLink, FileText, Loader2, Package, RotateCw, 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
-import type { Leg, ThreeWayMatch } from "@/lib/invoice/three-way"
-import { threeWayMatch } from "@/lib/invoice/three-way"
+import type { Leg, LegVerification, ThreeWayMatch } from "@/lib/invoice/three-way"
+import { grnTotals, grnTotalsBySku, gstRateLabel, lineTotals, lineTotalsBySku, threeWayBySku, threeWayMatch } from "@/lib/invoice/three-way"
 import type { InvoiceDocument, InvoiceGrnLine, InvoiceHistoryHeader, InvoiceHistoryItem, InvoiceLegVerification } from "@/types/invoice"
 import { IST } from "@/lib/date"
 import { parseVerifiedLegs } from "./ThreeWayCells"
+import SkuSummary from "./SkuSummary"
 
 type LegKey = "po" | "pod" | "inv"
 
@@ -44,7 +45,7 @@ const TONE = {
 }
 
 function LegCard({
-  kind, title, blurb, leg, refs, lines, open, onOpen, signature, onVerify, saving,
+  kind, title, blurb, leg, refs, lines, open, onOpen, signature, onVerify, saving, dirty,
 }: {
   kind: LegKey
   title: string
@@ -55,8 +56,10 @@ function LegCard({
   open: boolean
   onOpen: () => void
   signature?: InvoiceLegVerification
-  onVerify: (verified: boolean) => void
+  onVerify: () => void
   saving: boolean
+  /** Staged but not yet written. */
+  dirty: boolean
 }) {
   const Icon = ICON[kind]
   const absent = leg.state === "missing"
@@ -121,20 +124,25 @@ function LegCard({
           size="xs"
           variant={leg.verified ? "outline" : "default"}
           disabled={absent || saving}
-          onClick={() => onVerify(!leg.verified)}
+          onClick={onVerify}
           // Never "mark matched": the button records that a person looked at the
           // document, which is a different claim from the numbers agreeing.
           title={absent
             ? "Nothing on file to verify"
             : leg.verified
-            ? "Withdraw this sign-off"
-            : "Confirm you have physically checked this document"}
+            ? "Withdraw this sign-off — takes effect on Save"
+            : "Confirm you have physically checked this document — takes effect on Save"}
         >
-          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : leg.verified ? "Verified" : "Mark verified"}
+          {leg.verified ? "Verified" : "Mark verified"}
         </Button>
       </div>
 
-      {signature && (
+      {dirty && (
+        <p className="mt-2 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+          Unsaved — {leg.verified ? "will be signed off" : "sign-off will be withdrawn"} on Save
+        </p>
+      )}
+      {signature && !dirty && (
         <p className="mt-2 text-[10px] text-muted-foreground">
           {signature.verified_by_name ?? `User ${signature.verified_by}`} · {shortDate(signature.verified_at)}
           {signature.remarks ? ` · ${signature.remarks}` : ""}
@@ -163,9 +171,14 @@ export default function ThreeWayDialog({
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState("")
   const [openLeg, setOpenLeg] = useState<LegKey | null>(null)
-  const [saving, setSaving]   = useState<LegKey | null>(null)
+  const [saving, setSaving]   = useState(false)
+  /** Staged sign-offs. Seeded from the server on load; written only on Save. */
+  const [draft, setDraft]     = useState<LegVerification>({ po: false, pod: false, inv: false })
   const [fetchingDocs, setFetchingDocs] = useState(false)
   const [docNote, setDocNote] = useState("")
+  const [askClose, setAskClose] = useState(false)
+  /** sku_code → the SKU's current Agreed Final Costing rate. */
+  const [agreedRates, setAgreedRates] = useState<Record<string, number>>({})
 
   const id = invoice?.id ?? null
 
@@ -179,12 +192,21 @@ export default function ThreeWayDialog({
         return data as {
           items?: InvoiceHistoryItem[]; grns?: InvoiceGrnLine[]
           documents?: InvoiceDocument[]; verifications?: InvoiceLegVerification[]
+          agreedRates?: Record<string, number>
         }
       })
       .then((d) => {
         if (cancelled) return
         setItems(d.items ?? []); setGrns(d.grns ?? [])
-        setDocuments(d.documents ?? []); setVerifications(d.verifications ?? [])
+        setDocuments(d.documents ?? [])
+        setAgreedRates(d.agreedRates ?? {})
+        const v = d.verifications ?? []
+        setVerifications(v)
+        setDraft({
+          po:  v.some((x) => x.leg === "po"),
+          pod: v.some((x) => x.leg === "pod"),
+          inv: v.some((x) => x.leg === "inv"),
+        })
       })
       .catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : "Couldn't load this invoice.") })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -228,36 +250,65 @@ export default function ThreeWayDialog({
     }
   }
 
-  async function verify(leg: LegKey, verified: boolean) {
-    if (id == null) return
-    setSaving(leg)
+  /**
+   * Stage a sign-off. Nothing is written until Save.
+   *
+   * A signature is a claim that a person checked a document, so it should take a
+   * deliberate act — not a click that lands the moment the pointer does, with no
+   * chance to reconsider after opening the PDF beside it.
+   */
+  function toggleDraft(leg: LegKey) {
+    setDraft((d) => ({ ...d, [leg]: !d[leg] }))
+  }
+
+  /** Write every staged change. One call per leg — the route is per leg. */
+  async function saveVerifications() {
+    if (id == null || dirtyLegs.length === 0) return
+    setSaving(true)
     setError("")
     try {
-      const res = await fetch(`/api/v1/purchase-orders/invoice/${id}/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leg, verified }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.error ?? "Couldn't record that.")
-      setVerifications(data.verifications ?? [])
+      // Sequential, not parallel: three requests at most, and a failure part way
+      // through should leave the earlier ones written rather than racing.
+      let latest: InvoiceLegVerification[] = verifications
+      for (const leg of dirtyLegs) {
+        const res = await fetch(`/api/v1/purchase-orders/invoice/${id}/verify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ leg, verified: draft[leg] }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(data.error ?? "Couldn't record that.")
+        latest = data.verifications ?? latest
+      }
+      setVerifications(latest)
       onChanged?.()
     } catch (e: unknown) {
+      // The draft is kept, so a failed save can be retried without re-ticking.
       setError(e instanceof Error ? e.message : "Couldn't record that.")
     } finally {
-      setSaving(null)
+      setSaving(false)
     }
+  }
+
+  /** Closing with staged sign-offs asks first — they are cheap to redo but easy
+   *  to lose, and losing one silently is worse than one extra click. */
+  function requestClose() {
+    if (dirtyLegs.length > 0) { setAskClose(true); return }
+    onClose()
   }
 
   if (!invoice) return null
 
   // Re-derived from the LIVE verifications, not from the row that opened the
   // dialog — otherwise the cards keep showing the state from before the click.
-  const verifiedNow = {
+  const savedLegs = {
     po:  verifications.some((v) => v.leg === "po"),
     pod: verifications.some((v) => v.leg === "pod"),
     inv: verifications.some((v) => v.leg === "inv"),
   }
+  // What Save would produce, so the cards and the badge preview the change
+  // rather than describing a state the desk has already moved on from.
+  const dirtyLegs = (["po", "inv", "pod"] as const).filter((k) => draft[k] !== savedLegs[k])
   const match: ThreeWayMatch = threeWayMatch({
     billedQty:       invoice.billed_qty        ?? 0,
     poCount:         invoice.po_count          ?? 0,
@@ -269,7 +320,7 @@ export default function ThreeWayDialog({
     grnAccepted:     invoice.grn_accepted      ?? 0,
     grnRejected:     invoice.grn_rejected      ?? 0,
     // Before the fetch lands, fall back to what the row already said.
-    verified: loading ? parseVerifiedLegs(invoice.verified_legs) : verifiedNow,
+    verified: loading ? parseVerifiedLegs(invoice.verified_legs) : draft,
   })
 
   const poLines = items.filter((i) => i.received_against_po_no)
@@ -288,6 +339,27 @@ export default function ThreeWayDialog({
   const rejected = grns.reduce((t, g) => t + Number(g.rejected_qty ?? 0), 0)
   const lastGrn  = grns.map((g) => g.grn_created_at).filter(Boolean).sort().at(-1) ?? null
 
+  const totals      = lineTotals(items)
+  const grnAll      = grnTotals(grns)
+  const poTotals    = lineTotals(poLines)
+  /**
+   * One row per SKU with all three rates.
+   *
+   * The invoice rate is taxable / qty — a weighted average, because one SKU can
+   * sit on two lines at two rates and picking either would misreport the other.
+   * The PO rate is the order's, taken from the first line that carries one.
+   */
+  const rateRows = lineTotalsBySku(items).map((sk) => {
+    const poRate = num(items.find((i) => (i.sku_code ?? "—") === sk.sku
+      && i.received_against_unit_price != null)?.received_against_unit_price ?? null)
+    const invRate = sk.qty > 0 ? sk.taxable / sk.qty : null
+    const agreed = agreedRates[sk.sku] ?? null
+    return {
+      sku: sk.sku, poRate, invRate, agreed,
+      delta: invRate != null && agreed != null ? invRate - agreed : null,
+    }
+  })
+
   const linesValue  = num(invoice.lines_value)
   const total       = num(invoice.invoice_total)
   const outstanding = [match.po, match.pod, match.inv].filter((l) => l.state === "missing").length
@@ -295,7 +367,7 @@ export default function ThreeWayDialog({
   const sig = (leg: LegKey) => verifications.find((v) => v.leg === leg)
 
   return (
-    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+    <Dialog open onOpenChange={(o) => { if (!o) requestClose() }}>
       <DialogContent className="max-h-[88vh] max-w-5xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Three-way match · {invoice.invoice_no}</DialogTitle>
@@ -320,7 +392,23 @@ export default function ThreeWayDialog({
           </span>
         </div>
 
-        {error ? (
+        {askClose ? (
+          <Callout variant="warning">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>
+                {dirtyLegs.length} sign-off{dirtyLegs.length === 1 ? "" : "s"} staged but not saved.
+              </span>
+              <Button size="xs" className="ml-auto" disabled={saving}
+                onClick={() => { setAskClose(false); void saveVerifications().then(onClose) }}>
+                Save and close
+              </Button>
+              <Button size="xs" variant="outline" onClick={() => { setDraft(savedLegs); setAskClose(false); onClose() }}>
+                Discard
+              </Button>
+              <Button size="xs" variant="ghost" onClick={() => setAskClose(false)}>Keep editing</Button>
+            </div>
+          </Callout>
+        ) : error ? (
           <Callout variant="destructive">{error}</Callout>
         ) : outstanding > 0 ? (
           <Callout variant="info">
@@ -350,8 +438,9 @@ export default function ThreeWayDialog({
                 refs={poRefs.map((i) => i.received_against_po_no!)}
                 lines={[["Ordered", `${qty(orderedQty)} pcs`]]}
                 open={openLeg === "po"} onOpen={() => setOpenLeg(openLeg === "po" ? null : "po")}
-                signature={sig("po")} saving={saving === "po"}
-                onVerify={(v) => void verify("po", v)}
+                signature={sig("po")} saving={saving}
+                dirty={dirtyLegs.includes("po")}
+                onVerify={() => toggleDraft("po")}
               />
               <LegCard
                 kind="inv" title="Supplier invoice" leg={match.inv}
@@ -360,32 +449,120 @@ export default function ThreeWayDialog({
                 lines={[
                   ["Billed", `${qty(invoice.billed_qty)} pcs`],
                   ["Header", money(total)],
+                  ["Documents", `${(invoice.attachment_key ? 1 : 0) + documents.length}`],
                   // Only when it disagrees — the same number twice is noise.
                   ...(linesValue != null && total != null && Math.abs(linesValue - total) > 1
                     ? [["Lines", money(linesValue)] as [string, string]]
                     : []),
                 ]}
                 open={openLeg === "inv"} onOpen={() => setOpenLeg(openLeg === "inv" ? null : "inv")}
-                signature={sig("inv")} saving={saving === "inv"}
-                onVerify={(v) => void verify("inv", v)}
+                signature={sig("inv")} saving={saving}
+                dirty={dirtyLegs.includes("inv")}
+                onVerify={() => toggleDraft("inv")}
               />
               <LegCard
                 kind="pod" title="GRN" leg={match.pod}
-                blurb="Goods receipt at site, with the signed &amp; stamped copy."
+                blurb="Goods receipt at site — what actually arrived."
                 refs={grnRefs}
                 lines={[
-                  ["Accepted", `${qty(accepted)} pcs`],
+                  ["QC passed", `${qty(accepted)} pcs`],
                   ...(rejected > 0 ? [["Rejected", `${qty(rejected)} pcs`] as [string, string]] : []),
                   ...(lastGrn ? [["Received", shortDate(lastGrn) ?? "—"] as [string, string]] : []),
-                  ...(signedCopies.length > 0
-                    ? [["Signed copy", `${signedCopies.length}`] as [string, string]]
-                    : []),
                 ]}
                 open={openLeg === "pod"} onOpen={() => setOpenLeg(openLeg === "pod" ? null : "pod")}
-                signature={sig("pod")} saving={saving === "pod"}
-                onVerify={(v) => void verify("pod", v)}
+                signature={sig("pod")} saving={saving}
+                dirty={dirtyLegs.includes("pod")}
+                onVerify={() => toggleDraft("pod")}
               />
             </div>
+
+            {!openLeg && items.length + grns.length > 0 && (
+              <div className="mt-3 rounded-lg border border-border bg-muted/20 p-3">
+                {/* The only place billed and accepted meet at SKU grain: the
+                    invoice panel knows what was charged, the GRN panel knows
+                    what arrived, and "which SKU is short" needs both. Shown
+                    until a leg is opened, which then takes this space. */}
+                <SkuSummary
+                  title="All three legs, by SKU"
+                  head={["SKU", "Billed", "Taxable", "GST", "Payable", "QC passed", "Rejected", "Short"]}
+                  note="open a card above for that leg in full"
+                  foot={[
+                    `Total · ${threeWayBySku(items, grns).length} SKUs`,
+                    qty(totals.qty), money(totals.taxable),
+                    <span key="x">{money(totals.gst)}
+                      <span className="ml-1 font-normal text-muted-foreground">{gstRateLabel(totals.gstRate)}</span>
+                    </span>,
+                    <span key="v" className="font-semibold">{money(totals.gross)}</span>,
+                    qty(grnAll.accepted),
+                    grnAll.rejected > 0
+                      ? <span key="r" className="text-amber-700 dark:text-amber-400">{qty(grnAll.rejected)}</span>
+                      : qty(grnAll.rejected),
+                    // The invoice-level gap, so the column foots to the same
+                    // number the GRN leg reports rather than a re-derived one.
+                    match.pod.state === "missing"
+                      ? <span key="s" className="text-muted-foreground">awaiting</span>
+                      : <span key="s" className={cn(
+                          Math.max(0, totals.qty - grnAll.accepted - grnAll.rejected) > 0 &&
+                            "text-amber-700 dark:text-amber-400")}>
+                          {qty(Math.max(0, totals.qty - grnAll.accepted - grnAll.rejected))}
+                        </span>,
+                  ]}
+                  rows={threeWayBySku(items, grns).map((k) => [
+                    k.unbilled
+                      ? <span key="s" className="text-amber-700 dark:text-amber-400" title="Received against no invoice line">
+                          {k.sku} · unbilled
+                        </span>
+                      : k.sku,
+                    qty(k.billedQty),
+                    k.unbilled ? <span key="t" className="text-muted-foreground">—</span> : money(k.taxable),
+                    k.unbilled
+                      ? <span key="x" className="text-muted-foreground">—</span>
+                      : <span key="x">{money(k.gst)}
+                          <span className="ml-1 text-muted-foreground">{gstRateLabel(k.gstRate)}</span>
+                        </span>,
+                    k.unbilled
+                      ? <span key="v" className="text-muted-foreground">—</span>
+                      : <span key="v" className="font-medium">{money(k.gross)}</span>,
+                    k.noReceipt ? <span key="a" className="text-muted-foreground">—</span> : qty(k.accepted),
+                    k.rejected > 0
+                      ? <span key="r" className="font-medium text-amber-700 dark:text-amber-400">{qty(k.rejected)}</span>
+                      : qty(k.rejected),
+                    k.noReceipt
+                      ? <span key="g" className="text-muted-foreground">awaiting</span>
+                      : k.awaited > 0
+                      ? <span key="g" className="font-medium text-amber-700 dark:text-amber-400">{qty(k.awaited)}</span>
+                      : k.overReceipt > 0
+                      ? <span key="g" className="font-medium text-amber-700 dark:text-amber-400">+{qty(k.overReceipt)} over</span>
+                      : <span key="g" className="text-muted-foreground">0</span>,
+                  ])}
+                />
+
+                {/* Three claims about one unit price: what the order agreed,
+                    what the invoice charged, and what the SKU costs today under
+                    Agreed Final Costing. The last is live — it moves when
+                    material rates do — so a gap is not necessarily an error. */}
+                <div className="mt-3">
+                  <SkuSummary
+                    title="Rates by SKU"
+                    head={["SKU", "PO rate", "Invoice rate", "Current agreed rate", "Inv vs agreed"]}
+                    note="agreed rate is today's Final Costing, not the rate at invoice date"
+                    rows={rateRows.map((r) => [
+                      r.sku,
+                      r.poRate == null ? <span key="p" className="text-muted-foreground">—</span> : money(r.poRate),
+                      r.invRate == null ? <span key="i" className="text-muted-foreground">—</span> : money(r.invRate),
+                      r.agreed == null
+                        ? <span key="a" className="text-muted-foreground" title="No live production line or no costing for this SKU">no costing</span>
+                        : money(r.agreed),
+                      r.delta == null
+                        ? <span key="d" className="text-muted-foreground">—</span>
+                        : <span key="d" className={cn(Math.abs(r.delta) > 0.005 && "font-medium text-amber-700 dark:text-amber-400")}>
+                            {r.delta > 0 ? "+" : ""}{money(r.delta)}
+                          </span>,
+                    ])}
+                  />
+                </div>
+              </div>
+            )}
 
             {openLeg && (
               <div className="mt-3 rounded-lg border border-border bg-muted/20 p-3">
@@ -436,48 +613,55 @@ export default function ThreeWayDialog({
                             )
                           })}
                         </tbody>
+                        <tfoot className="border-t-2 border-border">
+                          <tr className="[&>td]:px-1.5 [&>td]:py-1 [&>td]:font-medium">
+                            <td colSpan={2} className="text-muted-foreground">
+                              Total · {poRefs.length} order{poRefs.length === 1 ? "" : "s"}
+                            </td>
+                            <td className="text-right tabular-nums">{qty(orderedQty)}</td>
+                            <td className="text-right tabular-nums">
+                              {qty(poRefs.reduce((t, i) => t + Number(i.received_against_received_qty ?? 0), 0))}
+                            </td>
+                            <td className="text-right tabular-nums">{qty(poTotals.qty)}</td>
+                            <td />
+                            <td className="text-right tabular-nums">{money(poTotals.taxable)}</td>
+                            <td />
+                          </tr>
+                        </tfoot>
                       </table>
+                )}
+
+                {openLeg === "po" && poLines.length > 0 && (
+                  <div className="mt-3">
+                    {/* Per SKU rather than per order: one SKU can settle two
+                        orders, and "how much of this did we buy" is the question
+                        the order list cannot answer. */}
+                    <SkuSummary
+                      title="By SKU"
+                      head={["SKU", "Billed qty", "Taxable", "GST", "Payable", "Lines"]}
+                      rows={lineTotalsBySku(poLines).map((sk) => [
+                        sk.sku, qty(sk.qty), money(sk.taxable),
+                        <span key="x">{money(sk.gst)}
+                          <span className="ml-1 text-muted-foreground">{gstRateLabel(sk.gstRate)}</span>
+                        </span>,
+                        <span key="g" className="font-medium">{money(sk.gross)}</span>,
+                        sk.lines,
+                      ])}
+                    />
+                  </div>
                 )}
 
                 {openLeg === "pod" && (
                   <div className="space-y-3">
-                    {/* The signed copy sits with the GRN, not the invoice: it is
-                        the warehouse's acknowledgement that the goods landed. */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      {signedCopies.map((d) => (
-                        <Button key={d.id} size="xs" variant="outline" onClick={() => void openKey(d.s3_key)}>
-                          <FileText className="h-3 w-3" />
-                          <span className="max-w-48 truncate" title={d.filename}>{d.filename}</span>
-                          {d.uniware_uploaded_by && (
-                            <span className="max-w-28 truncate text-muted-foreground">{d.uniware_uploaded_by}</span>
-                          )}
-                          <ExternalLink className="h-2.5 w-2.5" />
-                        </Button>
-                      ))}
-                      {/* Asks Uniware about THIS invoice only. The toolbar's
-                          button sweeps 40, which is 40 mints for one answer. */}
-                      <Button size="xs" variant="ghost" disabled={fetchingDocs} onClick={() => void fetchDocs()}>
-                        {fetchingDocs
-                          ? <><Loader2 className="h-3 w-3 animate-spin" /> Fetching…</>
-                          : <><RotateCw className="h-3 w-3" /> {signedCopies.length ? "Re-fetch" : "Fetch signed copy"}</>}
-                      </Button>
-                      {docNote && <span className="text-[11px] text-muted-foreground">{docNote}</span>}
-                    </div>
-                    {signedCopies.length === 0 && !docNote && (
-                      <p className="text-xs text-muted-foreground">
-                        No signed copy held for this invoice yet.
-                      </p>
-                    )}
-
                     {grns.length === 0
                     ? <p className="text-xs text-muted-foreground">No goods receipt synced against this invoice yet.</p>
                     : <table className="w-full text-[11px]">
                         <thead>
                           <tr className="[&>th]:px-1.5 [&>th]:py-1 [&>th]:text-left [&>th]:font-medium [&>th]:text-muted-foreground">
                             <th>GRN</th><th>SKU</th><th>Inward PO</th><th>Batch</th><th>Received</th>
-                            <th className="text-right">Accepted</th><th className="text-right">Rejected</th>
+                            <th className="text-right" title="Passed QC — good, sellable stock">QC passed</th><th className="text-right">Rejected</th>
                             <th className="text-right">Rate</th>
-                            <th className="text-right">Accepted ₹</th>
+                            <th className="text-right">QC passed ₹</th>
                             <th className="text-right">Rejected ₹</th>
                           </tr>
                         </thead>
@@ -516,21 +700,64 @@ export default function ThreeWayDialog({
                             </tr>
                           ))}
                         </tbody>
+                        <tfoot className="border-t-2 border-border">
+                          <tr className="[&>td]:px-1.5 [&>td]:py-1 [&>td]:font-medium">
+                            <td colSpan={5} className="text-muted-foreground">
+                              Total · {grnAll.grns} GRN{grnAll.grns === 1 ? "" : "s"}
+                            </td>
+                            <td className="text-right tabular-nums">{qty(grnAll.accepted)}</td>
+                            <td className={cn("text-right tabular-nums",
+                              grnAll.rejected > 0 && "text-amber-700 dark:text-amber-400")}>
+                              {qty(grnAll.rejected)}
+                            </td>
+                            <td />
+                            <td className="text-right tabular-nums">{money(grnAll.acceptedValue)}</td>
+                            <td className={cn("text-right tabular-nums",
+                              grnAll.rejectedValue > 0 && "text-amber-700 dark:text-amber-400")}>
+                              {money(grnAll.rejectedValue)}
+                            </td>
+                          </tr>
+                        </tfoot>
                       </table>
                     }
+
+                    <SkuSummary
+                      title="By SKU"
+                      head={["SKU", "QC passed", "Rejected", "QC passed ₹", "Rejected ₹", "GRNs"]}
+                      note={grnAll.unpriced ? "some lines unpriced" : undefined}
+                      rows={grnTotalsBySku(grns).map((g) => [
+                        g.sku, qty(g.accepted),
+                        g.rejected > 0
+                          ? <span className="font-medium text-amber-700 dark:text-amber-400">{qty(g.rejected)}</span>
+                          : qty(g.rejected),
+                        g.unpriced && g.acceptedValue === 0 ? "—" : money(g.acceptedValue),
+                        g.unpriced && g.rejectedValue === 0 ? "—" : money(g.rejectedValue),
+                        g.grns,
+                      ])}
+                    />
                   </div>
                 )}
 
                 {openLeg === "inv" && (
                   <div className="space-y-3">
-                    <div className="flex flex-wrap gap-2">
+                    {/* EVERY document for this invoice lives here — ours and the
+                        warehouse's signed copy alike. They are all copies of the
+                        same document, and splitting them across two cards meant
+                        hunting in two places for one PDF. */}
+                    <div className="flex flex-wrap items-center gap-2">
                       {invoice.attachment_key && (
                         <Button size="xs" variant="outline" onClick={() => void openKey(invoice.attachment_key!)}>
                           <FileText className="h-3 w-3" /> Original invoice <ExternalLink className="h-2.5 w-2.5" />
                         </Button>
                       )}
-                      {/* Only our own pushed copy here — what the warehouse
-                          attached is evidence of delivery and lives on GRN. */}
+                      {signedCopies.map((d) => (
+                        <Button key={d.id} size="xs" variant="outline" onClick={() => void openKey(d.s3_key)}>
+                          <FileText className="h-3 w-3" />
+                          <span className="max-w-44 truncate" title={d.filename}>{d.filename}</span>
+                          <span className="text-muted-foreground">signed copy</span>
+                          <ExternalLink className="h-2.5 w-2.5" />
+                        </Button>
+                      ))}
                       {ourCopies.map((d) => (
                         <Button key={d.id} size="xs" variant="outline" onClick={() => void openKey(d.s3_key)}>
                           <FileText className="h-3 w-3" />
@@ -539,10 +766,18 @@ export default function ThreeWayDialog({
                           <ExternalLink className="h-2.5 w-2.5" />
                         </Button>
                       ))}
-                      {!invoice.attachment_key && ourCopies.length === 0 && (
-                        <p className="text-xs text-muted-foreground">No invoice document stored.</p>
-                      )}
+                      {/* Asks Uniware about THIS invoice only. The toolbar's
+                          button sweeps 40, which is 40 mints for one answer. */}
+                      <Button size="xs" variant="ghost" disabled={fetchingDocs} onClick={() => void fetchDocs()}>
+                        {fetchingDocs
+                          ? <><Loader2 className="h-3 w-3 animate-spin" /> Fetching…</>
+                          : <><RotateCw className="h-3 w-3" /> {signedCopies.length ? "Re-fetch" : "Fetch signed copy"}</>}
+                      </Button>
+                      {docNote && <span className="text-[11px] text-muted-foreground">{docNote}</span>}
                     </div>
+                    {!invoice.attachment_key && documents.length === 0 && !docNote && (
+                      <p className="text-xs text-muted-foreground">No invoice document stored.</p>
+                    )}
                     <table className="w-full text-[11px]">
                       <thead>
                         <tr className="[&>th]:px-1.5 [&>th]:py-1 [&>th]:text-left [&>th]:font-medium [&>th]:text-muted-foreground">
@@ -559,11 +794,42 @@ export default function ThreeWayDialog({
                             <td className="max-w-56 truncate" title={li.sku_name ?? ""}>{li.sku_name ?? "—"}</td>
                             <td className="text-right tabular-nums">{qty(li.qty)}</td>
                             <td className="text-right tabular-nums">{money(li.rate)}</td>
-                            <td className="text-right tabular-nums">{money(li.total_amount)}</td>
+                            <td className="text-right tabular-nums">{money(li.amount)}</td>
                           </tr>
                         ))}
                       </tbody>
+                      {/* The per-line column is taxable value; GST and the
+                          payable appear nowhere else on this panel. */}
+                      <tfoot className="border-t-2 border-border">
+                        <tr className="[&>td]:px-1.5 [&>td]:py-1 [&>td]:font-medium">
+                          <td colSpan={3} className="text-muted-foreground">
+                            Total · {items.length} line{items.length === 1 ? "" : "s"}
+                          </td>
+                          <td className="text-right tabular-nums">{qty(totals.qty)}</td>
+                          <td className="text-right text-muted-foreground">
+                            <span className="font-normal">+GST {gstRateLabel(totals.gstRate)} </span>{money(totals.gst)}
+                          </td>
+                          <td className="text-right tabular-nums">{money(totals.taxable)}</td>
+                        </tr>
+                        <tr className="[&>td]:px-1.5 [&>td]:pb-1">
+                          <td colSpan={5} className="text-right text-muted-foreground">Payable</td>
+                          <td className="text-right font-semibold tabular-nums">{money(totals.gross)}</td>
+                        </tr>
+                      </tfoot>
                     </table>
+
+                    <SkuSummary
+                      title="By SKU"
+                      head={["SKU", "Qty", "Taxable", "GST", "Payable", "Lines"]}
+                      rows={lineTotalsBySku(items).map((sk) => [
+                        sk.sku, qty(sk.qty), money(sk.taxable),
+                        <span key="x">{money(sk.gst)}
+                          <span className="ml-1 text-muted-foreground">{gstRateLabel(sk.gstRate)}</span>
+                        </span>,
+                        <span key="g" className="font-medium">{money(sk.gross)}</span>,
+                        sk.lines,
+                      ])}
+                    />
                   </div>
                 )}
               </div>
@@ -580,8 +846,23 @@ export default function ThreeWayDialog({
           </p>
         )}
 
-        <DialogFooter>
-          <DialogClose asChild><Button variant="outline" size="sm">Close</Button></DialogClose>
+        <DialogFooter className="items-center">
+          {dirtyLegs.length > 0 && (
+            <>
+              <span className="mr-auto text-[11px] text-amber-700 dark:text-amber-400">
+                {dirtyLegs.length} unsaved change{dirtyLegs.length === 1 ? "" : "s"}
+              </span>
+              <Button variant="ghost" size="sm" disabled={saving} onClick={() => setDraft(savedLegs)}>
+                Discard
+              </Button>
+            </>
+          )}
+          {/* Close is not a Dialog.Close while there are staged changes — the
+              guard below has to run, or a stray click loses the sign-offs. */}
+          <Button variant="outline" size="sm" disabled={saving} onClick={requestClose}>Close</Button>
+          <Button size="sm" disabled={saving || dirtyLegs.length === 0} onClick={() => void saveVerifications()}>
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save verifications"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

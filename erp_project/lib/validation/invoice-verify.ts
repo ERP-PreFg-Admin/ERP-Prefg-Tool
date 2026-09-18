@@ -15,3 +15,16 @@ export const legVerifySchema = z.object({
   // Optional: forcing a sentence on every click buys noise, not evidence.
   remarks: z.string().trim().max(500).optional().nullable(),
 })
+
+/** Matches invoice_payment.status's ENUM — only the states a person can set. */
+export const manualPaymentStatusSchema = z.enum(["pending", "initiated", "approved", "completed"])
+
+export const paymentSchema = z.object({
+  /** null hands the invoice back to the state derived from the match. */
+  status: manualPaymentStatusSchema.nullable(),
+  /** Free text: UTR formats differ per channel and bank, and a guessed pattern
+   *  would reject a real reference at the worst possible moment. The route
+   *  refuses 'completed' without one. */
+  utr: z.string().trim().max(64).optional().nullable(),
+  remarks: z.string().trim().max(500).optional().nullable(),
+})

@@ -26,9 +26,11 @@ import { SectionHead } from "../po-inwarding/InvoiceFields"
 import UniwareStatusBadge from "../UniwareStatusBadge"
 import type { InvoiceHistoryHeader, InvoiceHistoryItem, InvoiceGrnLine, InvoiceDocument } from "@/types/invoice"
 import { IST, todayIST } from "@/lib/date"
-import type { MatchBadge } from "@/lib/invoice/three-way"
+import { grnTotals, grnTotalsBySku, gstRateLabel, lineTotals, lineTotalsBySku, type MatchBadge } from "@/lib/invoice/three-way"
 import { PaymentCell, ThreeWayChips, matchOf } from "./ThreeWayCells"
 import ThreeWayDialog from "./ThreeWayDialog"
+import PaymentDialog from "./PaymentDialog"
+import SkuSummary from "./SkuSummary"
 
 const num = (v: unknown) => (v == null || v === "" ? null : Number(v))
 
@@ -146,8 +148,50 @@ function GrnSection({ lines }: { lines: InvoiceGrnLine[] }) {
     else byGrn.set(l.grn_code, [l])
   }
 
+  // Across every receipt on this invoice, not per GRN — the per-GRN headers
+  // below answer "what came in this delivery", this answers "what has arrived
+  // against this invoice at all", which is the number the match reads.
+  const all = grnTotals(lines)
+
   return (
     <div className="grid gap-2">
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md border border-border bg-muted/30 px-2 py-1.5 text-[11px]">
+        <span className="font-medium">
+          All receipts · {all.grns} GRN{all.grns === 1 ? "" : "s"}
+        </span>
+        <span className="tabular-nums">
+          <span className="text-muted-foreground">QC passed </span>
+          <span className="font-medium">{qty(all.accepted)}</span>
+          <span className="ml-1 text-muted-foreground">₹{money(all.acceptedValue)}</span>
+        </span>
+        <span className={cn("tabular-nums", all.rejected > 0 && "text-amber-700 dark:text-amber-400")}>
+          <span className="text-muted-foreground">Rejected </span>
+          <span className="font-medium">{qty(all.rejected)}</span>
+          {all.rejectedValue > 0 && <span className="ml-1">₹{money(all.rejectedValue)}</span>}
+        </span>
+        {/* Named, or the value totals silently understate what arrived. */}
+        {all.unpriced && (
+          <span className="text-muted-foreground" title="Some receipt lines have no rate on their inward PO">
+            some lines unpriced
+          </span>
+        )}
+      </div>
+
+      <SkuSummary
+        title="By SKU"
+        head={["SKU", "QC passed", "Rejected", "QC passed ₹", "Rejected ₹", "GRNs"]}
+        rows={grnTotalsBySku(lines).map((s) => [
+          s.sku,
+          qty(s.accepted),
+          s.rejected > 0
+            ? <span className="font-medium text-amber-700 dark:text-amber-400">{qty(s.rejected)}</span>
+            : qty(s.rejected),
+          s.unpriced && s.acceptedValue === 0 ? "—" : money(s.acceptedValue),
+          s.unpriced && s.rejectedValue === 0 ? "—" : money(s.rejectedValue),
+          s.grns,
+        ])}
+      />
+
       {[...byGrn.entries()].map(([code, rows]) => {
         const accepted = rows.reduce((t, r) => t + Number(r.quantity ?? 0), 0)
         const rejected = rows.reduce((t, r) => t + Number(r.rejected_qty ?? 0), 0)
@@ -199,11 +243,11 @@ function GrnSection({ lines }: { lines: InvoiceGrnLine[] }) {
                   <th>Inward PO</th>
                   <th>Batch</th>
                   <th>Expiry</th>
-                  <th className="text-right">Accepted</th>
+                  <th className="text-right" title="Passed QC — good, sellable stock">QC passed</th>
                   <th className="text-right">Rejected</th>
                   {/* Our own rate off the inward PO — the receipt has none. */}
                   <th className="text-right">Rate</th>
-                  <th className="text-right">Accepted ₹</th>
+                  <th className="text-right">QC passed ₹</th>
                   <th className="text-right">Rejected ₹</th>
                 </tr>
               </thead>
@@ -308,7 +352,6 @@ export default function InvoiceGroupTable({
   emptyHint,
   className,
   matchFilter,
-  onTally,
 }: {
   /** Server-side filter on invoice_no / manufacturer name. */
   search?: string
@@ -327,8 +370,6 @@ export default function InvoiceGroupTable({
   /** Match badges to keep. Empty = all. Applied to the PAGE, not the query —
    *  the match is derived in TS, so the server can't filter on it. */
   matchFilter?: MatchBadge[]
-  /** Reports this page's badge tally up, so the host can caption it honestly. */
-  onTally?: (t: { shown: number; counts: Partial<Record<MatchBadge, number>> }) => void
 }) {
   const [invoices, setInvoices] = useState<InvoiceHistoryHeader[]>([])
   const [total, setTotal]       = useState(0)
@@ -342,6 +383,8 @@ export default function InvoiceGroupTable({
   const [expanded, setExpanded] = useState<number | null>(null)
   /** The row whose three-way drilldown is open. */
   const [matchFor, setMatchFor] = useState<InvoiceHistoryHeader | null>(null)
+  /** The row whose payment dialog is open. */
+  const [payFor, setPayFor] = useState<InvoiceHistoryHeader | null>(null)
   const [items, setItems]       = useState<Record<number, InvoiceHistoryItem[]>>({})
   /** Receipt lines for the expanded invoice, keyed like `items`. */
   const [grns, setGrns] = useState<Record<number, InvoiceGrnLine[]>>({})
@@ -448,14 +491,6 @@ export default function InvoiceGroupTable({
     [matched, matchFilter]
   )
 
-  // Reported in an effect, not during render — this sets state in the parent.
-  useEffect(() => {
-    if (!onTally) return
-    const counts: Partial<Record<MatchBadge, number>> = {}
-    for (const { m } of matched) counts[m.badge] = (counts[m.badge] ?? 0) + 1
-    onTally({ shown: matched.length, counts })
-  }, [matched, onTally])
-
   /** Open the original PDF via a short-lived presigned URL. */
   async function openOriginal(key: string) {
     // Opened synchronously and pointed at the URL once it resolves — a popup
@@ -479,9 +514,9 @@ export default function InvoiceGroupTable({
           <thead className="sticky top-0 z-10 bg-muted">
             <tr className="[&>th]:whitespace-nowrap [&>th]:px-2 [&>th]:py-2 [&>th]:text-left [&>th]:font-medium [&>th]:text-muted-foreground">
               {/* Manufacturer and Entered each carry two facts in one column —
-                  code under name, date under person. Ten columns didn't fit
-                  without horizontal scroll, and the pairs read better stacked
-                  than side by side. */}
+                  code under name, date under person. Everything else gets its
+                  own column: these are looked at side by side and scanned down,
+                  and stacking pairs to save width cost more than it saved. */}
               <th className="w-8" />
               <th>Invoice</th>
               {/* The same document's identity in the other system, so it sits
@@ -494,11 +529,10 @@ export default function InvoiceGroupTable({
               {/* The reconciliation, in one place: ordered, billed, received.
                   Next to the status because it answers what the status only
                   hints at — "approved" says nothing about whether goods
-                  arrived. Click it for the verdict and the documents; a column
-                  of its own repeated what the chips and the dialog already say. */}
+                  arrived. Click it for the verdict and the documents. */}
               <th>3-way (PO · INV · GRN)</th>
-              {/* Derived from the match, not a payment record — the ERP stores
-                  no payment state. See PaymentStatus in lib/invoice/three-way.ts. */}
+              {/* Derived from the match until someone sets it by hand. See
+                  PaymentStatus in lib/invoice/three-way.ts. */}
               <th>Payment</th>
               <th>Manufacturer</th>
               <th>Destination</th>
@@ -574,7 +608,7 @@ export default function InvoiceGroupTable({
                       <ThreeWayChips m={m} onOpen={() => setMatchFor(inv)} />
                     </td>
                     <td className="whitespace-nowrap">
-                      <PaymentCell m={m} />
+                      <PaymentCell m={m} utr={inv.payment_utr} onOpen={() => setPayFor(inv)} />
                     </td>
                     <td className="max-w-56">
                       <div className="truncate" title={inv.mfg_name}>{inv.mfg_name}</div>
@@ -587,8 +621,8 @@ export default function InvoiceGroupTable({
                     {/* Just the count. The "N recd" badge that used to sit here
                         said how many lines settled an existing PO — which is
                         nearly all of them on a normal invoice, so it carried no
-                        signal, and it now competes with the Accepted / Rejected
-                        column that reports what actually arrived. */}
+                        signal, and it now competes with the 3-way column that
+                        reports what actually arrived. */}
                     <td className="whitespace-nowrap text-center">{inv.item_count ?? 0}</td>
                     <td className="max-w-36">
                       <div className="truncate">{inv.created_by_name ?? "—"}</div>
@@ -636,6 +670,29 @@ export default function InvoiceGroupTable({
                                   ? `Goods receipts (${grnCount(grns[inv.id])})`
                                   : `Documents (${documents[inv.id]?.length ?? 0})`}
                               </SectionHead>
+                              {/* The invoice's own stated total, up top, beside
+                                  what the lines add up to below. The two
+                                  disagreeing is the INV leg's whole point, and
+                                  it should not need scrolling to notice. */}
+                              {view === "lines" && (() => {
+                                const t = lineTotals(lines)
+                                const stated = num(inv.invoice_total)
+                                const off = stated != null && Math.abs(t.gross - stated) > 1
+                                return (
+                                  <span className="ml-auto mr-2 text-[11px] tabular-nums">
+                                    <span className="text-muted-foreground">Invoice total </span>
+                                    <span className="font-medium">₹{money(stated)}</span>
+                                    {off && (
+                                      <span
+                                        className="ml-2 font-medium text-amber-700 dark:text-amber-400"
+                                        title="The lines do not add up to the invoice's stated total"
+                                      >
+                                        lines ₹{money(t.gross)}
+                                      </span>
+                                    )}
+                                  </span>
+                                )
+                              })()}
                               {/* A select, not tabs: two options swapping one
                                   table for another inside an already dense row.
                                   The counts live in the options so the unchosen
@@ -674,7 +731,7 @@ export default function InvoiceGroupTable({
                                       pair on one row is the reconciliation.
                                       Keyed on this line's own inward PO, which
                                       is what grn_items_uniware.po_id joins on. */}
-                                  <th className="text-right">Accepted</th>
+                                  <th className="text-right" title="Passed QC — good, sellable stock">QC passed</th>
                                   <th className="text-right">Rejected</th>
                                   {/* Unicommerce's own two, mirrored by the
                                       sync. Only these — received and rejected
@@ -764,7 +821,49 @@ export default function InvoiceGroupTable({
                                   </tr>
                                 ))}
                               </tbody>
+                              {/* Consolidated, because the per-line columns are
+                                  all taxable value — there is nowhere else on
+                                  this screen the GST and the payable appear. */}
+                              {(() => {
+                                const t = lineTotals(lines)
+                                return (
+                                  <tfoot className="border-t-2 border-border">
+                                    <tr className="[&>td]:px-1.5 [&>td]:py-1 [&>td]:font-medium">
+                                      <td colSpan={5} className="text-muted-foreground">
+                                        Total · {lines.length} line{lines.length === 1 ? "" : "s"}
+                                      </td>
+                                      <td className="text-right tabular-nums">{qty(t.qty)}</td>
+                                      <td colSpan={2} />
+                                      <td className="text-right tabular-nums">{money(t.taxable)}</td>
+                                      {/* 15 columns in this table: 5 + qty + 2 + taxable + 6. */}
+                                      <td colSpan={6} className="text-right text-muted-foreground">
+                                        <span className="font-normal">+ GST {gstRateLabel(t.gstRate)} </span>{money(t.gst)}
+                                        <span className="ml-2 font-normal">= </span>
+                                        <span className="text-foreground">₹{money(t.gross)}</span>
+                                      </td>
+                                    </tr>
+                                  </tfoot>
+                                )
+                              })()}
                             </table>
+                            )}
+
+                            {/* One SKU can sit on several lines — different
+                                batches, or a quantity FIFO split across two
+                                orders — so per-SKU is not the line list again. */}
+                            {view === "lines" && (
+                              <SkuSummary
+                                title="By SKU"
+                                head={["SKU", "Qty", "Taxable", "GST", "Payable", "Lines"]}
+                                rows={lineTotalsBySku(lines).map((s) => [
+                                  s.sku, qty(s.qty), money(s.taxable),
+                                  <span key="x">{money(s.gst)}
+                                    <span className="ml-1 text-muted-foreground">{gstRateLabel(s.gstRate)}</span>
+                                  </span>,
+                                  <span key="g" className="font-medium">₹{money(s.gross)}</span>,
+                                  s.lines,
+                                ])}
+                              />
                             )}
                           </div>
                         )}
@@ -809,6 +908,14 @@ export default function InvoiceGroupTable({
         // A sign-off changes the row's badge, and rows are fetched client-side,
         // so the list has to be told rather than refreshed by the router.
         onChanged={() => void refreshPage()}
+      />
+
+      <PaymentDialog
+        key={`pay-${payFor?.id ?? "none"}`}
+        invoice={payFor}
+        match={payFor ? matchOf(payFor) : null}
+        onClose={() => setPayFor(null)}
+        onSaved={() => void refreshPage()}
       />
     </div>
   )

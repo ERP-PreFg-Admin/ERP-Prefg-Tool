@@ -132,11 +132,12 @@ test("totals roll up per PO, counting DISTINCT GRNs not lines", () => {
     row(2, "GRN1", 70, 7, "2026-08-20"),
   ])
   const one = totals.get(1)!
-  assert.equal(one.accepted, 350)
+  // quantity is GROSS, so accepted is quantity - rejected: 90 + 195 + 50.
+  assert.equal(one.accepted, 335)
   assert.equal(one.rejected, 15)
   assert.equal(one.grnCount, 2, "two receipts across three lines")
   assert.equal(one.lastReceivedAt?.toISOString().slice(0, 10), "2026-08-25")
-  assert.equal(totals.get(2)!.accepted, 70)
+  assert.equal(totals.get(2)!.accepted, 63)   // 70 arrived, 7 rejected
 })
 
 test("lines with no PO are skipped, never folded into another PO's totals", () => {

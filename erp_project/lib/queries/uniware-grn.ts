@@ -157,7 +157,7 @@ export const uniwareGrn = {
    * Parameters: [po_id]
    */
   totalsByPo: `
-    SELECT COALESCE(SUM(i.quantity), 0)     AS accepted,
+    SELECT COALESCE(SUM(i.quantity - i.rejected_qty), 0) AS accepted,
            COALESCE(SUM(i.rejected_qty), 0) AS rejected,
            COUNT(DISTINCT i.grn_id)         AS grn_count,
            MAX(g.grn_created_at)            AS last_received_at

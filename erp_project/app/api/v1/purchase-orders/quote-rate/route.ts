@@ -16,8 +16,7 @@
 import { NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
-import { computeWastage, computeTotalCosting } from "@/lib/costing/final-costing"
-import type { MiscCostType } from "@/types/masters"
+import { agreedRatesByMfg } from "@/lib/costing/agreed-rates"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { getUserScope, assertInScope, scopeParams } from "@/lib/scope"
 import { ApiError } from "@/lib/gateway/errors"
@@ -36,30 +35,18 @@ export const GET = withGateway({
     const scope = await getUserScope(Number(session.user.id))
     assertInScope(scope, "mfg", mfgId)
 
-    const [lineRows, materialCostRows, miscCostRows] = await Promise.all([
-      query<{ recipe_id: number; sku_code: string }>(manufacturingSql.selectLiveLinesByMfg, [mfgId, ...scopeParams(scope.brandIds)]),
-      query<{ recipe_id: number; rm_cost: string; pm_cost: string }>(manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId]),
-      query<{ recipe_id: number; type: MiscCostType; cost: string }>(manufacturingSql.selectMiscCostsByMfg, [mfgId]),
-    ])
-
-    const line = lineRows.find((l) => l.sku_code === skuCode)
-    if (!line) {
-      throw new ApiError(404, "no_line", "No active production line links this SKU to the selected manufacturer.")
+    // One definition of the agreed rate, shared with the invoice drilldown.
+    const rates = await agreedRatesByMfg(mfgId, scope.brandIds)
+    const rate = rates.get(skuCode)
+    if (rate == null) {
+      // Kept as two messages: "this SKU isn't made here" and "it is, but has no
+      // costing" send the desk to different places.
+      const lines = await query<{ sku_code: string }>(
+        manufacturingSql.selectLiveLinesByMfg, [mfgId, ...scopeParams(scope.brandIds)])
+      throw lines.some((l) => l.sku_code === skuCode)
+        ? new ApiError(404, "no_costing", "No costing available for this SKU/Manufacturer combination.")
+        : new ApiError(404, "no_line", "No active production line links this SKU to the selected manufacturer.")
     }
-
-    const material = materialCostRows.find((r) => r.recipe_id === line.recipe_id)
-    if (!material) {
-      throw new ApiError(404, "no_costing", "No costing available for this SKU/Manufacturer combination.")
-    }
-
-    const rm = Number(material.rm_cost)
-    const pm = Number(material.pm_cost)
-    const misc: Record<MiscCostType, number> = { jw: 0, shrink: 0, shipper: 0, rm_loss: 0, pm_loss: 0 }
-    for (const r of miscCostRows) {
-      if (r.recipe_id === line.recipe_id) misc[r.type] = Number(r.cost)
-    }
-    const { total: wastage } = computeWastage(rm, pm, misc.rm_loss, misc.pm_loss)
-    const rate = computeTotalCosting({ rmCost: rm, pmCost: pm, wastageTotal: wastage, jw: misc.jw, shrink: misc.shrink, shipper: misc.shipper })
 
     return NextResponse.json({ rate })
   },

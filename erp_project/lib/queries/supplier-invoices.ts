@@ -100,6 +100,12 @@ const INVOICE_LIST_BODY = `
          si.attachment_key, si.uniware_po_code,
          si.uniware_status, si.uniware_synced_at, si.created_at,
          m.code AS mfg_code, m.name AS mfg_name,
+         -- invoice_mfg.destination stores a master_warehouse.name and there is
+         -- no FK, so the code is a join on the name. Safe: uq_warehouse_name
+         -- makes it 1:1, and a LEFT JOIN keeps an invoice whose destination
+         -- predates the warehouse master rather than dropping it.
+         w.code AS destination_code,
+         e.code AS entity_code, e.legal_name AS entity_name,
          u.name AS created_by_name,
          COUNT(sii.id)                   AS item_count,
          SUM(sii.link_type = 'received') AS received_count,
@@ -127,9 +133,17 @@ const INVOICE_LIST_BODY = `
          -- All three read 0 for an invoice nobody has synced GRNs for, which is
          -- indistinguishable from "synced, nothing received" — invoice_mfg
          -- .uniware_grn_count is the field that tells those apart.
+         --
+         -- ── grn_items_uniware.quantity IS GROSS ──────────────────────────
+         -- It is what came in the box, rejections included — confirmed on
+         -- prod: MPO-INW-202609-023 reads quantity 2496, rejected 1, and
+         -- Uniware's own un_qc_pass_qty 2495. So the GOOD, sellable figure is
+         -- quantity - rejected_qty, and that is what "accepted" means
+         -- everywhere in this file. Summing quantity alone counts the rejected
+         -- units as sellable and then adds them again as rejected.
          (SELECT COUNT(*) FROM grn_uniware g WHERE g.invoice_id = si.id)
            AS grn_count,
-         (SELECT COALESCE(SUM(i.quantity), 0)
+         (SELECT COALESCE(SUM(i.quantity - i.rejected_qty), 0)
             FROM grn_items_uniware i
             JOIN grn_uniware g ON g.id = i.grn_id
            WHERE g.invoice_id = si.id) AS grn_accepted,
@@ -175,13 +189,22 @@ const INVOICE_LIST_BODY = `
          -- correct reading — there is deliberately no verified=0 row to find.
          (SELECT GROUP_CONCAT(v.leg ORDER BY v.leg)
             FROM invoice_leg_verification v
-           WHERE v.invoice_id = si.id) AS verified_legs
+           WHERE v.invoice_id = si.id) AS verified_legs,
+         -- The hand-set payment state, NULL when nobody has touched it — which
+         -- is what makes the column fall back to the match's own reading.
+         (SELECT p.status FROM invoice_payment p WHERE p.invoice_id = si.id)
+           AS payment_status,
+         (SELECT p.utr FROM invoice_payment p WHERE p.invoice_id = si.id)
+           AS payment_utr
   FROM invoice_mfg si
   INNER JOIN master_mfgs m ON m.id = si.mfg_id
+  LEFT JOIN master_warehouse w ON w.name = si.destination
+  -- PAN, never the full GSTIN — see the line-item query for why.
+  LEFT JOIN master_entity e ON e.pan = SUBSTRING(si.buyer_gstin, 3, 10)
   LEFT JOIN users u ON u.id = si.created_by
   LEFT JOIN invoice_items_mfg sii ON sii.invoice_id = si.id
   ${INVOICE_WHERE}
-  GROUP BY si.id
+  GROUP BY si.id, w.code, e.code, e.legal_name
   ORDER BY si.created_at DESC, si.id DESC
 `
 
@@ -396,6 +419,9 @@ export const supplierInvoicesSql = {
    */
   listInvoiceItemsForExport: `
      SELECT si.invoice_no, si.invoice_date, si.destination,
+           w.code AS destination_code,
+           e.code AS entity_code, e.legal_name AS entity_name,
+           si.uniware_po_code,
            si.invoice_total, si.eway_bill_no, si.vehicle_no,
            u.name AS created_by_name, si.created_at,
            m.code AS mfg_code, m.name AS mfg_name,
@@ -407,6 +433,12 @@ export const supplierInvoicesSql = {
            ref.po_no AS received_against_po_no
     FROM invoice_mfg si
     INNER JOIN master_mfgs m ON m.id = si.mfg_id
+    LEFT  JOIN master_warehouse w ON w.name = si.destination
+    -- The legal entity BILLED, matched on PAN — never the full GSTIN. The same
+    -- entity registered in another state differs only in the leading two
+    -- characters, so the state code does not identify it. Mirrors panOf()
+    -- (gstin.slice(2,12)) and the rule facilityForInvoice already follows.
+    LEFT  JOIN master_entity e ON e.pan = SUBSTRING(si.buyer_gstin, 3, 10)
     LEFT  JOIN users u ON u.id = si.created_by
     LEFT  JOIN invoice_items_mfg sii ON sii.invoice_id = si.id
     LEFT JOIN purchase_orders inw ON inw.id = sii.po_id
@@ -486,10 +518,12 @@ export const supplierInvoicesSql = {
            ref.po_no    AS received_against_po_no,
            ref.qty      AS received_against_qty,
            ref.received_qty AS received_against_received_qty,
-           -- No ref.unit_price here on purpose: all 123 procurement POs on prod
-           -- were bulk-imported by direct SQL and carry NULL, so an "agreed
-           -- rate" column is 100% dashes and an off-contract check can never
-           -- fire. Add it back when POs start being raised with a price.
+           -- The ORDER's own rate. NULL on every one of the 123 procurement POs
+           -- imported by direct SQL, so this reads as a dash until POs start
+           -- being raised with a price — shown anyway, because "we never agreed
+           -- a rate on this order" is itself worth seeing next to what we were
+           -- billed.
+           ref.unit_price AS received_against_unit_price,
            -- ── What the warehouse accepted against THIS line ────────────────
            -- Keyed on sii.po_id, the inward PO this line raised. That resolves
            -- 1:1 only because mergeInwardLinesBySku raises one inward PO per
@@ -499,7 +533,7 @@ export const supplierInvoicesSql = {
            -- Scalar subqueries, not joins: this query is one row per line, and
            -- a receipt can carry several lines for one PO, so a join would
            -- duplicate the invoice line itself.
-           (SELECT COALESCE(SUM(gi.quantity), 0)
+           (SELECT COALESCE(SUM(gi.quantity - gi.rejected_qty), 0)
               FROM grn_items_uniware gi
              WHERE gi.po_id = sii.po_id) AS grn_accepted,
            (SELECT COALESCE(SUM(gi.rejected_qty), 0)
@@ -544,6 +578,45 @@ export const supplierInvoicesSql = {
   `,
 
   /**
+   * The match figures for EVERY invoice the filter matches, for the summary
+   * strip above the list.
+   *
+   * Deliberately not paginated and deliberately narrow: the badge is derived in
+   * TypeScript by threeWayMatch, so a summary counted in SQL would be a second
+   * implementation of the tolerance and verification rules, free to drift from
+   * the chips it sits above. Fetching the inputs and reducing them once keeps
+   * one definition.
+   *
+   * Capped at 5,000 rows. 55 invoices exist today, so the cap is a guard rather
+   * than a limit — but the strip says so when it bites rather than quietly
+   * summarising part of the set.
+   * Parameters: buildInvoiceParams(...) (15), then the cap
+   */
+  selectMatchFields: `
+    SELECT si.id, si.invoice_total,
+           COUNT(sii.id)             AS item_count,
+           COALESCE(SUM(sii.qty), 0) AS billed_qty,
+           COALESCE(SUM(sii.amount * (1 + COALESCE(sii.gst_percent, 0) / 100)), 0) AS lines_value,
+           COALESCE(SUM(sii.id IS NOT NULL AND sii.received_against_po_id IS NULL), 0) AS po_unlinked_lines,
+           (SELECT COUNT(*) FROM grn_uniware g WHERE g.invoice_id = si.id) AS grn_count,
+           (SELECT COALESCE(SUM(i.quantity - i.rejected_qty), 0) FROM grn_items_uniware i
+              JOIN grn_uniware g ON g.id = i.grn_id WHERE g.invoice_id = si.id) AS grn_accepted,
+           (SELECT COALESCE(SUM(i.rejected_qty), 0) FROM grn_items_uniware i
+              JOIN grn_uniware g ON g.id = i.grn_id WHERE g.invoice_id = si.id) AS grn_rejected,
+           (SELECT COUNT(DISTINCT po.id) FROM invoice_items_mfg x
+              JOIN purchase_orders po ON po.id = x.received_against_po_id
+             WHERE x.invoice_id = si.id) AS po_count,
+           (SELECT GROUP_CONCAT(v.leg ORDER BY v.leg) FROM invoice_leg_verification v
+             WHERE v.invoice_id = si.id) AS verified_legs
+    FROM invoice_mfg si
+    INNER JOIN master_mfgs m ON m.id = si.mfg_id
+    LEFT JOIN invoice_items_mfg sii ON sii.invoice_id = si.id
+    ${INVOICE_WHERE}
+    GROUP BY si.id
+    LIMIT ?
+  `,
+
+  /**
    * Just the figures threeWayMatch() reads, for one invoice.
    *
    * A narrow twin of the list query's match columns, so the verify route can
@@ -559,7 +632,7 @@ export const supplierInvoicesSql = {
            COALESCE(SUM(sii.amount * (1 + COALESCE(sii.gst_percent, 0) / 100)), 0) AS lines_value,
            COALESCE(SUM(sii.id IS NOT NULL AND sii.received_against_po_id IS NULL), 0) AS po_unlinked_lines,
            (SELECT COUNT(*) FROM grn_uniware g WHERE g.invoice_id = si.id) AS grn_count,
-           (SELECT COALESCE(SUM(i.quantity), 0) FROM grn_items_uniware i
+           (SELECT COALESCE(SUM(i.quantity - i.rejected_qty), 0) FROM grn_items_uniware i
               JOIN grn_uniware g ON g.id = i.grn_id WHERE g.invoice_id = si.id) AS grn_accepted,
            (SELECT COALESCE(SUM(i.rejected_qty), 0) FROM grn_items_uniware i
               JOIN grn_uniware g ON g.id = i.grn_id WHERE g.invoice_id = si.id) AS grn_rejected,
@@ -604,6 +677,35 @@ export const supplierInvoicesSql = {
   deleteLegVerification: `
     DELETE FROM invoice_leg_verification WHERE invoice_id = ? AND leg = ?
   `,
+
+  /** The hand-set payment state of one invoice, with who last moved it.
+   *  Parameters: [invoice_id] */
+  selectPayment: `
+    SELECT p.invoice_id, p.status, p.utr, p.remarks, p.updated_at,
+           p.updated_by, u.name AS updated_by_name
+    FROM invoice_payment p
+    LEFT JOIN users u ON u.id = p.updated_by
+    WHERE p.invoice_id = ?
+  `,
+
+  /**
+   * Move an invoice along the payment lifecycle. One row per invoice, so this
+   * overwrites — activity_log holds the sequence of moves, this holds where it
+   * is now.
+   * Parameters: [invoice_id, status, utr, remarks, updated_by]
+   */
+  upsertPayment: `
+    INSERT INTO invoice_payment (invoice_id, status, utr, remarks, updated_by)
+    VALUES (?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      status     = VALUES(status),
+      utr        = VALUES(utr),
+      remarks    = VALUES(remarks),
+      updated_by = VALUES(updated_by)
+  `,
+
+  /** Hand the invoice back to the derived state. Parameters: [invoice_id] */
+  deletePayment: `DELETE FROM invoice_payment WHERE invoice_id = ?`,
 }
 
 /** The user-chosen filters on /po-tracking/invoices. All optional — an absent

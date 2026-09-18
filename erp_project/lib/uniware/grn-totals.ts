@@ -22,6 +22,9 @@ export type GrnTotalRow = {
   /** Null when the warehouse received a SKU we never raised — see the schema. */
   poId: number | null
   grnCode: string
+  /** GROSS — what came in the box, rejections included. Confirmed on prod:
+   *  quantity 2496, rejectedQty 1, Uniware's own qcPass 2495. Accepted (good,
+   *  sellable stock) is therefore quantity MINUS rejectedQty. */
   quantity: number
   rejectedQty: number
   receivedAt: Date | null
@@ -55,7 +58,8 @@ export function grnTotalsByPo(rows: GrnTotalRow[]): Map<number, PoGrnTotals> {
     if (r.poId == null) continue
 
     const t = out.get(r.poId) ?? { accepted: 0, rejected: 0, grnCount: 0, lastReceivedAt: null }
-    t.accepted += num(r.quantity)
+    // quantity is GROSS of rejection — see the note on GrnTotalRow.quantity.
+    t.accepted += num(r.quantity) - num(r.rejectedQty)
     t.rejected += num(r.rejectedQty)
     if (r.receivedAt && (!t.lastReceivedAt || r.receivedAt > t.lastReceivedAt)) {
       t.lastReceivedAt = r.receivedAt

@@ -1,8 +1,8 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useState } from "react"
 import { X } from "lucide-react"
-import { MATCH_TOLERANCE, type MatchBadge } from "@/lib/invoice/three-way"
+import type { MatchBadge } from "@/lib/invoice/three-way"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Select } from "@/components/ui/select"
@@ -13,6 +13,7 @@ import type { MfgOption } from "../po-procurement/po-types"
 import SyncUniwareButton from "../SyncUniwareButton"
 import SyncDocumentsButton from "../SyncDocumentsButton"
 import InvoiceGroupTable from "./InvoiceGroupTable"
+import ThreeWaySummary from "./ThreeWaySummary"
 
 export default function InvoicesClient({
   mfgOptions,
@@ -33,13 +34,9 @@ export default function InvoicesClient({
   // router.refresh() can't reach them and the new statuses would stay invisible
   // until the next filter change.
   const [reloadKey, setReloadKey] = useState(0)
-  // Match is derived in TS from columns the list already returns, so it filters
-  // the page rather than the query — the caption below says so rather than
-  // implying the tally covers every invoice the filters match.
+  // Match is derived in TS from columns the list already returns, so this
+  // filters the PAGE. ThreeWaySummary above covers the whole filter.
   const [match, setMatch] = useState<"" | MatchBadge>("")
-  const [tally, setTally] = useState<{ shown: number; counts: Partial<Record<MatchBadge, number>> }>({ shown: 0, counts: {} })
-  // useCallback, or a new identity every render re-fires the table's report effect.
-  const onTally = useCallback((t: { shown: number; counts: Partial<Record<MatchBadge, number>> }) => setTally(t), [])
 
   // Built as a query string, not an object: the table takes it as a prop and
   // refetches when it changes, and a string compares by value — an object would
@@ -147,33 +144,17 @@ export default function InvoicesClient({
           </div>
         </div>
 
+        <ThreeWaySummary filterQuery={filterQuery} search={search} reloadKey={reloadKey} />
+
         {/* max-height, not a fixed height: twelve invoices shouldn't render
             inside a viewport-tall box with dead space underneath. Grows with
             the list, then scrolls internally under the sticky header. */}
-        {/* "on this page" is not hedging — the match is derived per row after
-            the query, so a tally over every matching invoice would need a
-            second sweep. Saying so beats a number that looks global. */}
-        <p className="text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Three-way match</span>
-          {" · "}{tally.shown} invoice{tally.shown === 1 ? "" : "s"} on this page
-          {(tally.counts.variance ?? 0) > 0 && (
-            <span className="text-amber-700 dark:text-amber-400">
-              {" · "}{tally.counts.variance} on variance
-            </span>
-          )}
-          {(tally.counts.unmatched ?? 0) > 0 && (
-            <span className="text-destructive">{" · "}{tally.counts.unmatched} unmatched</span>
-          )}
-          {" · tolerance "}{(MATCH_TOLERANCE * 100).toFixed(0)}%
-        </p>
-
         <div className="flex max-h-[70vh] min-h-0 flex-col">
           <InvoiceGroupTable
             search={search}
             filterQuery={filterQuery}
             reloadKey={reloadKey}
             matchFilter={match ? [match] : undefined}
-            onTally={onTally}
             emptyHint="No invoices yet. They appear here once one is read on PO Inwarding via Add Invoice."
           />
         </div>

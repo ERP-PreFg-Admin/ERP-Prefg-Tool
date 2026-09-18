@@ -5,6 +5,8 @@
  * than guess, and a scanned invoice can be missing anything.
  */
 
+import type { ManualPaymentStatus } from "@/lib/invoice/three-way"
+
 export type ParsedLineItem = {
   sku_code:     string | null
   sku_name:     string | null
@@ -123,6 +125,8 @@ export type InvoiceHistoryHeader = {
   mfg_code:        string
   mfg_name:        string
   created_by_name: string | null
+  /** Detail query only — needed to price the SKU's current agreed rate. */
+  mfg_id?:         number
   /** Present on the list query only. */
   item_count?:     number
   received_count?: number
@@ -154,6 +158,21 @@ export type InvoiceHistoryHeader = {
   /** CSV of legs a human signed off, e.g. "inv,po". NULL = none, which is the
    *  common case: absence of a row is the unverified state. */
   verified_legs?:      string | null
+  /** Hand-set payment state. NULL = derive it from the match. */
+  payment_status?:     ManualPaymentStatus | null
+  /** Bank reference, once the money has moved. */
+  payment_utr?:        string | null
+}
+
+/** One invoice's payment state, for the dialog. */
+export type InvoicePayment = {
+  invoice_id:      number
+  status:          ManualPaymentStatus
+  utr:             string | null
+  remarks:         string | null
+  updated_at:      string
+  updated_by:      number
+  updated_by_name: string | null
 }
 
 /** One leg's physical sign-off, for the drilldown. */
@@ -179,6 +198,10 @@ export type InvoiceHistoryItem = {
   hsn:                    string | null
   qty:                    string | number
   rate:                   string | number | null
+  /** Taxable value, qty × rate. `total_amount` holds the SAME figure — neither
+   *  carries GST, so the payable is amount × (1 + gst_percent/100). */
+  amount:                 string | number | null
+  gst_percent:            string | number | null
   total_amount:           string | number | null
   /** The inward PO this line raised. */
   po_id:                  number | null
@@ -199,6 +222,8 @@ export type InvoiceHistoryItem = {
   received_against_po_no: string | null
   received_against_qty:            string | number | null
   received_against_received_qty:   string | number | null
+  /** The ORDER's agreed rate. NULL on every imported PO — see the SQL note. */
+  received_against_unit_price:     string | number | null
   /* ── Goods receipts against this line's inward PO ─────────────────────────
    * What the WAREHOUSE accepted, as against `qty` above, which is what the
    * manufacturer billed on this line. Zero also reads as "never synced" — the
