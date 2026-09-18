@@ -9,6 +9,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import { DownloadButton } from "@/components/masters/DownloadButton"
+import { SegmentedToggle } from "@/components/ui/segmented-toggle"
 import { useToast } from "@/components/ui/toast"
 import type { MfgLine, MfgLineStatus } from "@/types/masters"
 import { fmtDate } from "../mfg-utils"
@@ -34,7 +35,21 @@ const STATUS_BADGE_VARIANT: Record<MfgLineStatus, "success" | "warning" | "secon
   inactive: "secondary",
 }
 
-type StatusFilter = "all" | MfgLineStatus
+/**
+ * Two views, not four status filters.
+ *
+ * A line this manufacturer has stopped making is noise in the list of what it
+ * currently makes — it was 3 of 197 rows on prod, sitting among the active ones
+ * looking identical apart from a badge. Archived holds every non-active status
+ * so the two views together account for every line, and nothing can fall
+ * between them.
+ *
+ * This is a LINE status (master_recipe_mfg.status), not the recipe's. It does
+ * NOT touch selectLiveLinesByMfg, which deliberately costs discontinued lines
+ * because they are still producible — so Agreed Final Costing and the PO rate
+ * quote are unchanged by this.
+ */
+type LineView = "active" | "archived"
 
 export default function ManufacturingLinesClient({
   mfgId,
@@ -54,14 +69,17 @@ export default function ManufacturingLinesClient({
   const { toast } = useToast()
   const [search, setSearch] = useState("")
   const guard = useEditGuard()
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  const [view, setView] = useState<LineView>("active")
   const [dialogTarget, setDialogTarget] = useState<MfgLine | null | "new">(null)
   const [pausingBomId, setPausingBomId] = useState<number | null>(null)
+
+  const archivedCount = useMemo(() => rows.filter((r) => r.status !== "active").length, [rows])
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase()
     return rows.filter((r) => {
-      if (statusFilter !== "all" && r.status !== statusFilter) return false
+      // The partition: active on one side, every other status on the other.
+      if ((view === "active") !== (r.status === "active")) return false
       if (!q) return true
       return (
         (r.sku_code ?? "").toLowerCase().includes(q) ||
@@ -69,7 +87,7 @@ export default function ManufacturingLinesClient({
         (r.bom_code ?? "").toLowerCase().includes(q)
       )
     })
-  }, [rows, search, statusFilter])
+  }, [rows, search, view])
 
   const afterAction = () => { setDialogTarget(null); router.refresh() }
 
@@ -105,22 +123,16 @@ export default function ManufacturingLinesClient({
           placeholder="Search SKU, Recipe…"
           className="flex h-9 w-full sm:max-w-xs rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
         />
-        <div className="flex items-center gap-1.5">
-          {(["all", "active", "discontinued", "inactive"] as StatusFilter[]).map((f) => (
-            <button
-              key={f}
-              onClick={() => setStatusFilter(f)}
-              className={
-                "rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap " +
-                (statusFilter === f
-                  ? "bg-foreground text-background"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground border border-input")
-              }
-            >
-              {f === "all" ? "All" : STATUS_LABEL[f]}
-            </button>
-          ))}
-        </div>
+        {/* The count rides on the label so the archive is discoverable without
+            opening it — an unlabelled toggle reads as a filter nobody needs. */}
+        <SegmentedToggle
+          options={[
+            { key: "active", label: `Active (${rows.length - archivedCount})` },
+            { key: "archived", label: `Archived (${archivedCount})` },
+          ]}
+          active={view}
+          onSelect={setView}
+        />
         <div className="flex items-center gap-2 sm:ml-auto">
           <DownloadButton
             endpoint={`/api/v1/manufacturing/${mfgId}/lines/export`}
@@ -155,7 +167,11 @@ export default function ManufacturingLinesClient({
                 {filteredRows.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} className="text-center text-muted-foreground py-10">
-                      No manufacturing lines match this view.
+                      {search.trim()
+                        ? `No ${view} lines match “${search.trim()}”.`
+                        : view === "archived"
+                        ? "Nothing archived — every line for this manufacturer is active."
+                        : "No active lines. Use Add SKUs to link one, or check Archived."}
                     </TableCell>
                   </TableRow>
                 ) : (

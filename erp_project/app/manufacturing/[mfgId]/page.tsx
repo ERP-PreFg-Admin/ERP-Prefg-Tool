@@ -11,6 +11,8 @@ import { rawMaterials } from "@/lib/queries/raw-materials"
 import { packingMaterials } from "@/lib/queries/packing-materials"
 import { getRmVendorByMfg, getRmVendorHistoryByMfg, getPmVendorByMfg, getPmVendorHistoryByMfg, getAgreedRmRatesByMfg, getAgreedPmRatesByMfg } from "@/lib/cached-reference-data"
 import { computeRmCost, computePmCost, computeWastage, computeTotalCosting } from "@/lib/costing/final-costing"
+import { parsePaginationParams } from "@/lib/pagination"
+import { bestTotalIndex } from "./costing-columns"
 import type {
   FinalCostingRow, FinalCostingComparisonRow, MfgLine, MfgLineOption, MfgMonthlyPoRow,
   MiscCostLine, MiscCostType,
@@ -94,6 +96,9 @@ export default async function ManufacturerDetailPage({
   const sp = await searchParams
   const tabParam = String(sp.tab ?? "active")
   const tab = (VALID_TABS.includes(tabParam as MfgTab) ? tabParam : "active") as MfgTab
+  // 25 rather than the 20 default: the largest manufacturer has 52 live lines,
+  // so 25 is two pages rather than three.
+  const pagination = parsePaginationParams(sp, { page: 1, size: 25 })
 
   const [mfgRows, monthlyPoRows] = await Promise.all([
     timedQuery<{ id: number; code: string; name: string }>(manufacturersSql.selectNameById, [id]),
@@ -128,6 +133,9 @@ export default async function ManufacturerDetailPage({
           <FinalCostingTabContent
             mfgId={id}
             view={tab}
+            search={String(sp.q ?? "")}
+            page={pagination.page}
+            size={pagination.size}
             brandScope={scopeParams(scope.brandIds)}
             vendorScope={[...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds)]}
             approvedScope={[...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds)]}
@@ -217,11 +225,12 @@ async function AgreedRatesTabContent({ mfgId }: { mfgId: number }) {
 }
 
 async function FinalCostingTabContent({
-  mfgId, view, brandScope, vendorScope, approvedScope,
+  mfgId, view, brandScope, vendorScope, approvedScope, search, page, size,
 }: {
   mfgId: number
   view: "final_costing" | "analytics"
   brandScope: unknown[]; vendorScope: unknown[]; approvedScope: unknown[]
+  search: string; page: number; size: number
 }) {
   const [
     lineRows, materialCostRows, miscCostRows, bomLineInputRows,
@@ -385,5 +394,53 @@ async function FinalCostingTabContent({
     buildBreakup(linesByBom.get(r.recipe_id) ?? [], miscByBom.get(r.recipe_id) ?? {})
   )
 
-  return <FinalCostingTable mfgId={mfgId} rows={rows} scenarios={scenarios} breakups={breakups} />
+  /*
+   * Search and paginate HERE, after every row has been costed — not in the
+   * line query.
+   *
+   * Two things forbid narrowing the query instead:
+   *
+   *   - The "cheapest" badge is a fact about this MANUFACTURER, not about the
+   *     page. bestTotalIndex used to run over all rows inside the table for
+   *     exactly this reason; computing it over a page would crown a new winner
+   *     on every page turn.
+   *   - `scenarios[].rows` and `breakups` are built as rows.map(...) and read
+   *     BY POSITION, so anything that reorders or filters rows has to carry
+   *     them along or they silently describe the wrong SKU.
+   *
+   * So the eight queries still fetch the manufacturer's whole set — which is 52
+   * rows at the largest one. This change is about the URL carrying the search
+   * and the table rendering a page, not about doing less work.
+   */
+  const q = search.trim().toLowerCase()
+  const indexed = rows.map((r, i) => ({ r, i }))
+  const matched = q
+    ? indexed.filter(({ r }) =>
+        (r.sku_code ?? "").toLowerCase().includes(q) || (r.sku_name ?? "").toLowerCase().includes(q))
+    : indexed
+  const total = matched.length
+  // A search that shortens the list past the current page would otherwise land
+  // on an empty one with no way back except editing the URL.
+  const lastPage = Math.max(1, Math.ceil(total / size))
+  const safePage = Math.min(page, lastPage)
+  const slice = matched.slice((safePage - 1) * size, safePage * size)
+
+  // The winner's position in the FULL set, translated to its position on this
+  // page — or null when the cheapest SKU is not on it.
+  const bestOverall = bestTotalIndex(rows)
+  const bestOnPage = slice.findIndex(({ i }) => i === bestOverall)
+
+  return (
+    <FinalCostingTable
+      mfgId={mfgId}
+      rows={slice.map(({ r }) => r)}
+      scenarios={scenarios.map((s) => ({ label: s.label, rows: slice.map(({ i }) => s.rows[i]) }))}
+      breakups={slice.map(({ i }) => breakups[i])}
+      bestIndex={bestOnPage === -1 ? null : bestOnPage}
+      search={search}
+      total={total}
+      page={safePage}
+      pageSize={size}
+    />
+  )
 }

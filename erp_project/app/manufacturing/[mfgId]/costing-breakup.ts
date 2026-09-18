@@ -95,3 +95,64 @@ export function buildBreakup(
     pmTotal: subtotal("pm"),
   }
 }
+
+/* ── CSV ──────────────────────────────────────────────────────────────────── */
+
+/**
+ * The open breakup panel as a CSV, built client-side from the data already
+ * rendered — no route, because the page holds every breakup already.
+ *
+ * NOT lib/export.ts's buildCsv: that module imports ExcelJS at module scope and
+ * its header says it is the only file allowed to, so importing it from a client
+ * component would bundle ExcelJS into the browser. This mirrors
+ * buildRecipeDumpCsv instead, BOM included so Excel on Windows reads it as UTF-8.
+ *
+ * Every row repeats the SKU, so a file stays readable once it is sorted or
+ * filtered in Excel, and several exports can be pasted into one sheet.
+ */
+const BREAKUP_CSV_HEADER = [
+  "SKU Code", "SKU Name", "Section", "Code", "Material", "Qty", "Rate", "Value", "Unit",
+] as const
+
+const csvCell = (v: unknown) =>
+  v == null ? '""' : `"${String(v).replace(/"/g, '""')}"`
+
+export function buildBreakupCsv(
+  breakup: CostingBreakup,
+  sku: { sku_code: string | null; sku_name: string | null },
+  /** Stored wastage is in one of two units; the caller passes the same reader
+   *  the costing uses so the file cannot disagree with the panel. */
+  wastagePercent: (value: number) => number,
+): string {
+  const id = [sku.sku_code, sku.sku_name]
+  const rows: unknown[][] = []
+
+  for (const type of ["rm", "pm"] as const) {
+    const label = type === "rm" ? "Raw material" : "Packing material"
+    const lines = breakup.lines.filter((l) => l.type === type)
+    for (const l of lines) {
+      rows.push([
+        ...id, label, l.code, l.name, l.amount,
+        // Blank, never 0 — an unpriced line is a gap, and the panel says "not
+        // set" for exactly this reason. A zero here would read as a free input.
+        l.rate == null ? "" : l.rate,
+        l.rate == null ? "" : l.cost,
+        l.rate == null ? "no agreed rate" : "INR",
+      ])
+    }
+    rows.push([...id, `${label} total`, "", "", "", "", type === "rm" ? breakup.rmTotal : breakup.pmTotal, "INR"])
+  }
+
+  for (const m of breakup.misc) {
+    const isPct = m.type === "rm_loss" || m.type === "pm_loss"
+    rows.push([
+      ...id, "Misc. cost", "", m.label, "", "",
+      m.value == null ? "" : isPct ? wastagePercent(m.value) : m.value,
+      m.value == null ? "not set" : isPct ? "%" : "INR",
+    ])
+  }
+
+  return "\ufeff" + [BREAKUP_CSV_HEADER, ...rows]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\r\n")
+}

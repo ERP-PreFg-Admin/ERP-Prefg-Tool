@@ -12,13 +12,34 @@
  *    cell is exactly what someone opens this panel to find and a single amber
  *    word does not survive a scan of twenty lines.
  *
- * Presentational and stateless, so no "use client" — it renders inside
- * FinalCostingTable's expanded row with the breakup the page already built.
+ * "use client" only for the Export button's click handler — everything else
+ * here is presentational and renders inside FinalCostingTable's expanded row
+ * with the breakup the page already built.
  */
+"use client"
 
+import { Download } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { wastageFraction } from "@/lib/costing/final-costing"
 import type { BreakupLine, CostingBreakup } from "./costing-breakup"
+import { buildBreakupCsv } from "./costing-breakup"
 import { fmtMoney } from "../mfg-utils"
+
+/** No route: the page already holds every breakup, so the file is built here
+ *  from what is on screen. Same shape as RecipeDetailPanel's download. */
+function downloadBreakup(breakup: CostingBreakup, sku: SkuRef) {
+  const url = URL.createObjectURL(
+    new Blob([buildBreakupCsv(breakup, sku, (v) => wastageFraction(v) * 100)],
+      { type: "text/csv;charset=utf-8" })
+  )
+  const a = document.createElement("a")
+  a.href = url
+  a.download = `costing_breakup_${sku.sku_code ?? "sku"}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+type SkuRef = { sku_code: string | null; sku_name: string | null }
 
 /** A gap, not a zero — telling those apart is the whole job of the panel. */
 const NOT_SET = <span className="text-amber-700 dark:text-amber-400">not set</span>
@@ -72,7 +93,9 @@ function LineRows({ lines, label, total }: { lines: BreakupLine[]; label: string
   )
 }
 
-export default function CostingBreakupPanel({ breakup }: { breakup: CostingBreakup }) {
+export default function CostingBreakupPanel(
+  { breakup, sku }: { breakup: CostingBreakup; sku: SkuRef },
+) {
   const rmLines = breakup.lines.filter((l) => l.type === "rm")
   const pmLines = breakup.lines.filter((l) => l.type === "pm")
 
@@ -80,6 +103,18 @@ export default function CostingBreakupPanel({ breakup }: { breakup: CostingBreak
     // A contained surface: the expanded row is already bg-muted/40, so without
     // this the panel bleeds into the table it is nested in.
     <div className="rounded-lg border bg-card p-3">
+      {/* Panel-level, not inside the lines section: the file carries the misc
+          costs too, and the lines heading sits over only the left column. */}
+      <div className="mb-2 flex justify-end">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 gap-1 px-2 text-[11px]"
+          onClick={() => downloadBreakup(breakup, sku)}
+        >
+          <Download className="h-3 w-3" /> Export CSV
+        </Button>
+      </div>
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">
         <section>
           <div className="mb-1.5 flex items-baseline justify-between gap-3">

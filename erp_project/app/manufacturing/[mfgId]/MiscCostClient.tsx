@@ -17,7 +17,7 @@ import type { MfgLineOption, MiscCostLine, MiscCostType } from "@/types/masters"
 import { wastageFraction } from "@/lib/costing/final-costing"
 import { fmtDate, fmtMoney } from "../mfg-utils"
 import MiscCostDialog from "./MiscCostDialog"
-import { MISC_COST_BULK_CSV_FIELDS } from "./misc-cost-bulk-fields"
+import { miscCostBulkCsvFields } from "./misc-cost-bulk-fields"
 import { useEditGuard } from "@/components/AccessContext"
 
 const TYPE_LABEL: Record<MiscCostType, string> = {
@@ -54,6 +54,14 @@ export default function MiscCostClient({
     )
   }, [rows, search])
 
+  // The SKUs this manufacturer actually produces, so the upload preview can
+  // refuse a row for one it does not — the check that used to fire inside
+  // applyAndArchive, after an approver had already clicked approve.
+  const bulkFields = useMemo(
+    () => miscCostBulkCsvFields(options.map((o) => o.sku_code).filter(Boolean) as string[]),
+    [options]
+  )
+
   const afterAction = () => { setDialogTarget(null); router.refresh() }
 
   return (
@@ -68,7 +76,7 @@ export default function MiscCostClient({
             title="Bulk Upload Job Work / Shrink Wrap / Shipper / Wastage"
             endpoint={`/api/v1/manufacturing/misc-costs?mfg_id=${mfgId}`}
             templateFilename="misc_cost_bulk_template.csv"
-            fields={MISC_COST_BULK_CSV_FIELDS}
+            fields={bulkFields}
             onSuccess={() => router.refresh()}
           />
           <DownloadButton

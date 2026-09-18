@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useMemo, useState } from "react"
+import { Fragment, useState } from "react"
 import Link from "next/link"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -10,11 +10,12 @@ import {
 } from "@/components/ui/table"
 import { TableEmpty } from "@/components/ui/empty-state"
 import { DownloadButton } from "@/components/masters/DownloadButton"
-import { SearchInput } from "@/components/masters/SearchInput"
+import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
+import { PaginationBar } from "@/components/ui/pagination-bar"
 import type { FinalCostingRow, FinalCostingComparisonRow } from "@/types/masters"
 import {
   CostingHeadRow, CostingCells, ScenarioLabelRow, ScenarioHeadRow,
-  bestTotalIndex, COSTING_COL_COUNT,
+  COSTING_COL_COUNT,
 } from "./costing-columns"
 import { rateGapReasons } from "./costing-gaps"
 import type { CostingBreakup } from "./costing-breakup"
@@ -47,37 +48,34 @@ function incompleteReasons(r: FinalCostingRow): string {
 }
 
 export default function FinalCostingTable({
-  mfgId, rows, scenarios, breakups,
+  mfgId, rows, scenarios, breakups, bestIndex, search, total, page, pageSize,
 }: {
   mfgId: number
+  /** ONE PAGE of rows. Searched and sliced on the server — see the note in
+   *  FinalCostingTabContent for why it cannot be done in the line query. */
   rows: FinalCostingRow[]
-  /** The Analytics tab's three vendor-rate scenarios, each built as `rows.map(...)`
-   *  and therefore index-aligned with `rows`. Shown inline when a SKU is expanded. */
+  /** The Analytics tab's three vendor-rate scenarios, each sliced alongside
+   *  `rows` and therefore index-aligned with it. Shown inline when a SKU is expanded. */
   scenarios: { label: string; rows: FinalCostingComparisonRow[] }[]
   /** One per row, same index alignment — what the Actions column opens. */
   breakups: CostingBreakup[]
+  /** Where the cheapest SKU sits ON THIS PAGE, or null when it is on another.
+   *  Computed over every row, because "cheapest" is a fact about the
+   *  manufacturer and a per-page winner would change on every page turn. */
+  bestIndex: number | null
+  search: string
+  total: number
+  page: number
+  pageSize: number
 }) {
-  // Over ALL rows, not the filtered set: "cheapest" is a fact about this
-  // manufacturer's costing, so searching must not crown a new best.
-  const best = bestTotalIndex(rows)
   // Single-open, same shape as the invoice desk's history table — comparing one
   // SKU against the vendor rates is the question, not comparing two SKUs. The
   // panel is part of the state so the two expansions share one slot.
   const [open, setOpen] = useState<{ id: number; panel: Panel } | null>(null)
-  const [search, setSearch] = useState("")
 
-  // Carries each row's ORIGINAL index: scenarios[].rows and breakups are built
-  // as rows.map(...) and read by position, so re-indexing a filtered list would
-  // pair a SKU with another SKU's breakup.
-  const visible = useMemo(() => {
-    const indexed = rows.map((r, i) => ({ r, i }))
-    const q = search.trim().toLowerCase()
-    if (!q) return indexed
-    return indexed.filter(({ r }) =>
-      (r.sku_code ?? "").toLowerCase().includes(q) ||
-      (r.sku_name ?? "").toLowerCase().includes(q)
-    )
-  }, [rows, search])
+  // Still carries the index, because scenarios[].rows and breakups are read BY
+  // POSITION — they were sliced with these rows and stay aligned.
+  const visible = rows.map((r, i) => ({ r, i }))
 
   function show(id: number, panel: Panel) {
     setOpen(open?.id === id && open.panel === panel ? null : { id, panel })
@@ -96,12 +94,10 @@ export default function FinalCostingTable({
           label="Final Costing"
         />
       </div>
-      <SearchInput
-        value={search}
-        onChange={setSearch}
-        placeholder="Search SKU code or name…"
-        className="sm:max-w-xs"
-      />
+      {/* URL-driven: the search survives a reload, is shareable, and — the
+          reason it moved off local state — reaches the server, so it searches
+          every SKU rather than the page on screen. */}
+      <UrlSearchInput initialValue={search} placeholder="Search SKU code or name…" />
       <Card>
         <CardContent className="p-0">
             <Table>
@@ -119,8 +115,8 @@ export default function FinalCostingTable({
                           <Link href={`/manufacturing/${mfgId}?tab=active`}>Add SKUs</Link>
                         </Button>
                       ) : (
-                        <Button variant="outline" size="sm" onClick={() => setSearch("")}>
-                          Clear search
+                        <Button variant="outline" size="sm" asChild>
+                          <Link href={`/manufacturing/${mfgId}?tab=final_costing`}>Clear search</Link>
                         </Button>
                       )
                     }
@@ -166,7 +162,7 @@ export default function FinalCostingTable({
                           >
                             {r.sku_name ?? "—"}
                           </TableCell>
-                          <CostingCells row={r} best={i === best} />
+                          <CostingCells row={r} best={i === bestIndex} />
                           <TableCell>
                             <Button
                               variant="outline"
@@ -219,7 +215,7 @@ export default function FinalCostingTable({
                         {shown === "breakup" && (
                           <TableRow className="bg-muted/40 hover:bg-muted/40">
                             <TableCell colSpan={COL_COUNT} className="px-3 py-2">
-                              <CostingBreakupPanel breakup={breakups[i]} />
+                              <CostingBreakupPanel breakup={breakups[i]} sku={r} />
                             </TableCell>
                           </TableRow>
                         )}
@@ -231,6 +227,7 @@ export default function FinalCostingTable({
             </Table>
         </CardContent>
       </Card>
+      <PaginationBar total={total} page={page} pageSize={pageSize} />
     </div>
   )
 }
