@@ -48,7 +48,7 @@ test("a costing row fills exactly the declared columns", () => {
   const IDENTITY_COLS = 2 // SKU + SKU Name lead every table
   const costing = cellCount(CostingCells({ row: ROW, best: false }))
 
-  assert.equal(costing, 7, "CostingCells renders RM, PM, JWW, Shrinkage, Shipper, Wastage, Total")
+  assert.equal(costing, 9, "CostingCells renders RM, PM, JWW, Shrinkage, Shipper, Utility, Margin, Wastage, Total")
   assert.equal(
     IDENTITY_COLS + costing,
     COSTING_COL_COUNT,

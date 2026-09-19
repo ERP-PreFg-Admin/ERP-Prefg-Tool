@@ -41,6 +41,8 @@ export const MISC_LABEL: Record<MiscCostType, string> = {
   jw: "JW",
   shrink: "Shrink Wrap",
   shipper: "Shipper",
+  utility: "Utility",
+  margin: "Margin",
   rm_loss: "RM Wastage %",
   pm_loss: "PM Wastage %",
 }

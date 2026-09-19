@@ -1,10 +1,13 @@
 import type { MasterField } from "@/components/masters/field-config"
 import { dateCellRemark, parseDateCell } from "@/lib/date"
+import { parseMiscCostTypeCell } from "@/lib/validation/manufacturing"
 
 const MISC_COST_TYPE_OPTIONS = [
   { value: "jw", label: "Job Work" },
   { value: "shrink", label: "Shrink Wrap" },
   { value: "shipper", label: "Shipper" },
+  { value: "utility", label: "Utility" },
+  { value: "margin", label: "Margin" },
   { value: "rm_loss", label: "RM Wastage %" },
   { value: "pm_loss", label: "PM Wastage %" },
 ]
@@ -40,10 +43,22 @@ export function miscCostBulkCsvFields(producibleSkus: readonly string[]): Master
     {
       key: "type", label: "Type", type: "select", required: true, sample: "jw",
       options: MISC_COST_TYPE_OPTIONS,
+      // parseMiscCostTypeCell, not a local rule: the server applies the upload
+      // with the same function, and the two disagreeing is what dropped 194 of
+      // 198 rows once already. It accepts the labels the UI shows ("Job Work",
+      // "RM Wastage %") as well as the stored codes, ignoring case, spacing,
+      // underscores and a trailing %.
       validate: (raw) =>
-        MISC_COST_TYPE_VALUES.includes(raw.trim().toLowerCase())
+        parseMiscCostTypeCell(raw).success
           ? null
           : `must be one of ${MISC_COST_TYPE_VALUES.join(", ")} (got "${raw}")`,
+      // `parse` is what the preview stores and posts. Without it the cell goes
+      // up as typed and only the server-side fold saves it — this keeps the
+      // approver's preview showing the value that will actually be written.
+      parse: (raw) => {
+        const r = parseMiscCostTypeCell(raw)
+        return r.success ? r.data : raw
+      },
     },
     {
       key: "cost", label: "Cost / Wastage %", type: "number", required: true, placeholder: "e.g. 2.50", sample: "2.50",

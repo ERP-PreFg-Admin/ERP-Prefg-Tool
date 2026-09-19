@@ -18,6 +18,8 @@ const TYPE_LABEL: Record<MiscCostType, string> = {
   jw: "Job Work",
   shrink: "Shrink Wrap",
   shipper: "Shipper",
+  utility: "Utility",
+  margin: "Margin",
   rm_loss: "RM Wastage",
   pm_loss: "PM Wastage",
 }
@@ -155,11 +157,15 @@ export default function MiscCostDialog({
                 onChange={(e) => set("type", e.target.value as MiscCostType)}
                 className="w-full"
               >
-                <option value="jw">Job Work</option>
-                <option value="shrink">Shrink Wrap</option>
-                <option value="shipper">Shipper</option>
-                <option value="rm_loss">RM Wastage %</option>
-                <option value="pm_loss">PM Wastage %</option>
+                {/* Generated from TYPE_LABEL, not written out again: this list
+                    was hardcoded beside that map and silently missed `utility`
+                    and `margin` when they were added to the enum, so the two
+                    new types could be uploaded by CSV but never picked here. */}
+                {(Object.keys(TYPE_LABEL) as MiscCostType[]).map((t) => (
+                  <option key={t} value={t}>
+                    {TYPE_LABEL[t]}{isPercentType(t) ? " %" : ""}
+                  </option>
+                ))}
               </Select>
             </div>
           )}

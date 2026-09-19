@@ -23,7 +23,7 @@ import { query, execute } from "@/lib/db"
 import { createVendorItem, uniwareEnabled, uniwareVendorCode } from "@/lib/uniware"
 import { mfgFacilityMap } from "@/lib/queries/mfg-facility-map"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
-import { computeWastage, computeTotalCosting } from "@/lib/costing/final-costing"
+import { computeWastage, computeTotalCosting, ZERO_MISC } from "@/lib/costing/final-costing"
 import type { MiscCostType } from "@/types/masters"
 import logger from "@/lib/logger"
 
@@ -76,7 +76,7 @@ export async function buildPriceMap(mfgId: number): Promise<Map<string, number>>
     if (!material) continue      // no costing for this recipe — no price
     const rm = Number(material.rm_cost)
     const pm = Number(material.pm_cost)
-    const misc: Record<MiscCostType, number> = { jw: 0, shrink: 0, shipper: 0, rm_loss: 0, pm_loss: 0 }
+    const misc: Record<MiscCostType, number> = { ...ZERO_MISC }
     for (const m of miscs) {
       if (m.recipe_id === line.recipe_id) misc[m.type] = Number(m.cost)
     }
@@ -84,6 +84,7 @@ export async function buildPriceMap(mfgId: number): Promise<Map<string, number>>
     const rate = computeTotalCosting({
       rmCost: rm, pmCost: pm, wastageTotal: wastage,
       jw: misc.jw, shrink: misc.shrink, shipper: misc.shipper,
+      utility: misc.utility, margin: misc.margin,
     })
     if (Number.isFinite(rate) && rate > 0) prices.set(line.sku_code, rate)
   }

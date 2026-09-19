@@ -20,6 +20,10 @@ import type { InvoiceDocument, InvoiceGrnLine, InvoiceHistoryHeader, InvoiceHist
 import { IST } from "@/lib/date"
 import { parseVerifiedLegs } from "./ThreeWayCells"
 import SkuSummary from "./SkuSummary"
+import type { AgreedRate } from "@/lib/costing/agreed-rates"
+// The same wording the Agreed Final Costing table and the SKUs tab use, so one
+// gap is not described three different ways.
+import { rateGapReasons } from "../../manufacturing/[mfgId]/costing-gaps"
 
 type LegKey = "po" | "pod" | "inv"
 
@@ -178,7 +182,7 @@ export default function ThreeWayDialog({
   const [docNote, setDocNote] = useState("")
   const [askClose, setAskClose] = useState(false)
   /** sku_code → the SKU's current Agreed Final Costing rate. */
-  const [agreedRates, setAgreedRates] = useState<Record<string, number>>({})
+  const [agreedRates, setAgreedRates] = useState<Record<string, AgreedRate>>({})
 
   const id = invoice?.id ?? null
 
@@ -192,7 +196,7 @@ export default function ThreeWayDialog({
         return data as {
           items?: InvoiceHistoryItem[]; grns?: InvoiceGrnLine[]
           documents?: InvoiceDocument[]; verifications?: InvoiceLegVerification[]
-          agreedRates?: Record<string, number>
+          agreedRates?: Record<string, AgreedRate>
         }
       })
       .then((d) => {
@@ -353,9 +357,15 @@ export default function ThreeWayDialog({
     const poRate = num(items.find((i) => (i.sku_code ?? "—") === sk.sku
       && i.received_against_unit_price != null)?.received_against_unit_price ?? null)
     const invRate = sk.qty > 0 ? sk.taxable / sk.qty : null
-    const agreed = agreedRates[sk.sku] ?? null
+    const costing = agreedRates[sk.sku] ?? null
+    const agreed = costing?.rate ?? null
     return {
       sku: sk.sku, poRate, invRate, agreed,
+      // Why the agreed rate may be understated. An RM/PM line with no agreed
+      // rate for this manufacturer sums as 0, so the figure below is LOW, not
+      // absent — without this the comparison reads as a real gap in price.
+      // rateGapReasons, so this words it exactly as the costing screens do.
+      gaps: costing ? rateGapReasons(costing) : [],
       delta: invRate != null && agreed != null ? invRate - agreed : null,
     }
   })
@@ -552,9 +562,20 @@ export default function ThreeWayDialog({
                       r.invRate == null ? <span key="i" className="text-muted-foreground">—</span> : money(r.invRate),
                       r.agreed == null
                         ? <span key="a" className="text-muted-foreground" title="No live production line or no costing for this SKU">no costing</span>
+                        // A rate with unpriced material behind it is UNDERSTATED,
+                        // not absent — the missing lines summed as 0. Said here
+                        // rather than left to look like a genuine price gap.
+                        : r.gaps.length > 0
+                        ? <span key="a" className="text-amber-700 dark:text-amber-400" title={r.gaps.join("; ")}>
+                            {money(r.agreed)}<span className="ml-1 text-[10px]">incomplete</span>
+                          </span>
                         : money(r.agreed),
                       r.delta == null
                         ? <span key="d" className="text-muted-foreground">—</span>
+                        // Suppressed when the agreed rate is incomplete: a delta
+                        // against a figure known to be too low is not a finding.
+                        : r.gaps.length > 0
+                        ? <span key="d" className="text-muted-foreground" title="Not comparable until every material is rated">—</span>
                         : <span key="d" className={cn(Math.abs(r.delta) > 0.005 && "font-medium text-amber-700 dark:text-amber-400")}>
                             {r.delta > 0 ? "+" : ""}{money(r.delta)}
                           </span>,

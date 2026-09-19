@@ -74,12 +74,13 @@ test("RM comes before PM, unpriced first inside each, then dearest first", () =>
   ])
 })
 
-test("misc always returns all five types, and absent is not zero", () => {
+test("misc always returns every type, and absent is not zero", () => {
   const b = buildBreakup([], { jw: 2, rm_loss: 0 })
-  assert.equal(b.misc.length, 5)
+  assert.equal(b.misc.length, 7)
   assert.deepEqual(
     b.misc.map((m) => [m.type, m.value]),
-    [["jw", 2], ["shrink", null], ["shipper", null], ["rm_loss", 0], ["pm_loss", null]],
+    [["jw", 2], ["shrink", null], ["shipper", null], ["utility", null],
+     ["margin", null], ["rm_loss", 0], ["pm_loss", null]],
     "a genuine 0 stays 0; a type with no bom_misc row is null"
   )
 })
@@ -88,5 +89,5 @@ test("an empty recipe is empty, not an error", () => {
   const b = buildBreakup([], {})
   assert.deepEqual(b.lines, [])
   assert.equal(b.unpricedLines, 0)
-  assert.equal(b.misc.length, 5)
+  assert.equal(b.misc.length, 7)
 })

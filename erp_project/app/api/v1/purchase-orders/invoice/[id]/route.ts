@@ -9,7 +9,7 @@ import { z } from "zod"
 import { query } from "@/lib/db"
 import { supplierInvoicesSql } from "@/lib/queries/supplier-invoices"
 import { uniwareDocsSql } from "@/lib/queries/uniware-documents"
-import { agreedRatesByMfg } from "@/lib/costing/agreed-rates"
+import { agreedRatesByMfg, type AgreedRate } from "@/lib/costing/agreed-rates"
 import { getViewScope } from "@/lib/brand-view"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
@@ -43,7 +43,12 @@ export const GET = withGateway({
     // not select it; selectInvoiceById returns si.*, so it is always present here.
     const mfgId = headers[0].mfg_id
     const scope = await getViewScope(Number(session.user.id))
-    const agreed = mfgId == null ? new Map<string, number>() : await agreedRatesByMfg(mfgId, scope.brandIds)
+    // Carries the rate AND why it may be understated — an RM/PM line with no
+    // agreed rate for this manufacturer sums as 0, so the figure is low rather
+    // than absent, and the drilldown says so instead of showing it bare.
+    const agreed = mfgId == null
+      ? new Map<string, AgreedRate>()
+      : await agreedRatesByMfg(mfgId, scope.brandIds)
 
     return NextResponse.json({
       invoice: headers[0], items, grns, documents, verifications,

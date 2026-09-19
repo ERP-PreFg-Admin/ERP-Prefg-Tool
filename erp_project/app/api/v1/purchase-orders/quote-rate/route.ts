@@ -48,6 +48,9 @@ export const GET = withGateway({
         : new ApiError(404, "no_line", "No active production line links this SKU to the selected manufacturer.")
     }
 
-    return NextResponse.json({ rate })
+    // `rate.rate`: agreedRatesByMfg returns the gap counts alongside the figure
+    // so the invoice drilldown can say what is missing. This endpoint's contract
+    // is a bare number and stays that way.
+    return NextResponse.json({ rate: rate.rate })
   },
 })

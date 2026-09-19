@@ -279,7 +279,9 @@ async function FinalCostingTabContent({
     const jw = misc.jw ?? 0
     const shrink = misc.shrink ?? 0
     const shipper = misc.shipper ?? 0
-    const total = computeTotalCosting({ rmCost, pmCost, wastageTotal: wastage, jw, shrink, shipper })
+    const utility = misc.utility ?? 0
+    const margin = misc.margin ?? 0
+    const total = computeTotalCosting({ rmCost, pmCost, wastageTotal: wastage, jw, shrink, shipper, utility, margin })
     const incomplete =
       !material || rmCost <= 0 || pmCost <= 0 ||
       misc.jw === undefined || misc.shrink === undefined || misc.shipper === undefined ||
@@ -293,6 +295,8 @@ async function FinalCostingTabContent({
       jw,
       shrink,
       shipper,
+      utility,
+      margin,
       rm_wastage: rmWastage,
       pm_wastage: pmWastage,
       wastage,
@@ -347,7 +351,9 @@ async function FinalCostingTabContent({
       const jw = misc.jw ?? 0
       const shrink = misc.shrink ?? 0
       const shipper = misc.shipper ?? 0
-      const total = computeTotalCosting({ rmCost, pmCost, wastageTotal: wastage, jw, shrink, shipper })
+      const utility = misc.utility ?? 0
+      const margin = misc.margin ?? 0
+      const total = computeTotalCosting({ rmCost, pmCost, wastageTotal: wastage, jw, shrink, shipper, utility, margin })
       const rmDelta = rmCost - mrmRow.rm_cost
       const pmDelta = pmCost - mrmRow.pm_cost
       const totalDelta = total - mrmRow.total
@@ -358,7 +364,7 @@ async function FinalCostingTabContent({
         rm_wastage: rmWastage,
         pm_wastage: pmWastage,
         wastage,
-        jw, shrink, shipper,
+        jw, shrink, shipper, utility, margin,
         total,
         rm_delta: rmDelta,
         rm_delta_pct: mrmRow.rm_cost ? (rmDelta / mrmRow.rm_cost) * 100 : 0,

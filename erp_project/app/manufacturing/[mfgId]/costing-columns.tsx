@@ -38,6 +38,8 @@ const HEADS: { label: string; width: string; numeric: boolean }[] = [
   { label: "JWW",           width: W.small, numeric: true  },
   { label: "Shrinkage",     width: W.money, numeric: true  },
   { label: "Shipper",       width: W.small, numeric: true  },
+  { label: "Utility",       width: W.small, numeric: true  },
+  { label: "Margin",        width: W.small, numeric: true  },
   { label: "Wastage",       width: W.money, numeric: true  },
   { label: "Total Costing", width: W.total, numeric: true  },
 ]
@@ -141,6 +143,8 @@ export function CostingCells({ row, best }: { row: FinalCostingRow; best: boolea
       <TableCell className={input}>{fmtMoney(row.jw)}</TableCell>
       <TableCell className={input}>{fmtMoney(row.shrink)}</TableCell>
       <TableCell className={input}>{fmtMoney(row.shipper)}</TableCell>
+      <TableCell className={input}>{fmtMoney(row.utility)}</TableCell>
+      <TableCell className={input}>{fmtMoney(row.margin)}</TableCell>
       <TableCell className={input}>{fmtMoney(row.wastage)}</TableCell>
       <TableCell
         className={

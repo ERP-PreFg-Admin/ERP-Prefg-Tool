@@ -337,6 +337,8 @@ export const FINAL_COSTING_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "jw",       label: "JWW",             type: "number" },
   { key: "shrink",   label: "Shrinkage",       type: "number" },
   { key: "shipper",  label: "Shipper",         type: "number" },
+  { key: "utility",  label: "Utility",         type: "number" },
+  { key: "margin",   label: "Margin",          type: "number" },
   { key: "rm_wastage", label: "RM Wastage",    type: "number" },
   { key: "pm_wastage", label: "PM Wastage",    type: "number" },
   { key: "wastage",  label: "Wastage",         type: "number" },

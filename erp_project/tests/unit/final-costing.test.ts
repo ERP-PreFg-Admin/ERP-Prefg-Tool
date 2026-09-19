@@ -89,17 +89,51 @@ test("wastageFraction switches units at 1", () => {
   assert.equal(wastageFraction(0.005), 0.005, "0.5% is entered as 0.005")
 })
 
-test("computeTotalCosting sums all six components", () => {
+test("computeTotalCosting sums every component", () => {
   const total = computeTotalCosting({
     rmCost: 100, pmCost: 50, wastageTotal: 15, jw: 20, shrink: 5, shipper: 10,
+    utility: 7, margin: 3,
   })
-  assert.equal(total, 200)
+  assert.equal(total, 210)
 })
 
 test("computeTotalCosting omits nothing — dropping any component changes the total", () => {
-  const base = { rmCost: 1, pmCost: 2, wastageTotal: 4, jw: 8, shrink: 16, shipper: 32 }
-  // Powers of two: the total is 63 only if every single field was added.
-  assert.equal(computeTotalCosting(base), 63)
+  const base = {
+    rmCost: 1, pmCost: 2, wastageTotal: 4, jw: 8, shrink: 16, shipper: 32,
+    utility: 64, margin: 128,
+  }
+  // Powers of two: the total is 255 only if every single field was added.
+  assert.equal(computeTotalCosting(base), 255)
+})
+
+// margin is money on top, NOT a percentage of anything. Reading it as a
+// percentage the way rm_loss/pm_loss are read would divide it by 100.
+test("margin is added flat, not treated as a percentage", () => {
+  const withMargin = computeTotalCosting({
+    rmCost: 100, pmCost: 0, wastageTotal: 0, jw: 0, shrink: 0, shipper: 0,
+    utility: 0, margin: 25,
+  })
+  assert.equal(withMargin, 125, "margin must add 25, not 25% of anything")
+  // And it does not scale with the cost it sits on.
+  const onBiggerCost = computeTotalCosting({
+    rmCost: 1000, pmCost: 0, wastageTotal: 0, jw: 0, shrink: 0, shipper: 0,
+    utility: 0, margin: 25,
+  })
+  assert.equal(onBiggerCost - 1000, 25)
+})
+
+test("utility is added flat too", () => {
+  assert.equal(computeTotalCosting({
+    rmCost: 10, pmCost: 0, wastageTotal: 0, jw: 0, shrink: 0, shipper: 0,
+    utility: 4, margin: 0,
+  }), 14)
+})
+
+// computeWastage takes only the two loss percentages; a flat cost reaching it
+// would be silently divided by 100 by wastageFraction.
+test("the absolute types are not in the wastage calculation", () => {
+  const { total } = computeWastage(100, 100, 0, 0)
+  assert.equal(total, 0, "no loss % means no wastage, whatever the flat costs are")
 })
 
 test("the full costing chain composes as the mfgId page uses it", () => {
@@ -109,7 +143,8 @@ test("the full costing chain composes as the mfgId page uses it", () => {
   const wastage = computeWastage(rmCost, pmCost, 10, 10) // 3 + 1.5
   const total = computeTotalCosting({
     rmCost, pmCost, wastageTotal: wastage.total, jw: 5, shrink: 1, shipper: 2,
+    utility: 3, margin: 6,
   })
   assert.equal(wastage.total, 4.5)
-  assert.equal(total, 57.5) // 30 + 15 + 4.5 + 5 + 1 + 2
+  assert.equal(total, 66.5) // 30 + 15 + 4.5 + 5 + 1 + 2 + 3 + 6
 })

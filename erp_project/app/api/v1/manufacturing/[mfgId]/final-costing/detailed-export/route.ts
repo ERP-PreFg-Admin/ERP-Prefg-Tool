@@ -146,7 +146,7 @@ export const GET = withGateway({
         }
         const misc = miscByBom.get(bomId) ?? {}
         const { total: wastage } = computeWastage(rm, pm, misc.rm_loss ?? 0, misc.pm_loss ?? 0)
-        const total = computeTotalCosting({ rmCost: rm, pmCost: pm, wastageTotal: wastage, jw: misc.jw ?? 0, shrink: misc.shrink ?? 0, shipper: misc.shipper ?? 0 })
+        const total = computeTotalCosting({ rmCost: rm, pmCost: pm, wastageTotal: wastage, jw: misc.jw ?? 0, shrink: misc.shrink ?? 0, shipper: misc.shipper ?? 0, utility: misc.utility ?? 0, margin: misc.margin ?? 0 })
         return { rm, pm, total }
       }
 
@@ -154,7 +154,7 @@ export const GET = withGateway({
         const material = materialByBom.get(l.recipe_id) ?? { rm: 0, pm: 0 }
         const misc = miscByBom.get(l.recipe_id) ?? {}
         const { total: mrmWastage } = computeWastage(material.rm, material.pm, misc.rm_loss ?? 0, misc.pm_loss ?? 0)
-        const mrmTotal = computeTotalCosting({ rmCost: material.rm, pmCost: material.pm, wastageTotal: mrmWastage, jw: misc.jw ?? 0, shrink: misc.shrink ?? 0, shipper: misc.shipper ?? 0 })
+        const mrmTotal = computeTotalCosting({ rmCost: material.rm, pmCost: material.pm, wastageTotal: mrmWastage, jw: misc.jw ?? 0, shrink: misc.shrink ?? 0, shipper: misc.shipper ?? 0, utility: misc.utility ?? 0, margin: misc.margin ?? 0 })
         const approved = scenarioTotal(l.recipe_id, "approved")
         const cheapest = scenarioTotal(l.recipe_id, "min")
         const max = scenarioTotal(l.recipe_id, "max")

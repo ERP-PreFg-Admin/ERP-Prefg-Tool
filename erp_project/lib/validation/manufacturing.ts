@@ -35,10 +35,10 @@ export type MfgLineAction = z.infer<typeof mfgLineActionSchema>
 // rm_loss/pm_loss are RM/PM wastage PERCENTAGES stored in the same `cost`
 // column jw/shrink/shipper use for an absolute currency amount.
 
-export const miscCostTypeSchema = z.enum(["jw", "shrink", "shipper", "rm_loss", "pm_loss"])
+export const miscCostTypeSchema = z.enum(["jw", "shrink", "shipper", "utility", "margin", "rm_loss", "pm_loss"])
 
 /**
- * A `type` cell out of a bulk-upload CSV, case-folded before the enum.
+ * A `type` cell out of a bulk-upload CSV, folded to the stored code.
  *
  * The browser preview (MISC_COST_BULK_CSV_FIELDS) validates
  * `raw.trim().toLowerCase()` but writes the cell through unchanged, so "Shipper"
@@ -48,9 +48,74 @@ export const miscCostTypeSchema = z.enum(["jw", "shrink", "shipper", "rm_loss", 
  *
  * Lives here, beside the enum, so the handler and its test read the SAME rule
  * rather than each keeping a copy that can drift apart again.
+ *
+ * ── WHY THE LABELS ARE ACCEPTED TOO ─────────────────────────────────────────
+ * The stored codes are `jw` / `rm_loss`, but every screen shows "JW" and
+ * "RM Wastage %", and the downloaded template's legend now lists the codes
+ * beside those labels. Somebody reading a filled-in sheet types what the UI
+ * calls the thing. Both are the same instruction, so both are accepted rather
+ * than one being a silently dropped row.
+ *
+ * Matching strips everything that is not a letter or digit, so spacing,
+ * underscores, case and a trailing % are all irrelevant: "Job Work", "job_work",
+ * "JOBWORK" and "jw" are one value. Digits are kept, because nothing here is
+ * distinguished by punctuation alone.
  */
+/**
+ * Words that say nothing about WHICH type this is — "Shipper" and "Shipper
+ * Cost" are one instruction.
+ *
+ * Dropped as whole tokens BEFORE folding, never as a suffix of the folded
+ * string: "shipper" ends in "per", so stripping a trailing "per" would leave
+ * "ship" and the row would fail for a reason nobody could see.
+ */
+const NOISE = new Set(["cost", "costs", "charge", "charges", "amount", "percent", "pct", "perc"])
+
+const fold = (s: string) =>
+  s.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t && !NOISE.has(t)).join("")
+
+/**
+ * Folded spelling -> stored code.
+ *
+ * Keys are already folded and noise-stripped; `fold` is applied to the incoming
+ * cell, never to these. Both word orders are listed where a person plausibly
+ * writes either ("RM Wastage" / "Wastage RM"), because guessing at order in
+ * code is how a table like this starts missing cases.
+ *
+ * Deliberately NOT here: "wastage" and "loss" on their own (RM or PM?), "sw"
+ * and "jc" (too terse to distinguish from a typo), and "outer box" / "master
+ * carton" — those name a physical thing, and deciding they mean `shipper` is a
+ * business call, not a spelling.
+ */
+const MISC_TYPE_ALIASES: Record<string, z.infer<typeof miscCostTypeSchema>> = {
+  jw: "jw", jobwork: "jw", jobworks: "jw", job: "jw", labour: "jw", labor: "jw",
+
+  shrink: "shrink", shrinkwrap: "shrink", shrinkwrapping: "shrink",
+  shrinkwrapped: "shrink", shrinkfilm: "shrink",
+
+  shipper: "shipper", shippers: "shipper", shipperbox: "shipper",
+  shippercarton: "shipper", shipping: "shipper",
+
+  utility: "utility", utilities: "utility", utilitycost: "utility",
+  electricity: "utility", power: "utility", fuel: "utility",
+
+  // Flat money on top, never a percentage — see MISC_ABSOLUTE.
+  margin: "margin", margins: "margin", profit: "margin", profitmargin: "margin",
+  markup: "margin", marginamount: "margin",
+
+  rmloss: "rm_loss", rmwastage: "rm_loss", rmwaste: "rm_loss",
+  lossrm: "rm_loss", wastagerm: "rm_loss", wasterm: "rm_loss",
+  rawmaterialloss: "rm_loss", rawmaterialwastage: "rm_loss", rawmaterialwaste: "rm_loss",
+
+  pmloss: "pm_loss", pmwastage: "pm_loss", pmwaste: "pm_loss",
+  losspm: "pm_loss", wastagepm: "pm_loss", wastepm: "pm_loss",
+  packingmaterialloss: "pm_loss", packingmaterialwastage: "pm_loss",
+  packingmaterialwaste: "pm_loss", packagingmaterialwastage: "pm_loss",
+}
+
 export function parseMiscCostTypeCell(cell: unknown) {
-  return miscCostTypeSchema.safeParse(String(cell ?? "").trim().toLowerCase())
+  const folded = fold(String(cell ?? ""))
+  return miscCostTypeSchema.safeParse(MISC_TYPE_ALIASES[folded] ?? folded)
 }
 export const miscCostStatusSchema = z.enum(["active", "inactive", "discontinued"])
 

@@ -585,8 +585,20 @@ export type MfgMonthlyPoRow = {
   received_qty: string | null
 }
 
-/** `bom_misc` cost type — job work, shrink wrap, shipper (absolute cost); rm_loss/pm_loss (RM/PM wastage %, stored in the same `cost` column). */
-export type MiscCostType = "jw" | "shrink" | "shipper" | "rm_loss" | "pm_loss"
+/**
+ * `bom_misc` cost type.
+ *
+ * Two kinds share one `cost` column, and which kind a type is decides how the
+ * number is read:
+ *   - ABSOLUTE money, added straight to the total: jw, shrink, shipper,
+ *     utility, margin.
+ *   - PERCENTAGES applied to the RM/PM cost: rm_loss, pm_loss.
+ *
+ * `margin` is deliberately in the first group — it is a flat amount on top, not
+ * a percentage of anything. See MISC_ABSOLUTE in lib/costing/final-costing.ts.
+ */
+export type MiscCostType =
+  | "jw" | "shrink" | "shipper" | "utility" | "margin" | "rm_loss" | "pm_loss"
 
 /** `bom_misc` joined with `master_recipe`/`master_skus`. Used by the JW/Shrink Wrap/Shipper/Wastage tabs. */
 export type MiscCostLine = {
@@ -698,6 +710,9 @@ export type FinalCostingRow = {
   jw: number
   shrink: number
   shipper: number
+  utility: number
+  /** A flat amount on top, not a percentage — see MISC_ABSOLUTE. */
+  margin: number
   /** rm_cost * (rm_loss% / 100) — real per-SKU RM wastage, not a flat rate. */
   rm_wastage: number
   /** pm_cost * (pm_loss% / 100) — real per-SKU PM wastage, not a flat rate. */
