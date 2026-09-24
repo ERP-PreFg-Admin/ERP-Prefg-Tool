@@ -60,15 +60,32 @@ export async function createPurchaseOrder(po: UniwarePoInput): Promise<{ purchas
 /** Cookie, not bearer: /po/show serves whichever facility the SESSION is on, and
  *  only the web session can be switched. */
 export async function fetchPurchaseOrderPdf(code: string , facility ? : string) : Promise<Buffer> {
-    // Switch + fetch must not interleave with another caller's switch.
+    // const token =await getToken()
+    // const query = new URLSearchParams({ code, legacy: "1" })
+    // const url = `${BASE}${PO_DOCUMENT_PATH}?${query}`
+
+    // const res = await fetch(url , {
+    //     headers :authHeaders(token , facility),
+    //     signal :AbortSignal.timeout(TIMEOUT_MS)
+    // })
+
+    // const buf = Buffer.from(await res.arrayBuffer())
+
+    // if(!res.ok)  {
+    //     throw new Error(`Uniware PO document ${code}: HTTP ${res.status}`)
+    // }
+
+    // if(buf.subarray(0 , 5).toString("latin1") !== "%PDF-") {
+    //     const ct = res.headers.get("content-type") ?? "unknown"
+    //     throw new Error(`Uniware PO document ${code}: expected a PDF, got ${ct} (${buf.length} bytes)`)
+    // }
+    // return buf
+
     return withCookieSession(async () => {
         const cookie = await requireUniwareWebCookie()
         return fetchPurchaseOrderPdfWithCookie(cookie, code, facility)
     })
 }
-
-/** Split out so a unit test can drive it without the DB. Does NOT lock — callers
- *  outside fetchPurchaseOrderPdf must hold withCookieSession themselves. */
 export async function fetchPurchaseOrderPdfWithCookie(
     cookie: string, code: string, facility?: string
 ): Promise<Buffer> {

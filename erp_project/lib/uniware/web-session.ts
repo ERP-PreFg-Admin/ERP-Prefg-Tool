@@ -24,6 +24,7 @@
 
 import { query } from "@/lib/db"
 import { uniwareDocsSql } from "@/lib/queries/uniware-documents"
+import { unknown } from "zod"
 
 export type UniwareWebSession = {
   cookie: string
@@ -40,7 +41,7 @@ export type UniwareWebSession = {
  * about the PO, and it is fixed by a human logging in, not by a retry.
  */
 export class UniwareSessionStale extends Error {
-  constructor(message = "The Uniware web session has expired. Re-open Uniware and click the ERP Uniware Session extension to renew it.") {
+  constructor(message = "The Uniware web session has expired. Run `python uniware_documents/harvest.py login` to renew it.") {
     super(message)
     this.name = "UniwareSessionStale"
   }
@@ -85,13 +86,11 @@ export async function getUniwareWebSessionInfo(): Promise<
     obtained_by: row.obtained_by,
   }
 }
-/** Serialise everything that touches the web session — the facility is session
- *  state, so an interleaved switch would serve one caller another's facility. */
+
 let chain: Promise<unknown> = Promise.resolve()
 
-export function withCookieSession<T>(fn: () => Promise<T>): Promise<T> {
-  // Both arms: a rejected predecessor must not stall the queue.
-  const run = chain.then(fn, fn)
-  chain = run.then(() => undefined, () => undefined)
+export function withCookieSession<T>(fn:() => Promise<T>): Promise<T> {
+  const run = chain.then(fn , fn)
+  chain = run.then(() => undefined , ()=> undefined)
   return run
 }
