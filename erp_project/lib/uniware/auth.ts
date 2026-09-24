@@ -72,21 +72,6 @@ async function getAccessToken(): Promise<UniwareToken> {
   return tokenFromResponse(await res.json().catch(() => ({})))
 }
 
-// ── refreshAccessToken() USED TO LIVE HERE. DO NOT BRING IT BACK. ────────────
-//
-// `GET /oauth/token?grant_type=refresh_token` works — it answers 200 with a
-// genuinely NEW access_token. That is the problem: minting a new one invalidates
-// the token every other holder of this account is using, and there is no
-// notification. Prod spent 2026-09-08 answering "Not authorised" on every PO
-// because the test container had refreshed and evicted it.
-//
-// The password grant is strictly better here: it returns the SAME token with its
-// remaining lifetime, so every holder converges on one value and nobody evicts
-// anybody. It buys nothing to refresh, and it costs an outage.
-//
-// The real fix is a Uniware API user per environment. Until then this is what
-// keeps the two deployments from fighting.
-
 let cached: UniwareToken | null = null
 let inFlight: Promise<UniwareToken> | null = null
 

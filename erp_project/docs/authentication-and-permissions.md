@@ -18,7 +18,7 @@ sequenceDiagram
     participant B as Browser
     participant G as Google OAuth
     participant NA as NextAuth (lib/auth.ts)
-    participant DB as MariaDB
+    participant DB as MySQL 8.0
 
     B->>G: Click "Sign in with Google"
     G-->>B: OAuth consent screen

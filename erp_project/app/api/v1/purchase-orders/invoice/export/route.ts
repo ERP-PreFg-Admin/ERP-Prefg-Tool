@@ -12,10 +12,6 @@
 //   search — same predicate the list uses (invoice_no / manufacturer name)
 //   mfgCode, destination, dateFrom, dateTo — the list's filters, so the file
 //     matches what's on screen rather than everything the search alone matches
-//
-// Responses:
-//   200 — file attachment
-//   401 — unauthenticated · 403 — insufficient access · 500 — server error
 
 import { NextResponse } from "next/server"
 import { query } from "@/lib/db"

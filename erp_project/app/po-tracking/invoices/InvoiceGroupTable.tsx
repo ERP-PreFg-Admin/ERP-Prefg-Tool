@@ -29,6 +29,7 @@ import { IST, todayIST } from "@/lib/date"
 import { grnTotals, grnTotalsBySku, gstRateLabel, lineTotals, lineTotalsBySku, type MatchBadge } from "@/lib/invoice/three-way"
 import { PaymentCell, ThreeWayChips, matchOf } from "./ThreeWayCells"
 import ThreeWayDialog from "./ThreeWayDialog"
+import { MAX_PAGE_SIZE } from "@/lib/constants"
 import PaymentDialog from "./PaymentDialog"
 import SkuSummary from "./SkuSummary"
 
@@ -347,7 +348,7 @@ function DocumentsSection({
 export default function InvoiceGroupTable({
   search = "",
   filterQuery = "",
-  pageSize = 25,
+  pageSize: initialPageSize = 25,
   reloadKey = 0,
   emptyHint,
   className,
@@ -374,6 +375,9 @@ export default function InvoiceGroupTable({
   const [invoices, setInvoices] = useState<InvoiceHistoryHeader[]>([])
   const [total, setTotal]       = useState(0)
   const [offset, setOffset]     = useState(0)
+  /** Rows per page. "All" is MAX_PAGE_SIZE, the server's own ceiling — see the
+   *  note on the route for why that is 500 and not unbounded. */
+  const [pageSize, setPageSize] = useState(initialPageSize)
   // Starts true: the mount-effect fetches immediately, and flipping this on
   // inside the effect would be a synchronous setState during render.
   const [loading, setLoading]   = useState(true)
@@ -413,6 +417,13 @@ export default function InvoiceGroupTable({
     if (!res.ok) throw new Error(data.error ?? "Couldn't load invoices.")
     return data as { invoices?: InvoiceHistoryHeader[]; total?: number }
   }, [pageSize, search, filterQuery, reloadKey])
+
+  /** A new page size has to start at page 1 — offset 200 in pages of 500 is
+   *  past the end of a 65-row list and would render empty. */
+  function changePageSize(next: number) {
+    setPageSize(next)
+    setOffset(0)
+  }
 
   const apply = useCallback((data: { invoices?: InvoiceHistoryHeader[]; total?: number }, at: number) => {
     setError("")
@@ -877,12 +888,32 @@ export default function InvoiceGroupTable({
         </table>
       </div>
 
-      <div className="mt-3 flex shrink-0 items-center gap-3 border-t border-border pt-3 text-xs">
-        <span className="flex-1 text-muted-foreground">
+      <div className="mt-3 flex shrink-0 flex-wrap items-center gap-3 border-t border-border pt-3 text-xs">
+        <span className="text-muted-foreground">
           {error ? <span className="text-destructive">{error}</span>
             : total > 0 ? `${offset + 1}–${Math.min(offset + pageSize, total)} of ${total}`
             : ""}
         </span>
+        <label className="flex items-center gap-1.5 text-muted-foreground">
+          Show
+          <Select
+            aria-label="Rows per page"
+            className="h-7 w-20 py-0 text-[11px]"
+            value={String(pageSize)}
+            onChange={(e) => changePageSize(Number(e.target.value))}
+          >
+            {[25, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+            <option value={MAX_PAGE_SIZE}>All</option>
+          </Select>
+        </label>
+        {/* Only when it bites. A set past the ceiling would otherwise look like
+            the whole list, which is the one thing "All" must not do. */}
+        {pageSize >= MAX_PAGE_SIZE && total > MAX_PAGE_SIZE && (
+          <span className="text-amber-700 dark:text-amber-400">
+            showing the first {MAX_PAGE_SIZE} — narrow the filters to see the rest
+          </span>
+        )}
+        <span className="flex-1" />
         <Button
           variant="outline" size="sm"
           disabled={loading || offset === 0}

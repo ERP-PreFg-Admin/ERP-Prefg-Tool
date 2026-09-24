@@ -1,9 +1,15 @@
 # API Hardening Plan
 
-**Status:** proposal — nothing here is implemented. Written 2026-08-12.
-**Scope:** the 70 route files under `app/api/`. Auth, authorization, abuse
-resistance, transport headers, and the two efficiency items that fall out of the
-same audit.
+**Status:** partly implemented. Written 2026-08-12 as a proposal; **Finding 2**
+(rate limiting) shipped as `lib/gateway/rate-limit.ts` + the `rateLimit` option on
+`withGateway`, and **Finding 3** (`/api/v1/files/preview` key enumeration) shipped
+as `lib/s3-guard.ts` / `assertKeyReadable` on both the v1 route and its v2
+replacement. Entity scope also became declarative — `lib/gateway/scope-rules.ts`,
+which this plan did not propose. The rest is still a proposal; there is still no
+`middleware.ts`.
+**Scope:** the route files under `app/api/` — 70 when this was written, ~90 today.
+Auth, authorization, abuse resistance, transport headers, and the two efficiency
+items that fall out of the same audit.
 
 **Companion docs:** `docs/architecture-evolution.md` §4 (the `withGateway`
 design — its rate-limit and `middleware.ts` sections were never built; this plan
@@ -177,7 +183,6 @@ The endpoints where this actually costs something:
 | Endpoint | Why it matters |
 |---|---|
 | `POST /api/v2/purchase-orders/invoice/parse` | Falls through to **Nanonets, which is metered**. `maxDuration = 300`, 50-70 s per call. A loop here is a billing incident, not just load |
-| `POST /api/v1/purchase-orders/invoice/parse` | v1, same metered path, always Nanonets |
 | 16 `*/export/route.ts` | Each dumps a full filtered table through ExcelJS in memory |
 | `POST /api/v1/purchase-orders/send-mail` | Sends real mail via `nodemailer` to vendor/warehouse addresses |
 | `POST /api/v1/upload` | 10 MB per call, unbounded call count |

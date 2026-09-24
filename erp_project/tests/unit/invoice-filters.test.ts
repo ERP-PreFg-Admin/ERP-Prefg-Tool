@@ -25,5 +25,31 @@ test("listInvoices takes the same params plus limit and offset", () => {
 test("an unset filter is NULL, so the `? IS NULL` arm switches it off", () => {
   // Empty strings come off a cleared <select>; they must not match a code of "".
   const params = buildInvoiceParams(null, UNRESTRICTED, { mfgCode: "", dateFrom: "" })
-  assert.ok(params.slice(-8).every((p) => p === null))
+  assert.ok(params.slice(-11).every((p) => p === null))
+})
+
+// Uniware's own verdict, and the only filter that surfaces an invoice whose PO
+// the warehouse cancelled there — our own record still reads healthy.
+test("the uniware status filter contributes three params, all of them the value", () => {
+  const params = buildInvoiceParams(null, UNRESTRICTED, { uniwareStatus: "CANCELLED" })
+  // The IS NULL guard, the 'none' test, and the equality — all read the same cell.
+  assert.deepEqual(params.slice(-3), ["CANCELLED", "CANCELLED", "CANCELLED"])
+})
+
+test("a cleared uniware status filter is NULL, not the empty string", () => {
+  const params = buildInvoiceParams(null, UNRESTRICTED, { uniwareStatus: "" })
+  assert.deepEqual(params.slice(-3), [null, null, null])
+})
+
+// 'none' is never-synced. It has to reach the NULL arm rather than compare
+// equal to a status literally called "none".
+test("'none' selects the never-synced invoices", () => {
+  assert.match(supplierInvoicesSql.countInvoices, /'none' AND si\.uniware_status IS NULL/)
+})
+
+// Every query taking these params must stay in step, not just the two above.
+test("the export and the sync candidate query take the same params", () => {
+  const params = buildInvoiceParams(null, UNRESTRICTED)
+  assert.equal(params.length, count(supplierInvoicesSql.listInvoicesForExport))
+  assert.equal(params.length + 1, count(supplierInvoicesSql.selectForStatusSyncByFilter))
 })

@@ -1,4 +1,5 @@
-// The current Agreed Final Costing rate per SKU for one manufacturer.
+// The Agreed Final Costing rate per SKU for one manufacturer, today's or on a
+// given date.
 //
 // Extracted from app/api/v1/purchase-orders/quote-rate, which computed it for a
 // single SKU: the invoice drilldown needs it for every SKU on a document, and a
@@ -33,9 +34,23 @@ export type AgreedRate = {
   pm_lines_without_rate: number
 }
 
+/**
+ * `asOf` (YYYY-MM-DD) prices the recipe at the rates that applied on that date
+ * instead of today's — what the invoice drilldown needs, since an invoice is
+ * compared against what was agreed when it was raised, not what is agreed now.
+ *
+ * Only the RM/PM RATES move with the date, because they are the only part with a
+ * real archive (history_cost_mfg). The recipe's own lines, the SKU's fill weight
+ * and the misc costs are read as they stand today — recipe versions archive to
+ * history_recipe but reconstructing a past one is a different job, nothing
+ * versions `filling`, and bom_misc is edited in place (see
+ * selectMiscCostsByMfg). So a recipe reformulated since the invoice still prices
+ * with today's materials.
+ */
 export async function agreedRatesByMfg(
   mfgId: number,
-  brandIds: number[] | null
+  brandIds: number[] | null,
+  asOf?: string | null,
 ): Promise<Map<string, AgreedRate>> {
   const [lines, materials, miscs] = await Promise.all([
     query<{ recipe_id: number; sku_code: string }>(
@@ -45,7 +60,8 @@ export async function agreedRatesByMfg(
       filling: string | null; rm_line_count: number
       rm_lines_without_rate: number; pm_lines_without_rate: number
     }>(
-      manufacturingSql.selectMaterialCostByMfg, [mfgId, mfgId, mfgId]),
+      asOf ? manufacturingSql.selectMaterialCostByMfgAsOf : manufacturingSql.selectMaterialCostByMfg,
+      asOf ? [asOf, asOf, mfgId, asOf, asOf, mfgId, mfgId] : [mfgId, mfgId, mfgId]),
     query<{ recipe_id: number; type: MiscCostType; cost: string }>(
       manufacturingSql.selectMiscCostsByMfg, [mfgId]),
   ])

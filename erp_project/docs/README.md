@@ -10,9 +10,10 @@ This index is the single entry point for understanding the ERP codebase. Read do
 | 2 | [Architecture](./architecture.md) | Tech stack, request lifecycles, folder map |
 | 3 | [Database Schema](./database-schema.md) | All 25+ models, relationships, naming conventions |
 | 4 | [Authentication & Permissions](./authentication-and-permissions.md) | Google OAuth, RBAC, session lifecycle |
-| 5 | [API Reference](./api-reference.md) | Every endpoint: method, body, response |
-| 6 | [Masters Module](./masters-module.md) | The fully-implemented reference module |
-| 7 | [Frontend Patterns](./frontend-patterns.md) | Server/client split, styling, components |
+| 5 | [API Reference](./api/README.md) | All 89 route files / 101 handlers: access rule, scope rule, body, response, error codes |
+| 6 | [API Information Flow](./api-information-flow.md) | How the modules hand data to each other — approval gate, costing chain, PO lifecycle, invoice pipeline, Uniware sweeps, bounce loop |
+| 7 | [Masters Module](./masters-module.md) | The fully-implemented reference module |
+| 8 | [Frontend Patterns](./frontend-patterns.md) | Server/client split, styling, components |
 
 ## Feature Docs
 
@@ -21,6 +22,7 @@ This index is the single entry point for understanding the ERP codebase. Read do
 | [Admin Panel & Data Scoping](./admin-and-data-scoping.md) | `/admin` (Users · Permissions · Data Access · Activity), the declared role taxonomy, per-user entity scope, the activity trail |
 | [PO Inwarding](./po-inwarding.md) | Supplier-invoice PDF → Nanonets extraction → review → inward POs / goods receipts → Uniware mirror → warehouse notification |
 | [S3 Integration](./s3-integration.md) | Bucket layout, key conventions, presigned URLs, event writes |
+| [API Known Issues](./api/known-issues.md) | Defects found while documenting the API surface, and the doc drift corrected. Read before trusting an old claim |
 
 ## QA / QC
 

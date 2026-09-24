@@ -33,7 +33,109 @@ const LINES_SELECT = `
 // this expression exists to stop: an unpriced recipe used to read as a free one.
 // selectMaterialCostByMfg returns `filling` alongside the totals so the page can
 // say WHY a cost is zero instead of guessing.
-const SKU_FILLING = `COALESCE(NULLIF(sk.filling, 0), NULLIF(ds.filling, 0))`
+// ponytail: pack-of-3 soaps, hardcoded. Replace with a master_skus.pack_units
+// column when a third multi-pack shows up. If sk.filling already holds the PACK
+// total (300 g = 3 x 100 g) rather than one bar, this makes RM 9x, not 3x.
+const PACK_MULTIPLIER = `CASE WHEN sk.sku_code IN ('3MCaf394', '3MCaf395') THEN 3 ELSE 1 END`
+
+const SKU_FILLING = `COALESCE(NULLIF(sk.filling, 0), NULLIF(ds.filling, 0)) * ${PACK_MULTIPLIER}`
+
+/**
+ * One manufacturer's agreed rate per material, as a set to join against.
+ *
+ * `asOf = false` is the live row and nothing else — the behaviour every costing
+ * screen has always had. `asOf = true` answers "what was the rate ON this date":
+ * `history_cost_mfg` first, because a superseded row whose window covers the date
+ * IS the rate that applied then, and the live row otherwise. That fallback also
+ * covers a date OLDER than anything archived — a rate first entered in September
+ * has no record of what August cost, and the current figure is a better answer
+ * there than none. See supersededOn in lib/approvals/handlers/types.ts for how
+ * the archived window gets its end date.
+ *
+ * Params: [mfg_id] · as-of: [asOf, asOf, mfg_id]
+ */
+const rateSet = (table: string, idCol: string, type: "rm" | "pm", asOf: boolean) => asOf ? `
+      SELECT c.${idCol} AS mtrl_id, COALESCE(h.rate, c.curr_rate) AS rate
+      FROM ${table} c
+      LEFT JOIN history_cost_mfg h ON h.id = (
+        SELECT id FROM history_cost_mfg
+        WHERE mtrl_type = '${type}' AND mtrl_id = c.${idCol} AND mfg_id = c.mfg_id
+          AND COALESCE(status, 1) = 1
+          AND effective_from <= ? AND (effective_to IS NULL OR effective_to > ?)
+        ORDER BY effective_from DESC, id DESC LIMIT 1
+      )
+      WHERE c.mfg_id = ? AND c.status = 'active'
+` : `
+      SELECT c.${idCol} AS mtrl_id, c.curr_rate AS rate
+      FROM ${table} c
+      WHERE c.mfg_id = ? AND c.status = 'active'
+`
+
+/**
+ * Per-bom RM/PM material cost for this manufacturer's live lines (status
+ * 'active' or 'discontinued' — see selectLiveLinesByMfg's comment; a
+ * discontinued line is still producible, so its costing still applies).
+ *
+ * RM lines (details_recipe.amount) are a formulation PERCENTAGE, not a
+ * quantity — the Recipe editor requires all RM lines on a SKU to sum to
+ * ~100% (see lib/validation/recipe.ts). RM rates (cost_master_rm_mfg.curr_rate)
+ * are agreed per KG, while the SKU's fill weight (master_skus.filling) is
+ * in grams. So the RM grams actually used per unit = filling * pct/100,
+ * converted to kg (/1000) before multiplying by the per-kg rate:
+ *   rm_cost = filling(g) * amount(%) * curr_rate(/kg) / 100 / 1000
+ * A SKU with no filling recorded contributes 0 for that line (SUM skips
+ * the resulting NULL), same as a missing rate does today.
+ *
+ * Filling is read from master_skus (the SKU master's own source of truth,
+ * same column lib/queries/skus.ts uses), not details_sku — details_sku
+ * carries a separate, unsynced copy that can drift from the real value.
+ *
+ * PM lines are unit-wise (details_recipe.amount is a plain per-unit qty), so
+ * PM cost stays a straight quantity × rate multiplication.
+ *
+ * Rates come from rateSet() above, pinned to status='active' AND this exact
+ * mfg_id so a material with multiple rate rows (draft/inactive history, or
+ * rates for other manufacturers) can't fan out the join and inflate the SUM.
+ * BOTH variants are generated from this one function on purpose: a dated copy
+ * of twenty lines of arithmetic is a second answer waiting to disagree with
+ * the first.
+ *
+ * ⚠️ Do NOT add `WHERE db.mtrl_type IN ('rm','pm')` here, even though its sibling
+ * selectBomLineDetailByMfg needs exactly that. Every aggregate below is an
+ * explicit `CASE WHEN mtrl_type = 'rm' … WHEN/ELSE 'pm'`, so a 'sku' line (a gift
+ * kit's component — see lib/masters/kit-sku.ts) already contributes 0 to both
+ * costs and to every line count: correct, and correct by construction. A WHERE
+ * filter would instead drop the recipe's only rows for a pure-kit recipe, and the
+ * INNER JOIN would then remove the recipe from the result set entirely — turning
+ * "this kit costs nothing yet" into "this kit does not exist", which is what the
+ * rm_line_count diagnostics exist to tell apart.
+ *
+ * Params: [mfg_id, mfg_id, mfg_id]
+ *   as-of: [asOf, asOf, mfg_id, asOf, asOf, mfg_id, mfg_id]
+ */
+const materialCostSql = (asOf: boolean) => `
+    WITH rm_rate AS (${rateSet("cost_master_rm_mfg", "rm_id", "rm", asOf)}),
+         pm_rate AS (${rateSet("cost_master_pm_mfg", "pm_id", "pm", asOf)})
+    SELECT mbm.recipe_id,
+      COALESCE(SUM(CASE WHEN db.mtrl_type = 'rm' THEN (db.amount * ${SKU_FILLING} * rmm.rate) / 100000 ELSE 0 END), 0) AS rm_cost,
+      COALESCE(SUM(CASE WHEN db.mtrl_type = 'pm' THEN db.amount * pmm.rate ELSE 0 END), 0) AS pm_cost,
+      -- Why an RM cost is zero. Without these the page can only say "possibly
+      -- missing RM cost", which points at the rate when the cause is usually
+      -- the SKU's fill weight — the two need different people to fix.
+      MAX(${SKU_FILLING})                                                            AS filling,
+      SUM(db.mtrl_type = 'rm')                                                       AS rm_line_count,
+      SUM(db.mtrl_type = 'rm' AND rmm.rate IS NULL)                                  AS rm_lines_without_rate,
+      SUM(db.mtrl_type = 'pm' AND pmm.rate IS NULL)                                  AS pm_lines_without_rate
+    FROM master_recipe_mfg mbm
+    INNER JOIN master_recipe  b  ON b.id = mbm.recipe_id
+    LEFT  JOIN master_skus sk ON sk.id = b.sku_id
+    LEFT  JOIN details_sku ds ON ds.sku_id = sk.id
+    INNER JOIN details_recipe db ON db.recipe_id = mbm.recipe_id AND db.status = 'active'
+    LEFT  JOIN rm_rate rmm ON rmm.mtrl_id = db.mtrl_id AND db.mtrl_type = 'rm'
+    LEFT  JOIN pm_rate pmm ON pmm.mtrl_id = db.mtrl_id AND db.mtrl_type = 'pm'
+    WHERE mbm.mfg_id = ? AND mbm.status IN ('active', 'discontinued')
+    GROUP BY mbm.recipe_id
+  `
 
 export const manufacturingSql = {
   /**
@@ -472,64 +574,12 @@ export const manufacturingSql = {
 
   // ── Agreed Final Costing (read-only, computed) ────────────────────────────
 
-  /**
-   * Per-bom RM/PM material cost for this manufacturer's live lines (status
-   * 'active' or 'discontinued' — see selectLiveLinesByMfg's comment; a
-   * discontinued line is still producible, so its costing still applies).
-   *
-   * RM lines (details_recipe.amount) are a formulation PERCENTAGE, not a
-   * quantity — the Recipe editor requires all RM lines on a SKU to sum to
-   * ~100% (see lib/validation/recipe.ts). RM rates (cost_master_rm_mfg.curr_rate)
-   * are agreed per KG, while the SKU's fill weight (master_skus.filling) is
-   * in grams. So the RM grams actually used per unit = filling * pct/100,
-   * converted to kg (/1000) before multiplying by the per-kg rate:
-   *   rm_cost = filling(g) * amount(%) * curr_rate(/kg) / 100 / 1000
-   * A SKU with no filling recorded contributes 0 for that line (SUM skips
-   * the resulting NULL), same as a missing rate does today.
-   *
-   * Filling is read from master_skus (the SKU master's own source of truth,
-   * same column lib/queries/skus.ts uses), not details_sku — details_sku
-   * carries a separate, unsynced copy that can drift from the real value.
-   *
-   * PM lines are unit-wise (details_recipe.amount is a plain per-unit qty), so
-   * PM cost stays a straight quantity × rate multiplication.
-   *
-   * Rate joins are pinned to status='active' AND this exact mfg_id so a
-   * material with multiple rate rows (draft/inactive history, or rates for
-   * other manufacturers) can't fan out the join and inflate the SUM.
-   *
-   * ⚠️ Do NOT add `WHERE db.mtrl_type IN ('rm','pm')` here, even though its sibling
-   * selectBomLineDetailByMfg needs exactly that. Every aggregate below is an
-   * explicit `CASE WHEN mtrl_type = 'rm' … WHEN/ELSE 'pm'`, so a 'sku' line (a gift
-   * kit's component — see lib/masters/kit-sku.ts) already contributes 0 to both
-   * costs and to every line count: correct, and correct by construction. A WHERE
-   * filter would instead drop the recipe's only rows for a pure-kit recipe, and the
-   * INNER JOIN would then remove the recipe from the result set entirely — turning
-   * "this kit costs nothing yet" into "this kit does not exist", which is what the
-   * rm_line_count diagnostics exist to tell apart.
-   * Params: [mfg_id, mfg_id, mfg_id]
-   */
-  selectMaterialCostByMfg: `
-    SELECT mbm.recipe_id,
-      COALESCE(SUM(CASE WHEN db.mtrl_type = 'rm' THEN (db.amount * ${SKU_FILLING} * rmm.curr_rate) / 100000 ELSE 0 END), 0) AS rm_cost,
-      COALESCE(SUM(CASE WHEN db.mtrl_type = 'pm' THEN db.amount * pmm.curr_rate ELSE 0 END), 0) AS pm_cost,
-      -- Why an RM cost is zero. Without these the page can only say "possibly
-      -- missing RM cost", which points at the rate when the cause is usually
-      -- the SKU's fill weight — the two need different people to fix.
-      MAX(${SKU_FILLING})                                                            AS filling,
-      SUM(db.mtrl_type = 'rm')                                                       AS rm_line_count,
-      SUM(db.mtrl_type = 'rm' AND rmm.curr_rate IS NULL)                             AS rm_lines_without_rate,
-      SUM(db.mtrl_type = 'pm' AND pmm.curr_rate IS NULL)                             AS pm_lines_without_rate
-    FROM master_recipe_mfg mbm
-    INNER JOIN master_recipe  b  ON b.id = mbm.recipe_id
-    LEFT  JOIN master_skus sk ON sk.id = b.sku_id
-    LEFT  JOIN details_sku ds ON ds.sku_id = sk.id
-    INNER JOIN details_recipe db ON db.recipe_id = mbm.recipe_id AND db.status = 'active'
-    LEFT  JOIN cost_master_rm_mfg rmm ON rmm.rm_id = db.mtrl_id AND rmm.mfg_id = ? AND rmm.status = 'active' AND db.mtrl_type = 'rm'
-    LEFT  JOIN cost_master_pm_mfg pmm ON pmm.pm_id = db.mtrl_id AND pmm.mfg_id = ? AND pmm.status = 'active' AND db.mtrl_type = 'pm'
-    WHERE mbm.mfg_id = ? AND mbm.status IN ('active', 'discontinued')
-    GROUP BY mbm.recipe_id
-  `,
+  /** Today's rates. See materialCostSql above. Params: [mfg_id, mfg_id, mfg_id] */
+  selectMaterialCostByMfg: materialCostSql(false),
+
+  /** The same costing priced at the rates that applied on a given date.
+   *  Params: [asOf, asOf, mfg_id, asOf, asOf, mfg_id, mfg_id] */
+  selectMaterialCostByMfgAsOf: materialCostSql(true),
 
   /**
    * The APPROVED vendor's current rate per RM, for this manufacturer — the third
@@ -594,7 +644,18 @@ export const manufacturingSql = {
     WHERE pmm.mfg_id = ? AND pmm.status = 'active'
   `,
 
-  /** Active JW/Shrink/Shipper costs for this manufacturer, keyed by recipe_id + type in application code. Params: [mfg_id] */
+  /**
+   * Active JW/Shrink/Shipper costs for this manufacturer, keyed by recipe_id +
+   * type in application code. Params: [mfg_id]
+   *
+   * Deliberately NOT date-filtered, even when the caller is pricing a past date
+   * (see agreedRatesByMfg's `asOf`). bom_misc is edited IN PLACE — mfgMiscHandler
+   * writes the new cost over the old one and archives nothing — so restricting to
+   * the effective window cannot tell you what a line used to charge, only that it
+   * had not been entered yet. Every one of the 56 live rows starts 2026-08-01, the
+   * month the data was loaded, so the filter simply deleted JW, shrink, shipper
+   * and margin from any older invoice and reported the remainder as the rate.
+   */
   selectMiscCostsByMfg: `
     SELECT bom_id AS recipe_id, type, cost FROM bom_misc WHERE mfg_id = ? AND status = 'active'
   `,

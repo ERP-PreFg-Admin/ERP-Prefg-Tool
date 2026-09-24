@@ -126,6 +126,16 @@ export function poLetterForEntity(entityCode: string | null | undefined): string
   return ENTITY_PO_LETTER[entityCode.trim().toUpperCase()] ?? null
 }
 
-
-
-
+/**
+ * The invoice list's hard ceiling, and what its "All" option asks for.
+ *
+ * HERE, and not in lib/pagination.ts, because that module imports lib/db: a
+ * "use client" component importing it drags mysql2 into the browser bundle and
+ * the build dies on `Can't resolve 'tls'`. This file has no imports at all,
+ * which is what makes it safe on both sides — keep it that way.
+ *
+ * 500 is a real cost, not a formality: every invoice row carries six scalar
+ * subqueries, so "All" is roughly 3,000 subquery executions. Fine on an
+ * explicit click, too slow to be a default.
+ */
+export const MAX_PAGE_SIZE = 500

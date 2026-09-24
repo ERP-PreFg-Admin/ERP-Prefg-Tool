@@ -41,6 +41,34 @@ export const uniwareGrn = {
   setGrnCount: `UPDATE invoice_mfg SET uniware_grn_count = ? WHERE id = ?`,
 
   /**
+   * Cancel OUR inward POs when Uniware cancels the PO they mirror.
+   *
+   * The warehouse cancels in Uniware; nothing told this side, so the inward POs
+   * sat as `received` against an order that no longer exists — they still
+   * counted on the Inward tab and in every open-PO figure.
+   *
+   * Matched on uniware_po_code, which is the whole set: one Uniware PO per
+   * invoice, and mergeInwardLinesBySku raises one inward PO per SKU under it.
+   *
+   * `po_type = 'inward'` is load-bearing — a procurement PO can carry the same
+   * code and is NOT ours to cancel from a Uniware status. `status <> 'cancelled'`
+   * keeps it idempotent across repeated syncs.
+   *
+   * Deliberately does NOT touch received_qty, here or on the parent order. The
+   * goods were booked against the parent when the invoice was inwarded, and
+   * whether a Uniware cancellation means they never arrived is a question for
+   * the desk — reversing a receipt silently would be the worse answer.
+   * Parameters: [uniware_po_code]
+   */
+  cancelInwardPosByUniwareCode: `
+    UPDATE purchase_orders
+       SET status = 'cancelled'
+     WHERE uniware_po_code = ?
+       AND po_type = 'inward'
+       AND status <> 'cancelled'
+  `,
+
+  /**
    * Mirror one Uniware PO line's pending / QC-pass onto OUR inward PO for that
    * SKU. Matched on (uniware_po_code, sku_code), which is 1:1 only because
    * mergeInwardLinesBySku raises one inward PO per SKU.

@@ -90,6 +90,12 @@ const INVOICE_WHERE = `
     AND (? IS NULL OR si.destination  = ?)
     AND (? IS NULL OR si.invoice_date >= ?)
     AND (? IS NULL OR si.invoice_date <= ?)
+    -- Uniware's own verdict on the mirrored PO. 'none' is the never-synced
+    -- case: uniware_status IS NULL covers both "no mirror" and "not asked yet",
+    -- which is what the filter's own label says.
+    AND (? IS NULL
+         OR (? = 'none' AND si.uniware_status IS NULL)
+         OR si.uniware_status = ?)
 `
 
 // The list itself, shared by the paginated view and the export so the two can
@@ -717,6 +723,8 @@ export type InvoiceFilters = {
   destination?: string | null
   dateFrom?: string | null
   dateTo?: string | null
+  /** invoice_mfg.uniware_status, or 'none' for never synced. */
+  uniwareStatus?: string | null
 }
 
 /**
@@ -746,5 +754,7 @@ export function buildInvoiceParams(
     f.destination || null, f.destination || null,
     f.dateFrom    || null, f.dateFrom    || null,
     f.dateTo      || null, f.dateTo      || null,
+    // Read three times: the IS NULL guard, the 'none' test, and the equality.
+    f.uniwareStatus || null, f.uniwareStatus || null, f.uniwareStatus || null,
   ]
 }

@@ -113,6 +113,7 @@ export default function GatepassClient({
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ""
+    let sawDone = false
 
     for (;;) {
       const { done, value } = await reader.read()
@@ -125,6 +126,7 @@ export default function GatepassClient({
         if (!line.trim()) continue
         const msg = JSON.parse(line)
         if (msg.done) {
+          sawDone = true
           const r = msg.result ?? {}
           if (r.ok) {
             setRows((current) => [...current, ...(r.summary as PackageTypeRow[])])
@@ -145,6 +147,13 @@ export default function GatepassClient({
           mark(code, { note: "downloading export" })
         }
       }
+    }
+
+    // The stream ended without a `done` line — the request was killed mid-flight
+    // (maxDuration, proxy reset). Nothing else marks this, so the row would sit
+    // on "waiting for Uniware" forever.
+    if (!sawDone) {
+      mark(code, { status: "failed", note: undefined, error: "Uniware took too long — the export was still running when the request ended" })
     }
   }
 

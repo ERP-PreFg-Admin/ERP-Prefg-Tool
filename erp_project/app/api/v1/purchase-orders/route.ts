@@ -82,8 +82,8 @@ export const POST = withGateway({
       return NextResponse.json({ ok: true, approval_id: approvalId, staged: body.rows.length })
     } catch (err: any) {
       await conn.rollback()
-      recordFailedEvent("PO_BULK", eventId, {}, err.message)
       logger.error({ ...ctx, eventId, err: err.message, stack: err.stack, message: "PO bulk upload staging failed" })
+      recordFailedEvent("PO_BULK", eventId, {}, err.message)
       throw new ApiError(500, "internal", "Database error: " + err.message)
     } finally {
       conn.release()

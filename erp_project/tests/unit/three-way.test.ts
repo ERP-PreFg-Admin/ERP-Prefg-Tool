@@ -565,3 +565,60 @@ test("nulls do not throw and do not read as a clean match", () => {
   assert.equal(m.badge, "unmatched")
   assert.equal(m.onFile, 0)
 })
+
+// ── SKU spelling ─────────────────────────────────────────────────────────────
+
+test("one SKU spelled two ways is ONE row, not a phantom over-receipt", () => {
+  // Real prod data: invoices carry "Mcaf212_WB", Uniware's GRNs carry
+  // "MCaf212_WB". MySQL's collation is case-insensitive so every SQL join
+  // already treats them as one; a JS Map keyed on the raw string did not, and
+  // the drilldown showed the invoice awaiting 1,080 while the receipt read
+  // "unbilled, +1,080 over". One SKU, fully received, reported as two problems.
+  const r = threeWayBySku(
+    [{ sku_code: "Mcaf212_WB", qty: 1080, amount: 42541.2, gst_percent: 18 }],
+    [{ sku_code: "MCaf212_WB", grn_code: "G6973", quantity: 1080, rejected_qty: 0, po_unit_price: 39.39 }]
+  )
+  assert.equal(r.length, 1)
+  assert.equal(r[0].billedQty, 1080)
+  assert.equal(r[0].accepted, 1080)
+  assert.equal(r[0].awaited, 0)
+  assert.equal(r[0].overReceipt, 0)
+  assert.equal(r[0].unbilled, false)
+  assert.equal(r[0].noReceipt, false)
+})
+
+test("the invoice's spelling is the one shown", () => {
+  // It is the document being reconciled; Uniware's copy is the mirror.
+  const r = threeWayBySku(
+    [{ sku_code: "Mcaf212_WB", qty: 10, amount: 100, gst_percent: 0 }],
+    [{ sku_code: "MCAF212_WB", grn_code: "G1", quantity: 10, rejected_qty: 0, po_unit_price: 10 }]
+  )
+  assert.equal(r[0].sku, "Mcaf212_WB")
+})
+
+test("surrounding whitespace does not split a SKU either", () => {
+  const r = lineTotalsBySku([
+    { sku_code: "A-1", qty: 5, amount: 50, gst_percent: 0 },
+    { sku_code: " a-1 ", qty: 5, amount: 50, gst_percent: 0 },
+  ])
+  assert.equal(r.length, 1)
+  assert.equal(r[0].qty, 10)
+})
+
+test("genuinely different SKUs still separate", () => {
+  const r = lineTotalsBySku([
+    { sku_code: "A-1", qty: 5, amount: 50, gst_percent: 0 },
+    { sku_code: "A-2", qty: 5, amount: 50, gst_percent: 0 },
+  ])
+  assert.equal(r.length, 2)
+})
+
+test("GRN receipts fold on case too", () => {
+  const r = grnTotalsBySku([
+    { sku_code: "MCaf212_WB", grn_code: "G1", quantity: 100, rejected_qty: 0, po_unit_price: 10 },
+    { sku_code: "Mcaf212_WB", grn_code: "G2", quantity: 40, rejected_qty: 5, po_unit_price: 10 },
+  ])
+  assert.equal(r.length, 1)
+  assert.equal(r[0].accepted, 135)
+  assert.equal(r[0].grns, 2)
+})

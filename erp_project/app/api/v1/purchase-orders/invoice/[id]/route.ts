@@ -11,6 +11,7 @@ import { supplierInvoicesSql } from "@/lib/queries/supplier-invoices"
 import { uniwareDocsSql } from "@/lib/queries/uniware-documents"
 import { agreedRatesByMfg, type AgreedRate } from "@/lib/costing/agreed-rates"
 import { getViewScope } from "@/lib/brand-view"
+import { isoDate } from "@/lib/date"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import type { InvoiceHistoryHeader, InvoiceHistoryItem, InvoiceGrnLine, InvoiceDocument, InvoiceLegVerification } from "@/types/invoice"
@@ -35,10 +36,13 @@ export const GET = withGateway({
       query<InvoiceLegVerification>(supplierInvoicesSql.selectLegVerifications, [params.id]),
     ])
     if (!headers[0]) throw new ApiError(404, "not_found", `Invoice id=${params.id} not found`)
-
-    // The SKU's CURRENT agreed rate, beside what the order and the invoice said.
-    // Needs the invoice's manufacturer, so it cannot join the parallel batch
-    // above. Same helper the PO quote uses, so the two can never disagree.
+    // The SKU's agreed rate AS ON THE INVOICE DATE, beside what the order and
+    // the invoice said. Today's rate answered the wrong question: material rates
+    // move, so an invoice from two months ago compared against this morning's
+    // costing shows a gap that was never a gap. Falls back to today only when
+    // the document carries no date. Needs the invoice's manufacturer, so it
+    // cannot join the parallel batch above. Same helper the PO quote uses, so
+    // the two can never disagree.
     // mfg_id is optional on the shared header type because the LIST query does
     // not select it; selectInvoiceById returns si.*, so it is always present here.
     const mfgId = headers[0].mfg_id
@@ -48,7 +52,7 @@ export const GET = withGateway({
     // than absent, and the drilldown says so instead of showing it bare.
     const agreed = mfgId == null
       ? new Map<string, AgreedRate>()
-      : await agreedRatesByMfg(mfgId, scope.brandIds)
+      : await agreedRatesByMfg(mfgId, scope.brandIds, isoDate(headers[0].invoice_date) || null)
 
     return NextResponse.json({
       invoice: headers[0], items, grns, documents, verifications,

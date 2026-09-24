@@ -15,7 +15,7 @@ On top of that sits **Add Invoice** — upload a supplier's invoice PDF, have it
 ```mermaid
 sequenceDiagram
     participant U as User (Add Invoice dialog)
-    participant P as /api/v1/purchase-orders/invoice/parse
+    participant P as /api/v2/purchase-orders/invoice/parse
     participant N as Nanonets
     participant C as /api/v1/purchase-orders/invoice (POST)
     participant S3 as S3
@@ -85,7 +85,7 @@ The HTTP status is always `200` once streaming starts: headers are on the wire b
 
 ---
 
-## Nanonets Extraction (`lib/nanonets.ts`)
+## Nanonets Extraction (`lib/nanonets/`)
 
 Two calls on `https://extraction-api.nanonets.com`:
 
@@ -222,7 +222,7 @@ Referenced lines take their brand from the parent PO's number rather than the SK
 
 Lines are written in two passes. Pass 1 credits each line's receipt against its referenced order (that allocation is genuinely per line). Pass 2 runs `mergeInwardLinesBySku` over the staged lines and writes **one inward PO per SKU**.
 
-A single SKU reaches that point several times as a matter of course: the FIFO allocator splits a line covered by two open POs into two rows, and two printed lines can carry the same SKU. Writing one PO per row produced three of our POs against the **one merged item** Uniware creates for the same invoice — nothing the desk could reconcile. `mergeItemsBySku` in `lib/uniware.ts` had already been given this rule (after the 2026-08-12 failure, where a repeated `itemSKU` was rejected outright); this is our side of the same rule, and `tests/unit/inward-merge.test.ts` pins the two together.
+A single SKU reaches that point several times as a matter of course: the FIFO allocator splits a line covered by two open POs into two rows, and two printed lines can carry the same SKU. Writing one PO per row produced three of our POs against the **one merged item** Uniware creates for the same invoice — nothing the desk could reconcile. `mergeItemsBySku` in `lib/uniware/` had already been given this rule (after the 2026-08-12 failure, where a repeated `itemSKU` was rejected outright); this is our side of the same rule, and `tests/unit/inward-merge.test.ts` pins the two together.
 
 - Quantities and amounts **sum**; the unit price is quantity-weighted and rounded to 2dp, exactly as `mergeItemsBySku` does, so the PO's value still equals the lines' value.
 - Descriptive fields take the first non-null.
@@ -244,7 +244,7 @@ Before any transaction opens, `resolveBrands` validates every mapped SKU — an 
 
 ---
 
-## Uniware (Unicommerce) Mirror — `lib/uniware.ts`
+## Uniware (Unicommerce) Mirror — `lib/uniware/`
 
 Uniware's mirror is **one PO carrying every SKU on the invoice**, and since the merge above our inward POs line up with its items 1:1 — one per SKU on both sides. `mergeItemsBySku` stays in `buildPurchaseOrder` as the guard against a repeat reaching the payload. That code is stamped onto every inward PO row (`purchase_orders.uniware_po_code`) as well as the invoice header (`invoice_mfg.uniware_po_code`), so the PO list — the hottest query on that table — doesn't grow a join.
 
@@ -307,7 +307,7 @@ The document-shaped view of the same data: one row per supplier invoice, expandi
 
 | Endpoint | Purpose |
 |----------|---------|
-| `POST /api/v1/purchase-orders/invoice/parse` | Multipart PDF → `{ ok, parsed }`. `422 unparseable` when nothing usable came back (wrong file, unreadable scan) rather than an empty success the user has to diagnose from a blank form. `10 MB` cap, PDF only. |
+| `POST /api/v2/purchase-orders/invoice/parse` | Multipart PDF → `{ ok, parsed, detected, source }`. Reads the PDF's text layer first and only falls through to Nanonets when it refuses; `detected` is the manufacturer matched on the seller GSTIN, `source` names the path that answered. `422 unparseable` when nothing usable came back (wrong file, unreadable scan) rather than an empty success the user has to diagnose from a blank form. `10 MB` cap, PDF only. **The v1 route was deleted** — there is no v1 parser to fall back to. |
 | `POST /api/v1/purchase-orders/invoice` | Multipart (`file` + JSON `payload`) → NDJSON step stream. Validated with `invoiceInwardSchema`; no `schema` on the gateway because it's multipart. |
 | `GET /api/v1/purchase-orders/invoice` | Invoice history list, `?limit` (clamped 1–100) `&offset`, `&search`, plus the filters `&mfgCode` `&destination` `&dateFrom` `&dateTo` (invoice date). All optional; `buildInvoiceParams` turns an absent one into a NULL that switches its predicate off |
 | `GET /api/v1/purchase-orders/invoice/[id]` | One invoice: header, items, and the POs each line resolved to |
@@ -322,9 +322,9 @@ The document-shaped view of the same data: one row per supplier invoice, expandi
 | `lib/invoice/invoice-inward.ts` | The whole committed sequence and its compensation rules |
 | `lib/invoice/invoice-merge.ts` | `mergeInwardLinesBySku` — one inward PO per SKU. Pure, so a unit test can load it |
 | `lib/mail/recipients.ts` | `splitRecipients` — entity_emails rows → `{ to, cc }`. Pure, same reason |
-| `lib/nanonets.ts` | Extraction wire format |
+| `lib/nanonets/` | Extraction wire format |
 | `lib/invoice/invoice-mapping.ts` | Fuzzy invoice → masters mapping |
-| `lib/uniware.ts` | OAuth + PO create/fetch |
+| `lib/uniware/` | OAuth + PO create/fetch |
 | `lib/po/po-receive.ts` | Shared receipt/tolerance/auto-close logic |
 | `lib/queries/supplier-invoices.ts` | SQL for both invoice tables |
 | `types/invoice.ts` | `ParsedInvoice`, `ParsedLineItem`, `OpenPoOption`, invoice-history row types |

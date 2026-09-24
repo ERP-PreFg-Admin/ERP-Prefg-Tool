@@ -33,6 +33,7 @@ import { ApiError } from "@/lib/gateway/errors"
 import { invoiceInwardSchema } from "@/lib/validation/purchase-orders"
 import { runInwardInvoice, type StepEvent } from "@/lib/invoice/invoice-inward"
 import { makeEventId, recordRawEvent, recordProcessedEvent, recordFailedEvent } from "@/lib/events"
+import { MAX_PAGE_SIZE } from "@/lib/constants"
 import logger from "@/lib/logger"
 
 const MAX_BYTES = 10 * 1024 * 1024
@@ -45,7 +46,11 @@ export const GET = withGateway({
     const sp = req.nextUrl.searchParams
     // Clamped rather than rejected: this is a pager, not public API surface
     // worth 400-ing over.
-    const limit  = Math.min(Math.max(Number(sp.get("limit")) || 25, 1), 100)
+    //
+    // MAX_PAGE_SIZE, not 100, so the list's "All" option can actually mean all.
+    // See lib/pagination.ts for what that costs. A set larger than the ceiling
+    // still pages, and the footer says so rather than quietly truncating.
+    const limit  = Math.min(Math.max(Number(sp.get("limit")) || 25, 1), MAX_PAGE_SIZE)
     const offset = Math.max(Number(sp.get("offset")) || 0, 0)
     const search = sp.get("search")?.trim() || null
 
@@ -57,6 +62,7 @@ export const GET = withGateway({
       destination: sp.get("destination")?.trim() || null,
       dateFrom:    sp.get("dateFrom")?.trim()    || null,
       dateTo:      sp.get("dateTo")?.trim()      || null,
+      uniwareStatus: sp.get("uniwareStatus")?.trim() || null,
     })
 
     const [invoices, countRows] = await Promise.all([

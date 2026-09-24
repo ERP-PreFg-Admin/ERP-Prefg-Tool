@@ -16,7 +16,7 @@ async function main() {
   // ── 1. The declared taxonomy is well formed ───────────────────────────────
   const expected = SYSTEM_ROLES.length + DOMAINS.length * DESIGNATIONS.length
   assert.equal(ROLES.length, expected, `${expected} roles declared`)
-  assert.equal(ROLES.length, 17, "17 roles: developer + admin + 5 domains x 3 designations")
+  assert.equal(ROLES.length, 20, "20 roles: developer + admin + 6 domains x 3 designations")
   assert.equal(new Set(ROLE_KEYS).size, ROLE_KEYS.length, "role keys are unique")
   for (const r of ROLES) {
     assert.match(r.key, /^[a-z_]+$/, `${r.key} is lowercase [a-z_] only`)
@@ -24,8 +24,8 @@ async function main() {
   }
   assert.deepEqual(
     APPROVER_ROLES.sort(),
-    ["cost_head", "pm_head", "production_head", "rm_head", "warehouse_head"].sort(),
-    "the five Heads are the approver roles"
+    ["cost_head", "finance_head", "pm_head", "production_head", "rm_head", "warehouse_head"].sort(),
+    "the six Heads are the approver roles"
   )
   for (const r of ROLES) {
     if (r.designation === "head") assert.ok(r.approver, `${r.key} is an approver`)

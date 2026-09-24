@@ -7,8 +7,9 @@
  * permanent new role. This file replaces that with a declared list.
  *
  * ── Shape ─────────────────────────────────────────────────────────────────
- * Fifteen org roles: five domains (RM · PM · Production · Cost · Warehouse) x
- * three designations (Head · Lead · Executive), keyed as `${domain}_${designation}`.
+ * Eighteen org roles: six domains (RM · PM · Production · Cost · Warehouse ·
+ * Finance) x three designations (Head · Lead · Executive), keyed as
+ * `${domain}_${designation}`.
  * Plus two system roles, `developer` and `admin`, which have no designation
  * because they aren't org positions.
  *
@@ -35,6 +36,10 @@ export const DOMAINS = [
   { key: "production", label: "Production" },
   { key: "cost", label: "Cost" },
   { key: "warehouse", label: "Warehouse" },
+  // Verifies the three-way match and releases payment on supplier invoices.
+  // Needs `editor` on /po-tracking/invoices, granted from /admin > Permissions —
+  // only /admin and /approvals are seeded, because only they lack a parent slug.
+  { key: "finance", label: "Finance" },
 ] as const
 
 export const DESIGNATIONS = [

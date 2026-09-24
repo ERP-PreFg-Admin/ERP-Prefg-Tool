@@ -14,7 +14,7 @@
 | mysql2 | 3 | Runtime database access | Connection pool in `lib/db.ts`; NOT Prisma Client |
 | Prisma | 7 | Schema definition and migrations **only** | Client generated to `app/generated/prisma/` — not imported at runtime |
 | NextAuth | v5 beta | Authentication | Google OAuth only, JWT strategy |
-| MySQL / MariaDB | 8.0 on RDS | Primary database (AWS RDS) | Accessed via `mysql2` connection pool |
+| MySQL | 8.0 on RDS | Primary database (AWS RDS) | Accessed via `mysql2` connection pool |
 
 > **Engine note:** the RDS instance is **real MySQL 8.0**, despite this project's docs historically saying MariaDB. Practical consequence: there is no `ADD COLUMN IF NOT EXISTS`, so the hand-written `prisma/*.sql` migrations that add columns are **not** re-runnable (they error on the duplicate column). `CREATE TABLE IF NOT EXISTS` and `MODIFY COLUMN` ones are. Each file's header says which it is.
 
@@ -36,9 +36,10 @@ flowchart LR
     MW --> AR["API Route\n(app/api/v1/**/route.ts)"]
     SC --> LDB["lib/db.ts\n(mysql2 pool)"]
     SC --> LP["lib/permissions.ts\n(resolveAccess)"]
-    AR --> LDB
-    AR --> LA["lib/auth.ts\n(NextAuth)"]
-    LDB --> DB[("MariaDB\n(AWS RDS)")]
+    AR --> GW["lib/gateway/with-gateway.ts\n(auth · access · Zod · scope)"]
+    GW --> LDB
+    GW --> LA["lib/auth.ts\n(NextAuth)"]
+    LDB --> DB[("MySQL 8.0\n(AWS RDS)")]
     SC --> CC["Client Component\n(*Client.tsx)"]
     CC --> AR
 ```
@@ -50,7 +51,7 @@ sequenceDiagram
     participant B as Browser
     participant M as middleware.ts
     participant P as page.tsx (Server)
-    participant DB as lib/db.ts → MariaDB
+    participant DB as lib/db.ts → MySQL 8.0
 
     B->>M: GET /masters/skus
     M->>M: Validate JWT cookie (NextAuth)
@@ -75,17 +76,22 @@ sequenceDiagram
 sequenceDiagram
     participant C as Client Component
     participant R as route.ts (API)
-    participant DB as lib/db.ts → MariaDB
+    participant DB as lib/db.ts → MySQL 8.0
 
     C->>R: POST /api/v1/masters/skus\n{ action: "create", sku_code: "SKU001", name: "..." }
-    R->>R: auth() — verify session (401 if missing)
-    R->>R: Parse body, validate required fields (400 if missing)
-    R->>DB: execute(INSERT INTO skus ...)
+    R->>R: withGateway: auth (401) → access (403)\n→ rateLimit (429) → Zod (400) → scope (403)
+    note over R: The route no longer calls auth() itself.\nSee lib/gateway/with-gateway.ts.
+    R->>DB: execute(INSERT INTO master_skus ...)
     DB-->>R: ResultSetHeader { insertId: 42 }
+    R->>DB: logActivity → activity_log (non-GET only)
     R-->>C: 200 { id: 42 }
     C->>C: router.refresh()
     note over C: Triggers Server Component re-fetch;\nnew row appears in table
 ```
+
+> Errors on this path carry the gateway envelope `{ error, code, details?, requestId }`.
+> The full pipeline, and the four routes that deliberately skip it, are in
+> [API Information Flow §2](./api-information-flow.md).
 
 ## Directory Map
 

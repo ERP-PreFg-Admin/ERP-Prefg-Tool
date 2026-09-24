@@ -133,7 +133,7 @@ export default async function ManufacturerDetailPage({
           <FinalCostingTabContent
             mfgId={id}
             view={tab}
-            search={String(sp.q ?? "")}
+            search={String(sp.search ?? "")}
             page={pagination.page}
             size={pagination.size}
             brandScope={scopeParams(scope.brandIds)}

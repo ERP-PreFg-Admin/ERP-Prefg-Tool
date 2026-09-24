@@ -181,7 +181,7 @@ export default function ThreeWayDialog({
   const [fetchingDocs, setFetchingDocs] = useState(false)
   const [docNote, setDocNote] = useState("")
   const [askClose, setAskClose] = useState(false)
-  /** sku_code → the SKU's current Agreed Final Costing rate. */
+  /** sku_code → the SKU's Agreed Final Costing rate, priced at the invoice date. */
   const [agreedRates, setAgreedRates] = useState<Record<string, AgreedRate>>({})
 
   const id = invoice?.id ?? null
@@ -548,14 +548,20 @@ export default function ThreeWayDialog({
                 />
 
                 {/* Three claims about one unit price: what the order agreed,
-                    what the invoice charged, and what the SKU costs today under
-                    Agreed Final Costing. The last is live — it moves when
-                    material rates do — so a gap is not necessarily an error. */}
+                    what the invoice charged, and what the SKU cost under Agreed
+                    Final Costing ON THE INVOICE DATE — the rates in force then,
+                    not this morning's, so a gap here is a real gap rather than
+                    two months of rate movement. The recipe itself is still read
+                    as it stands today; only the rates are dated. */}
                 <div className="mt-3">
                   <SkuSummary
                     title="Rates by SKU"
-                    head={["SKU", "PO rate", "Invoice rate", "Current agreed rate", "Inv vs agreed"]}
-                    note="agreed rate is today's Final Costing, not the rate at invoice date"
+                    head={["SKU", "PO rate", "Invoice rate",
+                      invoice.invoice_date ? "Agreed rate (invoice date)" : "Current agreed rate",
+                      "Inv vs agreed"]}
+                    note={invoice.invoice_date
+                      ? "agreed rate is Final Costing at the invoice date — material rates as of then, falling back to the current rate where none was on record"
+                      : "no invoice date on file, so the agreed rate is today's Final Costing"}
                     rows={rateRows.map((r) => [
                       r.sku,
                       r.poRate == null ? <span key="p" className="text-muted-foreground">—</span> : money(r.poRate),

@@ -585,7 +585,9 @@ external systems point at by URL and therefore could not move:
 | `/api/health` | the ALB target-group health-check path (`deploy/setup-commands.md`) |
 
 A new major version is a sibling directory (`app/api/v2/...`), not a rewrite of
-v1. **Outbound** URLs are not ours to version: `lib/nanonets/endpoints.ts` calls
+v1. Four v2 routes exist: `purchase-orders/invoice/parse` (its v1 sibling was
+deleted), `files/preview`, `files/view` and `facilities/po-code`.
+**Outbound** URLs are not ours to version: `lib/nanonets/endpoints.ts` calls
 Nanonets' own `/api/v2/`, and a repo-wide find-replace on `"/api/"` once rewrote
 it to `/api/v1/v2/` — a 404 that compiled, linted and type-checked.
 `tests/unit/nanonets-endpoints.test.ts` now pins it.
@@ -607,11 +609,18 @@ it to `/api/v1/v2/` — a 404 that compiled, linted and type-checked.
 | `app/api/v1/admin/permissions/route.ts` | Role page grants — GET / POST / DELETE (DELETE = "inherit") |
 | `app/api/v1/admin/user-permissions/route.ts` | Per-user page permission overrides |
 | `app/api/v1/admin/entity-scope/route.ts` | PUT — replaces one `(user, entity_type)` data-scope set |
-| `app/api/v1/purchase-orders/invoice/parse/route.ts` | Multipart PDF → Nanonets extraction (50–70 s; `maxDuration = 300`) |
+| `app/api/v2/purchase-orders/invoice/parse/route.ts` | Multipart PDF → local text layer first, Nanonets when it refuses (50–70 s; `maxDuration = 300`). **The v1 route was deleted** — there is no v1 parser |
 | `app/api/v1/purchase-orders/invoice/route.ts` | GET invoice history · POST commit (NDJSON step stream, always HTTP 200) |
 | `app/api/v1/purchase-orders/invoice/[id]/route.ts` | One invoice + its lines + the POs each resolved to |
+| `app/api/v1/purchase-orders/invoice/[id]/verify` · `/payment` · `/documents` | Three-way leg sign-off · payment lifecycle · per-invoice Uniware document sync. All direct writes, no approval |
+| `app/api/v1/purchase-orders/invoice/summary/route.ts` | Three-way match rolled up over the whole filter, not the page |
 | `app/api/v1/purchase-orders/open-for-receive/route.ts` | Open POs for the per-line Reference PO picker |
-| `app/api/v1/files/preview/route.ts` | Server-side parse of a bulk-upload CSV/Excel → `{ headers, rows }` for the approval CSV preview |
+| `app/api/v1/purchase-orders/uniware-status` · `/uniware-grn` · `/uniware-documents` | Unicommerce sweeps — status+receipts · GRNs · documents both directions |
+| `app/api/v1/uniware/explorer/**` · `/session` | Read-only tenant window (slug `/uniware`, granted per person, admins do **not** inherit) · where the Chrome extension drops the web cookie (**no `withGateway`** — minting the token is the auth) |
+| `app/api/v1/gatepass/summary` · `/create` | Per-facility gatepass, NDJSON, one facility per request |
+| `app/api/v1/webhooks/ses/route.ts` | SES bounces/complaints via SNS → `email_suppressions`. **No `withGateway`** — the SNS signature check is the entire access control |
+| `app/api/v2/files/preview` · `/view` | Bulk-CSV preview · S3 object streamed through the app. Both gate on `assertKeyReadable`; the v1 siblings stay live with the same back-ported guard |
+| `app/api/v2/facilities/po-code/route.ts` | Per-facility segment of the ERP-minted Uniware PO code |
 | `app/api/auth/[...nextauth]/route.ts` | NextAuth — Google OAuth |
 
 **All routes go through `withGateway`** (`lib/gateway/with-gateway.ts`): session → `access: { pageSlug, level }` → Zod → handler, error shape `{ error, code, details?, requestId }`, plus an `activity_log` row on every non-GET. Throw `ApiError(status, code, message)` for user-facing failures.

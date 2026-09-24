@@ -11,3 +11,13 @@ uniware_sku_export/.env
 # Real supplier documents. This root Invoices/ is separate from erp_project/Invoices/,
 # which erp_project/.gitignore already covers.
 /Invoices/
+api-docs
+api-docs/*
+process-docs
+process-docs/*
+rm-type-backfill
+rm-type-backfill/*
+uniware_session_extension.zip
+vendor-duplicate-impact.csv
+vendor-duplicate-registered-names.csv
+/erp_project/docs/api

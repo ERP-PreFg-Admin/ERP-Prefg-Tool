@@ -48,7 +48,7 @@ export const poCreateSchema = z
 
 export const poActionSchema = z.union([poBulkSchema, poCreateSchema])
 
-// /api/v1/purchase-orders/invoice/parse takes the PDF as multipart/form-data and
+// /api/v2/purchase-orders/invoice/parse takes the PDF as multipart/form-data and
 // validates it in the route — nothing is in S3 at parse time, so there's no key
 // to schema-check here.
 

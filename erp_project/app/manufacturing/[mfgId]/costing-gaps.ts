@@ -48,10 +48,26 @@ export const MISC_LABEL: Record<MiscCostType, string> = {
 }
 
 /**
+ * Misc costs that only some arrangements carry, so their absence is not a gap.
+ *
+ * Utility and Margin are charged by some manufacturers and not others — unlike
+ * JW, shrink, shipper and the two wastage percentages, which every costed line
+ * is expected to declare even when the answer is 0. Warning about them turned
+ * every SKU amber the day they were added, which trains people to ignore the
+ * warning that does mean something.
+ *
+ * They still price normally when present: computeTotalCosting adds both, and
+ * ZERO_MISC covers the absent case.
+ */
+export const OPTIONAL_MISC: readonly MiscCostType[] = ["utility", "margin"] as const
+
+/**
  * Misc costs with no `bom_misc` row for this recipe × manufacturer. An absent
- * key and a genuine 0% are different states — only the absent ones are gaps.
+ * key and a genuine 0% are different states — only the absent ones are gaps,
+ * and only for the types every line is expected to carry.
  */
 export function missingMiscReasons(misc: Partial<Record<MiscCostType, number>>): string[] {
-  const missing = (Object.keys(MISC_LABEL) as MiscCostType[]).filter((t) => misc[t] === undefined)
+  const missing = (Object.keys(MISC_LABEL) as MiscCostType[])
+    .filter((t) => misc[t] === undefined && !OPTIONAL_MISC.includes(t))
   return missing.length === 0 ? [] : [`No ${missing.map((t) => MISC_LABEL[t]).join(", ")} cost set for this manufacturer`]
 }

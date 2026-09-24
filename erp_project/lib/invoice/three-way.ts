@@ -148,17 +148,35 @@ export function lineTotals(
  * single line. Insertion-ordered, so it follows the document rather than
  * re-sorting into an order nobody chose.
  */
+/**
+ * The grouping key for a SKU code: trimmed and lower-cased.
+ *
+ * MySQL's collation (utf8mb4_0900_ai_ci) is case-INSENSITIVE, so every join in
+ * SQL already treats "Mcaf212_WB" and "MCaf212_WB" as one SKU. A JS Map keyed
+ * on the raw string does not, and the drilldown split that SKU into two rows —
+ * the invoice's spelling showing "awaiting" with nothing received, and
+ * Uniware's showing the receipt as "unbilled, +1,080 over". One SKU, fully
+ * received, reported as two problems.
+ *
+ * Same rule as norm() in po-inwarding/invoice-form.ts, which the FIFO allocator
+ * matches on, so the screen agrees with how the quantity was booked.
+ */
+const skuKey = (s: string | null | undefined) => (s ?? "—").trim().toLowerCase()
+
 export function lineTotalsBySku<T extends { sku_code?: string | null }>(
   lines: readonly (T & { qty?: unknown; amount?: unknown; gst_percent?: unknown })[]
-): ({ sku: string; lines: number } & ReturnType<typeof lineTotals>)[] {
-  const groups = new Map<string, typeof lines[number][]>()
+): ({ sku: string; key: string; lines: number } & ReturnType<typeof lineTotals>)[] {
+  // Keyed on the folded spelling; the FIRST spelling seen is what gets shown,
+  // so the document's own wording survives.
+  const groups = new Map<string, { label: string; rows: typeof lines[number][] }>()
   for (const l of lines) {
-    const sku = l.sku_code ?? "—"
-    const g = groups.get(sku)
-    if (g) g.push(l)
-    else groups.set(sku, [l])
+    const key = skuKey(l.sku_code)
+    const g = groups.get(key)
+    if (g) g.rows.push(l)
+    else groups.set(key, { label: l.sku_code ?? "—", rows: [l] })
   }
-  return [...groups.entries()].map(([sku, rows]) => ({ sku, lines: rows.length, ...lineTotals(rows) }))
+  return [...groups.entries()].map(([key, g]) =>
+    ({ sku: g.label, key, lines: g.rows.length, ...lineTotals(g.rows) }))
 }
 
 /** The rate to print beside a GST amount. "mixed" when the lines disagree —
@@ -211,15 +229,20 @@ export function threeWayBySku(
   items: readonly { sku_code?: string | null; qty?: unknown; amount?: unknown; gst_percent?: unknown }[],
   grns: readonly { sku_code?: string | null; grn_code?: string; quantity?: unknown; rejected_qty?: unknown; po_unit_price?: unknown }[]
 ): SkuThreeWay[] {
-  const billed  = new Map(lineTotalsBySku(items).map((s) => [s.sku, s]))
-  const arrived = new Map(grnTotalsBySku(grns).map((g) => [g.sku, g]))
+  // Both sides keyed on the FOLDED spelling — the union is where the case
+  // mismatch actually bit, splitting one SKU into a billed row and a received row.
+  const billed  = new Map(lineTotalsBySku(items).map((s) => [s.key, s]))
+  const arrived = new Map(grnTotalsBySku(grns).map((g) => [g.key, g]))
 
   // Invoice order first, then receipt-only SKUs — the document leads.
-  const skus = [...billed.keys(), ...[...arrived.keys()].filter((s) => !billed.has(s))]
+  const keys = [...billed.keys(), ...[...arrived.keys()].filter((k) => !billed.has(k))]
 
-  return skus.map((sku) => {
-    const b = billed.get(sku)
-    const a = arrived.get(sku)
+  return keys.map((key) => {
+    const b = billed.get(key)
+    const a = arrived.get(key)
+    // The invoice's spelling wins when both have one: it is the document being
+    // reconciled, and Uniware's copy is the mirror.
+    const sku = b?.sku ?? a?.sku ?? "—"
     const r = reconcile({
       invoicedQty: b?.qty ?? 0,
       accepted: a?.accepted ?? 0,
@@ -352,15 +375,15 @@ export function grnTotals(
 /** Receipts rolled up per SKU — one SKU can arrive across several receipts. */
 export function grnTotalsBySku<T extends { sku_code?: string | null }>(
   rows: readonly (T & { grn_code?: string; quantity?: unknown; rejected_qty?: unknown; po_unit_price?: unknown })[]
-): ({ sku: string } & GrnTotals)[] {
-  const groups = new Map<string, typeof rows[number][]>()
+): ({ sku: string; key: string } & GrnTotals)[] {
+  const groups = new Map<string, { label: string; rows: typeof rows[number][] }>()
   for (const r of rows) {
-    const sku = r.sku_code ?? "—"
-    const g = groups.get(sku)
-    if (g) g.push(r)
-    else groups.set(sku, [r])
+    const key = skuKey(r.sku_code)
+    const g = groups.get(key)
+    if (g) g.rows.push(r)
+    else groups.set(key, { label: r.sku_code ?? "—", rows: [r] })
   }
-  return [...groups.entries()].map(([sku, rs]) => ({ sku, ...grnTotals(rs) }))
+  return [...groups.entries()].map(([key, g]) => ({ sku: g.label, key, ...grnTotals(g.rows) }))
 }
 
 const qty   = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 3 })

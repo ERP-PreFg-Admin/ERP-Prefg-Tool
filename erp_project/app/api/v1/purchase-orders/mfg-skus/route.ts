@@ -30,13 +30,6 @@ export const GET = withGateway({
     const rows = await query<{ sku_code: string; sku_name: string; recipe_id: number; bom_code: string; bom_status: string | null; entity_code: string | null }>(
       manufacturingSql.selectOrderableBomsForMfg, [parsed.data.mfg_id, ...scopeParams(scope.brandIds)]
     )
-
-    // Collapsed back to one entry per SKU — the query fans out by recipe, but
-    // the dialog lists SKUs and offers their recipes within the row.
-    //
-    // entity_code rides on the SKU, not the recipe: it comes from the SKU's brand,
-    // so every recipe row for one SKU carries the same value. The dialog uses it to
-    // narrow that row's destination dropdown to the entity's facilities.
     const bySku = new Map<string, { sku_code: string; sku_name: string; entity_code: string | null; boms: { recipe_id: number; bom_code: string; status: string | null }[] }>()
     for (const r of rows) {
       if (!bySku.has(r.sku_code)) bySku.set(r.sku_code, { sku_code: r.sku_code, sku_name: r.sku_name, entity_code: r.entity_code, boms: [] })

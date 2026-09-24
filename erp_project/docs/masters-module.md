@@ -12,13 +12,18 @@ Master data records are created once and referenced repeatedly by transactional 
 
 | Entity | Route | API Endpoint | Tables |
 |--------|-------|-------------|--------|
-| SKUs | `/masters/skus` | `POST /api/v1/masters/skus` | `skus` |
-| Vendors | `/masters/vendors` | `POST /api/v1/masters/vendors` | `master_vendors`, `vendor_details` |
-| Manufacturers | `/masters/manufacturers` | `POST /api/v1/masters/manufacturers` | `master_mfgs`, `mfg_details` |
-| Raw Materials | `/masters/raw-materials` | `POST /api/v1/masters/raw-materials` | `master_rm`, `cost_master_rm_ven`, `cost_master_rm_mfg`, `vrm_history`, `history_cost_ven`, `history_cost_mfg` |
+| SKUs | `/masters/skus` | `POST /api/v1/masters/skus` | `master_skus`, `sku_variants` |
+| Vendors | `/masters/vendors` | `POST /api/v1/masters/vendors` | `master_vendors`, `details_vendor` |
+| Manufacturers | `/masters/manufacturers` | `POST /api/v1/masters/manufacturers` | `master_mfgs`, `details_mfg` |
+| Raw Materials | `/masters/raw-materials` | `POST /api/v1/masters/raw-materials` | `master_rm`, `cost_master_rm_ven`, `cost_master_rm_mfg`, `history_cost_ven`, `history_cost_mfg` |
 | Packing Materials | `/masters/packing-materials` | `POST /api/v1/masters/packing-materials` | `master_pm`, `cost_master_pm_ven`, `cost_master_pm_mfg`, `history_cost_ven`, `history_cost_mfg` |
 | Material Master | `/masters/material-master` | `POST /api/v1/masters/material-master` | `master_rm`, `master_pm` |
-| BOM Master | `/masters/recipe-master` | `POST /api/v1/masters/recipe-master` | `bom`, `bom_details` |
+| Recipe Master | `/masters/recipe-master` | `POST /api/v1/masters/recipe-master` | `master_recipe`, `details_recipe`, `history_recipe` |
+
+> **Table names here are the real MySQL tables**, not `prisma/schema.prisma`'s model
+> names, which still carry the pre-rename spellings. The approval module code for
+> Recipe Master is still `BOM` — renaming it would strand every historical
+> `approvals` row on a 422. See [api/approvals.md](./api/approvals.md).
 
 ## Server + Client Component Pattern
 
@@ -51,7 +56,7 @@ export default async function SkusPage() {
   const access = await resolveAccess(Number(session.user.id), session.user.roles, "/masters");
   if (access === "none") redirect("/auth/unauthorized");
 
-  const skus = await query<Sku>("SELECT id, sku_code, name, brand, category, status, created_at FROM skus ORDER BY sku_code ASC");
+  const skus = await query<Sku>("SELECT id, sku_code, name, brand, category, status, created_at FROM master_skus ORDER BY sku_code ASC");
   return <SkusClient initialSkus={skus} />;
 }
 ```
@@ -63,7 +68,7 @@ flowchart LR
     U["User action\n(Add record / Upload CSV)"]
     CC["Client Component\n(*Client.tsx)"]
     AR["API Route\n(/api/v1/masters/*)"]
-    DB["MariaDB\n(via lib/db.ts)"]
+    DB["MySQL 8.0\n(via lib/db.ts)"]
     SC["Server Component\n(page.tsx re-runs)"]
     T["Updated table\nin browser"]
 
@@ -328,7 +333,7 @@ app/masters/material-master/
 
 ### Structure
 
-A BOM (Bill of Materials) links a SKU to a manufacturing site with a versioned `bom_code`. It contains material line items (`bom_details`) specifying what raw and packing materials are needed, in what quantity, and at what cost.
+A BOM (Bill of Materials) links a SKU to a manufacturing site with a versioned `bom_code`. It contains material line items (`details_recipe`) specifying what raw and packing materials are needed, in what quantity, and at what cost.
 
 ```
 bom (header)
@@ -336,7 +341,7 @@ bom (header)
 ├── mfg_id   → which plant
 ├── bom_code → version identifier
 ├── effective_from / effective_till → validity window (recipe-level)
-└── bom_details[] (line items)
+└── details_recipe[] (line items)
     ├── mtrl_type: "rm" | "pm" | "sku"
     ├── mtrl_id: master_rm.id | master_pm.id | master_skus.id  (NO foreign key)
     ├── amount: RM % | PM per-unit qty | kit unit count
@@ -392,7 +397,7 @@ Applies to **new (non-backfilled), non-bulk** BOMs only — the `new-version` pa
 
 ### BOMMasterComponent
 
-`app/masters/recipe-master/BOMMasterComponent.tsx` renders a flat joined view of `bom_details` + `bom` (one row per material line). Each row shows the BOM code, SKU code, material type and ID, amounts, costs, and effective dates.
+`app/masters/recipe-master/BOMMasterComponent.tsx` renders a flat joined view of `details_recipe` + `master_recipe` (one row per material line). Each row shows the BOM code, SKU code, material type and ID, amounts, costs, and effective dates.
 
 ## CSV Import Workflow
 
@@ -405,7 +410,7 @@ sequenceDiagram
     participant C as Client Component
     participant R as API Route
     participant S3 as S3
-    participant DB as MariaDB
+    participant DB as MySQL 8.0
     participant Ap as Approver
 
     U->>D: Click "Upload CSV"

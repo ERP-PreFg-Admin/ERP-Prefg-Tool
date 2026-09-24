@@ -136,6 +136,7 @@ export const POST = withGateway({
     let unmatchedLines = 0
     let grnBudget = GRN_BUDGET
     let grnDeferred = 0
+    let cancelled = 0
     const failures: { code: string; error: string }[] = []
 
     for (const row of batch) {
@@ -149,6 +150,21 @@ export const POST = withGateway({
         // Free: the same call already carried it, and it is what tells us
         // whether the receipt walk below is worth making at all.
         await execute(uniwareGrn.setGrnCount, [grnCount, row.id])
+
+        // The warehouse cancels in Uniware and nothing told this side, so the
+        // inward POs went on reading `received` against an order that no longer
+        // exists — still counted on the Inward tab and in every open-PO figure.
+        // Idempotent, so a re-sync of an already-cancelled PO is a no-op.
+        if (String(status).toUpperCase() === "CANCELLED") {
+          const res = await execute(uniwareGrn.cancelInwardPosByUniwareCode, [row.uniware_po_code])
+          if (res.affectedRows > 0) {
+            cancelled += res.affectedRows
+            logger.info({
+              ...ctx, poCode: row.uniware_po_code, inwardPos: res.affectedRows,
+              message: "Uniware cancelled this PO — cancelled our inward POs for it",
+            })
+          }
+        }
 
         // Also free from that call: pending and QC-pass per line, which have no
         // local equivalent. Matched onto our inward PO by SKU. A line whose SKU
@@ -218,6 +234,8 @@ export const POST = withGateway({
       // has to pick up.
       receipts,
       grnDeferred,
+      // Inward POs closed off because Uniware cancelled the PO they mirror.
+      cancelled,
       unmatchedLines,
     })
   },
