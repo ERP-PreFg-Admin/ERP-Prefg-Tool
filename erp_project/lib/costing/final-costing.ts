@@ -6,6 +6,7 @@
  */
 
 import type { MiscCostType } from "@/types/masters"
+import { ABSOLUTE_COST_TYPES, REQUIRED_COST_TYPES, ZERO_COST_TYPES } from "./cost-types"
 
 /** RM lines are a formulation PERCENTAGE of the SKU's fill weight (grams), converted to kg before pricing per-kg. */
 export function computeRmCost(filling: number, amountPct: number, ratePerKg: number): number {
@@ -36,8 +37,10 @@ export function computeWastage(rmCost: number, pmCost: number, rmLossPct: number
  *
  * `margin` belongs here: it is a flat amount on top of the cost, not a
  * percentage of it. Reading it as a percentage would silently divide it by 100.
+ *
+ * Derived from `basis` in lib/costing/cost-types.ts — declare it there.
  */
-export const MISC_ABSOLUTE = ["jw", "shrink", "shipper", "utility", "margin"] as const
+export const MISC_ABSOLUTE = ABSOLUTE_COST_TYPES
 
 /**
  * Every misc cost at zero — the starting point for "this recipe has no
@@ -45,10 +48,10 @@ export const MISC_ABSOLUTE = ["jw", "shrink", "shipper", "utility", "margin"] as
  *
  * Exported because two callers kept their own copy of this literal, so adding a
  * cost type meant finding both. A missed one reads as a genuine zero, which is
- * indistinguishable from "not set" once it reaches a price.
+ * indistinguishable from "not set" once it reaches a price. It is now derived
+ * from the cost-type table, so it cannot fall behind at all.
  */
-export const ZERO_MISC: Record<MiscCostType, number> =
-  { jw: 0, shrink: 0, shipper: 0, utility: 0, margin: 0, rm_loss: 0, pm_loss: 0 }
+export const ZERO_MISC: Record<MiscCostType, number> = ZERO_COST_TYPES
 
 /**
  * Every field REQUIRED, none optional with a `?? 0` default.
@@ -72,4 +75,42 @@ export function computeTotalCosting(params: {
 }): number {
   return params.rmCost + params.pmCost + params.wastageTotal
     + params.jw + params.shrink + params.shipper + params.utility + params.margin
+}
+
+/**
+ * Is this SKU × manufacturer costing understated?
+ *
+ * ── Why the zero tests alone were not enough ─────────────────────────────────
+ * This used to be `rmCost <= 0 || pmCost <= 0 || <misc undefined>`, copied
+ * verbatim into the Final Costing page AND the export. A line with no agreed
+ * rate contributes 0 to the SUM rather than dropping out, so a recipe with three
+ * PM lines and two missing rates still totals a positive pm_cost — the zero test
+ * never fires and the row reads as fully costed while being materially cheap.
+ * 51 of 196 live pairs were in that state (39 RM, 15 PM) when this was found.
+ *
+ * `rmLinesWithoutRate` / `pmLinesWithoutRate` were already computed in SQL
+ * (manufacturingSql material cost) and already used by rateGapReasons to EXPLAIN
+ * the flag — they just never set it.
+ *
+ * Lives here, beside the formula, because the page and the export each held
+ * their own copy and a fix to one silently left the other lying.
+ */
+export function isIncompleteCosting(params: {
+  /** False when the recipe has no material-cost row at all. */
+  hasMaterial: boolean
+  rmCost: number
+  pmCost: number
+  rmLinesWithoutRate: number
+  pmLinesWithoutRate: number
+  /** Absent key = no bom_misc row. A genuine 0 is NOT a gap. */
+  misc: Partial<Record<MiscCostType, number>>
+}): boolean {
+  const { hasMaterial, rmCost, pmCost, rmLinesWithoutRate, pmLinesWithoutRate, misc } = params
+  return !hasMaterial
+    || rmCost <= 0 || pmCost <= 0
+    // A PARTIAL rate gap still totals > 0, so the zero tests above miss it.
+    || rmLinesWithoutRate > 0 || pmLinesWithoutRate > 0
+    // utility/margin are deliberately absent — they are `required: false` in
+    // lib/costing/cost-types.ts, which is where this list now comes from.
+    || REQUIRED_COST_TYPES.some((t) => misc[t] === undefined)
 }

@@ -5,6 +5,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
   computeRmCost, computePmCost, computeWastage, computeTotalCosting, wastageFraction,
+  isIncompleteCosting,
 } from "../../lib/costing/final-costing"
 
 // Worked by hand from the formula's intent: an RM line is a PERCENTAGE of the
@@ -147,4 +148,50 @@ test("the full costing chain composes as the mfgId page uses it", () => {
   })
   assert.equal(wastage.total, 4.5)
   assert.equal(total, 66.5) // 30 + 15 + 4.5 + 5 + 1 + 2 + 3 + 6
+})
+
+// ── isIncompleteCosting ─────────────────────────────────────────────────────
+// The regression this exists for: a line with no agreed rate contributes 0 to
+// the SUM rather than dropping out, so a PARTIAL gap still totals > 0. The old
+// `pmCost <= 0` test therefore read a materially cheap row as fully costed.
+// 51 of 196 live SKU x manufacturer pairs were in that state.
+
+const FULL_MISC = { jw: 5, shrink: 1, shipper: 2, rm_loss: 3, pm_loss: 3 }
+const costed = (over: Partial<Parameters<typeof isIncompleteCosting>[0]> = {}) => ({
+  hasMaterial: true, rmCost: 30, pmCost: 15,
+  rmLinesWithoutRate: 0, pmLinesWithoutRate: 0, misc: FULL_MISC, ...over,
+})
+
+test("a fully costed line is not incomplete", () => {
+  assert.equal(isIncompleteCosting(costed()), false)
+})
+
+test("SOME PM lines missing a rate is incomplete even though pm_cost is positive", () => {
+  // MCaf392 @ MFG-003-ARO: 3 PM lines, 2 without a rate, pm_cost 17.43.
+  assert.equal(isIncompleteCosting(costed({ pmCost: 17.43, pmLinesWithoutRate: 2 })), true)
+})
+
+test("SOME RM lines missing a rate is incomplete even though rm_cost is positive", () => {
+  assert.equal(isIncompleteCosting(costed({ rmCost: 30, rmLinesWithoutRate: 1 })), true)
+})
+
+test("a zero cost is still incomplete, as before", () => {
+  assert.equal(isIncompleteCosting(costed({ pmCost: 0 })), true)
+  assert.equal(isIncompleteCosting(costed({ rmCost: 0 })), true)
+})
+
+test("no material-cost row at all is incomplete", () => {
+  assert.equal(isIncompleteCosting(costed({ hasMaterial: false })), true)
+})
+
+test("an absent misc type is incomplete, but a genuine zero is not", () => {
+  const noJw = { shrink: 1, shipper: 2, rm_loss: 3, pm_loss: 3 }
+  assert.equal(isIncompleteCosting(costed({ misc: noJw })), true)
+  assert.equal(isIncompleteCosting(costed({ misc: { ...FULL_MISC, jw: 0 } })), false)
+})
+
+test("utility and margin are optional — their absence is not a gap", () => {
+  // Mirrors OPTIONAL_MISC in costing-gaps.ts. Warning about these turned every
+  // SKU amber the day they were added.
+  assert.equal(isIncompleteCosting(costed({ misc: FULL_MISC })), false)
 })
