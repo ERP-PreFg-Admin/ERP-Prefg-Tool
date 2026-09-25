@@ -688,10 +688,61 @@ export const manufacturingSql = {
    * three consumers (costing-breakup.ts, [mfgId]/page.tsx, the detailed export) at
    * once, which is why none of them branch on a third type.
    *
-   * Consequence, and it is the intended one: a kit with only component lines has no
-   * costing here at all, so it reads as UNCOSTED rather than as costing zero.
+   * Consequence, and it is the intended one: a kit's component lines are absent
+   * from THIS query's result. They are costed by selectKitComponentsByMfg and
+   * lib/costing/kit-costing.ts instead, and reach the breakup panel as their own
+   * `component` line type — so this filter stays exactly as it is.
    * Params: [mfg_id, mfg_id, mfg_id]
    */
+  /**
+   * A manufacturer's GIFT KIT component lines, with every manufacturer that could
+   * price each component.
+   *
+   * `details_recipe.mtrl_type = 'sku'` is a kit's contents — the component FG's
+   * `master_skus.id` in `mtrl_id`, and a UNIT COUNT in `amount` (see
+   * lib/masters/kit-sku.ts). The two sibling costing queries deliberately drop
+   * these lines; this is the one query that reads them.
+   *
+   * ── Why candidates, not one resolved manufacturer ────────────────────────────
+   * A component can be made at several manufacturers. The rule is: prefer the one
+   * assembling the kit when it is among them. That much is expressible here — but
+   * the fallback when it is NOT among them is "cheapest", and cheapest needs each
+   * candidate's full costing, which is computed in TypeScript. Resolving half the
+   * rule in SQL and half in TS would put the policy in two places, so this returns
+   * ONE ROW PER CANDIDATE and lib/costing/kit-costing.ts decides. `kit_mfg_id` is
+   * carried on every row so the comparison needs no second lookup.
+   *
+   * A component with no recipe, or a recipe with no live manufacturer line, yields
+   * a single row with a NULL `candidate_mfg_id` — present, and visibly uncostable.
+   * Dropping it instead would make an unpriceable kit look complete.
+   *
+   * Params: [mfg_id, brandScope×2]
+   */
+  selectKitComponentsByMfg: `
+    SELECT
+      kbm.recipe_id              AS kit_recipe_id,
+      kbm.mfg_id                 AS kit_mfg_id,
+      ksk.sku_code               AS kit_sku_code,
+      d.mtrl_id                  AS component_sku_id,
+      cs.sku_code                AS component_sku_code,
+      cs.name                    AS component_sku_name,
+      d.amount                   AS units,
+      cbm.mfg_id                 AS candidate_mfg_id
+    FROM master_recipe_mfg kbm
+    INNER JOIN master_recipe kb  ON kb.id = kbm.recipe_id
+    LEFT  JOIN master_skus  ksk  ON ksk.id = kb.sku_id
+    INNER JOIN details_recipe d  ON d.recipe_id = kbm.recipe_id
+                                AND d.status = 'active'
+                                AND d.mtrl_type = 'sku'
+    LEFT  JOIN master_skus  cs   ON cs.id = d.mtrl_id
+    LEFT  JOIN master_recipe cb  ON cb.sku_id = cs.id
+    LEFT  JOIN master_recipe_mfg cbm ON cbm.recipe_id = cb.id
+                                    AND cbm.status IN ('active', 'discontinued')
+    WHERE kbm.mfg_id = ? AND kbm.status IN ('active', 'discontinued')
+      AND (? IS NULL OR ksk.brand_id IS NULL OR ksk.brand_id IN (?))
+    ORDER BY ksk.sku_code, cs.sku_code
+  `,
+
   selectBomLineDetailByMfg: `
     SELECT
       mbm.recipe_id, sk.sku_code, sk.name AS sku_name,

@@ -35,6 +35,16 @@ const COL_COUNT = COSTING_COL_COUNT + 1
 // only the vague fallback below is specific to this table (it needs the
 // computed costs, which the SKUs tab doesn't have).
 function incompleteReasons(r: FinalCostingRow): string {
+  // A gift kit has no RM lines and no fill weight, so rateGapReasons has nothing
+  // to say and the vague fallback below would report "Possibly missing: RM cost"
+  // — pointing at a rate master that can never fix it. A kit's gaps are about its
+  // COMPONENTS, and they arrive already worded.
+  if (r.kit) {
+    if (r.kit.gaps.length > 0) return r.kit.gaps.join(" · ")
+    // Every component priced, so whatever is wrong is on the kit's own PM side.
+    return rateGapReasons(r).join(" · ") || "Possibly missing: PM cost"
+  }
+
   const reasons = rateGapReasons(r)
 
   // Only fall back to the vague forms when the precise ones found nothing.

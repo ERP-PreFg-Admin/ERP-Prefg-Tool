@@ -96,6 +96,10 @@ function LineRows({ lines, label, total }: { lines: BreakupLine[]; label: string
 export default function CostingBreakupPanel(
   { breakup, sku }: { breakup: CostingBreakup; sku: SkuRef },
 ) {
+  // A gift kit's contents. Their own section: they hold the RM position in the
+  // costing, but they are finished goods and their "rate" is each one's whole
+  // final cost, not a per-kg or per-unit material rate.
+  const componentLines = breakup.lines.filter((l) => l.type === "component")
   const rmLines = breakup.lines.filter((l) => l.type === "rm")
   const pmLines = breakup.lines.filter((l) => l.type === "pm")
 
@@ -148,7 +152,12 @@ export default function CostingBreakupPanel(
                 </tr>
               ) : (
                 <>
-                  <LineRows lines={rmLines} label="Raw material" total={breakup.rmTotal} />
+                  {componentLines.length > 0 && (
+                    <LineRows lines={componentLines} label="Kit components" total={breakup.rmTotal} />
+                  )}
+                  {rmLines.length > 0 && (
+                    <LineRows lines={rmLines} label="Raw material" total={breakup.rmTotal} />
+                  )}
                   <LineRows lines={pmLines} label="Packing material" total={breakup.pmTotal} />
                 </>
               )}

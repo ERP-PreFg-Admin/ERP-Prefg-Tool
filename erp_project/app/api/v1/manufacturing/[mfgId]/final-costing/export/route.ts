@@ -22,7 +22,8 @@ import { getUserScope, assertInScope, scopeParams } from "@/lib/scope"
 import { mfgIdParamSchema } from "@/lib/validation/manufacturing"
 import { buildCsv, buildXlsx, buildExportFilename } from "@/lib/export"
 import { FINAL_COSTING_EXPORT_COLUMNS } from "@/lib/export-configs"
-import { computeWastage, computeTotalCosting } from "@/lib/costing/final-costing"
+import { buildFinalCostingRow } from "@/lib/costing/final-costing-row"
+import { kitCostingByMfg } from "@/lib/costing/agreed-rates"
 import type { MfgLine, FinalCostingRow, MiscCostType } from "@/types/masters"
 import logger from "@/lib/logger"
 
@@ -52,6 +53,10 @@ export const GET = withGateway({
         query<{ recipe_id: number; type: MiscCostType; cost: string }>(manufacturingSql.selectMiscCostsByMfg, [mfgId]),
       ])
 
+      // Gift kit components are finished goods priced at THEIR OWN manufacturer,
+      // so they cannot come from the per-mfg queries above.
+      const kitCosting = await kitCostingByMfg(mfgId, scope.brandIds)
+
       const materialByBom = new Map(materialCostRows.map((r) => [r.recipe_id, {
         rm: Number(r.rm_cost),
         pm: Number(r.pm_cost),
@@ -67,44 +72,16 @@ export const GET = withGateway({
         miscByBom.set(r.recipe_id, entry)
       }
 
-      const rows: FinalCostingRow[] = lineRows.map((l) => {
-        const material = materialByBom.get(l.recipe_id)
-        const misc = miscByBom.get(l.recipe_id) ?? {}
-        const rmCost = material?.rm ?? 0
-        const pmCost = material?.pm ?? 0
-        const { rmWastage, pmWastage, total: wastage } = computeWastage(rmCost, pmCost, misc.rm_loss ?? 0, misc.pm_loss ?? 0)
-        const jw = misc.jw ?? 0
-        const shrink = misc.shrink ?? 0
-        const shipper = misc.shipper ?? 0
-        const utility = misc.utility ?? 0
-        const margin = misc.margin ?? 0
-        const total = computeTotalCosting({ rmCost, pmCost, wastageTotal: wastage, jw, shrink, shipper, utility, margin })
-        const incomplete =
-          !material || rmCost <= 0 || pmCost <= 0 ||
-          misc.jw === undefined || misc.shrink === undefined || misc.shipper === undefined ||
-          misc.rm_loss === undefined || misc.pm_loss === undefined
-        return {
-          recipe_id: l.recipe_id,
-          sku_code: l.sku_code,
-          sku_name: l.sku_name,
-          rm_cost: rmCost,
-          pm_cost: pmCost,
-          jw,
-          shrink,
-          shipper,
-          utility,
-          margin,
-          rm_wastage: rmWastage,
-          pm_wastage: pmWastage,
-          wastage,
-          total,
-          incomplete,
-          filling: material?.filling ?? null,
-          rm_lines_without_rate: material?.rmLinesWithoutRate ?? 0,
-          pm_lines_without_rate: material?.pmLinesWithoutRate ?? 0,
-          rm_line_count: material?.rmLineCount ?? 0,
-        }
-      })
+      // The same builder the screen uses, so the file and the page cannot
+      // disagree — this map used to be a second copy of that assembly.
+      const rows: FinalCostingRow[] = lineRows.map((l) => buildFinalCostingRow({
+        recipeId: l.recipe_id,
+        skuCode: l.sku_code,
+        skuName: l.sku_name,
+        material: materialByBom.get(l.recipe_id),
+        misc: miscByBom.get(l.recipe_id) ?? {},
+        kit: l.sku_code ? kitCosting.get(l.sku_code) : undefined,
+      }))
 
       const filename = buildExportFilename("manufacturing_final_costing", format, { mfgId: String(mfgId) })
       logger.info({ ...ctx, mfgId, rowCount: rows.length, message: "Final costing export served" })

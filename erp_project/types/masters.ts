@@ -732,6 +732,23 @@ export type FinalCostingRow = {
   pm_lines_without_rate: number
   /** Total RM lines on the recipe, so "2 of 3 unpriced" is expressible. */
   rm_line_count: number
+  /**
+   * GIFT KIT ONLY — absent on a formulation.
+   *
+   * A kit is assembled from finished goods, so `rm_cost` above holds the
+   * rolled-up FULL cost of its components rather than a raw-material total, and
+   * `rm_line_count` is 0. That combination used to render as "RM ₹0, with no
+   * reason given". This says the number is a roll-up, how much of it is real,
+   * and why the rest is missing.
+   *
+   * `rm_wastage` is always 0 here: `rm_loss` does not apply to a kit — declared
+   * by `appliesTo` in lib/costing/cost-types.ts.
+   */
+  kit?: {
+    componentsCosted: number
+    componentsTotal: number
+    gaps: string[]
+  }
 }
 
 /**

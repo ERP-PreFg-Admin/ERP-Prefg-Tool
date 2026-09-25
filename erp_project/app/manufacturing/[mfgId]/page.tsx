@@ -11,6 +11,8 @@ import { rawMaterials } from "@/lib/queries/raw-materials"
 import { packingMaterials } from "@/lib/queries/packing-materials"
 import { getRmVendorByMfg, getRmVendorHistoryByMfg, getPmVendorByMfg, getPmVendorHistoryByMfg, getAgreedRmRatesByMfg, getAgreedPmRatesByMfg } from "@/lib/cached-reference-data"
 import { computeRmCost, computePmCost, computeWastage, computeTotalCosting } from "@/lib/costing/final-costing"
+import { kitCostingByMfg } from "@/lib/costing/agreed-rates"
+import { buildFinalCostingRow } from "@/lib/costing/final-costing-row"
 import { parsePaginationParams } from "@/lib/pagination"
 import { bestTotalIndex } from "./costing-columns"
 import type {
@@ -137,6 +139,7 @@ export default async function ManufacturerDetailPage({
             page={pagination.page}
             size={pagination.size}
             brandScope={scopeParams(scope.brandIds)}
+            brandIds={scope.brandIds}
             vendorScope={[...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds)]}
             approvedScope={[...scopeParams(scope.vendorIds), ...scopeParams(scope.vendorIds)]}
           />
@@ -225,11 +228,15 @@ async function AgreedRatesTabContent({ mfgId }: { mfgId: number }) {
 }
 
 async function FinalCostingTabContent({
-  mfgId, view, brandScope, vendorScope, approvedScope, search, page, size,
+  mfgId, view, brandScope, brandIds, vendorScope, approvedScope, search, page, size,
 }: {
   mfgId: number
   view: "final_costing" | "analytics"
-  brandScope: unknown[]; vendorScope: unknown[]; approvedScope: unknown[]
+  brandScope: unknown[]
+  /** Raw, not scopeParams'd — kitCostingByMfg fans out over other manufacturers
+   *  and applies the scope itself on each. */
+  brandIds: number[] | null
+  vendorScope: unknown[]; approvedScope: unknown[]
   search: string; page: number; size: number
 }) {
   const [
@@ -249,6 +256,10 @@ async function FinalCostingTabContent({
     timedQuery<ApprovedVendorRateRow>(manufacturingSql.selectApprovedVendorRateByRm, [...approvedScope, mfgId], { label: "manufacturing.selectApprovedVendorRateByRm" }),
     timedQuery<ApprovedVendorRateRow>(manufacturingSql.selectApprovedVendorRateByPm, [...approvedScope, mfgId], { label: "manufacturing.selectApprovedVendorRateByPm" }),
   ])
+
+  // Gift kits: their components are finished goods priced at THEIR OWN
+  // manufacturer, so this cannot come from the per-mfg queries above.
+  const kitCosting = await kitCostingByMfg(mfgId, brandIds)
 
   const materialByBom = new Map(materialCostRows.map((r) => [r.recipe_id, {
     rm: Number(r.rm_cost),
@@ -270,44 +281,14 @@ async function FinalCostingTabContent({
     miscByBom.set(r.recipe_id, entry)
   }
 
-  const rows: FinalCostingRow[] = lineRows.map((l) => {
-    const material = materialByBom.get(l.recipe_id)
-    const misc = miscByBom.get(l.recipe_id) ?? {}
-    const rmCost = material?.rm ?? 0
-    const pmCost = material?.pm ?? 0
-    const { rmWastage, pmWastage, total: wastage } = computeWastage(rmCost, pmCost, misc.rm_loss ?? 0, misc.pm_loss ?? 0)
-    const jw = misc.jw ?? 0
-    const shrink = misc.shrink ?? 0
-    const shipper = misc.shipper ?? 0
-    const utility = misc.utility ?? 0
-    const margin = misc.margin ?? 0
-    const total = computeTotalCosting({ rmCost, pmCost, wastageTotal: wastage, jw, shrink, shipper, utility, margin })
-    const incomplete =
-      !material || rmCost <= 0 || pmCost <= 0 ||
-      misc.jw === undefined || misc.shrink === undefined || misc.shipper === undefined ||
-      misc.rm_loss === undefined || misc.pm_loss === undefined
-    return {
-      recipe_id: l.recipe_id,
-      sku_code: l.sku_code,
-      sku_name: l.sku_name,
-      rm_cost: rmCost,
-      pm_cost: pmCost,
-      jw,
-      shrink,
-      shipper,
-      utility,
-      margin,
-      rm_wastage: rmWastage,
-      pm_wastage: pmWastage,
-      wastage,
-      total,
-      incomplete,
-      filling: material?.filling ?? null,
-      rm_lines_without_rate: material?.rmLinesWithoutRate ?? 0,
-      pm_lines_without_rate: material?.pmLinesWithoutRate ?? 0,
-      rm_line_count: material?.rmLineCount ?? 0,
-    }
-  })
+  const rows: FinalCostingRow[] = lineRows.map((l) => buildFinalCostingRow({
+    recipeId: l.recipe_id,
+    skuCode: l.sku_code,
+    skuName: l.sku_name,
+    material: materialByBom.get(l.recipe_id),
+    misc: miscByBom.get(l.recipe_id) ?? {},
+    kit: l.sku_code ? kitCosting.get(l.sku_code) : undefined,
+  }))
 
   const linesByBom = new Map<number, RecipeLineDetailRow[]>()
   for (const l of bomLineInputRows) {
@@ -397,7 +378,13 @@ async function FinalCostingTabContent({
 
   // Same index alignment as `scenarios` — both are rows.map(...).
   const breakups = rows.map((r) =>
-    buildBreakup(linesByBom.get(r.recipe_id) ?? [], miscByBom.get(r.recipe_id) ?? {})
+    buildBreakup(
+      linesByBom.get(r.recipe_id) ?? [],
+      miscByBom.get(r.recipe_id) ?? {},
+      // A gift kit's contents, which selectBomLineDetailByMfg deliberately
+      // excludes — they come from the kit resolver instead.
+      r.sku_code ? (kitCosting.get(r.sku_code)?.components ?? []) : [],
+    )
   )
 
   /*

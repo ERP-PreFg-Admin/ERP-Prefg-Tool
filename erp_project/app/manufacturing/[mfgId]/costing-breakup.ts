@@ -15,14 +15,31 @@ import { computeRmCost, computePmCost } from "@/lib/costing/final-costing"
 import { MISC_LABEL } from "./costing-gaps"
 
 export type BreakupLine = {
-  type: "rm" | "pm"
+  /**
+   * `component` is a GIFT KIT's contents — a finished good, not a material.
+   * Deliberately its own type rather than folded into `rm`: it occupies the RM
+   * position in the costing, but calling a finished good "Raw material" in the
+   * panel would be a lie, and its `rate` is that SKU's whole final cost rather
+   * than a per-kg or per-unit material rate.
+   */
+  type: "rm" | "pm" | "component"
   code: string | null
   name: string | null
-  /** RM: a formulation % of the SKU's fill weight. PM: a per-unit quantity. Not money. */
+  /** RM: a formulation % of the SKU's fill weight. PM: a per-unit quantity. Component: a unit count. Not money. */
   amount: number
   /** null = no agreed rate for this manufacturer. NOT a rate of zero. */
   rate: number | null
   cost: number
+}
+
+/** One resolved gift kit component, as lib/costing/kit-costing.ts returns it. */
+export type BreakupComponentInput = {
+  skuCode: string
+  skuName: string | null
+  units: number
+  /** The component's full final cost at its resolved manufacturer. null = uncostable. */
+  unitCost: number | null
+  lineCost: number | null
 }
 
 /** A null value = no `bom_misc` row at all, which is not the same as 0. */
@@ -54,7 +71,23 @@ export type BreakupLineInput = {
 export function buildBreakup(
   lines: BreakupLineInput[],
   misc: Partial<Record<MiscCostType, number>>,
+  /**
+   * A gift kit's contents. They arrive here rather than through `lines` because
+   * selectBomLineDetailByMfg deliberately excludes `mtrl_type='sku'` — a
+   * component's `mtrl_id` is a master_skus.id, and that query's consumers would
+   * look it up in a PM rate map. See its comment; the filter stays.
+   */
+  components: readonly BreakupComponentInput[] = [],
 ): CostingBreakup {
+  const componentLines: BreakupLine[] = components.map((c) => ({
+    type: "component",
+    code: c.skuCode,
+    name: c.skuName,
+    amount: c.units,
+    rate: c.unitCost,
+    cost: c.lineCost ?? 0,
+  }))
+
   const built: BreakupLine[] = lines.map((l) => {
     const amount = Number(l.amount)
     const rate = l.mrm_rate == null ? null : Number(l.mrm_rate)
@@ -73,25 +106,31 @@ export function buildBreakup(
     }
   })
 
-  // RM before PM, and inside each: unpriced lines first, then dearest first.
-  // Sorting by cost alone buries an unpriced line at the bottom on its ₹0 cost —
-  // the one line someone opened this panel to find.
-  built.sort((a, b) =>
+  // Components, then RM, then PM; inside each: unpriced lines first, then
+  // dearest first. Sorting by cost alone buries an unpriced line at the bottom on
+  // its ₹0 cost — the one line someone opened this panel to find.
+  const ORDER = { component: 0, rm: 1, pm: 2 } as const
+  const all = [...componentLines, ...built]
+  all.sort((a, b) =>
     a.type === b.type
       ? (a.rate == null ? 0 : 1) - (b.rate == null ? 0 : 1) || b.cost - a.cost
-      : a.type === "rm" ? -1 : 1
+      : ORDER[a.type] - ORDER[b.type]
   )
 
-  const subtotal = (type: "rm" | "pm") =>
-    built.reduce((sum, l) => (l.type === type ? sum + l.cost : sum), 0)
+  const subtotal = (type: BreakupLine["type"]) =>
+    all.reduce((sum, l) => (l.type === type ? sum + l.cost : sum), 0)
+
+  // A kit has no RM lines, so its RM position holds the component roll-up —
+  // the same number the row above the panel shows in its RM Cost cell.
+  const componentTotal = subtotal("component")
 
   return {
-    lines: built,
+    lines: all,
     misc: (Object.keys(MISC_LABEL) as MiscCostType[]).map((type) => ({
       type, label: MISC_LABEL[type], value: misc[type] ?? null,
     })),
-    unpricedLines: built.filter((l) => l.rate == null).length,
-    rmTotal: subtotal("rm"),
+    unpricedLines: all.filter((l) => l.rate == null).length,
+    rmTotal: componentLines.length > 0 ? componentTotal : subtotal("rm"),
     pmTotal: subtotal("pm"),
   }
 }
@@ -127,9 +166,19 @@ export function buildBreakupCsv(
   const id = [sku.sku_code, sku.sku_name]
   const rows: unknown[][] = []
 
-  for (const type of ["rm", "pm"] as const) {
-    const label = type === "rm" ? "Raw material" : "Packing material"
+  const SECTION = {
+    component: "Kit component",
+    rm: "Raw material",
+    pm: "Packing material",
+  } as const
+
+  for (const type of ["component", "rm", "pm"] as const) {
     const lines = breakup.lines.filter((l) => l.type === type)
+    // Only the component section is conditional: a formulation has none, and a
+    // bare "Kit component total: 0" row would read as a real zero. The RM and PM
+    // sections keep emitting their totals exactly as before, empty or not.
+    if (type === "component" && lines.length === 0) continue
+    const label = SECTION[type]
     for (const l of lines) {
       rows.push([
         ...id, label, l.code, l.name, l.amount,
@@ -140,7 +189,7 @@ export function buildBreakupCsv(
         l.rate == null ? "no agreed rate" : "INR",
       ])
     }
-    rows.push([...id, `${label} total`, "", "", "", "", type === "rm" ? breakup.rmTotal : breakup.pmTotal, "INR"])
+    rows.push([...id, `${label} total`, "", "", "", "", type === "pm" ? breakup.pmTotal : breakup.rmTotal, "INR"])
   }
 
   for (const m of breakup.misc) {

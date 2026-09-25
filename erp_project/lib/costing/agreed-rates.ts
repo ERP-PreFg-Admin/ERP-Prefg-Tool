@@ -12,8 +12,25 @@
 import { query } from "@/lib/db"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { computeWastage, computeTotalCosting, ZERO_MISC } from "@/lib/costing/final-costing"
+import { rateGapReasons, missingMiscReasons } from "@/lib/costing/costing-gaps"
+import {
+  resolveComponent, rollUpComponents,
+  type ComponentCandidate, type KitComponentInput, type KitCosting,
+} from "@/lib/costing/kit-costing"
 import { scopeParams } from "@/lib/scope"
 import type { MiscCostType } from "@/types/masters"
+
+/** One (kit, component, candidate manufacturer) row from selectKitComponentsByMfg. */
+type KitComponentRow = {
+  kit_recipe_id: number
+  kit_mfg_id: number
+  kit_sku_code: string
+  component_sku_id: number
+  component_sku_code: string | null
+  component_sku_name: string | null
+  units: string | number
+  candidate_mfg_id: number | null
+}
 
 /**
  * A SKU's agreed rate, with what it is missing.
@@ -32,6 +49,13 @@ export type AgreedRate = {
   rm_line_count: number
   rm_lines_without_rate: number
   pm_lines_without_rate: number
+  /**
+   * The recipe's `bom_misc` rows as they stand — an ABSENT key means no row,
+   * which is not the same as a row holding 0. Carried so a caller can run
+   * missingMiscReasons; gift kit costing needs it to report a COMPONENT's own
+   * gaps on the kit that contains it.
+   */
+  misc: Partial<Record<MiscCostType, number>>
 }
 
 /**
@@ -68,10 +92,17 @@ export async function agreedRatesByMfg(
 
   const materialByRecipe = new Map(materials.map((m) => [m.recipe_id, m]))
   const miscByRecipe = new Map<number, Record<MiscCostType, number>>()
+  // The same rows WITHOUT the zero fill, because an absent key and a stored 0
+  // are different states once they reach a gap message.
+  const rawMiscByRecipe = new Map<number, Partial<Record<MiscCostType, number>>>()
   for (const r of miscs) {
     const m = miscByRecipe.get(r.recipe_id) ?? { ...ZERO_MISC }
     m[r.type] = Number(r.cost)
     miscByRecipe.set(r.recipe_id, m)
+
+    const raw = rawMiscByRecipe.get(r.recipe_id) ?? {}
+    raw[r.type] = Number(r.cost)
+    rawMiscByRecipe.set(r.recipe_id, raw)
   }
 
   const out = new Map<string, AgreedRate>()
@@ -94,7 +125,78 @@ export async function agreedRatesByMfg(
       rm_line_count:          Number(material.rm_line_count ?? 0),
       rm_lines_without_rate:  Number(material.rm_lines_without_rate ?? 0),
       pm_lines_without_rate:  Number(material.pm_lines_without_rate ?? 0),
+      misc: rawMiscByRecipe.get(line.recipe_id) ?? {},
     })
+  }
+  return out
+}
+
+/**
+ * Agreed Final Costing for one manufacturer's GIFT KITS.
+ *
+ * A kit's material cost is the rolled-up FULL final cost of its component FGs —
+ * the same number each component's own costing row shows — because the assembler
+ * receives finished goods. Components are priced at THEIR OWN manufacturer,
+ * which is usually not the one assembling the kit.
+ *
+ * ── Why this reuses agreedRatesByMfg instead of one cross-manufacturer query ──
+ * The material-cost SQL is parameterised by a single mfg_id all the way down
+ * through rateSet(), so a "these recipes, each at a different manufacturer"
+ * variant would be a second copy of the arithmetic — the exact thing
+ * selectMaterialCostByMfg's own comment warns about ("a dated copy of twenty
+ * lines of arithmetic is a second answer waiting to disagree with the first").
+ * Instead this fans out over the DISTINCT component manufacturers, which is a
+ * handful, not per kit and not per component. Each call is the same query the
+ * component's own costing screen runs.
+ *
+ * Returns a map keyed by the KIT's sku_code. A kit whose recipe has no component
+ * lines is absent — it is not a kit for costing purposes.
+ */
+export async function kitCostingByMfg(
+  mfgId: number,
+  brandIds: number[] | null,
+  asOf?: string | null,
+): Promise<Map<string, KitCosting>> {
+  const rows = await query<KitComponentRow>(
+    manufacturingSql.selectKitComponentsByMfg, [mfgId, ...scopeParams(brandIds)])
+  if (rows.length === 0) return new Map()
+
+  // One lookup per DISTINCT candidate manufacturer, in parallel.
+  const candidateMfgIds = [...new Set(
+    rows.map((r) => r.candidate_mfg_id).filter((id): id is number => id != null))]
+  const rateMaps = new Map<number, Map<string, AgreedRate>>(
+    await Promise.all(candidateMfgIds.map(async (id) =>
+      [id, await agreedRatesByMfg(id, brandIds, asOf)] as const)))
+
+  // Collapse the one-row-per-candidate shape back into one entry per component.
+  const byKit = new Map<string, Map<string, KitComponentInput>>()
+  for (const r of rows) {
+    const kit = byKit.get(r.kit_sku_code) ?? new Map<string, KitComponentInput>()
+    byKit.set(r.kit_sku_code, kit)
+
+    const key = r.component_sku_code ?? `#${r.component_sku_id}`
+    const entry = kit.get(key) ?? {
+      skuCode: key, skuName: r.component_sku_name, units: Number(r.units), candidates: [],
+    }
+    if (r.candidate_mfg_id != null) {
+      const agreed = r.component_sku_code
+        ? rateMaps.get(r.candidate_mfg_id)?.get(r.component_sku_code)
+        : undefined
+      ;(entry.candidates as ComponentCandidate[]).push({
+        mfgId: r.candidate_mfg_id,
+        rate: agreed?.rate ?? null,
+        gaps: agreed
+          ? [...rateGapReasons(agreed), ...missingMiscReasons(agreed.misc)]
+          : [],
+      })
+    }
+    kit.set(key, entry)
+  }
+
+  const out = new Map<string, KitCosting>()
+  for (const [kitSkuCode, components] of byKit) {
+    out.set(kitSkuCode, rollUpComponents(
+      [...components.values()].map((c) => resolveComponent(c, mfgId))))
   }
   return out
 }
