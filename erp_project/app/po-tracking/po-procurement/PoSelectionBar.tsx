@@ -58,8 +58,18 @@ function ReviewSendDialog({
       const failedResults = data.results.filter((r: any) => !r.sent)
       toast({
         title: sentCount > 0 ? "Mail sent" : "No mail sent",
+        // The route already carries the real reason per manufacturer; show it.
+        // This used to read "no email on file or send failed" for every
+        // failure, which sent people to the address book after a crash.
         description: failedResults.length > 0
-          ? `Sent to ${sentCount} manufacturer(s). Skipped: ${failedResults.map((r: any) => r.mfg_name).join(", ")} (no email on file or send failed).`
+          ? `Sent to ${sentCount} manufacturer(s). Failed: ${failedResults
+              .map((r: any) => {
+                // po_no is set on split legs only, and one manufacturer can have
+                // several in a batch — naming it is the point of carrying it.
+                const who = r.po_no ? `${r.mfg_name} (${r.po_no})` : r.mfg_name
+                return `${who} — ${r.error ?? "no email on file"}`
+              })
+              .join("; ")}`
           : `Sent to ${sentCount} manufacturer(s).`,
         variant: failedResults.length > 0 ? "error" : "success",
       })
