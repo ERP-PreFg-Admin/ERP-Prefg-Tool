@@ -337,8 +337,11 @@ export const manufacturingSql = {
     FROM bom_misc bm
     INNER JOIN master_recipe  b  ON b.id  = bm.bom_id
     LEFT  JOIN master_skus sk ON sk.id = b.sku_id
-    WHERE bm.mfg_id = ? AND bm.type IN ('jw', 'shrink', 'shipper', 'rm_loss', 'pm_loss')
-    ORDER BY sk.sku_code ASC
+    -- Every type, not a hand-listed subset: utility and margin were added to
+    -- bom_misc_type later and the old list silently hid them, so 21 live rows
+    -- priced into costing while the screen that manages them showed nothing.
+    WHERE bm.mfg_id = ?
+    ORDER BY sk.sku_code ASC, bm.type ASC
   `,
 
   /** Current (active) JW/Shrink/Shipper/Wastage lines for one manufacturer, across all types — for the "Download CSV/Excel" export. Params: [mfg_id] */

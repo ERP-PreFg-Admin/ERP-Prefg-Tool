@@ -15,7 +15,7 @@ import { PaginationBar } from "@/components/ui/pagination-bar"
 import type { FinalCostingRow, FinalCostingComparisonRow } from "@/types/masters"
 import {
   CostingHeadRow, CostingCells, ScenarioLabelRow, ScenarioHeadRow,
-  COSTING_COL_COUNT,
+  COSTING_COL_COUNT, MissingCostFlag,
 } from "./costing-columns"
 import { rateGapReasons } from "./costing-gaps"
 import type { CostingBreakup } from "./costing-breakup"
@@ -144,14 +144,7 @@ export default function FinalCostingTable({
                         <TableRow className={shown ? "bg-muted/40" : undefined}>
                           <TableCell className="font-mono">
                             <span className="inline-flex items-center gap-1">
-                              {r.incomplete && (
-                                <span
-                                  title={incompleteReasons(r)}
-                                  className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 text-[10px] font-bold cursor-help"
-                                >
-                                  !
-                                </span>
-                              )}
+                              {r.incomplete && <MissingCostFlag reasons={[incompleteReasons(r)]} />}
                               <button
                                 type="button"
                                 onClick={toggleScenarios}

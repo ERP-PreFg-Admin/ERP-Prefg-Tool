@@ -12,12 +12,38 @@
 // Everything about a column now lives on one line here: its label, its width,
 // and how its cell renders. Add a column and every table gets it.
 
+import { AlertTriangle } from "lucide-react"
 import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 // FinalCostingComparisonRow is no longer imported: nothing here reads a delta
 // field. A scenario row is still one, but every cell this file renders comes
 // from the FinalCostingRow half of it, which is what CostingCells takes.
 import type { FinalCostingRow } from "@/types/masters"
 import { fmtMoney } from "../mfg-utils"
+
+/**
+ * The amber warning that sits before a SKU code when its costing is missing
+ * something.
+ *
+ * One component because it now appears in three tables — SKU Manager, Agreed
+ * Final Costing, and the three Analytics comparisons — and it was previously
+ * two hand-copied spans that had already drifted: the SKU Manager rendered an
+ * AlertTriangle, Agreed Final Costing rendered a bold "!" in the same circle.
+ * The same condition should not look like two different things.
+ *
+ * `reasons` is the hover text. An empty list renders nothing at all rather than
+ * an unexplained badge — a flag nobody can act on is noise.
+ */
+export function MissingCostFlag({ reasons }: { reasons: string[] }) {
+  if (reasons.length === 0) return null
+  return (
+    <span
+      title={reasons.join("\n")}
+      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 cursor-help"
+    >
+      <AlertTriangle className="h-2.5 w-2.5" />
+    </span>
+  )
+}
 
 /** Fixed widths, sized to the digits rather than to the label, so the four
  *  tables stay as narrow as the numbers allow. */

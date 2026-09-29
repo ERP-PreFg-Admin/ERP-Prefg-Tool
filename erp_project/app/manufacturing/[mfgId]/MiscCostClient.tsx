@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Plus, Pencil } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -12,6 +12,7 @@ import {
 import { TableEmpty } from "@/components/ui/empty-state"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import { SearchInput } from "@/components/masters/SearchInput"
+import { PaginationBar } from "@/components/ui/pagination-bar"
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import type { MfgLineOption, MiscCostLine, MiscCostType } from "@/types/masters"
 import { wastageFraction } from "@/lib/costing/final-costing"
@@ -32,6 +33,15 @@ const TYPE_LABEL: Record<MiscCostType, string> = {
 
 const isPercentType = (t: MiscCostType) => t === "rm_loss" || t === "pm_loss"
 
+/**
+ * Active carries the live line AND the pending one: an in_review row is the
+ * line being reviewed, not an archived one, and hiding it would make a cost
+ * look missing while its edit is waiting. Everything else is the archive —
+ * bom_misc keeps no history of its own, so a retired line IS the record that
+ * a cost once applied.
+ */
+const LIVE_STATUSES = new Set(["active", "in_review"])
+
 export default function MiscCostClient({
   mfgId,
   rows,
@@ -45,16 +55,32 @@ export default function MiscCostClient({
   const [search, setSearch] = useState("")
   const guard = useEditGuard()
   const [dialogTarget, setDialogTarget] = useState<MiscCostLine | null | "new">(null)
+  const [view, setView] = useState<"active" | "archive">("active")
+  // Page and size live in the URL because PaginationBar writes them there.
+  const sp = useSearchParams()
+  const pageSize = Math.max(1, Number(sp.get("size")) || 20)
+  const rawPage = Math.max(1, Number(sp.get("page")) || 1)
+
+  const activeCount = useMemo(() => rows.filter((r) => LIVE_STATUSES.has(String(r.status))).length, [rows])
+  const archiveCount = rows.length - activeCount
 
   const filteredRows = useMemo(() => {
+    const inView = rows.filter((r) =>
+      view === "active" ? LIVE_STATUSES.has(String(r.status)) : !LIVE_STATUSES.has(String(r.status)))
     const q = search.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter((r) =>
+    if (!q) return inView
+    return inView.filter((r) =>
       (r.sku_code ?? "").toLowerCase().includes(q) ||
       (r.sku_name ?? "").toLowerCase().includes(q) ||
       (r.bom_code ?? "").toLowerCase().includes(q)
     )
-  }, [rows, search])
+  }, [rows, search, view])
+
+  // Searching or switching view can leave the URL on a page past the end —
+  // clamp rather than redirect, so the table never renders blank.
+  const lastPage = Math.max(1, Math.ceil(filteredRows.length / pageSize))
+  const page = Math.min(rawPage, lastPage)
+  const pageRows = filteredRows.slice((page - 1) * pageSize, page * pageSize)
 
   // The SKUs this manufacturer actually produces, so the upload preview can
   // refuse a row for one it does not — the check that used to fire inside
@@ -95,6 +121,22 @@ export default function MiscCostClient({
           placeholder="Search SKU, Recipe…"
           className="sm:max-w-xs"
         />
+        <div className="inline-flex h-9 items-center rounded-lg border border-border p-0.5">
+          {([["active", "Active", activeCount], ["archive", "Archive", archiveCount]] as const).map(
+            ([key, label, count]) => (
+              <button
+                key={key}
+                onClick={() => setView(key)}
+                className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors ${
+                  view === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {label}
+                <span className={view === key ? "opacity-80" : "opacity-60"}>({count})</span>
+              </button>
+            )
+          )}
+        </div>
         <button
           onClick={() => { if (guard("add a misc cost")) setDialogTarget("new") }}
           className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors sm:ml-auto"
@@ -120,27 +162,33 @@ export default function MiscCostClient({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredRows.length === 0 ? (
+                {pageRows.length === 0 ? (
                   <TableEmpty
                     colSpan={9}
                     action={
-                      rows.length === 0 ? (
-                        <Button variant="outline" size="sm" onClick={() => { if (guard("add a misc cost")) setDialogTarget("new") }}>
-                          <Plus /> Add Cost / Wastage %
-                        </Button>
-                      ) : (
+                      search.trim() ? (
                         <Button variant="outline" size="sm" onClick={() => setSearch("")}>
                           Clear search
+                        </Button>
+                      ) : view === "archive" ? (
+                        <Button variant="outline" size="sm" onClick={() => setView("active")}>
+                          Back to Active
+                        </Button>
+                      ) : (
+                        <Button variant="outline" size="sm" onClick={() => { if (guard("add a misc cost")) setDialogTarget("new") }}>
+                          <Plus /> Add Cost / Wastage %
                         </Button>
                       )
                     }
                   >
-                    {rows.length === 0
-                      ? "No Job Work, Shrink Wrap, Shipper or Wastage % recorded yet."
-                      : "No cost lines match this search."}
+                    {search.trim()
+                      ? "No cost lines match this search."
+                      : view === "archive"
+                      ? "Nothing archived — no cost line here has been rejected or retired."
+                      : "No Job Work, Shrink Wrap, Shipper, Utility, Margin or Wastage % recorded yet."}
                   </TableEmpty>
                 ) : (
-                  filteredRows.map((r) => (
+                  pageRows.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell className="font-mono">{r.sku_code ?? "—"}</TableCell>
                       <TableCell className="font-mono">{r.bom_code ?? "—"}</TableCell>
@@ -183,6 +231,7 @@ export default function MiscCostClient({
                 )}
               </TableBody>
             </Table>
+            <PaginationBar total={filteredRows.length} page={page} pageSize={pageSize} />
         </CardContent>
       </Card>
 

@@ -9,7 +9,9 @@ import { DownloadButton } from "@/components/masters/DownloadButton"
 import type { FinalCostingComparisonRow } from "@/types/masters"
 import {
   CostingHeadRow, CostingCells, ScenarioLabelRow, bestTotalIndex, COSTING_COL_COUNT,
+  MissingCostFlag,
 } from "./costing-columns"
+import { rateGapReasons } from "./costing-gaps"
 
 export default function FinalCostingComparisonTable({
   title, subtitle, scenarioLabel, rows, exportEndpoint,
@@ -59,7 +61,18 @@ export default function FinalCostingComparisonTable({
                 ) : (
                   rows.map((r, i) => (
                     <TableRow key={r.recipe_id}>
-                      <TableCell className="font-mono">{r.sku_code ?? "—"}</TableCell>
+                      <TableCell className="font-mono">
+                        {/* Same flag as the Agreed Final Costing tab and SKU
+                            Manager. A scenario only moves RM and PM, so a SKU
+                            whose costing is incomplete is incomplete here too —
+                            and these three tables are where a rate gets picked
+                            for a negotiation, which is the worst place to read
+                            a total without knowing it is short. */}
+                        <span className="inline-flex items-center gap-1">
+                          {r.incomplete && <MissingCostFlag reasons={rateGapReasons(r)} />}
+                          {r.sku_code ?? "—"}
+                        </span>
+                      </TableCell>
                       <TableCell className="max-w-40 truncate text-muted-foreground">{r.sku_name ?? "—"}</TableCell>
                       {/* JWW / Shrinkage / Shipper are inside CostingCells and
                           carry the SAME values as the MRM table — a scenario only

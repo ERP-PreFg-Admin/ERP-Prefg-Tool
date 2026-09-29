@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Plus, Pencil, AlertTriangle } from "lucide-react"
+import { Plus, Pencil } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -12,6 +12,7 @@ import { DownloadButton } from "@/components/masters/DownloadButton"
 import { SegmentedToggle } from "@/components/ui/segmented-toggle"
 import { useToast } from "@/components/ui/toast"
 import type { MfgLine, MfgLineStatus } from "@/types/masters"
+import { MissingCostFlag } from "./costing-columns"
 import { fmtDate } from "../mfg-utils"
 import LineDialog, { type RecipeOption } from "./LineDialog"
 import { useEditGuard } from "@/components/AccessContext"
@@ -191,14 +192,7 @@ export default function ManufacturingLinesClient({
                     <TableRow key={r.id}>
                       <TableCell className="font-mono">
                         <div className="flex items-center gap-1.5">
-                          {warnings.length > 0 && (
-                            <span
-                              title={warnings.join("\n")}
-                              className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 cursor-help"
-                            >
-                              <AlertTriangle className="h-2.5 w-2.5" />
-                            </span>
-                          )}
+                          <MissingCostFlag reasons={warnings} />
                           {r.sku_code ?? "—"}
                         </div>
                       </TableCell>

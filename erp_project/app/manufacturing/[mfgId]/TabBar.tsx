@@ -35,7 +35,13 @@ export default function TabBar({
           <TabsTrigger
             key={tab.key}
             active={currentTab === tab.key}
-            onClick={() => router.push(`/manufacturing/${mfgId}?tab=${tab.key}`)}
+            onClick={() => {
+              // Re-pushing the URL we are already on re-runs the whole server
+              // component — this page is force-dynamic, so on Agreed Final
+              // Costing that is eight queries for a click that changes nothing.
+              if (currentTab === tab.key) return
+              router.push(`/manufacturing/${mfgId}?tab=${tab.key}`)
+            }}
           >
             {tab.label}
           </TabsTrigger>
