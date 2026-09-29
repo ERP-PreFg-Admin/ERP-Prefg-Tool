@@ -326,7 +326,7 @@ export type SelectedPoLine = {
   received_qty?: number | null
 }
 type OngoingPoLine = {
-  po_no: string; sku_code: string; sku_name: string | null; qty: number
+  po_no: string; sku_code: string | null; sku_name: string | null; qty: number
   remarks?: string | null; unit_price?: number | null
 }
 
@@ -337,12 +337,15 @@ type OngoingPoLine = {
 // `selected` directly (raisedLines / cancelledLines below), so nothing else
 // needed the set.
 
-const escapeHtml = (s: string) =>
-  s.replace(/[&<>"']/g, (c) =>
+// Null-tolerant on purpose. purchase_orders.sku_code is nullable, and one such
+// row threw "Cannot read properties of null (reading 'replace')" out of the
+// row map, losing the entire manufacturer's mail over one blank cell.
+const escapeHtml = (s: string | null | undefined) =>
+  (s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!))
 
 export type PoMailLine = {
-  po_no: string; sku_code: string; sku_name: string | null; qty: number
+  po_no: string; sku_code: string | null; sku_name: string | null; qty: number
   remarks?: string | null
   /** Excel only — the mail body stays compact. Null on POs raised before
    *  rates were resolved server-side (lib/po/po-rate.ts). */
@@ -357,7 +360,7 @@ function poTableRows(lines: PoMailLine[], withRemarks: boolean): string {
       (l) => `
         <tr>
           <td style="${CELL}">${escapeHtml(l.po_no)}</td>
-          <td style="${CELL}">${escapeHtml(l.sku_code)}</td>
+          <td style="${CELL}">${l.sku_code ? escapeHtml(l.sku_code) : "—"}</td>
           <td style="${CELL}">${l.sku_name ? escapeHtml(l.sku_name) : "—"}</td>
           <td style="${CELL};text-align:right">${Number(l.qty).toLocaleString("en-IN")}</td>
           ${withRemarks ? `<td style="${CELL};color:#555">${l.remarks ? escapeHtml(l.remarks) : "—"}</td>` : ""}
@@ -515,6 +518,12 @@ export async function sendMfgSelectionEmail(
   // the manufacturer's open book. assertAttachmentsWithinLimit below is the
   // backstop for a very large selection.
   for (const line of selected) {
+    // PDF ONLY. A cancelled PO still appears in the Cancelled table and on the
+    // Excel sheet — this withholds just its document, which is an order to
+    // supply and has no business riding along with the mail that withdraws it.
+    // Skips 'cancelled' alone: the old ATTACHABLE_STATUSES whitelist is not
+    // coming back, or a part-received PO loses its copy again.
+    if (line.status === "cancelled") continue
     try {
       const doc = await poDocument(line, generatePoPdf, ctx)
       if (!doc) continue
@@ -560,7 +569,7 @@ export async function sendMfgSelectionEmail(
       html: `
         <div style="font-family:sans-serif;max-width:620px;margin:auto;color:#111">
           <h2 style="margin-bottom:4px">PO Update: ${mfg.name}</h2>
-          <p style="color:#555;margin-top:0">Please find the latest status of the following purchase orders${pdfsAttached > 0 ? " (PDFs attached for raised/cancelled POs; full details in the attached Excel)" : " (full details in the attached Excel)"}.</p>
+          <p style="color:#555;margin-top:0">Please find the latest status of the following purchase orders${pdfsAttached > 0 ? " (PO copies attached; full details in the attached Excel)" : " (full details in the attached Excel)"}.</p>
           ${poSection("Newly Raised Purchase Orders", raisedLines)}
           ${poSection("Cancelled Purchase Orders", cancelledLines, "Cancelled Qty")}
           ${poSection("Remaining Open Purchase Orders", openLines)}
