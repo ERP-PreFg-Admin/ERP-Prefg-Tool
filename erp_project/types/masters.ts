@@ -358,6 +358,9 @@ export type RMByMfg = {
   hsn_code: string | null
   rm_code: string | null
   inci_name: string | null
+  /** The approved vendor's currently-effective rate, or null when that vendor
+   *  has none in force today or is outside your scope. */
+  vendor_curr_rate: string | number | null
 }
 
 /** `pm` table — Packing Materials. Used by app/masters/packing-materials. */
@@ -414,6 +417,12 @@ export type PMByMfg = {
   /** Status of the cost_master_pm_mfg rate row — used for approval badges. */
   status: string | null
   effective_from: string | null
+  /** The vendor rate in force today for this PM, and the vendor it came from.
+   *  PM has no approved vendor, so where several quote one PM this is the
+   *  lowest-id active rate — the same pick the costing screens make. Null when
+   *  none is in force or the vendor is outside your scope. */
+  vendor_curr_rate: string | number | null
+  vendor_rate_code: string | null
 }
 
 

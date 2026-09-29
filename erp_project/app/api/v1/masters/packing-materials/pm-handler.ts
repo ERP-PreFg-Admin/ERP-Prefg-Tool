@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { ApiError } from "@/lib/gateway/errors"
 import type { ResultSetHeader } from "mysql2/promise"
 import { query, pool } from "@/lib/db"
 import { packingMaterials } from "@/lib/queries/packing-materials"
@@ -149,6 +150,9 @@ export async function pmCreate(body: PmCreateBody, userId: number, ctx: object):
       return NextResponse.json({ id: pmId })
     } catch (err: unknown) {
       await conn.rollback()
+      // A refusal the caller can act on (an empty or fully-skipped file) is not
+      // a server fault — let the gateway serialise it as the 4xx it already is.
+      if (err instanceof ApiError) throw err
       const message = err instanceof Error ? err.message : String(err)
       recordFailedEvent("PM", eventId, { name }, message)
       logger.error({ ...logCtx, message: `PM + rate insert error (${rateTab} tab)`, error: message, code: (err as { code?: string })?.code })
@@ -175,6 +179,9 @@ export async function pmCreate(body: PmCreateBody, userId: number, ctx: object):
     return NextResponse.json({ id: pmId })
   } catch (err: unknown) {
     await conn.rollback()
+    // A refusal the caller can act on (an empty or fully-skipped file) is not
+    // a server fault — let the gateway serialise it as the 4xx it already is.
+    if (err instanceof ApiError) throw err
     const message = err instanceof Error ? err.message : String(err)
     const code = (err as { code?: string })?.code
     recordFailedEvent("PM", eventId, { name }, message)
@@ -320,6 +327,9 @@ export async function pmCreateFull(body: PmCreateFullBody, userId: number, ctx: 
     return NextResponse.json({ id: pmId })
   } catch (err: unknown) {
     await conn.rollback()
+    // A refusal the caller can act on (an empty or fully-skipped file) is not
+    // a server fault — let the gateway serialise it as the 4xx it already is.
+    if (err instanceof ApiError) throw err
     const message = err instanceof Error ? err.message : String(err)
     recordFailedEvent("PM_FULL", eventId, { name: pmName }, message)
     logger.error({ ...logCtx, message: "create-full error", error: message, code: (err as { code?: string })?.code })
@@ -339,6 +349,19 @@ export async function pmAddRates(body: PmAddRatesBody, userId: number, ctx: obje
   if (vendorList.length === 0 && mfgList.length === 0) {
     logger.warn({ ...logCtx, message: "add-rates rejected: no vendors or manufacturers provided" })
     return NextResponse.json({ error: "Provide at least one vendor rate or manufacturer" }, { status: 400 })
+  }
+
+  // A rate needs the party it was agreed with: vendor_id and mfg_id are NOT NULL
+  // on cost_master_{rm,pm}_{ven,mfg}. Without this the row reaches MySQL and comes
+  // back as a 500 "Column 'vendor_id' cannot be null" — a user input problem
+  // reported as a server fault.
+  const noVendor = vendorList.filter((v: { vendor_id?: unknown }) => !v?.vendor_id).length
+  const noMfg    = mfgList.filter((m: { mfg_id?: unknown }) => !m?.mfg_id).length
+  if (noVendor > 0 || noMfg > 0) {
+    throw new ApiError(400, "counterparty_required",
+      [noVendor > 0 ? `${noVendor} vendor rate line(s) have no vendor_id` : null,
+       noMfg    > 0 ? `${noMfg} manufacturer rate line(s) have no mfg_id` : null,
+      ].filter(Boolean).join("; "))
   }
 
   try {
@@ -407,6 +430,9 @@ export async function pmAddRates(body: PmAddRatesBody, userId: number, ctx: obje
       return NextResponse.json({ pmId })
     } catch (err: unknown) {
       await conn.rollback()
+      // A refusal the caller can act on (an empty or fully-skipped file) is not
+      // a server fault — let the gateway serialise it as the 4xx it already is.
+      if (err instanceof ApiError) throw err
       const message = err instanceof Error ? err.message : String(err)
       recordFailedEvent("PM_RATES", eventId, { pmId }, message)
       logger.error({ ...logCtx, message: "add-rates transaction error", pmId, error: message, code: (err as { code?: string })?.code })
@@ -450,7 +476,8 @@ export async function pmBulk(body: PmBulkBody, userId: number, ctx: object): Pro
     skipped = result.skipped
 
     if (staged === 0) {
-      throw new Error("Nothing to submit for approval — every row was skipped or had no actual changes.")
+      throw new ApiError(400, "nothing_to_stage",
+        "Nothing to submit for approval — every row was skipped or had no actual changes.")
     }
     await conn.commit()
     recordProcessedEvent("PM_BULK", eventId, { source: "csv", staged, skipped, approvalId: result.approvalId })
@@ -458,6 +485,9 @@ export async function pmBulk(body: PmBulkBody, userId: number, ctx: object): Pro
     return NextResponse.json({ ok: true, approval_id: result.approvalId, staged, skipped, total: rows.length })
   } catch (err: unknown) {
     await conn.rollback()
+    // A refusal the caller can act on (an empty or fully-skipped file) is not
+    // a server fault — let the gateway serialise it as the 4xx it already is.
+    if (err instanceof ApiError) throw err
     const message = err instanceof Error ? err.message : String(err)
     recordFailedEvent("PM_BULK", eventId, { source: "csv", rowCount: rows.length }, message)
     logger.error({ ...logCtx, message: "Bulk upload error", error: message, code: (err as { code?: string })?.code })
@@ -509,7 +539,8 @@ export async function pmS3Bulk(body: PmS3BulkBody, userId: number, ctx: object):
     skipped = result.skipped
 
     if (staged === 0) {
-      throw new Error("Nothing to submit for approval — every row was skipped or had no actual changes.")
+      throw new ApiError(400, "nothing_to_stage",
+        "Nothing to submit for approval — every row was skipped or had no actual changes.")
     }
     await conn.commit()
     recordProcessedEvent("PM_S3BULK", eventId, { source: "s3", s3Key: key, staged, skipped, approvalId: result.approvalId })
@@ -517,6 +548,9 @@ export async function pmS3Bulk(body: PmS3BulkBody, userId: number, ctx: object):
     return NextResponse.json({ ok: true, approval_id: result.approvalId, staged, skipped, total: rawRows.length })
   } catch (err: unknown) {
     await conn.rollback()
+    // A refusal the caller can act on (an empty or fully-skipped file) is not
+    // a server fault — let the gateway serialise it as the 4xx it already is.
+    if (err instanceof ApiError) throw err
     const message = err instanceof Error ? err.message : String(err)
     recordFailedEvent("PM_S3BULK", eventId, { source: "s3", s3Key: key }, message)
     logger.error({ ...logCtx, message: "bulk_from_s3 staging failed", error: message, code: (err as { code?: string })?.code })

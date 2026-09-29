@@ -82,11 +82,17 @@ export default async function PackingMaterialsPage({
       search || null, statusFilter || null, makeFilter || null,
       mfgCodeFilter || null, mfgRateMinFilter || null, mfgRateMaxFilter || null, mfgEffFromFilter || null, scope
     )
+    // The list queries carry the vendor-rate join, whose scope params bind
+    // ahead of the filters. countMfg does not — see mfgListParams.
+    const mlp = PMMaterials.mfgListParams(
+      search || null, statusFilter || null, makeFilter || null,
+      mfgCodeFilter || null, mfgRateMinFilter || null, mfgRateMaxFilter || null, mfgEffFromFilter || null, scope
+    )
     let rows: PMByMfg[]
     const typeRows = await getPmDistinctTypes()
 
     if (search) {
-      const noSearchMfp = PMMaterials.mfgFilterParams(
+      const noSearchMfp = PMMaterials.mfgListParams(
         null, statusFilter || null, makeFilter || null,
         mfgCodeFilter || null, mfgRateMinFilter || null, mfgRateMaxFilter || null, mfgEffFromFilter || null, scope
       )
@@ -96,7 +102,7 @@ export default async function PackingMaterialsPage({
       rows = ranked.slice(offset, offset + size)
     } else {
       const [dbRows, countRows] = await Promise.all([
-        timedQuery<PMByMfg>(PMMaterials.selectMfgPaginated, [...mfp, size, offset], { label: "selectMfgPaginated" }),
+        timedQuery<PMByMfg>(PMMaterials.selectMfgPaginated, [...mlp, size, offset], { label: "selectMfgPaginated" }),
         timedQuery<{ total: number }>(PMMaterials.countMfg, mfp, { label: "countMfg" }),
       ])
       rows = dbRows

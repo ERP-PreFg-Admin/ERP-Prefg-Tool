@@ -1,11 +1,19 @@
 import { z } from "zod"
 import { gstNumberField, ifscNumberField, accountNumberField } from "./shared"
 
+/**
+ * `master_vendors.type` is ENUM('rm','pm','both'). It was `z.string().min(1)`,
+ * so any word passed validation and only MySQL refused it — under
+ * STRICT_TRANS_TABLES that surfaced as a 500 "Database error" rather than a 400
+ * naming the field. Keep this in step with the column.
+ */
+export const vendorTypeSchema = z.enum(["rm", "pm", "both"])
+
 // `code` is intentionally absent here — it's auto-generated server-side on create.
 export const vendorCreateSchema = z.object({
   action: z.literal("create"),
   name: z.string().trim().min(1),
-  type: z.string().trim().min(1),
+  type: vendorTypeSchema,
   location: z.string().optional(),
   zone: z.string().optional(),
   registered_name: z.string().optional(),
@@ -28,7 +36,7 @@ export const vendorUpdateSchema = z.object({
   action: z.literal("update"),
   vendor_id: z.union([z.number(), z.string()]),
   name: z.string().trim().min(1),
-  type: z.string().trim().min(1),
+  type: vendorTypeSchema,
   location: z.string().optional(),
   zone: z.string().optional(),
   registered_name: z.string().optional(),

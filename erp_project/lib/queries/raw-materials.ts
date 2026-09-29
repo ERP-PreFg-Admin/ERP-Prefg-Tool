@@ -355,6 +355,16 @@ export const rawMaterials = {
       rmm.id AS rate_id,
       rmm.rm_id, rmm.mfg_id, rmm.mfg_code, rmm.approved_vendor_id, rmm.approved_vendor_code,
       rmm.curr_rate, rmm.effective_from, rmm.uom, r.status,
+      (
+        SELECT ven.curr_rate FROM cost_master_rm_ven AS ven
+        WHERE ven.rm_id = rmm.rm_id
+          AND ven.vendor_id = rmm.approved_vendor_id
+          AND ven.status = 'active'
+          AND ven.effective_from <= ${SQL_TODAY_IST}
+          AND (ven.effective_to IS NULL OR ven.effective_to >= ${SQL_TODAY_IST})
+          AND (? IS NULL OR ven.vendor_id IN (?))
+        ORDER BY ven.id LIMIT 1
+      ) AS vendor_curr_rate,
       rmm.status AS rate_status,
       r.id, r.name, r.make, r.type, r.hsn_code, r.rm_code, r.inci_name
     FROM cost_master_rm_mfg AS rmm
@@ -380,6 +390,16 @@ export const rawMaterials = {
       rmm.id AS rate_id,
       rmm.rm_id, rmm.mfg_id, rmm.mfg_code, rmm.approved_vendor_id, rmm.approved_vendor_code,
       rmm.curr_rate, rmm.effective_from, rmm.uom, r.status,
+      (
+        SELECT ven.curr_rate FROM cost_master_rm_ven AS ven
+        WHERE ven.rm_id = rmm.rm_id
+          AND ven.vendor_id = rmm.approved_vendor_id
+          AND ven.status = 'active'
+          AND ven.effective_from <= ${SQL_TODAY_IST}
+          AND (ven.effective_to IS NULL OR ven.effective_to >= ${SQL_TODAY_IST})
+          AND (? IS NULL OR ven.vendor_id IN (?))
+        ORDER BY ven.id LIMIT 1
+      ) AS vendor_curr_rate,
       rmm.status AS rate_status,
       r.id, r.name, r.make, r.type, r.hsn_code, r.rm_code, r.inci_name
     FROM cost_master_rm_mfg AS rmm
@@ -409,6 +429,29 @@ export const rawMaterials = {
       AND (? IS NULL OR rmm.effective_from >= ?)
       AND (? IS NULL OR rmm.mfg_id IN (?))
   `,
+
+  /**
+   * Params for the two mfg-view LIST queries, which carry the approved-vendor
+   * rate subquery. Its scope params bind FIRST because the subquery sits in the
+   * SELECT list, ahead of every WHERE param — countMfg has no such column and
+   * keeps mfgFilterParams. Built on top of it rather than beside it so the
+   * filter list has one definition.
+   */
+  mfgListParams(
+    search: string | null,
+    status: string | null,
+    type: string | null,
+    mfgCode: string | null,
+    rateMin: string | null,
+    rateMax: string | null,
+    effectiveFrom: string | null,
+    scope: UserScope,
+  ): unknown[] {
+    return [
+      ...scopeParams(scope.vendorIds),
+      ...this.mfgFilterParams(search, status, type, mfgCode, rateMin, rateMax, effectiveFrom, scope),
+    ]
+  },
 
   /** Build the filter param array for all mfg-view queries. */
   mfgFilterParams(

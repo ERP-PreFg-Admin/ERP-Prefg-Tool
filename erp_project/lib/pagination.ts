@@ -13,12 +13,13 @@
  */
 
 import { query } from "@/lib/db"
+import { MAX_PAGE_SIZE } from "@/lib/constants"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type PaginationParams = {
   page:   number  // 1-based current page
-  size:   number  // rows per page (clamped to 5–100)
+  size:   number  // rows per page (clamped to 5–MAX_PAGE_SIZE)
   offset: number  // SQL OFFSET = (page - 1) * size
 }
 
@@ -34,7 +35,8 @@ export type PageResult<T> = {
 /**
  * Parse ?page and ?size from Next.js searchParams.
  *
- * Clamps: page ≥ 1, size in [5, 100].
+ * Clamps: page ≥ 1, size in [5, MAX_PAGE_SIZE] — the ceiling the bar's
+ * "All" option selects, so it survives the round trip.
  * Falls back gracefully for missing or non-numeric values.
  */
 export function parsePaginationParams(
@@ -46,7 +48,7 @@ export function parsePaginationParams(
     parseInt(String(sp.page ?? defaults.page), 10) || 1
   )
   const size = Math.min(
-    100,
+    MAX_PAGE_SIZE,
     Math.max(5, parseInt(String(sp.size ?? defaults.size), 10) || 20)
   )
   return { page, size, offset: (page - 1) * size }

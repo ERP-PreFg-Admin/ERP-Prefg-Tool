@@ -144,7 +144,7 @@ export function EditPmMfgRateDialog({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1">
-              <Label>Current Rate</Label>
+              <Label>Fixed Rate</Label>
               <Input type="number" step="0.01" min="0" value={form.curr_rate} onChange={(e) => set("curr_rate", e.target.value)} disabled={!canEdit} />
             </div>
             <div className="grid gap-1">

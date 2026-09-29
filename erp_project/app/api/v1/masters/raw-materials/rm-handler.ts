@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { ApiError } from "@/lib/gateway/errors"
 import { query, pool } from "@/lib/db"
 import { rawMaterials } from "@/lib/queries/raw-materials"
 import { parseS3Import } from "@/lib/import-s3"
@@ -83,6 +84,9 @@ export async function rmCreate(body: any, userId: number, ctx: object): Promise<
     return NextResponse.json({ id: rmId })
   } catch (err: any) {
     await conn.rollback()
+    // A refusal the caller can act on (an empty or fully-skipped file) is not
+    // a server fault — let the gateway serialise it as the 4xx it already is.
+    if (err instanceof ApiError) throw err
     recordFailedEvent("RM_MAT", logCtx.eventId, { name: body.name.trim() }, err.message)
     logger.error({ ...logCtx, error: err.message, message: "Raw material create error" })
     if (err.code === "ER_DUP_ENTRY")
@@ -284,6 +288,9 @@ export async function rmCreateFull(body: any, userId: number, ctx: object): Prom
     return NextResponse.json({ id: rmId })
   } catch (err: any) {
     await conn.rollback()
+    // A refusal the caller can act on (an empty or fully-skipped file) is not
+    // a server fault — let the gateway serialise it as the 4xx it already is.
+    if (err instanceof ApiError) throw err
     recordFailedEvent("RM_FULL", logCtx.eventId, { name: rm.name.trim() }, err.message)
     logger.error({ ...logCtx, error: err.message, message: "Raw material create-full error" })
     return NextResponse.json({ error: "Database error: " + err.message }, { status: 500 })
@@ -299,6 +306,19 @@ export async function rmAddRates(body: any, userId: number, ctx: object): Promis
   const mfgList = Array.isArray(body.manufacturers) ? body.manufacturers : []
   if (vendorList.length === 0 && mfgList.length === 0)
     return NextResponse.json({ error: "Provide at least one vendor rate or manufacturer" }, { status: 400 })
+
+  // A rate needs the party it was agreed with: vendor_id and mfg_id are NOT NULL
+  // on cost_master_{rm,pm}_{ven,mfg}. Without this the row reaches MySQL and comes
+  // back as a 500 "Column 'vendor_id' cannot be null" — a user input problem
+  // reported as a server fault.
+  const noVendor = vendorList.filter((v: { vendor_id?: unknown }) => !v?.vendor_id).length
+  const noMfg    = mfgList.filter((m: { mfg_id?: unknown }) => !m?.mfg_id).length
+  if (noVendor > 0 || noMfg > 0) {
+    throw new ApiError(400, "counterparty_required",
+      [noVendor > 0 ? `${noVendor} vendor rate line(s) have no vendor_id` : null,
+       noMfg    > 0 ? `${noMfg} manufacturer rate line(s) have no mfg_id` : null,
+      ].filter(Boolean).join("; "))
+  }
 
   const logCtx = { ...ctx, eventId: makeEventId("RM_RATES", "add-rates"), module: "RM_AddRates" }
   logger.info({ ...logCtx, rm_id, name: name?.trim(), message: "RM Add Rates Started" })
@@ -361,6 +381,9 @@ export async function rmAddRates(body: any, userId: number, ctx: object): Promis
       return NextResponse.json({ rmId })
     } catch (err: any) {
       await conn.rollback()
+      // A refusal the caller can act on (an empty or fully-skipped file) is not
+      // a server fault — let the gateway serialise it as the 4xx it already is.
+      if (err instanceof ApiError) throw err
       recordFailedEvent("RM_RATES", logCtx.eventId, { name: name.trim() }, err.message)
       logger.error({ ...logCtx, error: err.message, message: "Raw material add-rates transaction error" })
       return NextResponse.json({ error: "Database error: " + err.message }, { status: 500 })
@@ -398,7 +421,8 @@ export async function rmBulk(body: any, userId: number, ctx: object): Promise<Ne
     skipped = result.skipped
 
     if (staged === 0) {
-      throw new Error("Nothing to submit for approval — every row was skipped or had no actual changes.")
+      throw new ApiError(400, "nothing_to_stage",
+        "Nothing to submit for approval — every row was skipped or had no actual changes.")
     }
     await conn.commit()
     recordProcessedEvent("RM_BULK", logCtx.eventId, { staged, skipped, approvalId: result.approvalId })
@@ -406,6 +430,9 @@ export async function rmBulk(body: any, userId: number, ctx: object): Promise<Ne
     return NextResponse.json({ ok: true, approval_id: result.approvalId, staged, skipped, total: rows.length })
   } catch (err: any) {
     await conn.rollback()
+    // A refusal the caller can act on (an empty or fully-skipped file) is not
+    // a server fault — let the gateway serialise it as the 4xx it already is.
+    if (err instanceof ApiError) throw err
     recordFailedEvent("RM_BULK", logCtx.eventId, { rowCount: rows.length }, err.message)
     logger.error({ ...logCtx, error: err.message, message: "Raw material bulk upload error" })
     return NextResponse.json({ error: "Bulk upload failed: " + err.message }, { status: 500 })
@@ -450,7 +477,8 @@ export async function rmS3Bulk(body: any, userId: number, ctx: object): Promise<
     skipped = result.skipped
 
     if (staged === 0) {
-      throw new Error("Nothing to submit for approval — every row was skipped or had no actual changes.")
+      throw new ApiError(400, "nothing_to_stage",
+        "Nothing to submit for approval — every row was skipped or had no actual changes.")
     }
     await conn.commit()
     recordProcessedEvent("RM_S3BULK", logCtx.eventId, { s3Key: key, staged, skipped, approvalId: result.approvalId })
@@ -458,6 +486,9 @@ export async function rmS3Bulk(body: any, userId: number, ctx: object): Promise<
     return NextResponse.json({ ok: true, approval_id: result.approvalId, staged, skipped, total: rawRows.length })
   } catch (err: any) {
     await conn.rollback()
+    // A refusal the caller can act on (an empty or fully-skipped file) is not
+    // a server fault — let the gateway serialise it as the 4xx it already is.
+    if (err instanceof ApiError) throw err
     recordFailedEvent("RM_S3BULK", logCtx.eventId, { s3Key: key }, err.message)
     logger.error({ ...logCtx, error: err.message, message: "Raw material bulk upload (S3) error" })
     return NextResponse.json({ error: "Import failed: " + err.message }, { status: 500 })

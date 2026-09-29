@@ -85,12 +85,18 @@ export default async function RawMaterialsPage({
       search || null, statusFilter || null, typeFilter || null,
       mfgCodeFilter || null, mfgRateMinFilter || null, mfgRateMaxFilter || null, mfgEffFromFilter || null, scope
     )
+    // The list queries carry the approved-vendor rate subquery, whose scope
+    // params bind ahead of the filters. countMfg does not — see mfgListParams.
+    const mlp = rawMaterials.mfgListParams(
+      search || null, statusFilter || null, typeFilter || null,
+      mfgCodeFilter || null, mfgRateMinFilter || null, mfgRateMaxFilter || null, mfgEffFromFilter || null, scope
+    )
     let rows: RMByMfg[]
     let total: number
     const typeRows = await getRmDistinctTypes()
 
     if (search) {
-      const noSearchMfp = rawMaterials.mfgFilterParams(
+      const noSearchMfp = rawMaterials.mfgListParams(
         null, statusFilter || null, typeFilter || null,
         mfgCodeFilter || null, mfgRateMinFilter || null, mfgRateMaxFilter || null, mfgEffFromFilter || null, scope
       )
@@ -100,7 +106,7 @@ export default async function RawMaterialsPage({
       rows = ranked.slice(offset, offset + size)
     } else {
       const [dbRows, countRows] = await Promise.all([
-        timedQuery<RMByMfg>(rawMaterials.selectMfgPaginated, [...mfp, size, offset], { label: "selectMfgPaginated" }),
+        timedQuery<RMByMfg>(rawMaterials.selectMfgPaginated, [...mlp, size, offset], { label: "selectMfgPaginated" }),
         timedQuery<{ total: number }>(rawMaterials.countMfg, mfp, { label: "countMfg" }),
       ])
       rows = dbRows

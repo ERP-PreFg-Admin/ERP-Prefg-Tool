@@ -32,7 +32,11 @@ function buildMfgColumns(vendors: Vendor[], manufacturers: Mfg[]): ColumnDef[] {
   { key: "inci_name",            label: "INCI Name",       sortAs: "text", render: (r) => <TruncatedCell value={r.inci_name} label="INCI Name" /> },
   { key: "make",                 label: "Make",            sortAs: "text", render: (r) => <TruncatedCell value={r.make} label="Make" /> },
   { key: "type",                 label: "Type",            sortAs: "text", width: "100px" },
-  { key: "curr_rate",            label: "Current Rate",    sortAs: "num",  width: "145px", render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
+  { key: "curr_rate",            label: "Fixed Rate",      sortAs: "num",  width: "130px", render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
+  // The approved vendor's rate in force today, beside the fixed rate it was
+  // agreed against. Null when that vendor has no live rate, or is outside your
+  // vendor scope — the same boundary the Vendor tab applies.
+  { key: "vendor_curr_rate",     label: "Vendor Rate",     sortAs: "num",  width: "130px", render: (r) => r.vendor_curr_rate != null ? Number(r.vendor_curr_rate).toFixed(2) : "—" },
   { key: "mfg_code",             label: "Manufacturer",    sortAs: "text", render: (r) => nameByMfgId.get(r.mfg_id as number) ?? (r.mfg_code as string | null) ?? "—" },
   { key: "approved_vendor_code", label: "Approved Vendor", sortAs: "text", render: (r) => nameByVendorId.get(r.approved_vendor_id as number) ?? (r.approved_vendor_code as string | null) ?? "—" },
   { key: "rate_status",          label: "Status",          sortAs: "text", width: "100px", render: rateStatusBadge },

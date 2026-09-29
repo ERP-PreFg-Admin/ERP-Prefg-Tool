@@ -4,7 +4,7 @@
  * PaginationBar — reusable footer for every master table.
  *
  * Layout:
- *   Left  — rows-per-page selector (10 / 20 / 50 / 100)
+ *   Left  — rows-per-page selector (10 / 20 / 50 / 100 / All)
  *   Right — "X–Y of Z records" count  +  Prev / Next buttons
  *
  * Navigation strategy: all URL changes are merged into the existing
@@ -17,6 +17,7 @@
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { ChevronLeft, ChevronRight } from "lucide-react"
+import { MAX_PAGE_SIZE } from "@/lib/constants"
 
 export function PaginationBar({
   total,
@@ -63,7 +64,18 @@ export function PaginationBar({
           {[10, 20, 50, 100].map((n) => (
             <option key={n} value={n}>{n}</option>
           ))}
+          {/* "All" is MAX_PAGE_SIZE, the same ceiling parsePaginationParams and
+              the invoice list already use — every query behind this bar takes it
+              as a LIMIT, so it has to be a real number rather than "no limit". */}
+          <option value={MAX_PAGE_SIZE}>All</option>
         </select>
+        {/* Only when it bites. A set past the ceiling would otherwise look like
+            the whole list, which is the one thing "All" must not do. */}
+        {pageSize >= MAX_PAGE_SIZE && total > MAX_PAGE_SIZE && (
+          <span className="text-xs text-amber-700 dark:text-amber-400">
+            showing the first {MAX_PAGE_SIZE} — narrow the filters to see the rest
+          </span>
+        )}
       </div>
 
       {/* ── Count label + Prev / Next ── */}

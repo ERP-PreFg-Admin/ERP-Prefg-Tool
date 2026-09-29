@@ -305,9 +305,25 @@ export const packingMaterials = {
       p.pm_code, p.name, p.type, p.pantone_color,
       p.hsn_code, p.uom, pmm.pm_id, pmm.id AS rate_id,
       pmm.mfg_id, pmm.mfg_code, pmm.curr_rate,
-      pmm.uom, pmm.status, pmm.effective_from
+      pmm.uom, pmm.status, pmm.effective_from,
+      ven.curr_rate AS vendor_curr_rate,
+      ven.vendor_code AS vendor_rate_code
     FROM cost_master_pm_mfg AS pmm
     INNER JOIN master_pm AS p ON pmm.pm_id = p.id
+    -- The vendor rate in force today for this PM. cost_master_pm_mfg has no
+    -- approved_vendor_id (unlike its RM twin), so there is no "the" vendor:
+    -- this is the same best-effort pick selectApprovedVendorRateByPm makes —
+    -- lowest id — so the two screens name the same one. 252 of 280 quoted PMs
+    -- have a single active vendor, but 28 have 2-4, so vendor_code travels
+    -- with the rate and the column attributes it.
+    LEFT JOIN cost_master_pm_ven AS ven ON ven.id = (
+      SELECT id FROM cost_master_pm_ven
+      WHERE pm_id = pmm.pm_id AND status = 'active'
+        AND effective_from <= ${SQL_TODAY_IST}
+        AND (effective_to IS NULL OR effective_to >= ${SQL_TODAY_IST})
+        AND (? IS NULL OR vendor_id IN (?))
+      ORDER BY id LIMIT 1
+    )
     WHERE (? IS NULL OR p.pm_code LIKE ? OR p.name LIKE ?)
       AND (? IS NULL OR pmm.status = ?)
       AND (? IS NULL OR p.type = ?)
@@ -325,9 +341,25 @@ export const packingMaterials = {
       p.pm_code, p.name, p.type, p.pantone_color,
       p.hsn_code, p.uom, pmm.pm_id, pmm.id AS rate_id,
       pmm.mfg_id, pmm.mfg_code, pmm.curr_rate,
-      pmm.uom, pmm.status, pmm.effective_from
+      pmm.uom, pmm.status, pmm.effective_from,
+      ven.curr_rate AS vendor_curr_rate,
+      ven.vendor_code AS vendor_rate_code
     FROM cost_master_pm_mfg AS pmm
     INNER JOIN master_pm AS p ON pmm.pm_id = p.id
+    -- The vendor rate in force today for this PM. cost_master_pm_mfg has no
+    -- approved_vendor_id (unlike its RM twin), so there is no "the" vendor:
+    -- this is the same best-effort pick selectApprovedVendorRateByPm makes —
+    -- lowest id — so the two screens name the same one. 252 of 280 quoted PMs
+    -- have a single active vendor, but 28 have 2-4, so vendor_code travels
+    -- with the rate and the column attributes it.
+    LEFT JOIN cost_master_pm_ven AS ven ON ven.id = (
+      SELECT id FROM cost_master_pm_ven
+      WHERE pm_id = pmm.pm_id AND status = 'active'
+        AND effective_from <= ${SQL_TODAY_IST}
+        AND (effective_to IS NULL OR effective_to >= ${SQL_TODAY_IST})
+        AND (? IS NULL OR vendor_id IN (?))
+      ORDER BY id LIMIT 1
+    )
     WHERE (? IS NULL OR p.pm_code LIKE ? OR p.name LIKE ?)
       AND (? IS NULL OR pmm.status = ?)
       AND (? IS NULL OR p.type = ?)
@@ -354,6 +386,28 @@ export const packingMaterials = {
   `,
 
   /** Build the filter param array for all mfg-view queries. */
+  /**
+   * Params for the two mfg-view LIST queries, which carry the vendor-rate join.
+   * Its scope params bind FIRST because the join sits ahead of the WHERE clause
+   * — countMfg has no such column and keeps mfgFilterParams. Mirrors
+   * rawMaterials.mfgListParams.
+   */
+  mfgListParams(
+    search: string | null,
+    status: string | null,
+    type: string | null,
+    mfgCode: string | null,
+    rateMin: string | null,
+    rateMax: string | null,
+    effectiveFrom: string | null,
+    scope: UserScope,
+  ): unknown[] {
+    return [
+      ...scopeParams(scope.vendorIds),
+      ...this.mfgFilterParams(search, status, type, mfgCode, rateMin, rateMax, effectiveFrom, scope),
+    ]
+  },
+
   mfgFilterParams(
     search: string | null,
     status: string | null,

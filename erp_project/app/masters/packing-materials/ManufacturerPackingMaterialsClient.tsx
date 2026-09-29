@@ -29,9 +29,21 @@ function buildMfgColumns(manufacturers: Mfg[]): ColumnDef[] {
   { key: "pm_code",        label: "PM Code",        sortAs: "text", width: "120px", className: "font-mono text-xs font-medium" },
   { key: "name",           label: "Name",           sortAs: "text", className: "font-medium", render: (r) => <TruncatedCell value={r.name} label="Name" /> },
   { key: "type",           label: "Type",           sortAs: "text", width: "100px" },
-  { key: "mfg_code",       label: "Manufacturer",   sortAs: "text", render: (r) => nameByMfgId.get(r.mfg_id as number) ?? (r.mfg_code as string | null) ?? "—" },
-  { key: "mfg_id",         label: "MFG ID",         sortAs: "num",  width: "105px" },
-  { key: "curr_rate",      label: "Current Rate",   sortAs: "num",  width: "145px", render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
+  // Name and id in one cell — the id was its own column, which said nothing the
+  // name did not and cost a column's width to say it.
+  { key: "mfg_code",       label: "Manufacturer",   sortAs: "text", render: (r) => {
+      const name = nameByMfgId.get(r.mfg_id as number) ?? (r.mfg_code as string | null)
+      const id = r.mfg_id as number | null
+      if (!name) return id != null ? `#${id}` : "—"
+      return id != null ? `${name} (${id})` : name
+    } },
+  { key: "curr_rate",      label: "Fixed Rate",     sortAs: "num",  width: "130px", render: (r) => r.curr_rate != null ? Number(r.curr_rate).toFixed(2) : "—" },
+  // PM carries no approved vendor, so the rate is attributed to the vendor it
+  // actually came from rather than left as a bare number.
+  { key: "vendor_curr_rate", label: "Vendor Rate",  sortAs: "num",  width: "130px", render: (r) =>
+      r.vendor_curr_rate != null
+        ? <span title={r.vendor_rate_code ? `Vendor ${r.vendor_rate_code}` : undefined}>{Number(r.vendor_curr_rate).toFixed(2)}</span>
+        : "—" },
   { key: "uom",            label: "UOM",            sortAs: "text", width: "90px", className: "uppercase text-xs text-muted-foreground" },
   { key: "status",         label: "Status",         sortAs: "text", width: "100px", render: rateStatusBadge },
   { key: "effective_from", label: "Effective From", sortAs: "date", width: "155px", render: (r) => fmtDate(r.effective_from) },

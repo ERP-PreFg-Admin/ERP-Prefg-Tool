@@ -46,6 +46,10 @@ export const GET = withGateway({
 
   const scope = await getUserScope(Number(session.user.id))
   let filterParams: unknown[]
+  // countMfg and selectMfgAllFiltered no longer take the same list: the data
+  // query carries the approved-vendor rate subquery, whose scope params bind
+  // ahead of the filters. Same array on the vendor view, where neither does.
+  let dataParams: unknown[]
   let filename: string
   if (isMfg) {
     const mfgCode    = sp.get("mfg_code")           ?? ""
@@ -54,6 +58,10 @@ export const GET = withGateway({
     const mfgEffFrom = sp.get("mfg_effective_from")  ?? ""
     const typeFilter = sp.get("type") ?? ""
     filterParams = rmSql.mfgFilterParams(
+      search || null, status || null, typeFilter || null, mfgCode || null,
+      mfgRateMin || null, mfgRateMax || null, mfgEffFrom || null, scope
+    )
+    dataParams = rmSql.mfgListParams(
       search || null, status || null, typeFilter || null, mfgCode || null,
       mfgRateMin || null, mfgRateMax || null, mfgEffFrom || null, scope
     )
@@ -72,7 +80,7 @@ export const GET = withGateway({
     const rateMax        = sp.get("rate_max")        ?? ""
     const effectiveFrom  = sp.get("effective_from") ?? ""
     const typeFilter2 = sp.get("type") ?? ""
-    filterParams = rmSql.vendorFilterParams(
+    dataParams = filterParams = rmSql.vendorFilterParams(
       search || null, status || null, make || null, typeFilter2 || null,
       vendorCode || null, rateMin || null, rateMax || null, effectiveFrom || null, scope
     )
@@ -96,7 +104,7 @@ export const GET = withGateway({
       )
     }
 
-    const rows = await query<Record<string, unknown>>(dataSql, filterParams)
+    const rows = await query<Record<string, unknown>>(dataSql, dataParams)
     console.log(`[/api/v1/masters/raw-materials/export] served ${rows.length} rows as ${format} (view=${viewLabel})`)
     logger.info({ message: "Raw materials export", userId: session.user.id, format, view: viewLabel, rowCount: rows.length }) 
     if (format === "xlsx") {

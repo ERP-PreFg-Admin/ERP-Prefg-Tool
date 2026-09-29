@@ -46,6 +46,10 @@ export const GET = withGateway({
 
   const scope = await getUserScope(Number(session.user.id))
   let filterParams: unknown[]
+  // countMfg and selectMfgAllFiltered no longer take the same list: the data
+  // query carries the vendor-rate join, whose scope params bind ahead of the
+  // filters. Same array on the vendor view, where neither does.
+  let dataParams: unknown[]
   if (isMfg) {
     const mfgCode     = sp.get("mfg_code")           ?? ""
     const mfgRateMin  = sp.get("mfg_rate_min")        ?? ""
@@ -56,13 +60,17 @@ export const GET = withGateway({
       search || null, status || null, makeFilter || null, mfgCode || null,
       mfgRateMin || null, mfgRateMax || null, mfgEffFrom || null, scope
     )
+    dataParams = pmSql.mfgListParams(
+      search || null, status || null, makeFilter || null, mfgCode || null,
+      mfgRateMin || null, mfgRateMax || null, mfgEffFrom || null, scope
+    )
   } else {
     const make        = sp.get("make")          ?? ""
     const vendorCode  = sp.get("vendor_code")   ?? ""
     const rateMin     = sp.get("rate_min")       ?? ""
     const rateMax     = sp.get("rate_max")       ?? ""
     const effectiveFrom = sp.get("effective_from") ?? ""
-    filterParams = pmSql.vendorFilterParams(
+    dataParams = filterParams = pmSql.vendorFilterParams(
       search || null, status || null, make || null,
       vendorCode || null, rateMin || null, rateMax || null, effectiveFrom || null, scope
     )
@@ -77,7 +85,7 @@ export const GET = withGateway({
       )
     }
 
-    const rows = await query<Record<string, unknown>>(dataSql, filterParams)
+    const rows = await query<Record<string, unknown>>(dataSql, dataParams)
 
     const filename = isMfg
       ? buildExportFilename(`packing_materials_${viewLabel}`, format, {
