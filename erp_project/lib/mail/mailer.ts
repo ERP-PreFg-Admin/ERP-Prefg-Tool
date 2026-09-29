@@ -319,8 +319,16 @@ export type SelectedPoLine = {
   /** Set when this PO is a split of another — the parent's po_no. */
   reference_po?: string | null
   destination?: string | null
+  remarks?: string | null
+  unit_price?: number | null
+  /** Receipts so far, incl. a split's children. Cancelling cancels what has
+   *  NOT arrived, so the Cancelled table quotes qty minus this. */
+  received_qty?: number | null
 }
-type OngoingPoLine = { po_no: string; sku_code: string; sku_name: string | null; qty: number }
+type OngoingPoLine = {
+  po_no: string; sku_code: string; sku_name: string | null; qty: number
+  remarks?: string | null; unit_price?: number | null
+}
 
 // ATTACHABLE_STATUSES (raised | cancelled) used to gate whether a selected PO's
 // document was attached. Removed: the route passes the EFFECTIVE status, so any
@@ -333,14 +341,26 @@ const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!))
 
-function poTableRows(lines: { po_no: string; sku_code: string; sku_name: string | null; qty: number }[]): string {
+export type PoMailLine = {
+  po_no: string; sku_code: string; sku_name: string | null; qty: number
+  remarks?: string | null
+  /** Excel only — the mail body stays compact. Null on POs raised before
+   *  rates were resolved server-side (lib/po/po-rate.ts). */
+  unit_price?: number | null
+}
+
+const CELL = "padding:5px 10px;border-bottom:1px solid #eee"
+
+function poTableRows(lines: PoMailLine[], withRemarks: boolean): string {
   return lines
     .map(
       (l) => `
         <tr>
-          <td style="padding:6px 12px;border-bottom:1px solid #eee">${escapeHtml(l.po_no)}</td>
-          <td style="padding:6px 12px;border-bottom:1px solid #eee">${escapeHtml(l.sku_code)}${l.sku_name ? " — " + escapeHtml(l.sku_name) : ""}</td>
-          <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${Number(l.qty).toLocaleString("en-IN")}</td>
+          <td style="${CELL}">${escapeHtml(l.po_no)}</td>
+          <td style="${CELL}">${escapeHtml(l.sku_code)}</td>
+          <td style="${CELL}">${l.sku_name ? escapeHtml(l.sku_name) : "—"}</td>
+          <td style="${CELL};text-align:right">${Number(l.qty).toLocaleString("en-IN")}</td>
+          ${withRemarks ? `<td style="${CELL};color:#555">${l.remarks ? escapeHtml(l.remarks) : "—"}</td>` : ""}
         </tr>`
     )
     .join("")
@@ -366,17 +386,29 @@ export function partitionSplits(lines: SelectedPoLine[]): {
   return { splits: lines.filter(isSplit), rest: lines.filter((l) => !isSplit(l)) }
 }
 
-export function poSection(title: string, lines: { po_no: string; sku_code: string; sku_name: string | null; qty: number }[]): string {
+/**
+ * `qtyLabel` is not decoration: the Cancelled table quotes what was cancelled
+ * (ordered minus received), not the whole order, and a column still headed
+ * "Quantity" would read to the manufacturer as the original order size.
+ *
+ * The Remarks column appears only when a line carries one, so the inward
+ * invoice mail — which has no remarks — is unchanged.
+ */
+export function poSection(title: string, lines: PoMailLine[], qtyLabel = "Quantity"): string {
   if (lines.length === 0) return ""
+  const withRemarks = lines.some((l) => !!l.remarks?.trim())
+  const head = "padding:5px 10px;font-weight:600"
   return `
-    <h3 style="margin:20px 0 4px;font-size:14px">${title}</h3>
-    <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <h3 style="margin:20px 0 4px;font-size:13px">${title}</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
       <tr style="background:#f5f5f5">
-        <td style="padding:6px 12px;font-weight:600">PO No.</td>
-        <td style="padding:6px 12px;font-weight:600">SKU</td>
-        <td style="padding:6px 12px;font-weight:600;text-align:right">Quantity</td>
+        <td style="${head}">PO No.</td>
+        <td style="${head}">SKU Code</td>
+        <td style="${head}">SKU Name</td>
+        <td style="${head};text-align:right">${escapeHtml(qtyLabel)}</td>
+        ${withRemarks ? `<td style="${head}">Remarks</td>` : ""}
       </tr>
-      ${poTableRows(lines)}
+      ${poTableRows(lines, withRemarks)}
     </table>`
 }
 
@@ -385,10 +417,17 @@ const PO_SHEET_COLUMNS: ExportColumn[] = [
   { key: "sku_code", label: "SKU Code", type: "text" },
   { key: "sku_name", label: "SKU Name", type: "text" },
   { key: "qty", label: "Quantity", type: "number" },
+  { key: "unit_price", label: "Rate", type: "number" },
+  { key: "remarks", label: "Remarks", type: "text" },
 ]
 
-function toSheetRows(lines: { po_no: string; sku_code: string; sku_name: string | null; qty: number }[]): Record<string, unknown>[] {
-  return lines.map((l) => ({ ...l }))
+function toSheetRows(lines: PoMailLine[]): Record<string, unknown>[] {
+  return lines.map((l) => ({
+    ...l,
+    remarks: l.remarks ?? "",
+    // Blank, not 0 — an unpriced PO is unknown, and 0 reads as free.
+    unit_price: l.unit_price == null ? "" : Number(l.unit_price),
+  }))
 }
 
 /**
@@ -442,9 +481,10 @@ export async function sendMfgSelectionEmail(
     return false
   }
 
-  const ongoing = await query<{ id: number; po_no: string; sku_code: string; sku_name: string | null; qty: number; expected_on: string | null; status: string }>(purchaseOrdersSql.ongoingByMfg, [mfgId])
+  const ongoing = await query<{ id: number; po_no: string; sku_code: string; sku_name: string | null; qty: number; remarks: string | null; unit_price: number | null; expected_on: string | null; status: string }>(purchaseOrdersSql.ongoingByMfg, [mfgId])
   const openLines: OngoingPoLine[] = ongoing.map((r) => ({
     po_no: r.po_no, sku_code: r.sku_code, sku_name: r.sku_name, qty: Number(r.qty),
+    remarks: r.remarks, unit_price: r.unit_price,
   }))
 
   // Selected lines split into the tables the summary shows — any other selected
@@ -455,7 +495,11 @@ export async function sendMfgSelectionEmail(
   // would be a guard against a caller that doesn't exist, and it would hide the
   // real bug (a split routed to the wrong mail) by silently dropping the line.
   const raisedLines    = selected.filter((l) => l.status === "raised")
-  const cancelledLines = selected.filter((l) => l.status === "cancelled")
+  // Cancelling a PO cancels the part that never arrived, so the table quotes
+  // ordered minus received. Clamped: an over-receipt would otherwise go negative.
+  const cancelledLines = selected
+    .filter((l) => l.status === "cancelled")
+    .map((l) => ({ ...l, qty: Math.max(Number(l.qty) - Number(l.received_qty ?? 0), 0) }))
 
   const attachments: { filename: string; content: Buffer }[] = []
   let pdfsAttached = 0
@@ -518,7 +562,7 @@ export async function sendMfgSelectionEmail(
           <h2 style="margin-bottom:4px">PO Update: ${mfg.name}</h2>
           <p style="color:#555;margin-top:0">Please find the latest status of the following purchase orders${pdfsAttached > 0 ? " (PDFs attached for raised/cancelled POs; full details in the attached Excel)" : " (full details in the attached Excel)"}.</p>
           ${poSection("Newly Raised Purchase Orders", raisedLines)}
-          ${poSection("Cancelled Purchase Orders", cancelledLines)}
+          ${poSection("Cancelled Purchase Orders", cancelledLines, "Cancelled Qty")}
           ${poSection("Remaining Open Purchase Orders", openLines)}
           <p style="font-size:12px;color:#888;margin-top:20px">
             This is an auto-generated email from the mcaffeine ERP system.

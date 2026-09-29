@@ -872,6 +872,7 @@ export const purchaseOrdersSql = {
    */
   ongoingByMfg: `
     SELECT po.id, po.po_no, po.sku_code, sk.name AS sku_name, po.reference_po,
+           po.remarks, po.unit_price,
            ${UNALLOCATED_QTY_EXPR} AS qty,
            po.expected_on, ${EFFECTIVE_STATUS_EXPR} AS status
     FROM purchase_orders po
@@ -902,7 +903,10 @@ export const purchaseOrdersSql = {
     const placeholders = Array(count).fill("?").join(",")
     return `
       SELECT po.id, po.po_no, po.mfg_id, m.code AS mfg_code, m.name AS mfg_name,
-             po.sku_code, sk.name AS sku_name, po.qty, po.destination,
+             po.sku_code, sk.name AS sku_name, po.qty, po.unit_price, po.destination, po.remarks,
+             -- Cancelling a PO cancels what has NOT arrived, so the mail quotes
+             -- qty minus receipts, not the whole order.
+             ${RECEIVED_TOTAL_EXPR} AS received_qty,
              po.reference_po, COALESCE(ch.child_count, 0) AS child_count,
              ${EFFECTIVE_STATUS_EXPR} AS status
       FROM purchase_orders po

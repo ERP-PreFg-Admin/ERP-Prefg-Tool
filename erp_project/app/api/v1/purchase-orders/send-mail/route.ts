@@ -61,6 +61,8 @@ export const POST = withGateway({
       byMfg.get(r.mfg_id)!.lines.push({
         id: r.id, po_no: r.po_no, sku_code: r.sku_code, sku_name: r.sku_name, qty: Number(r.qty),
         status: r.status, reference_po: r.reference_po, destination: r.destination,
+        remarks: r.remarks, received_qty: Number(r.received_qty ?? 0),
+        unit_price: r.unit_price == null ? null : Number(r.unit_price),
       })
     }
 
