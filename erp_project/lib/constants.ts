@@ -139,3 +139,12 @@ export function poLetterForEntity(entityCode: string | null | undefined): string
  * explicit click, too slow to be a default.
  */
 export const MAX_PAGE_SIZE = 500
+
+/**
+ * Scheduled reports someone can subscribe to — entity_emails.entity_code on an
+ * `entity_type = 'report'` row. Validated server-side because entity_code has
+ * no FK, so a typo would be accepted and then match nothing at send time.
+ */
+
+export const REPORT_CODES = ["daily_ops", "po_low_open_qty"] as const
+

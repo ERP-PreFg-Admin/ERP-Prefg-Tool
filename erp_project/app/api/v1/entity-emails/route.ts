@@ -16,6 +16,15 @@ import { warehouse as warehouseSql } from "@/lib/queries/warehouse"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { entityEmailCreateSchema, entityEmailUpdateSchema } from "@/lib/validation/entity-emails"
+import { REPORT_CODES } from "@/lib/constants"
+
+/** entity_code on a 'report' row names a report, and has no FK. */
+function assertKnownReport(entityType: string, entityCode: string): void {
+  if (entityType !== "report") return
+  if (!(REPORT_CODES as readonly string[]).includes(entityCode)) {
+    throw new ApiError(400, "unknown_report", `'${entityCode}' is not a known report.`)
+  }
+}
 
 export const POST = withGateway({
   schema: entityEmailCreateSchema,
@@ -57,6 +66,9 @@ export const POST = withGateway({
         )
       }
     }
+
+    // A report row names a report, not an entity — same no-FK reasoning.
+    assertKnownReport(body.entity_type, body.entity_code)
 
     // One address per entity. uq_entity_email enforces it (see
     // prisma/add_entity_email_unique.sql) — this pre-check exists to say WHICH
@@ -137,6 +149,9 @@ export const PATCH = withGateway({
         )
       }
     }
+
+    // A report row names a report, not an entity — same no-FK reasoning.
+    assertKnownReport(body.entity_type, body.entity_code)
 
     if (body.entity_type === "warehouse" && body.entity_code !== "*") {
       const wh = await query<{ id: number }>(entityEmails.warehouseExistsByName, [body.entity_code])

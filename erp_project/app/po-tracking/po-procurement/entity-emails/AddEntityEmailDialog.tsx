@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
 import { apiErrorMessage } from "@/lib/api-error-message"
 
-type EntityType = "vendor" | "mfg" | "warehouse" | "employee"
+type EntityType = "vendor" | "mfg" | "warehouse" | "employee" | "report"
 type EntityOption = { id: number; code: string; name: string }
 /**
  * What an employee row hangs off. "all_mfgs" is stored as entity_code '*'.
@@ -33,7 +33,16 @@ const TYPE_LABEL: Record<EntityType, string> = {
   // purchase_orders.destination stores, and what the inward mail looks up.
   warehouse: "Warehouse",
   employee: "Employee",
+  report: "Report",
 }
+
+/** Reports a person can subscribe to, stored in entity_code. 'report' is its
+ *  own entity_type so these rows can never reach entity mail. */
+// Codes must match REPORT_CODES in lib/constants.ts — the API validates against it.
+const REPORTS = [
+  { code: "daily_ops", name: "Daily ops report (23:59 IST)" },
+  { code: "po_low_open_qty", name: "Low open PO quantity (08:00 IST)" },
+]
 
 /** The wildcard entity_code meaning "every manufacturer, including future ones". */
 // Same stored value for both, read differently by entity_type: on an employee row
@@ -137,6 +146,7 @@ export default function AddEntityEmailDialog({
   const codeOptions =
     entityType === "vendor" ? vendorOptions
     : entityType === "warehouse" ? [ALL_WAREHOUSES_OPTION, ...warehouseOptions]
+    : entityType === "report" ? REPORTS.map((r, i) => ({ id: -100 - i, ...r }))
     : mfgOptions
 
   function updateRow(i: number, patch: Partial<EmailRow>) {
@@ -247,6 +257,7 @@ export default function AddEntityEmailDialog({
                 <option value="vendor">Vendor</option>
                 <option value="warehouse">Warehouse</option>
                 <option value="employee">Employee / other person</option>
+                <option value="report">Report subscriber</option>
               </Select>
             </div>
 
@@ -307,6 +318,14 @@ export default function AddEntityEmailDialog({
                 {" "}Anyone can be added here, including people outside the company — the address is typed, not picked from your users.
               </p>
             </>
+          )}
+
+          {entityType === "report" && (
+            <p className="text-xs text-muted-foreground">
+              Receives the scheduled report and nothing else — a report subscriber is never
+              copied on PO, split or inward-invoice mail. Use <strong>Cc</strong> for people
+              who should see it without being the named recipient.
+            </p>
           )}
 
           {/* Warehouses only. Every location operates under both Pep and

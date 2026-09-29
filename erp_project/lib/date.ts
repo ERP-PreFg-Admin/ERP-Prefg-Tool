@@ -54,6 +54,25 @@ export function monthIST(at: Date = new Date()): string {
  */
 export const SQL_TODAY_IST = "DATE(CONVERT_TZ(NOW(), '+00:00', '+05:30'))"
 
+/**
+ * An IST calendar day as the half-open UTC instant range the DB actually stores.
+ *
+ * Needed because one report spans two time bases: `purchase_orders.date` is
+ * already an IST DATE, while `activity_log.created_on`, `approvals.raised_on`
+ * and `invoice_mfg.created_at` are UTC (plain NOW() on a UTC session). Filtering
+ * a UTC column by an IST date is the 5½-hour bug documented in
+ * lib/queries/activity.ts — this is the conversion that avoids it.
+ */
+export function istDayWindowUtc(day: string): { from: Date; to: Date } {
+  const from = new Date(`${day}T00:00:00+05:30`)
+  return { from, to: new Date(from.getTime() + 86_400_000) }
+}
+
+/** The same window as the `YYYY-MM-DD HH:MM:SS` strings mysql2 compares against. */
+export function sqlTs(d: Date): string {
+  return d.toISOString().slice(0, 19).replace("T", " ")
+}
+
 // ── Calendar grid math, for components/ui/date-picker.tsx ────────────────────
 //
 // Lives here rather than in a `lib/date-range.ts` because a second date module

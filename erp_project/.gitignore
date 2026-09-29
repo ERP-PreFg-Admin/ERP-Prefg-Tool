@@ -61,3 +61,7 @@ logs/*
 !/scripts/test-connection.js
 
 /.invoice-samples/
+
+# Scratch output from scripts/_check-daily-digest.ts
+digest-preview.html
+low-open-preview.html

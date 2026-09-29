@@ -21,6 +21,7 @@ import { assertAttachmentsWithinLimit } from "@/lib/mail/mail-limits"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import crypto from "crypto"
+import { log } from "console"
 
 // ── Transports ───────────────────────────────────────────────────────────────
 //
@@ -99,6 +100,39 @@ const sesOptions = MAIL_PROVIDER === "ses" ? { ses: { ConfigurationSetName: SES_
  */
 function mailerCtx() {
   return { module: "MAILER", requestId: crypto.randomUUID() }
+}
+
+/** Which send path a line came from. A CloudWatch filter matches these exactly,
+ *  so they are constants per call site, never built from data. */
+export const MAIL_FLOW = {
+  PO_SELECTION: "po_selection",
+  PO_SPLIT: "po_split",
+  INWARD_INVOICE: "inward_invoice",
+  OPS_DIGEST: "ops_digest",
+  LOW_OPEN_PO: "low_open_po"
+} as const
+
+export type MailFlow = (typeof MAIL_FLOW)[keyof typeof MAIL_FLOW]
+
+/** The countable fields on a send log line — without them the only signal is
+ *  the message text, which no filter should key on. */
+function mailOutcome(
+  outcome: "sent" | "failed",
+  flow: MailFlow,
+  extra: { recipients: number; sesMessageId?: string }
+) {
+  return {
+    mailOutcome: outcome,
+    flow,
+    recipients: extra.recipients,
+    // Which transport sent it. Without this a historical line is unreadable
+    // after a MAIL_PROVIDER switch — you cannot tell whether its id is an SES
+    // one (joinable to the webhook) or a Gmail Message-ID (joinable to nothing).
+    provider: MAIL_PROVIDER,
+    messageId: extra.sesMessageId ?? null,
+    // Only ever set on SES, so the webhook join cannot match a Gmail id.
+    sesMessageId: MAIL_PROVIDER === "ses" ? extra.sesMessageId ?? null : null,
+  }
 }
 
 // Attachment ceiling lives in lib/mail/mail-limits.ts so it can be unit-tested
@@ -231,7 +265,7 @@ export async function fetchPoData(poId: number): Promise<PoEmailData | null> {
  * warehouse's name, which is what purchase_orders.destination stores.
  */
 export async function resolveRecipients(
-  entityType: "mfg" | "vendor" | "warehouse",
+  entityType: "mfg" | "vendor" | "warehouse" | "report",
   entityCode: string,
   primaryEmail: string | null = null,
   /**
@@ -253,6 +287,8 @@ export async function resolveRecipients(
       ? await query<RecipientRow>(entityEmails.selectByWarehouseForEntity, [entityCode, legalEntityCode])
       : entityType === "mfg"
       ? await query<RecipientRow>(entityEmails.selectForMfg, [entityCode, entityCode])
+      : entityType === "report"
+      ? await query<RecipientRow>(entityEmails.selectReportRecipients, [entityCode])
       : await query<RecipientRow>(entityEmails.selectByEntity, [entityType, entityCode])
 
   // Addresses SES has hard-bounced or that complained. Read per call rather than
@@ -468,8 +504,9 @@ export async function sendMfgSelectionEmail(
     mfgId, mfg_name: mfg.name, mfg_email: allRecipients, selectedCount: selected.length, attachmentCount: attachments.length,
   })
 
+  let sesMessageId: string | undefined
   try {
-    await getTransporter().sendMail({
+    const info = await getTransporter().sendMail({
       ...sesOptions,
       from: fromHeader,
       to: to.join(", "),
@@ -492,15 +529,16 @@ export async function sendMfgSelectionEmail(
       `,
       attachments: attachments.length > 0 ? attachments : undefined,
     })
+    sesMessageId = info?.messageId
   } catch (sendErr: unknown) {
     const message = sendErr instanceof Error ? sendErr.message : String(sendErr)
     const stack = sendErr instanceof Error ? sendErr.stack : undefined
-    logger.error({ ...ctx, eventId, err: message, stack, message: "PO selection email send failed" })
+    logger.error({ ...ctx, ...mailOutcome("failed", MAIL_FLOW.PO_SELECTION, { recipients: to.length + cc.length }), eventId, err: message, stack, message: "PO selection email send failed" })
     recordFailedEvent("PO_SELECTION_EMAIL", eventId, { mfgId, mfg_name: mfg.name }, message)
     throw sendErr
   }
 
-  logger.info({ ...ctx, eventId, mfgId, mfg_name: mfg.name, mfg_email: allRecipients, message: "PO selection email sent successfully" })
+  logger.info({ ...ctx, ...mailOutcome("sent", MAIL_FLOW.PO_SELECTION, { recipients: to.length + cc.length, sesMessageId }), eventId, mfgId, mfg_name: mfg.name, mfg_email: allRecipients, message: "PO selection email sent successfully" })
   recordProcessedEvent("PO_SELECTION_EMAIL", eventId, { mfgId, mfg_name: mfg.name, mfg_email: allRecipients })
   return true
 }
@@ -587,8 +625,9 @@ export async function sendSplitPoEmail(mfgId: number, line: SelectedPoLine): Pro
     po_no: line.po_no, reference_po: line.reference_po, attachmentCount: attachments.length,
   })
 
+  let sesMessageId: string | undefined
   try {
-    await getTransporter().sendMail({
+    const info = await getTransporter().sendMail({
       ...sesOptions,
       from: fromHeader,
       to: to.join(", "),
@@ -623,16 +662,18 @@ export async function sendSplitPoEmail(mfgId: number, line: SelectedPoLine): Pro
       `,
       attachments: attachments.length > 0 ? attachments : undefined,
     })
+    sesMessageId = info?.messageId
   } catch (sendErr: unknown) {
     const message = sendErr instanceof Error ? sendErr.message : String(sendErr)
     const stack = sendErr instanceof Error ? sendErr.stack : undefined
-    logger.error({ ...ctx, eventId, po_no: line.po_no, err: message, stack, message: "Split PO email send failed" })
+    logger.error({ ...ctx, ...mailOutcome("failed", MAIL_FLOW.PO_SPLIT, { recipients: to.length + cc.length }), eventId, po_no: line.po_no, err: message, stack, message: "Split PO email send failed" })
     recordFailedEvent("PO_SPLIT_EMAIL", eventId, { mfgId, mfg_name: mfg.name, po_no: line.po_no }, message)
     throw sendErr
   }
 
   logger.info({
-    ...ctx, eventId, mfgId, mfg_name: mfg.name, mfg_email: allRecipients,
+    ...ctx, ...mailOutcome("sent", MAIL_FLOW.PO_SPLIT, { recipients: to.length + cc.length, sesMessageId }),
+    eventId, mfgId, mfg_name: mfg.name, mfg_email: allRecipients,
     po_no: line.po_no, reference_po: line.reference_po,
     message: "Split PO email sent successfully",
   })
@@ -791,8 +832,9 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<I
     warehouse_email: allRecipients, attachmentCount: attachments.length,
   })
 
+  let sesMessageId: string | undefined
   try {
-    await getTransporter().sendMail({
+    const info = await getTransporter().sendMail({
       ...sesOptions,
       from: fromHeader,
       to: to.join(", "),
@@ -820,15 +862,17 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<I
       `,
       attachments: attachments.length > 0 ? attachments : undefined,
     })
+    sesMessageId = info?.messageId
   } catch (sendErr: unknown) {
     const message = sendErr instanceof Error ? sendErr.message : String(sendErr)
-    logger.error({ ...ctx, eventId, mfgId, destination, invoiceNo, err: message, message: "Inward invoice email send failed" })
+    logger.error({ ...ctx, ...mailOutcome("failed", MAIL_FLOW.INWARD_INVOICE, { recipients: to.length + cc.length }), eventId, mfgId, destination, invoiceNo, err: message, message: "Inward invoice email send failed" })
     recordFailedEvent("PO_INWARD_INVOICE_EMAIL", eventId, { mfgId, destination, invoiceNo }, message)
     throw sendErr
   }
 
   logger.info({
-    ...ctx, eventId, mfgId, mfg_name: mfg.name, destination, invoiceNo, uniwarePoCode,
+    ...ctx, ...mailOutcome("sent", MAIL_FLOW.INWARD_INVOICE, { recipients: to.length + cc.length, sesMessageId }),
+    eventId, mfgId, mfg_name: mfg.name, destination, invoiceNo, uniwarePoCode,
     warehouse_email: allRecipients, attachmentCount: attachments.length,
     poDocumentAttached: uniwarePoCode ? !missingPoDocument : undefined,
     message: "Inward invoice email sent to warehouse",
@@ -838,3 +882,49 @@ export async function sendInwardInvoiceEmail(mail: InwardInvoiceMail): Promise<I
   })
   return { sent: true, missingPoDocument }
 }
+
+export const OPS_DIGEST_CODE = "daily_ops"
+export const LOW_OPEN_PO_CODE = "po_low_open_qty"
+
+async function sendReportEmail(
+  reportCode:string , subject:string , html:string , flow:MailFlow , day:string
+): Promise<boolean> {
+  const ctx = mailerCtx()
+  const { to , cc } = await resolveRecipients("report" , reportCode)
+  
+  if(to.length === 0 && cc.length === 0) {
+    logger.warn({...ctx , flow , reportCode , day , message : "Report has no active recipients - not sent"})
+    return false
+  }
+
+  const primary = to.length > 0 ? to : cc
+  const secondary = to.length > 0 ? cc : []
+
+  const recipients = primary.length + secondary.length
+
+  let sesMessageId: string | undefined
+  try {
+    const info = await getTransporter().sendMail({
+      ... sesOptions , 
+      from : fromHeader , 
+      to: primary.join(", "),
+      ... (secondary.length ? {cc : secondary.join(", ")} : {}),
+      subject , 
+      html
+    })
+    sesMessageId = info?.messageId
+  } catch(sendErr : unknown) {
+    const message = sendErr instanceof Error ? sendErr.message : String(sendErr)
+    logger.error({...ctx , ... mailOutcome("failed" , flow , {recipients , sesMessageId}) , reportCode , day , error: message ,  message:"Report Email send failed."})
+    throw sendErr
+  }
+
+  logger.info({ ...ctx, ...mailOutcome("sent", flow, { recipients, sesMessageId }), reportCode, day, message: "Report email sent successfully" })
+  return true
+}
+
+export const sendOpsDigestEmail = (day: string, html: string) =>
+  sendReportEmail(OPS_DIGEST_CODE, `ERP daily report — ${day}`, html, MAIL_FLOW.OPS_DIGEST, day)
+
+export const sendLowOpenPoEmail = (day: string, html: string) =>
+  sendReportEmail(LOW_OPEN_PO_CODE, `Low open PO quantity — ${day}`, html, MAIL_FLOW.LOW_OPEN_PO, day)

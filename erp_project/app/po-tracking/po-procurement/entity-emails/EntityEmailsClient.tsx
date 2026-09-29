@@ -90,6 +90,7 @@ export default function EntityEmailsClient({
           <option value="mfg">Manufacturer</option>
           <option value="warehouse">Warehouse</option>
           <option value="employee">Employee</option>
+          <option value="report">Report</option>
         </Select>
         <MasterToolbarActions>
           <Button

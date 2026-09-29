@@ -993,6 +993,41 @@ export const purchaseOrdersSql = {
     WHERE po.id = ?
     LIMIT 1
   `,
+
+  /**
+ * SKU x manufacturer pairs with little still on order. Masters only with child
+ * receipts folded in, so a split order is not counted twice. last_receipt_at
+ * matches on (sku_code, mfg_id), so a receipt booked on a split child counts.
+ * Params: [threshold]
+ */
+lowOpenByMfg: `
+  SELECT po.sku_code,
+         m.code                                            AS mfg_code,
+         m.name                                            AS mfg_name,
+         sk.name                                           AS sku_name,
+         SUM(GREATEST(po.qty - ${RECEIVED_TOTAL_EXPR}, 0)) AS open_qty,
+         COUNT(*)                                          AS open_pos,
+         MIN(po.expected_on)                               AS earliest_expected,
+         MAX(hr.last_receipt_at)                           AS last_receipt_at
+  FROM purchase_orders po
+  INNER JOIN master_mfgs m  ON m.id       = po.mfg_id
+  LEFT  JOIN master_skus sk ON sk.sku_code = po.sku_code
+  ${CHILD_AGG_JOIN}
+  LEFT JOIN (
+    SELECT p.sku_code, p.mfg_id, MAX(h.changed_on) AS last_receipt_at
+    FROM history_pos h
+    JOIN purchase_orders p ON p.id = h.po_id
+    WHERE h.action_type = 'update' AND h.field_name = 'received_qty'
+    GROUP BY p.sku_code, p.mfg_id
+  ) hr ON hr.sku_code = po.sku_code AND hr.mfg_id = po.mfg_id
+  WHERE COALESCE(po.po_type, '') <> 'inward'
+    AND ${DISPLAY_STATUS_EXPR} IN ('raised', 'punched', 'partially_received')
+    ${MASTERS_ONLY}
+  GROUP BY po.sku_code, po.mfg_id, m.code, m.name, sk.name
+  HAVING open_qty > 0 AND open_qty < ?
+  ORDER BY open_qty ASC
+`,
+
 }
 
 // ── Filter parameter helpers ──────────────────────────────────────────────────
@@ -1121,3 +1156,6 @@ export function buildStatusCountParams(
     ...scopeParams(scope.brandIds),       // entity scope: brand ×2
   ]
 }
+
+
+

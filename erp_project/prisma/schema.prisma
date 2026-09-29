@@ -1150,6 +1150,10 @@ enum entity_emails_entity_type {
   /// One of our own people, from `users`. entity_code is the warehouse name or
   /// manufacturer code they are attached to — or '*' for every manufacturer.
   employee
+  /// A subscriber to a scheduled internal report; entity_code names the report
+  /// ('daily_ops'). Its own type so selectForMfg / selectByWarehouseForEntity
+  /// can never reach it — see prisma/add_entity_email_report_type.sql.
+  report
 }
 
 enum entity_emails_recipient_type {

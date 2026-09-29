@@ -535,6 +535,7 @@ This eliminates `any` type noise and gives full IntelliSense on `conn.execute`, 
 | `lib/queries/activity.ts` | `activity_log` insert + the `/admin > Activity` UNION feed (with `session_history`) |
 | `lib/queries/approvals.ts` | Approval workflow — insert, select, hasPending |
 | `lib/queries/auth.ts` | Authentication — sessions, session history |
+| `lib/queries/daily-digest.ts` | Day-scoped counts for the 23:59 IST ops digest. Every query takes a **UTC** `[from, to)` from `istDayWindowUtc` — `purchase_orders.date` is the exception (already an IST DATE) and so is absent here |
 | `lib/queries/recipe.ts` | Recipe master — `master_recipe`, `details_recipe`, `artifacts_recipe` (was `bom.ts`) |
 | `lib/queries/entity-emails.ts` | Mail recipients per vendor / mfg / **warehouse** / **employee**, each row a `to` or a `cc`. An employee row is anyone worth looping in — ours or an outside party (3PL, CHA), so the address is typed, never picked from `users`. Its `entity_code` is the warehouse name or mfg code it hangs off, or `'*'` for **every** manufacturer including future ones |
 | `lib/queries/entity-scope.ts` | `user_entity_scope` + the admin picker's entity lists |

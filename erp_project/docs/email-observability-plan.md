@@ -40,12 +40,28 @@ What happens *after* the send:
 That last point is what makes this buildable without a table. The outcome data is already in
 the log group; nothing aggregates it.
 
-### The one real gap
+### The one real gap — CLOSED 2026-09-28
 
-`getTransporter().sendMail()` returns a result carrying the SES `messageId`. All three send
-sites throw it away (`mailer.ts:472`, `:591`, `:795`), so the send line and the webhook's
-outcome line share **no key**. Until the send logs its `messageId`, "what happened to *this*
-mail" cannot be answered from any source, table or otherwise.
+`getTransporter().sendMail()` returns a result carrying the SES `messageId`, and all three
+send sites used to throw it away, so the send line and the webhook's outcome line shared
+**no key**.
+
+All four senders now capture it. Each success and failure line carries
+`mailOutcome: "sent" | "failed"`, `flow`, `recipients` and `sesMessageId`, via the
+`mailOutcome()` helper in `lib/mail/mailer.ts`. That was done for the daily ops digest
+(`lib/reports/daily-digest.ts`), which counts those lines with `filterLogEvents` — but it
+is also exactly Phase 2's logging half, so **Phase 2 below is now only the message-tag
+work**. Phase 4's join key exists.
+
+Flows: `po_selection`, `po_split`, `inward_invoice`, `ops_digest`.
+
+**`sesMessageId` is set only when `MAIL_PROVIDER=ses`.** Every line also carries
+`provider` and a provider-agnostic `messageId`. This matters because the transport
+is a runtime switch: on Gmail, `sendMail()` still returns a `messageId`, but it is
+a nodemailer Message-ID that joins to nothing. Writing that into `sesMessageId`
+would put two different id spaces in one field with no way to tell them apart
+after the fact — so the SES-only field stays empty on Gmail, and `provider` is what
+makes a historical line readable across a switch.
 
 ---
 

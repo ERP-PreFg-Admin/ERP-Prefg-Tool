@@ -99,6 +99,20 @@ export const entityEmails = {
       AND (legal_entity_code IS NULL OR legal_entity_code = ?)
   `,
 
+  /**
+   * Recipients of a scheduled internal report.
+   *
+   * 'report' is its own entity_type, not an employee row with a purpose:
+   * selectForMfg matches employee + '*' and does NOT filter on purpose, so a
+   * subscriber stored that way would join every manufacturer's PO mail.
+   * Params: [entity_code]
+   */
+  selectReportRecipients: `
+    SELECT email, recipient_type FROM entity_emails
+    WHERE entity_type = 'report' AND entity_code = ?
+      AND status = 'active'
+  `,
+
   /** The legal entities, for the entity-email form's selector. */
   legalEntityOptions: `
     SELECT code, legal_name FROM master_entity WHERE status = 'active' ORDER BY code ASC

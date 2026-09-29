@@ -9,7 +9,9 @@ export const entityEmailCreateSchema = z
     // not picked from `users`. entity_code is then the warehouse name or
     // manufacturer code they are attached to, or '*' for every manufacturer.
     // The route checks that code against the right table.
-    entity_type: z.enum(["vendor", "mfg", "warehouse", "employee"]),
+    // 'report' is a subscriber to a scheduled digest; entity_code names the
+    // report ('daily_ops'), and no entity-facing query can reach these rows.
+    entity_type: z.enum(["vendor", "mfg", "warehouse", "employee", "report"]),
     entity_code: z.string().trim().min(1),
     /**
      * master_entity.code — which of OUR legal entities these addresses serve.
@@ -64,7 +66,7 @@ export const entityEmailCreateSchema = z
 export const entityEmailUpdateSchema = z
   .object({
     id: z.coerce.number().int().positive(),
-    entity_type: z.enum(["vendor", "mfg", "warehouse", "employee"]),
+    entity_type: z.enum(["vendor", "mfg", "warehouse", "employee", "report"]),
     entity_code: z.string().trim().min(1),
     legal_entity_code: z.string().trim().optional(),
     email: z.string().trim().email("Enter a valid email address, e.g. name@example.com"),
