@@ -11,7 +11,7 @@
 // Imports lib/constants, which has no imports of its own — no env, no DB.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { brandCode, entityForBrand } from "../../lib/constants"
+import { brandCode, brandInitial, entityForBrand } from "../../lib/constants"
 
 test("brandCode returns the established prefixes", () => {
   // MCAFF, with two F's — the value all three replaced maps carried, and what
@@ -54,4 +54,31 @@ test("entityForBrand returns null rather than guessing", () => {
   assert.equal(entityForBrand(null), null)
   assert.equal(entityForBrand(undefined), null)
   assert.equal(entityForBrand(""), null)
+})
+
+// A PO number carries the brand's INITIAL, not its name. The fallback is what
+// this guards: brandCode() returns the whole upper-cased name for an unmapped
+// brand, which used to land in a PO number verbatim.
+test("brandInitial is one letter, from the mapped code where there is one", () => {
+  assert.equal(brandInitial("mCaffeine"), "M")
+  assert.equal(brandInitial("MCAFFEINE"), "M")
+  assert.equal(brandInitial("m-caffeine"), "M")
+  assert.equal(brandInitial("Hyphen"), "H")
+  assert.equal(brandInitial("Fein"), "F")
+})
+
+test("an unmapped brand falls back to its own first letter, never its full name", () => {
+  assert.equal(brandInitial("DND"), "D")
+  assert.equal(brandInitial("Some New Brand"), "S")
+  // the prod typo of Fein — shares F, which is safe because countByPrefix
+  // scopes the sequence to the prefix, so the two share one series
+  assert.equal(brandInitial("Fien"), "F")
+})
+
+test("brandInitial always yields exactly one usable character", () => {
+  for (const raw of ["mCaffeine", "DND", "Fien", "  ", "---", "9Lives"]) {
+    const out = brandInitial(raw)
+    assert.equal(out.length, 1, `${JSON.stringify(raw)} -> ${JSON.stringify(out)}`)
+    assert.match(out, /^[A-Z0-9]$/, `${JSON.stringify(raw)} -> ${JSON.stringify(out)}`)
+  }
 })

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { query, pool } from "@/lib/db"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
+import { makePoRateResolver } from "@/lib/po/po-rate"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { skus as skusSql } from "@/lib/queries/skus"
 import { manufacturers as mfgsSql } from "@/lib/queries/manufacturers"
@@ -15,7 +16,7 @@ import { assertDestinationServesEntity } from "@/lib/po/po-guard"
 import { ApiError } from "@/lib/gateway/errors"
 import { poActionSchema } from "@/lib/validation/purchase-orders"
 import { monthIST } from "@/lib/date"
-import { brandCode } from "@/lib/constants"
+import { brandInitial } from "@/lib/constants"
 
 // GET /api/v1/purchase-orders — list all POs the caller is scoped to, with MFG + SKU details
 export const GET = withGateway({
@@ -123,7 +124,7 @@ export const POST = withGateway({
 
   const rawBrand = skuRows[0].brand?.trim() || sku_code.split("-")[0]
   // const brand    = (BRAND_CODES[rawBrand.toLowerCase()] ?? rawBrand).toUpperCase()
-  const brand = brandCode(rawBrand)
+  const brand = brandInitial(rawBrand)
   
   // Generate po_no: {Brand}-{PO|IMP}-{yyyymm}-{nnnn}, sequence scoped per brand+type+month
   const year    = new Date().getFullYear()
@@ -134,8 +135,11 @@ export const POST = withGateway({
   const seq  = (Number(countRows[0]?.cnt ?? 0) + 1).toString().padStart(3, "0")
   const po_no = `${poPrefix}-${seq}`
 
-  const unitPrice   = unit_price   != null && unit_price   !== "" ? Number(unit_price)   : null
-  const totalAmount = total_amount != null && total_amount !== "" ? Number(total_amount) : null
+  // Resolved server-side from the agreed rate, not taken from the body: a
+  // client-supplied price is a second source of truth, and the invoice
+  // three-way match compares against this same number. `unit_price` /
+  // `total_amount` stay in the schema for back-compat but are ignored.
+  const { unitPrice, totalAmount } = await makePoRateResolver()(Number(mfg_id), sku_code, Number(qty))
 
   const eventId = makeEventId("PO", "create")
   recordRawEvent("PO", eventId, { mfg_id, sku_code, qty, unit_price: unitPrice, expected_on, destination, reason, po_type })

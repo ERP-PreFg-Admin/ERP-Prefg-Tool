@@ -88,6 +88,26 @@ export function brandCode(raw:string):string {
   return (BRANDS[brandKey(raw)]?.code ?? raw).toUpperCase()
 }
 
+/**
+ * The brand's single-letter initial — what a PO number carries.
+ *
+ * Derived from brandCode() rather than the raw name so a mapped brand follows
+ * its code (mCaffeine -> MCAFF -> M) and only an unmapped one falls back to its
+ * own first letter. That fallback is the point: brandCode() returns the whole
+ * upper-cased name for a brand nobody has mapped, so "Some New Brand" used to
+ * land in a PO number verbatim, spaces and all.
+ *
+ * Two brands CAN share an initial — prod already has Fein and its typo Fien,
+ * both F. That is safe: the sequence is counted with countByPrefix against the
+ * prefix itself, so they share one series rather than colliding on a number.
+ */
+export function brandInitial(raw: string): string {
+  const letters = brandCode(raw).replace(/[^A-Z0-9]/gi, "")
+  // No usable character at all (an empty or punctuation-only brand) — "X" keeps
+  // the PO number well-formed and visibly odd rather than silently malformed.
+  return (letters.charAt(0) || "X").toUpperCase()
+}
+
 export function entityForBrand(brand: string | null | undefined) : string | null {
   if(!brand) return null
   return BRANDS[brandKey(brand)]?.entity ?? null;

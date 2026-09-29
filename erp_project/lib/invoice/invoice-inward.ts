@@ -50,7 +50,7 @@ import { ApiError } from "@/lib/gateway/errors"
 import logger from "@/lib/logger"
 import type { InvoiceInward } from "@/lib/validation/purchase-orders"
 import { monthIST, todayIST } from "@/lib/date"
-import { brandCode } from "../constants"
+import { brandInitial } from "../constants"
 import { panOf } from "./gstin"
 import { warehouse } from "../queries/warehouse"
 import { mfgFacilityMap } from "../queries/mfg-facility-map"
@@ -118,7 +118,7 @@ async function resolveBrands(
       )
     }
     const raw = rows[0].brand?.trim() || sku.split("-")[0]
-    brandBySku.set(sku, brandCode(raw))
+    brandBySku.set(sku, brandInitial(raw))
   }
   return brandBySku
 }

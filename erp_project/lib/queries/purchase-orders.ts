@@ -724,8 +724,8 @@ export const purchaseOrdersSql = {
    */
   insertBulkPo: `
     INSERT INTO purchase_orders
-      (po_no, mfg_id, date, sku_code, qty, expected_on, status, po_type, destination, remarks, csv_source_key, recipe_id)
-    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, 'raised', 'normal', ?, ?, ?, ${RECIPE_ID_FOR_LINE})
+      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, remarks, csv_source_key, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, 'raised', 'normal', ?, ?, ?, ${RECIPE_ID_FOR_LINE})
   `,
 
   /**

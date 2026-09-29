@@ -21,8 +21,9 @@ import { skus as skusSql } from "@/lib/queries/skus"
 import { parseS3Import } from "@/lib/import-s3"
 import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import { type ModuleHandler, s3KeyOf } from "./types"
-import { brandCode } from "@/lib/constants"
+import { brandInitial } from "@/lib/constants"
 import { isoDate, normalizeDateCell } from "@/lib/date"
+import { makePoRateResolver } from "@/lib/po/po-rate"
 
 export const poHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
@@ -44,6 +45,7 @@ export const poBulkHandler: ModuleHandler = {
   async applyAndArchive(conn, _entityId, items, approverId) {
     const s3Key = s3KeyOf(items, "PO_BULK")
     const rows = await parseS3Import(s3Key)
+    const resolvePoRate = makePoRateResolver()
     if (rows.length === 0) throw new Error("PO_BULK: file has no data rows")
 
     const eventId = makeEventId("PO_BULK", "apply")
@@ -114,7 +116,7 @@ export const poBulkHandler: ModuleHandler = {
           const remarks = row.remarks?.trim().slice(0, 300) || null
 
           const rawBrand = sku.brand?.trim() || skuCode.split("-")[0]
-          const brand = brandCode(rawBrand)
+          const brand = brandInitial(rawBrand)
           const year = new Date().getFullYear()
           const month = String(new Date().getMonth() + 1).padStart(2, "0")
           const poPrefix = `${brand}-PO-${year}${month}`
@@ -122,8 +124,12 @@ export const poBulkHandler: ModuleHandler = {
           const seq = (Number((cntRows as any[])[0]?.cnt ?? 0) + 1).toString().padStart(3, "0")
           const newPoNo = `${poPrefix}-${seq}`
 
+          // Server-resolved, cached per manufacturer. An unrated recipe yields
+          // null rather than an understated figure — see lib/po/po-rate.ts.
+          const { unitPrice, totalAmount } = await resolvePoRate(mfg.id, skuCode, qty)
+
           const [poResult] = await conn.execute(purchaseOrdersSql.insertBulkPo, [
-            newPoNo, mfg.id, skuCode, qty, expectedOn, destination, remarks, s3Key,
+            newPoNo, mfg.id, skuCode, qty, unitPrice, totalAmount, expectedOn, destination, remarks, s3Key,
             mfg.id, skuCode,
           ])
           const poId = (poResult as any).insertId
