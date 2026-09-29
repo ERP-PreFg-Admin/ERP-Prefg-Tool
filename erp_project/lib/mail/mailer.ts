@@ -21,7 +21,6 @@ import { assertAttachmentsWithinLimit } from "@/lib/mail/mail-limits"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import crypto from "crypto"
-import { log } from "console"
 
 // ── Transports ───────────────────────────────────────────────────────────────
 //
