@@ -155,3 +155,5 @@ export const NANONETS_MONTHLY_CALLS = Number(process.env.NANONETS_MONTHLY_CALLS 
 // A 20-working-day month at full tilt. Deriving the daily cap rather than
 // configuring it means one runaway day can burn at most ~5% of the month.
 export const NANONETS_DAILY_CALLS = Math.floor(NANONETS_MONTHLY_CALLS / 20)
+
+export const CRON_KEY = process.env.CRON_KEY;

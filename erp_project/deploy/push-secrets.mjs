@@ -24,27 +24,23 @@ if (envName !== "test" && envName !== "prod") {
 const REGION = "ap-south-1"
 const AUTH_URL = envName === "prod" ? "https://erp.mcaffeine.com" : "https://dev.erp.mcaffeine.com"
 
-// Keys mirrored from lib/env.ts + AUTH_URL/AUTH_SECRET (read directly by NextAuth,
-// not through lib/env.ts) + the Uniware vars used elsewhere via process.env directly.
-// DB_NAME is deliberately excluded here — it's env-specific (DB_NAME_TEST /
-// DB_NAME_PROD in .env), handled separately below. DB_HOST/DB_USER/DB_PASSWORD
-// and the SKU DB creds (same host, separate schema — see lib/db-sku.ts) are
-// shared across both environments.
 const KEYS = [
   "DB_HOST", "DB_USER", "DB_PASSWORD",
   "DB_USER_SKU", "DB_USER_SKU_PASSWORD", "DB_USER_NAME_SKU",
   "AUTH_SECRET",
   "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
+  // Gmail creds stay pushed even on SES — flipping MAIL_PROVIDER back is the
+  // rollback, and it only works if they are still on the box.
   "GMAIL_USER", "GMAIL_APP_PASSWORD",
+  // "ses" or anything else (= gmail). Pushing this to an env switches ALL of its
+  // outbound mail, not just the digest.
+  "MAIL_PROVIDER",
   "REGION_AWS", "ACCESS_KEY_ID_AWS", "SECRET_ACCESS_KEY_AWS",
   "S3_BUCKET_FILES_AWS", "S3_BUCKET_EVENTS_AWS",
   "UNIWARE_BASE_URL", "UNIWARE_USER_NAME", "UNIWARE_PASSWORD",
   "NANONET_API_KEY",
+  "CRON_KEY",
 ]
-// Deliberately NOT pushed: UNIWARE_FACILITY and UNIWARE_VENDOR_CODE. They're
-// sandbox values (TEST_FACILITY / Test_Vendor) that belong in a local .env only
-// — pushing them would point the deployed app at the test facility. Add them
-// here once the real facility and mfg -> vendor mapping are settled.
 
 function parseEnvFile(filePath) {
   const text = readFileSync(filePath, "utf8")

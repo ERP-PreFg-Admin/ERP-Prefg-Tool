@@ -87,6 +87,10 @@ server {
     listen 80;
     server_name ${DOMAIN};
 
+    # erp-cron.timer curls 127.0.0.1:3000 directly, so this costs nothing and
+    # keeps the route off the internet. The route still checks x-cron-key too.
+    location /api/v1/cron { allow 127.0.0.1; deny all; }
+
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
@@ -155,5 +159,38 @@ EOF
 
 systemctl daemon-reload
 systemctl enable --now certbot-renew.timer
+
+# One hourly trigger; the app decides which jobs are due (lib/cron/jobs.ts).
+# Keep in step with deploy/bootstrap-instance.sh, or a replacement instance
+# comes up with no scheduler and nothing says so.
+cat > /etc/systemd/system/erp-cron.service <<'EOF'
+[Unit]
+Description=ERP scheduled jobs (the app decides which are due)
+After=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/erp/env
+ExecStart=/usr/bin/curl -sS --fail-with-body --max-time 1800 -X POST \
+  -H "x-cron-key: ${CRON_KEY}" http://127.0.0.1:3000/api/v1/cron/run
+EOF
+
+# The minute is load-bearing. systemd reads the host's UTC clock; the container
+# is TZ=Asia/Kolkata. UTC :29 = IST :59, putting the digest inside IST hour 23.
+# No RandomizedDelaySec: jitter past midnight moves the IST hour to 0 and the
+# hour-23 job silently never runs. Not Persistent: a missed window is skipped.
+cat > /etc/systemd/system/erp-cron.timer <<'EOF'
+[Unit]
+Description=Trigger ERP scheduled jobs hourly
+
+[Timer]
+OnCalendar=*-*-* *:29:00
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now erp-cron.timer
 
 echo "== Done =="
