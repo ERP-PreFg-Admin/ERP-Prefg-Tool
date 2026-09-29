@@ -14,7 +14,7 @@
  * submitter and approver sit together in one row instead of a card per edit.
  */
 
-import { useEffect, useState } from "react"
+import { useAsyncData } from "@/lib/hooks/useAsync"
 import { History as HistoryIcon, Loader2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { HistoryTable } from "@/components/masters/HistoryEntry"
@@ -35,27 +35,29 @@ export function EntityHistoryDialog({
   title: string
   onClose: () => void
 }) {
-  const [approvals, setApprovals] = useState<Approval[]>([])
-  // Only ever populated for module="BOM" (see the API route) — resolves
-  // RM/PM ids in RecipeLineDiffTable to material name/code instead of "#123".
-  const [materialMap, setMaterialMap] = useState<MaterialMap | undefined>(undefined)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (entityId == null) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale results before the new entity's fetch resolves
-    setLoading(true)
-    setError(null)
-    fetch(`/api/v1/approvals/entity-history?module=${module}&entity_id=${entityId}`)
-      .then((r) => r.json())
-      .then((data) => {
-        setApprovals(data.approvals ?? [])
-        setMaterialMap(data.materialMap)
-      })
-      .catch(() => setError("Failed to load history"))
-      .finally(() => setLoading(false))
-  }, [module, entityId])
+  // Both halves come back in one response and are returned together, so they
+  // cannot land out of step with each other — and useAsyncData drops the whole
+  // response if a newer entity was opened while this one was in flight.
+  // `materialMap` is only ever populated for module="BOM" (see the API route):
+  // it resolves RM/PM ids in RecipeLineDiffTable to a name/code instead of "#123".
+  const { data, error, pending: loading } = useAsyncData<{
+    approvals: Approval[]
+    materialMap: MaterialMap | undefined
+  }>(
+    async (signal) => {
+      const res = await fetch(
+        `/api/v1/approvals/entity-history?module=${module}&entity_id=${entityId}`,
+        { signal },
+      )
+      if (!res.ok) throw new Error("Failed to load history")
+      const body = await res.json()
+      return { approvals: body.approvals ?? [], materialMap: body.materialMap }
+    },
+    [module, entityId],
+    entityId != null,
+  )
+  const approvals = data?.approvals ?? []
+  const materialMap = data?.materialMap
 
   // Every approval in the list belongs to the same entity, so its name/code
   // is identical across rows — shown once here instead of on every entry.

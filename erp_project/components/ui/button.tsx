@@ -1,5 +1,6 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
+import { Loader2 } from "lucide-react"
 import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
@@ -46,10 +47,26 @@ function Button({
   variant = "default",
   size = "default",
   asChild = false,
+  pending = false,
+  disabled,
+  children,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
+    /**
+     * A request this button started is still in flight.
+     *
+     * Disables it and swaps the leading icon for a spinner, so "don't fire it
+     * twice" stops being a decision every call site re-makes. Pair it with
+     * useAsyncAction (lib/hooks/useAsync.ts), which owns the flag and clears it
+     * in a `finally` — a hand-rolled boolean that misses a throw path leaves the
+     * button permanently dead.
+     *
+     * For MUTATIONS. A button that only opens a dialog does not need it, and
+     * putting it everywhere trains people to ignore it.
+     */
+    pending?: boolean
   }) {
   const Comp = asChild ? Slot.Root : "button"
 
@@ -58,9 +75,19 @@ function Button({
       data-slot="button"
       data-variant={variant}
       data-size={size}
+      data-pending={pending || undefined}
+      // `disabled ?? pending`, not `disabled || pending`: an explicit
+      // disabled={false} still wins, so a caller can opt out deliberately.
+      disabled={disabled ?? pending}
+      aria-busy={pending || undefined}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
-    />
+    >
+      {/* asChild renders the caller's own element — injecting a spinner into it
+          would break Slot's single-child contract, so pending only disables. */}
+      {pending && !asChild && <Loader2 className="animate-spin" aria-hidden />}
+      {children}
+    </Comp>
   )
 }
 

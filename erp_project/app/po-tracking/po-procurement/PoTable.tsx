@@ -229,6 +229,7 @@ export default function PoTable({
                     </TableHead>
                   )}
                   <SortHead colKey="po_no"        {...sh}>PO No.</SortHead>
+                  <SortHead colKey="status"       {...sh}>Status</SortHead>
                   <SortHead colKey="mfg_name"     {...sh}>Manufacturer</SortHead>
                   <SortHead colKey="date"         {...sh}>PO Date</SortHead>
                   <SortHead colKey="expected_on"  {...sh}>Exp. Dispatch</SortHead>
@@ -254,7 +255,6 @@ export default function PoTable({
                       would always be "—" — the same reason Invoice No is
                       inwarding-only above, in reverse. */}
                   {!inwardingMode && <TableHead>Remarks</TableHead>}
-                  <SortHead colKey="status"       {...sh}>Status</SortHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>

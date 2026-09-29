@@ -182,6 +182,8 @@ export default function PoProcurementClient({
   // Local state for the filter panel (only committed to URL on Apply)
   const [draftMfgCode,     setDraftMfgCode]     = useState(currentMfgCode)
   const [draftPoType,      setDraftPoType]      = useState(currentPoType)
+  // Same `status` param the tabs write, so the two can never disagree.
+  const [draftStatus,      setDraftStatus]      = useState(currentStatus)
   const [draftDateFrom,    setDraftDateFrom]    = useState(currentDateFrom)
   const [draftDateTo,      setDraftDateTo]      = useState(currentDateTo)
   const [draftSku,         setDraftSku]         = useState(currentSku)
@@ -200,6 +202,7 @@ export default function PoProcurementClient({
     navigate({
       mfgCode:     draftMfgCode,
       poType:      draftPoType,
+      status:      draftStatus,
       dateFrom:    draftDateFrom,
       dateTo:      draftDateTo,
       sku:         draftSku,
@@ -211,11 +214,12 @@ export default function PoProcurementClient({
   function clearFilters() {
     setDraftMfgCode("")
     setDraftPoType("")
+    setDraftStatus("")
     setDraftDateFrom("")
     setDraftDateTo("")
     setDraftSku("")
     setDraftDestination("")
-    navigate({ mfgCode: "", poType: "", dateFrom: "", dateTo: "", sku: "", destination: "", destEntity: "" })
+    navigate({ mfgCode: "", poType: "", status: "", dateFrom: "", dateTo: "", sku: "", destination: "", destEntity: "" })
     setShowFilters(false)
   }
 
@@ -367,6 +371,24 @@ export default function PoProcurementClient({
                   <option value="">All Manufacturers</option>
                   {mfgOptions.map((m) => (
                     <option key={m.id} value={m.code}>{m.code} — {m.name}</option>
+                  ))}
+                </Select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs">Status</Label>
+                <Select
+                  value={draftStatus}
+                  onChange={(e) => setDraftStatus(e.target.value)}
+                  className="w-full"
+                >
+                  {/* The tab strip's own list and its own value rule, so picking
+                      one here moves the active tab rather than fighting it. On
+                      inwarding "all" stays in the URL — an empty param there
+                      reads as "no filter chosen", which that page shows as Open. */}
+                  {(isInwarding ? INWARD_TABS : TABS).map((t) => (
+                    <option key={t} value={t === "all" && !isInwarding ? "" : t}>
+                      {TAB_LABEL[t] ?? STATUS_CONFIG[t]?.label ?? t}
+                    </option>
                   ))}
                 </Select>
               </div>

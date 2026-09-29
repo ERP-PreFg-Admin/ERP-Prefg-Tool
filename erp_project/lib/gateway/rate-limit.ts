@@ -11,7 +11,22 @@ export type RateLimitRule = {
    * a caller gets a fresh budget per id. Also lets a family of routes share one
    * budget — every /export route can hold a single concurrency slot.
     */
-  key?: string 
+  key?: string
+  /**
+   * Enforce the CONCURRENCY gate even in shadow mode. The volume gate (`limit`)
+   * still shadows.
+   *
+   * For routes where a simultaneous duplicate is not a load problem but an
+   * irreversible act — `gatepass/create` raises a document Unicommerce has no
+   * delete for. There, `concurrency: 1` is the only server-side thing standing
+   * between a double-click and two gatepasses, and leaving it switched off
+   * behind an env var means the guard reads as present while doing nothing.
+   *
+   * Deliberately narrow: it does NOT enforce `limit`, because a volume cap
+   * refusing a real user mid-sweep is exactly the failure that keeps the rest of
+   * rate limiting in shadow mode. See docs/duplicate-request-plan.md.
+   */
+  enforceConcurrency?: boolean
 }
 
 // `ok` MUST be the literal `false` / `true`, not `false | true` (which collapses
@@ -103,7 +118,12 @@ export function acquire(path:string , userId:number , rule:RateLimitRule) : Rate
         }
     }
 
-    if(denied && !isShadowMode()) {
+    // A concurrency denial on a route that declared enforceConcurrency is a
+    // correctness guard, not a throttle, so shadow mode does not excuse it.
+    const enforced = denied != null
+        && (!isShadowMode() || (rule.enforceConcurrency === true && denied.reason === "concurrency"))
+
+    if(denied && enforced) {
         // Store the pruned window but do NOT record a hit: a refused request never
         // reached the handler, so counting it would extend its own lockout.
         hits.set(userKey , recent)

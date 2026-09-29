@@ -228,6 +228,30 @@ export default function Sidebar({ user, mfgs = [], access, version }: SidebarPro
       ? pathname === item.href
       : !!globalActiveChild && (item.children ?? []).some(c => c.href === globalActiveChild!.href)
 
+  /**
+   * Is this link's destination the URL we are ALREADY on?
+   *
+   * Next navigates on a <Link> to the current URL, and with no staleTimes
+   * override a dynamic segment refetches its RSC payload — so the whole server
+   * component and every query in it run again for a click that changes nothing.
+   * Nine pages are force-dynamic; Agreed Final Costing alone is eight queries.
+   *
+   * NOT the active-highlight helpers above. globalActiveChild matches on a
+   * PREFIX, so a nested page lights its parent entry, and blocking there would
+   * kill a navigation that genuinely goes somewhere else.
+   *
+   * The search string is part of the comparison because usePathname() drops it:
+   * on /manufacturing/3?tab=analytics a pathname-only test would block the click
+   * that takes you back to the default tab.
+   *
+   * Read off window.location inside the handler rather than through
+   * useSearchParams() — that hook in a layout-level client component opts every
+   * page underneath it out of static rendering. This only runs in a browser
+   * event, so there is no SSR path to worry about.
+   */
+  const isCurrentUrl = (href: string) =>
+    href === window.location.pathname + window.location.search
+
   const { theme, toggle: toggleTheme } = useTheme()
 
   const initials = user?.name
@@ -293,6 +317,7 @@ export default function Sidebar({ user, mfgs = [], access, version }: SidebarPro
               ) : (
                 <Link
                   href={item.href ?? "#"}
+                  onClick={(e) => { if (isCurrentUrl(item.href ?? "#")) e.preventDefault() }}
                   className={cn(
                     "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors",
                     active
@@ -375,6 +400,7 @@ export default function Sidebar({ user, mfgs = [], access, version }: SidebarPro
                           <Link
                             key={child.href}
                             href={child.href}
+                            onClick={(e) => { if (isCurrentUrl(child.href)) e.preventDefault() }}
                             className={cn(
                               "block px-2 py-1.5 rounded-md text-sm transition-colors",
                               isChildActive(children, child.href)

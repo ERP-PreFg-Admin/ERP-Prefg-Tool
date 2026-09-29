@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useAsyncData } from "@/lib/hooks/useAsync"
 import { History, Loader2 } from "lucide-react"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -27,21 +27,19 @@ export default function PoHistoryDialog({
   poNo: string | null
   onClose: () => void
 }) {
-  const [entries, setEntries] = useState<PoHistoryRow[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!poId) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale results before the new PO's fetch resolves
-    setLoading(true)
-    setError(null)
-    fetch(`/api/v1/purchase-orders/history?po_id=${poId}`)
-      .then((r) => r.json())
-      .then((data) => setEntries(data.history ?? []))
-      .catch(() => setError("Failed to load history"))
-      .finally(() => setLoading(false))
-  }, [poId])
+  // Opening a second PO while the first is still loading used to leave the new
+  // PO's heading over the old PO's history — useAsyncData aborts the superseded
+  // request and drops it if it lands anyway.
+  const { data, error, pending: loading } = useAsyncData<PoHistoryRow[]>(
+    async (signal) => {
+      const res = await fetch(`/api/v1/purchase-orders/history?po_id=${poId}`, { signal })
+      if (!res.ok) throw new Error("Failed to load history")
+      return (await res.json()).history ?? []
+    },
+    [poId],
+    poId !== null,
+  )
+  const entries = data ?? []
 
   return (
     <Dialog open={poId !== null} onOpenChange={(o) => { if (!o) onClose() }}>

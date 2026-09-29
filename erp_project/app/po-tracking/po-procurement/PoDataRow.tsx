@@ -182,6 +182,11 @@ export default function PoDataRow({
         )}
       </TableCell>
 
+      {/* Beside the PO number: status is what the row is scanned for. */}
+      <TableCell>
+        <Badge variant={cfg.variant} className="whitespace-nowrap">{cfg.label}</Badge>
+      </TableCell>
+
       {/* Manufacturer */}
       <TableCell className="whitespace-nowrap">
         <div className="text-xs font-medium">{r.mfg_name}</div>
@@ -298,10 +303,6 @@ export default function PoDataRow({
           )}
         </TableCell>
       )}
-
-      <TableCell>
-        <Badge variant={cfg.variant} className="whitespace-nowrap">{cfg.label}</Badge>
-      </TableCell>
 
       {/* Actions */}
       <TableCell className="text-right">

@@ -40,6 +40,16 @@ export const maxDuration = 300
 export const POST = withGateway({
   schema: gatepassCreateSchema,
   access: { pageSlug: "/gatepass", level: "editor" },
+  //   4. One at a time, per user, ENFORCED. The three guards above all live in
+  //      the request shape or the browser; none of them stops the same user's
+  //      second click landing while the first is still streaming, and two
+  //      concurrent runs raise two gatepasses that cannot be deleted.
+  //
+  // `enforceConcurrency` because the volume gate stays in shadow mode with
+  // everything else, but this one cannot: a guard switched off by an env var is
+  // not a guard on an irreversible write. The browser drives one facility per
+  // request, so `limit` sits well clear of a full ~18-facility sweep.
+  rateLimit: { limit: 60, windowMs: 10 * 60_000, concurrency: 1, enforceConcurrency: true },
   handler: async ({ body, ctx }) => {
     const { facility_code: facility, from, to } = body
 

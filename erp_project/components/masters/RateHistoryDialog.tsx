@@ -6,7 +6,7 @@
  * name and API base path, so both collapse into this one component.
  */
 
-import { useState, useEffect } from "react"
+import { useAsyncData } from "@/lib/hooks/useAsync"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 
@@ -55,28 +55,30 @@ export function RateHistoryDialog({
   kind: "mfg" | "vendor"
   onClose: () => void
 }) {
-  const [entries, setEntries] = useState<RateHistoryEntry[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!row) return
-    const entityId = kind === "mfg" ? row.mfg_id : row.vendor_id
-    if (!entityId) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale results before the new row's fetch resolves
-    setLoading(true)
-    setError(null)
-    const basePath = materialType === "rm" ? "raw-materials" : "packing-materials"
-    const idParam = materialType === "rm" ? "rm_id" : "pm_id"
-    const endpoint = kind === "mfg"
+  // Keyed on the URL rather than on [row, kind, materialType]: the URL IS the
+  // identity of the request, so two renders that would issue the same one do not
+  // issue it twice. useAsyncData drops a response that a newer request has
+  // superseded — opening row B while row A was still loading used to leave B's
+  // heading over A's rates.
+  const entityId = row ? (kind === "mfg" ? row.mfg_id : row.vendor_id) : null
+  const basePath = materialType === "rm" ? "raw-materials" : "packing-materials"
+  const idParam = materialType === "rm" ? "rm_id" : "pm_id"
+  const endpoint = !row || !entityId
+    ? null
+    : kind === "mfg"
       ? `/api/v1/masters/${basePath}/mrm-history?${idParam}=${row.id}&mfg_id=${entityId}`
       : `/api/v1/masters/${basePath}/vrm-history?${idParam}=${row.id}&vendor_id=${entityId}`
-    fetch(endpoint)
-      .then((r) => r.json())
-      .then((data) => setEntries(data.history ?? []))
-      .catch(() => setError("Failed to load history"))
-      .finally(() => setLoading(false))
-  }, [row, kind, materialType])
+
+  const { data, error, pending: loading } = useAsyncData<RateHistoryEntry[]>(
+    async (signal) => {
+      const res = await fetch(endpoint!, { signal })
+      if (!res.ok) throw new Error("Failed to load history")
+      return (await res.json()).history ?? []
+    },
+    [endpoint],
+    endpoint !== null,
+  )
+  const entries = data ?? []
 
   if (!row) return null
 

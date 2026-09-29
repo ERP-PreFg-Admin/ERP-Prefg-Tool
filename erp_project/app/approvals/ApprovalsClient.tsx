@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useInFlightGuard } from "@/lib/hooks/useAsync"
 import { useRouter } from "next/navigation"
 import { Check, ShieldCheck, History, ChevronDown, ChevronRight, CheckCheck } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
@@ -71,6 +72,12 @@ export default function ApprovalsClient({
   const [loading,        setLoading]        = useState(false)
   const [actionError,    setActionError]    = useState<Record<number, string>>({})
   const [csvPreview,     setCsvPreview]     = useState<{ s3Key: string; filename: string } | null>(null)
+  // Guards against the SAME tick firing twice: `loading` is state, so two clicks
+  // before React re-renders both read false and both POST. The route 409s the
+  // second — it re-checks status = 'pending' — so no approval is applied twice,
+  // but the user sees a spurious "Approval failed" for a click that did nothing
+  // wrong. Shared across approve/reject/bulk: all "one action at a time".
+  const oneAtATime = useInFlightGuard()
 
   function clearError(id: number) {
     setActionError(prev => { const n = { ...prev }; delete n[id]; return n })
@@ -97,92 +104,101 @@ export default function ApprovalsClient({
   }
 
   async function handleApprove(approval: Approval) {
-    setLoading(true); clearError(approval.id)
-    try {
-      const res  = await fetch(`/api/v1/approvals/${approval.id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "approve" }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        const message = data.error ?? "Failed to approve"
-        setActionError(prev => ({ ...prev, [approval.id]: message }))
-        toast({ title: "Approval failed", description: message, variant: "error" })
-        return
-      }
-      setApprovals(prev => prev.filter(a => a.id !== approval.id))
-      setExpanded(null)
-      toast({
-        title: "Approved",
-        description: `${MODULE_LABEL[approval.module] ?? approval.module} change has been approved.`,
-        variant: "success",
-      })
-      router.refresh()
-    } catch {
-      setActionError(prev => ({ ...prev, [approval.id]: "Network error" }))
-      toast({ title: "Approval failed", description: "Network error — please try again.", variant: "error" })
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function handleReject(approval: Approval, remarks: string) {
-    setLoading(true)
-    try {
-      const res  = await fetch(`/api/v1/approvals/${approval.id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "reject", remarks }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? "Failed to reject")
-      setApprovals(prev => prev.filter(a => a.id !== approval.id))
-      setExpanded(null)
-      setRejectTarget(null)
-      toast({
-        title: "Rejected",
-        description: `${MODULE_LABEL[approval.module] ?? approval.module} change has been rejected.`,
-        variant: "info",
-      })
-      router.refresh()
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Network error — please try again."
-      toast({ title: "Rejection failed", description: message, variant: "error" })
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function handleBulkApprove(module: string) {
-    const targets = approvals.filter(a => groupKeyFor(a.module) === module)
-    setBulkLoading(true)
-    const succeededIds: number[] = []
-    let failedCount = 0
-
-    for (const a of targets) {
+    await oneAtATime(async () => {
+      setLoading(true); clearError(approval.id)
       try {
-        const res = await fetch(`/api/v1/approvals/${a.id}`, {
+        const res  = await fetch(`/api/v1/approvals/${approval.id}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "approve" }),
         })
-        if (res.ok) succeededIds.push(a.id)
-        else failedCount++
+        const data = await res.json()
+        if (!res.ok) {
+          const message = data.error ?? "Failed to approve"
+          setActionError(prev => ({ ...prev, [approval.id]: message }))
+          toast({ title: "Approval failed", description: message, variant: "error" })
+          return
+        }
+        setApprovals(prev => prev.filter(a => a.id !== approval.id))
+        setExpanded(null)
+        toast({
+          title: "Approved",
+          description: `${MODULE_LABEL[approval.module] ?? approval.module} change has been approved.`,
+          variant: "success",
+        })
+        router.refresh()
       } catch {
-        failedCount++
+        setActionError(prev => ({ ...prev, [approval.id]: "Network error" }))
+        toast({ title: "Approval failed", description: "Network error — please try again.", variant: "error" })
+      } finally {
+        setLoading(false)
       }
-    }
-
-    setApprovals(prev => prev.filter(a => !succeededIds.includes(a.id)))
-    setBulkLoading(false)
-    setBulkTarget(null)
-    toast({
-      title: failedCount === 0 ? "All approved" : "Finished with errors",
-      description: `${succeededIds.length} approved${failedCount > 0 ? `, ${failedCount} failed` : ""}.`,
-      variant: failedCount === 0 ? "success" : "error",
     })
-    if (succeededIds.length > 0) router.refresh()
+  }
+
+  async function handleReject(approval: Approval, remarks: string) {
+    await oneAtATime(async () => {
+      setLoading(true)
+      try {
+        const res  = await fetch(`/api/v1/approvals/${approval.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "reject", remarks }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? "Failed to reject")
+        setApprovals(prev => prev.filter(a => a.id !== approval.id))
+        setExpanded(null)
+        setRejectTarget(null)
+        toast({
+          title: "Rejected",
+          description: `${MODULE_LABEL[approval.module] ?? approval.module} change has been rejected.`,
+          variant: "info",
+        })
+        router.refresh()
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Network error — please try again."
+        toast({ title: "Rejection failed", description: message, variant: "error" })
+      } finally {
+        setLoading(false)
+      }
+    })
+  }
+
+  async function handleBulkApprove(module: string) {
+    await oneAtATime(async () => {
+      const targets = approvals.filter(a => groupKeyFor(a.module) === module)
+      setBulkLoading(true)
+      const succeededIds: number[] = []
+      let failedCount = 0
+
+      try {
+        for (const a of targets) {
+          try {
+            const res = await fetch(`/api/v1/approvals/${a.id}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "approve" }),
+            })
+            if (res.ok) succeededIds.push(a.id)
+            else failedCount++
+          } catch {
+            failedCount++
+          }
+        }
+
+        setApprovals(prev => prev.filter(a => !succeededIds.includes(a.id)))
+        setBulkTarget(null)
+        toast({
+          title: failedCount === 0 ? "All approved" : "Finished with errors",
+          description: `${succeededIds.length} approved${failedCount > 0 ? `, ${failedCount} failed` : ""}.`,
+          variant: failedCount === 0 ? "success" : "error",
+        })
+        if (succeededIds.length > 0) router.refresh()
+      } finally {
+        setBulkLoading(false)
+      }
+    })
   }
 
   return (

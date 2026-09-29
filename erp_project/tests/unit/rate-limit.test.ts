@@ -94,3 +94,51 @@ test("shadow mode is the default when RATE_LIMIT_MODE is unset", () => {
   assert.equal(acquire(PATH, USER, rule).ok, true, "unset must not enforce")
 })
 
+
+// ── enforceConcurrency ──────────────────────────────────────────────────────
+// For routes where a simultaneous duplicate is irreversible rather than merely
+// expensive — gatepass/create raises a document Unicommerce has no delete for.
+// The concurrency gate there is a correctness guard, so shadow mode must not
+// excuse it; the volume gate still shadows, because a cap refusing a real user
+// mid-sweep is why the rest of rate limiting is off.
+
+test("enforceConcurrency refuses a second in-flight call even in shadow mode", () => {
+  process.env.RATE_LIMIT_MODE = "shadow"
+  const rule = { limit: 60, windowMs: 60_000, concurrency: 1, enforceConcurrency: true }
+
+  const first = acquire("/gatepass/create", 1, rule)
+  assert.equal(first.ok, true)
+
+  const second = acquire("/gatepass/create", 1, rule)
+  assert.equal(second.ok, false, "the second click must be refused, shadow mode or not")
+  if (!second.ok) assert.equal(second.reason, "concurrency")
+
+  // And the slot comes back, so the user is not locked out afterwards.
+  if (first.ok) first.release()
+  assert.equal(acquire("/gatepass/create", 1, rule).ok, true)
+})
+
+test("enforceConcurrency does NOT enforce the volume gate in shadow mode", () => {
+  process.env.RATE_LIMIT_MODE = "shadow"
+  const rule = { limit: 2, windowMs: 60_000, concurrency: 1, enforceConcurrency: true }
+
+  for (let i = 0; i < 2; i++) {
+    const v = acquire("/gatepass/create", 2, rule)
+    assert.equal(v.ok, true)
+    if (v.ok) v.release()
+  }
+  // Over the limit, but nothing is in flight: a volume denial still shadows.
+  const over = acquire("/gatepass/create", 2, rule)
+  assert.equal(over.ok, true, "the volume gate must keep shadowing")
+  if (over.ok) assert.equal(over.wouldBlock?.reason, "rate")
+})
+
+test("without enforceConcurrency, a concurrency denial still shadows", () => {
+  process.env.RATE_LIMIT_MODE = "shadow"
+  const rule = { limit: 60, windowMs: 60_000, concurrency: 1 }
+
+  assert.equal(acquire("/uniware/explorer", 3, rule).ok, true)
+  const second = acquire("/uniware/explorer", 3, rule)
+  assert.equal(second.ok, true, "unchanged behaviour for every other route")
+  if (second.ok) assert.equal(second.wouldBlock?.reason, "concurrency")
+})
