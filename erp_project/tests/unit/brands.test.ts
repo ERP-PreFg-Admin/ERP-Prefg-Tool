@@ -18,9 +18,10 @@ test("brandCode returns the established prefixes", () => {
   // live PO numbers already use (MCAFF-PO-…, MCAFF-INW-202608-001).
   assert.equal(brandCode("mCaffeine"), "MCAFF")
   assert.equal(brandCode("Hyphen"), "HYP")
-  // Fein was in none of the three maps, so it used to fall through to the raw
-  // brand name and produce FEIN by accident. Same output, now on purpose.
-  assert.equal(brandCode("Fein"), "FEIN")
+  // Fein deliberately shares mCaffeine's prefix, so its POs continue the MCAFF
+  // sequence rather than starting a FEIN- series of their own. The four
+  // existing FEIN-PO-* rows predate that decision and are left as they are.
+  assert.equal(brandCode("Fein"), "MCAFF")
 })
 
 test("brandCode normalises casing and punctuation to one key", () => {
@@ -64,7 +65,8 @@ test("brandInitial is one letter, from the mapped code where there is one", () =
   assert.equal(brandInitial("MCAFFEINE"), "M")
   assert.equal(brandInitial("m-caffeine"), "M")
   assert.equal(brandInitial("Hyphen"), "H")
-  assert.equal(brandInitial("Fein"), "F")
+  // Follows brandCode, which now maps Fein to MCAFF.
+  assert.equal(brandInitial("Fein"), "M")
 })
 
 test("an unmapped brand falls back to its own first letter, never its full name", () => {

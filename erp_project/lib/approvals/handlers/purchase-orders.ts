@@ -21,7 +21,7 @@ import { skus as skusSql } from "@/lib/queries/skus"
 import { parseS3Import } from "@/lib/import-s3"
 import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import { type ModuleHandler, s3KeyOf } from "./types"
-import { brandInitial } from "@/lib/constants"
+import { brandCode } from "@/lib/constants"
 import { isoDate, normalizeDateCell } from "@/lib/date"
 import { makePoRateResolver } from "@/lib/po/po-rate"
 
@@ -116,7 +116,7 @@ export const poBulkHandler: ModuleHandler = {
           const remarks = row.remarks?.trim().slice(0, 300) || null
 
           const rawBrand = sku.brand?.trim() || skuCode.split("-")[0]
-          const brand = brandInitial(rawBrand)
+          const brand = brandCode(rawBrand)
           const year = new Date().getFullYear()
           const month = String(new Date().getMonth() + 1).padStart(2, "0")
           const poPrefix = `${brand}-PO-${year}${month}`

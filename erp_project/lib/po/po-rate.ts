@@ -36,13 +36,18 @@ const missingLines = (r: AgreedRate) => r.rm_lines_without_rate + r.pm_lines_wit
 export function makePoRateResolver(asOf?: string | null) {
   const cache = new Map<number, Map<string, AgreedRate>>()
 
-  return async function resolve(mfgId: number, skuCode: string, qty: number): Promise<PoRate> {
+  return async function resolve(mfgId: number, skuCode: string | null, qty: number): Promise<PoRate> {
     let rates = cache.get(mfgId)
     if (!rates) {
-      rates = await agreedRatesByMfg(mfgId, null, asOf)
+      const byExactCase = await agreedRatesByMfg(mfgId, null, asOf)
+      // Lower-cased keys. purchase_orders.sku_code is free text with no FK and
+      // its casing drifts from master_skus ('55Mcaf40' vs '55MCaf40'). MySQL
+      // compares case-insensitively so every query agrees; a JS Map.get does
+      // not, and silently returned "no rate" for a fully costed recipe.
+      rates = new Map([...byExactCase].map(([k, v]) => [k.toLowerCase(), v]))
       cache.set(mfgId, rates)
     }
-    const agreed = rates.get(skuCode)
+    const agreed = skuCode ? rates.get(skuCode.toLowerCase()) : undefined
     const raw = usable(agreed)
     if (raw == null) {
       logger.warn({ module: "PO_RATE", mfgId, skuCode, message: "No agreed rate at all — PO raised unpriced" })

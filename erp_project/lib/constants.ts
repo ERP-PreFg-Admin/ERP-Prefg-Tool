@@ -63,8 +63,10 @@ const BRANDS : Record<string , {code: string , entity : string}> = {
     code: "MCAFF" , 
     entity: "PEP"
   },
+  // MCAFF, not FEIN: Fein POs share mCaffeine's number series by decision, so
+  // the prefix — and therefore countByPrefix's sequence — is the same one.
   fein: {
-    code: "FEIN",
+    code: "MCAFF",
     entity: "PEP",
   },
   hyphen: {

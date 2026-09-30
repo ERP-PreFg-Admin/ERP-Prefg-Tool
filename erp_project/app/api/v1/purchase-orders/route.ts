@@ -16,7 +16,7 @@ import { assertDestinationServesEntity } from "@/lib/po/po-guard"
 import { ApiError } from "@/lib/gateway/errors"
 import { poActionSchema } from "@/lib/validation/purchase-orders"
 import { monthIST } from "@/lib/date"
-import { brandInitial } from "@/lib/constants"
+import { brandCode } from "@/lib/constants"
 
 // GET /api/v1/purchase-orders — list all POs the caller is scoped to, with MFG + SKU details
 export const GET = withGateway({
@@ -124,7 +124,7 @@ export const POST = withGateway({
 
   const rawBrand = skuRows[0].brand?.trim() || sku_code.split("-")[0]
   // const brand    = (BRAND_CODES[rawBrand.toLowerCase()] ?? rawBrand).toUpperCase()
-  const brand = brandInitial(rawBrand)
+  const brand = brandCode(rawBrand)
   
   // Generate po_no: {Brand}-{PO|IMP}-{yyyymm}-{nnnn}, sequence scoped per brand+type+month
   const year    = new Date().getFullYear()
