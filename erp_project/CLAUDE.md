@@ -6,6 +6,22 @@ Next.js 16 App Router · React 19 · TypeScript · Tailwind CSS v4 · Prisma 7 (
 
 > **Engine:** the RDS instance is **real MySQL 8.0**, not MariaDB (this file said MariaDB for a long time; the hand-written migrations in `prisma/*.sql` note the correction). The practical difference: **no `ADD COLUMN IF NOT EXISTS`**, so column-adding migrations are not re-runnable. The nested-transaction gotcha below still applies.
 
+> **Session history:** [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) is the export of every past Claude session's memory: working preferences, AWS/Uniware/SES facts, and the reasons behind decisions. Read it when starting fresh on a new machine. Old plan files are in `docs/claude-plans/`.
+
+## Working with Ajay — standing rules
+
+- **Plan first, then wait for an explicit go-ahead.** Plans lead with sequencing, gates, owners and risk, not a file-by-file list. Save them to `docs/<topic>-plan.md`.
+- **Who writes the code toggles.** "I will code it myself" / "help me code it out" / "code it out" mean hand over snippets and exact locations. Only "you write / you do the changes" means edit the files. Frontend is always Claude's to write. In snippet mode, check what he applied with `git diff`.
+- **Comments: one or two lines.** No section banners, no multi-paragraph JSDoc. If he strips a comment, don't put it back.
+- **Commits:** Conventional Commits, terse. **Never add `Co-Authored-By: Claude`** or any AI attribution.
+- **DDL goes to the dev schema (`mcaff_prefg_dev`) only, then stop.** Prod needs its own go-ahead every time.
+- **Never delete anything under `app/api/**`.** Report dead routes instead. Never touch `Desktop\Unicommerce playing\Downloads\`.
+- **UI work improves existing tables in place.** No new sections, panels or charts.
+- **Port a script he hands over faithfully**, constants included. Offer the DB-backed version as a follow-up.
+- Don't run `prisma generate`.
+- **Uniware REST is IP-whitelisted to the EC2 boxes.** Probe via SSM (`AWS_PROFILE=erp`, `MSYS_NO_PATHCONV=1`). Prove any new payload field against `TEST_FACILITY` first; unknown keys 400 the whole call.
+- **Mail runs on SES (`MAIL_PROVIDER=ses`), so nothing shows up in the mailbox's Sent folder.** Check delivery via SES events or CloudWatch metrics.
+
 ---
 
 ## Key Commands
@@ -370,7 +386,7 @@ Edits to master records go through a structured approval workflow instead of wri
 3. The entity's `status` is set to `in_review` (locking it from further edits)
 4. An approver visits `/approvals`, reviews the diff, and approves or rejects
 5. **On approve:** `applyAndArchive` in the module handler applies the diff and sets status to `active`
-6. **On reject:** `setStatus` sets status to `draft`; the original submitter can re-edit
+6. **On reject:** remarks are mandatory; `setStatus` sets status to `rejected` (its own ENUM value since 2026-07-09 — not `draft`); the original submitter can re-edit
 
 ### Reference implementation
 
