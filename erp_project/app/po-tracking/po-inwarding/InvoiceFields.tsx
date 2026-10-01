@@ -1,12 +1,14 @@
 "use client"
 
 import { useState } from "react"
+import { AlertTriangle } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import type { InvoiceForm } from "./invoice-form"
+import { destinationEvidence, noDestinationMessage, type InvoiceForm } from "./invoice-form"
+import { resolveFacility } from "@/lib/invoice/invoice-mapping"
 import type { ParsedCharge } from "@/types/invoice"
 import type { MfgOption, WarehouseOption } from "../po-procurement/po-types"
 import { warehousesForEntity, warehouseLabel, warehouseKey } from "../po-procurement/po-utils"
@@ -110,6 +112,15 @@ export function InvoiceFields({
   const off    = drift !== null && Math.abs(drift) >= 1
   const money  = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 2 })
 
+  const evidence = destinationEvidence(form)
+  const parsedSomething = Boolean(form.shipToAddress || form.shipToGstin || form.parsedDest)
+  const facility = form.destination ? resolveFacility(form.destination, form.buyerGstin, warehouseOptions) : null
+  const destAlert = !form.destination
+    ? (parsedSomething ? noDestinationMessage(form) : null)
+    : !facility?.facility_code?.trim()
+      ? `'${form.destination}' has no Uniware facility for the billed entity${form.buyerGstin ? ` (GSTIN ${form.buyerGstin})` : ""}. Set it on /masters/warehouses.`
+      : null
+
   return (
     <>
       {/* Header — 1 / 2 / 3 columns as the pane widens. */}
@@ -141,8 +152,8 @@ export function InvoiceFields({
           <Label className="text-xs">Destination <span className="text-destructive">*</span></Label>
           <Select
             value={form.destination}
-            onChange={(e) => setField("destination", e.target.value)}
-            className="w-full"
+            onChange={(e) => { setField("destination", e.target.value); setField("destMatchedBy", "") }}
+            className={cn("w-full", destAlert && "border-amber-400")}
           >
             {/* One entry per SITE here, not per (site, entity) — unlike the PO
                 list's destination filter. This is the invoice FORM: it writes
@@ -158,6 +169,12 @@ export function InvoiceFields({
             ))}
           </Select>
           <ParsedHint value={form.parsedDest} />
+          {evidence && <p className="text-[11px] text-emerald-700 dark:text-emerald-500">{evidence}</p>}
+          {destAlert && (
+            <p className="flex items-start gap-1 text-[11px] text-amber-700 dark:text-amber-500">
+              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{destAlert}
+            </p>
+          )}
         </div>
 
         <Field label="Seller GSTIN" value={form.sellerGstin} onChange={(v) => setField("sellerGstin", v)} />

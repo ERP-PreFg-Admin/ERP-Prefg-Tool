@@ -215,6 +215,18 @@ const INVOICE_LIST_BODY = `
 `
 
 export const supplierInvoicesSql = {
+  /** How this manufacturer's past invoice lines were booked — the SKU matcher's tie-break.
+   *  Params: [mfg_id, ...scopeParams(brandIds)] */
+  skuHistoryByMfg: `
+    SELECT i.sku_name, i.sku_code, COUNT(*) AS n
+    FROM invoice_items_mfg i
+    INNER JOIN invoice_mfg h ON h.id = i.invoice_id
+    LEFT JOIN master_skus sk ON sk.sku_code = i.sku_code
+    WHERE h.mfg_id = ? AND i.sku_code IS NOT NULL AND i.sku_name IS NOT NULL
+      AND (? IS NULL OR sk.brand_id IS NULL OR sk.brand_id IN (?))
+    GROUP BY i.sku_name, i.sku_code
+  `,
+
   /**
    * Insert the invoice header. Violating uq_supplier_invoice (mfg_id, invoice_no)
    * raises ER_DUP_ENTRY — that is the duplicate-submission guard, and it has to

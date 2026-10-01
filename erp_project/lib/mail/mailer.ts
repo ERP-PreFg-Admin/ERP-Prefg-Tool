@@ -324,7 +324,13 @@ export type SelectedPoLine = {
   /** Receipts so far, incl. a split's children. Cancelling cancels what has
    *  NOT arrived, so the Cancelled table quotes qty minus this. */
   received_qty?: number | null
+  po_type?: string | null
 }
+
+// Same test PO Tracking badges with (PoDataRow); older rows predate po_type.
+export const isImpromptuLine = (l: Pick<SelectedPoLine, "po_no" | "po_type">) =>
+  l.po_type === "impromptu" || l.po_no.startsWith("IMP-")
+
 type OngoingPoLine = {
   po_no: string; sku_code: string | null; sku_name: string | null; qty: number
   remarks?: string | null; unit_price?: number | null
@@ -373,7 +379,7 @@ function poTableRows(lines: PoMailLine[], withRemarks: boolean): string {
  * Split the selection the way the two emails need it.
  *
  * A split is a re-issue of demand the manufacturer already holds, against an order
- * they can be pointed back at — so it gets its own mail (sendSplitPoEmail) rather
+ * they can be pointed back at — so it gets its own mail (sendSplitPoSummaryEmail) rather
  * than a table inside the consolidated one, where "newly raised" would read as new
  * demand. Only raised splits: a cancelled one is a cancellation, and that belongs
  * in the consolidated mail's Cancelled table with the rest.
@@ -504,6 +510,9 @@ export async function sendMfgSelectionEmail(
     .filter((l) => l.status === "cancelled")
     .map((l) => ({ ...l, qty: Math.max(Number(l.qty) - Number(l.received_qty ?? 0), 0) }))
 
+  // An all-impromptu send keeps the open book in the Excel only, not the body.
+  const allImpromptu = selected.every(isImpromptuLine)
+
   const attachments: { filename: string; content: Buffer }[] = []
   let pdfsAttached = 0
   // Every selected PO gets its document, whatever its status. The old
@@ -513,7 +522,7 @@ export async function sendMfgSelectionEmail(
   // unit PO with 1,200 in, which is exactly when they still need it.
   //
   //
-  // Bounded by the operator's selection: the "Remaining Open" section comes from
+  // Bounded by the operator's selection: the "Current Open" section comes from
   // ongoingByMfg and never contributes attachments, so this cannot balloon with
   // the manufacturer's open book. assertAttachmentsWithinLimit below is the
   // backstop for a very large selection.
@@ -572,7 +581,7 @@ export async function sendMfgSelectionEmail(
           <p style="color:#555;margin-top:0">Please find the latest status of the following purchase orders${pdfsAttached > 0 ? " (PO copies attached; full details in the attached Excel)" : " (full details in the attached Excel)"}.</p>
           ${poSection("Newly Raised Purchase Orders", raisedLines)}
           ${poSection("Cancelled Purchase Orders", cancelledLines, "Cancelled Qty")}
-          ${poSection("Remaining Open Purchase Orders", openLines)}
+          ${allImpromptu ? "" : poSection("Current Open Purchase Orders", openLines)}
           <p style="font-size:12px;color:#888;margin-top:20px">
             This is an auto-generated email from the mcaffeine ERP system.
             Please confirm receipt by replying to this email.
@@ -597,41 +606,63 @@ export async function sendMfgSelectionEmail(
 
 // ── Split PO notification ────────────────────────────────────────────────────
 
-/** One "PO No. — value" row of the split detail block. */
-function detailRow(label: string, value: string): string {
+export type SplitSummaryRow = {
+  po_no: string; sku_code: string | null; sku_name: string | null
+  qty: number; ship_to_name: string | null; ship_to_lines: string[]
+}
+
+/** The split summary table, ending in a Total row over Split Qty. */
+export function splitSummarySection(rows: SplitSummaryRow[]): string {
+  if (rows.length === 0) return ""
+  const head = "padding:5px 10px;font-weight:600"
+  const total = rows.reduce((s, r) => s + Number(r.qty), 0)
+  const body = rows
+    .map((r) => {
+      // Deduped: the no-entity fallback is warehouse name + location, often the same word.
+      const dest = [...new Set([r.ship_to_name, ...r.ship_to_lines].filter(Boolean))]
+        .map((l) => escapeHtml(l)).join("<br>")
+      return `
+        <tr>
+          <td style="${CELL}">${r.sku_code ? escapeHtml(r.sku_code) : "—"}</td>
+          <td style="${CELL}">${r.sku_name ? escapeHtml(r.sku_name) : "—"}</td>
+          <td style="${CELL};font-size:11px;color:#333">${dest || "—"}</td>
+          <td style="${CELL}">${escapeHtml(r.po_no)}</td>
+          <td style="${CELL};text-align:right">${Number(r.qty).toLocaleString("en-IN")}</td>
+        </tr>`
+    })
+    .join("")
   return `
-    <tr>
-      <td style="padding:6px 12px;border-bottom:1px solid #eee;font-weight:600;width:150px">${escapeHtml(label)}</td>
-      <td style="padding:6px 12px;border-bottom:1px solid #eee">${escapeHtml(value)}</td>
-    </tr>`
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px">
+      <tr style="background:#f5f5f5">
+        <td style="${head}">SKU Code</td>
+        <td style="${head}">SKU Name</td>
+        <td style="${head}">Destination</td>
+        <td style="${head}">New PO Code</td>
+        <td style="${head};text-align:right">Split Qty</td>
+      </tr>
+      ${body}
+      <tr style="background:#f5f5f5">
+        <td style="${head}" colspan="4">Total</td>
+        <td style="${head};text-align:right">${total.toLocaleString("en-IN")}</td>
+      </tr>
+    </table>`
 }
 
 /**
- * One email for ONE split PO.
- *
- * Deliberately not a section inside sendMfgSelectionEmail. A split is a re-issue
- * of demand the manufacturer already holds against an order they can be pointed
- * back at — inside a mail headed "PO Update" with a Newly Raised table above it,
- * that reads as new demand, and the one fact that matters (which order this came
- * off) becomes a column in a five-column table.
- *
- * So the body is the split's own details and nothing else: no open snapshot, no
- * other statuses, no XLSX. The attachment is the split PO document
- * (lib/pdf/split-po-document.tsx), which states the same thing on letterhead.
- *
- * Returns true if sent, false if there is nobody to send to. Throws on a real send
- * failure — the caller decides what that costs, same contract as
- * sendMfgSelectionEmail.
+ * One email per manufacturer covering every split in the send: a summary table
+ * plus each split's PO document. No open snapshot, no XLSX.
+ * Returns false if there is nobody to send to; throws on a real send failure.
  */
-export async function sendSplitPoEmail(mfgId: number, line: SelectedPoLine): Promise<boolean> {
+export async function sendSplitPoSummaryEmail(mfgId: number, lines: SelectedPoLine[]): Promise<boolean> {
   const ctx = mailerCtx()
   const mfgRows = await query<{ code: string; name: string; email: string | null }>(
     `SELECT m.code, m.name, d.email FROM master_mfgs m JOIN details_mfg d ON d.mfg_id = m.id WHERE m.id = ? LIMIT 1`,
     [mfgId]
   )
   const mfg = mfgRows[0]
+  const poNos = lines.map((l) => l.po_no)
   if (!mfg) {
-    logger.warn({ ...ctx, mfgId, po_no: line.po_no, message: "sendSplitPoEmail: manufacturer not found" })
+    logger.warn({ ...ctx, mfgId, poNos, message: "sendSplitPoSummaryEmail: manufacturer not found" })
     return false
   }
 
@@ -640,41 +671,46 @@ export async function sendSplitPoEmail(mfgId: number, line: SelectedPoLine): Pro
   // is a real recipient, so a mail with only a CC still goes.
   if (to.length === 0 && cc.length === 0) {
     logger.warn({
-      ...ctx, mfgId, po_no: line.po_no,
+      ...ctx, mfgId, poNos,
       suppressed: dropped.length > 0 ? dropped.join(", ") : undefined,
       message: dropped.length > 0
-        ? "sendSplitPoEmail: every recipient is suppressed after an earlier bounce or complaint, skipping"
-        : "sendSplitPoEmail: manufacturer has no email on file, skipping",
+        ? "sendSplitPoSummaryEmail: every recipient is suppressed after an earlier bounce or complaint, skipping"
+        : "sendSplitPoSummaryEmail: manufacturer has no email on file, skipping",
     })
     return false
   }
 
-  // A PDF failure doesn't stop the mail: the body carries the same details in
-  // text, and a split the manufacturer never hears about is the worse outcome.
-  // Same call the consolidated path makes for its own attachments.
+  // Address from the same resolver the split PDF prints, so the two can't disagree.
+  // A PDF failure doesn't stop the mail — the table carries the same details.
+  const rows: SplitSummaryRow[] = []
   const attachments: { filename: string; content: Buffer }[] = []
-  try {
-    // Same store-once/reuse rule as the consolidated mail — a split child is its
-    // own purchase_orders row, so it owns its own attachment_key. Rendered with
-    // the split template, which prints the parent PO number.
-    const doc = await poDocument(line, generateSplitPoPdf, ctx)
-    if (doc) attachments.push(doc)
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err)
-    logger.error({
-      ...ctx, poId: line.id, po_no: line.po_no, error: message,
-      message: "Split PO PDF generation failed — sending the split email without the attachment",
+  for (const line of lines) {
+    const data = await fetchPoData(line.id).catch(() => null)
+    rows.push({
+      po_no: line.po_no, sku_code: line.sku_code, sku_name: line.sku_name, qty: Number(line.qty),
+      ship_to_name: data?.ship_to.name ?? line.destination ?? null,
+      ship_to_lines: data?.ship_to.address_lines ?? [],
     })
+    try {
+      const doc = await poDocument(line, generateSplitPoPdf, ctx)
+      if (doc) attachments.push(doc)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      logger.error({
+        ...ctx, poId: line.id, po_no: line.po_no, error: message,
+        message: "Split PO PDF generation failed — sending the summary without this attachment",
+      })
+    }
   }
 
-  assertAttachmentsWithinLimit(attachments, `Split PO email for ${line.po_no}`)
+  assertAttachmentsWithinLimit(attachments, `Split PO summary email for ${mfg.code}`)
 
+  const date = new Date()
+  const formatted = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
   const allRecipients = [...to, ...cc].join(", ")
-  const parent = line.reference_po ?? "—"
-  const eventId = makeEventId("PO_SPLIT_EMAIL", "send", line.id)
+  const eventId = makeEventId("PO_SPLIT_EMAIL", "send", mfgId)
   recordRawEvent("PO_SPLIT_EMAIL", eventId, {
-    mfgId, mfg_name: mfg.name, mfg_email: allRecipients,
-    po_no: line.po_no, reference_po: line.reference_po, attachmentCount: attachments.length,
+    mfgId, mfg_name: mfg.name, mfg_email: allRecipients, poNos, attachmentCount: attachments.length,
   })
 
   let sesMessageId: string | undefined
@@ -686,26 +722,15 @@ export async function sendSplitPoEmail(mfgId: number, line: SelectedPoLine): Pro
       // Omitted when empty rather than sent as "": nodemailer treats a blank Cc as
       // a malformed address and throws.
       ...(cc.length ? { cc: cc.join(", ") } : {}),
-      // The parent PO is deliberately NOT in the subject. It is our internal
-      // numbering, and to the manufacturer this is simply a purchase order to
-      // fulfil — naming an order they were never told about reads as a second
-      // reference they have to reconcile. The body still says which order it is
-      // part of, for anyone who needs it.
-      subject: `Split PO — ${line.po_no} — ${mfg.name}`,
+      // Parent POs stay out of the subject — they're named per row in the body.
+      subject: `Split POs — ${mfg.name} - ${formatted}`,
       html: `
-        <div style="font-family:sans-serif;max-width:620px;margin:auto;color:#111">
-          <h2 style="margin-bottom:4px">Split Purchase Order: ${escapeHtml(line.po_no)}</h2>
+        <div style="font-family:sans-serif;max-width:720px;margin:auto;color:#111">
+          <h2 style="margin-bottom:4px">Split Purchase Orders: ${escapeHtml(mfg.name)}</h2>
           <p style="color:#555;margin-top:0">
-            This is part of purchase order <strong>${escapeHtml(parent)}</strong>, re-issued as its own PO.
-            It is not additional quantity${attachments.length > 0 ? " — the PO document is attached" : ""}.
+            These are parts of existing purchase orders re-issued as their own POs — not additional quantity${attachments.length > 0 ? ". The PO documents are attached" : ""}.
           </p>
-          <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:12px">
-            ${detailRow("PO No.", line.po_no)}
-            ${detailRow("Split From", parent)}
-            ${detailRow("SKU", line.sku_code + (line.sku_name ? " — " + line.sku_name : ""))}
-            ${detailRow("Deliver To", line.destination ?? "—")}
-            ${detailRow("Quantity", Number(line.qty).toLocaleString("en-IN"))}
-          </table>
+          ${splitSummarySection(rows)}
           <p style="font-size:12px;color:#888;margin-top:20px">
             This is an auto-generated email from the mcaffeine ERP system.
             Please confirm receipt by replying to this email.
@@ -718,19 +743,18 @@ export async function sendSplitPoEmail(mfgId: number, line: SelectedPoLine): Pro
   } catch (sendErr: unknown) {
     const message = sendErr instanceof Error ? sendErr.message : String(sendErr)
     const stack = sendErr instanceof Error ? sendErr.stack : undefined
-    logger.error({ ...ctx, ...mailOutcome("failed", MAIL_FLOW.PO_SPLIT, { recipients: to.length + cc.length }), eventId, po_no: line.po_no, err: message, stack, message: "Split PO email send failed" })
-    recordFailedEvent("PO_SPLIT_EMAIL", eventId, { mfgId, mfg_name: mfg.name, po_no: line.po_no }, message)
+    logger.error({ ...ctx, ...mailOutcome("failed", MAIL_FLOW.PO_SPLIT, { recipients: to.length + cc.length }), eventId, poNos, err: message, stack, message: "Split PO summary email send failed" })
+    recordFailedEvent("PO_SPLIT_EMAIL", eventId, { mfgId, mfg_name: mfg.name, poNos }, message)
     throw sendErr
   }
 
   logger.info({
     ...ctx, ...mailOutcome("sent", MAIL_FLOW.PO_SPLIT, { recipients: to.length + cc.length, sesMessageId }),
-    eventId, mfgId, mfg_name: mfg.name, mfg_email: allRecipients,
-    po_no: line.po_no, reference_po: line.reference_po,
-    message: "Split PO email sent successfully",
+    eventId, mfgId, mfg_name: mfg.name, mfg_email: allRecipients, poNos,
+    message: "Split PO summary email sent successfully",
   })
   recordProcessedEvent("PO_SPLIT_EMAIL", eventId, {
-    mfgId, mfg_name: mfg.name, mfg_email: allRecipients, po_no: line.po_no,
+    mfgId, mfg_name: mfg.name, mfg_email: allRecipients, poNos,
   })
   return true
 }

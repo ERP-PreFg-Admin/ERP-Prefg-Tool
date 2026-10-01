@@ -53,7 +53,8 @@ export const PM_BASE_EXPORT_COLUMNS: ExportColumn[] = [
  */
 export const SKU_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "sku_code",    label: "SKU Code",    type: "text"   },
-  { key: "name",        label: "Name",        type: "text"   },
+  { key: "name",        label: "Uniware Name", type: "text"  },
+  { key: "supply_name", label: "Supply Name", type: "text"   },
   { key: "brand",       label: "Brand",       type: "text"   },
   { key: "sku_type",    label: "SKU Type",    type: "text"   },
   { key: "category",    label: "Category",    type: "text"   },

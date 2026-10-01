@@ -123,6 +123,7 @@ export type ParsedHeader = {
   bill_to_state: string | null
   ship_to_name: string | null
   ship_to_address: string | null
+  ship_to_gstin: string | null
   purchase_order: string | null
   total_amount: number | null
 }
@@ -163,6 +164,7 @@ export function parseHeader(text: string): ParsedHeader {
     bill_to_state: billTo.state,
     ship_to_name: shipTo.name,
     ship_to_address: shipTo.address,
+    ship_to_gstin: shipTo.gstin,
     purchase_order: after(lines, /^Buyer[’']s Order No\.?/i),
     total_amount: grandTotal(lines),
   }

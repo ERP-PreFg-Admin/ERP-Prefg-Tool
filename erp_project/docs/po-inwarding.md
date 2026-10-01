@@ -109,7 +109,13 @@ A supplier writes "REVE PHARMA", "Guwahati" and "Mcaf407"; the masters hold a ma
 
 - Uses **Fuse.js** (already a dependency via `components/ui/FuzzySelect`), threshold `0.3` — deliberately tighter than FuzzySelect's browsing threshold of `0.4`, because this picks a value on the user's behalf and a confidently wrong guess costs more than a blank field.
 - Exact case-insensitive hits short-circuit Fuse, so a supplier code that already equals a master code can never lose to a fuzzier-but-shorter candidate.
-- `matchSku` tries the code first (more discriminating), and only falls back to the product name when the code finds nothing.
+- **SKUs: our code first, then name and filling separately** (`matchSkuDetailed`, since 2026-10-01). Most invoices print only a name with the size inside it, and matching the whole string let "By The Blues … 300 ml" land on the 600 ml SKU. The ladder:
+  1. **Our `sku_code`, exact**, from the code column or the name's leading token (`MCaf401- By The Blue…`). A supplier's own code (`FG002500`) is ignored, and there is no fuzzy code match.
+  2. **Name and filling.** `cleanName` strips brand prefixes, `PO No …`, `(NEW PM)`, `1X` / `X 24` and the size, then lowercases and removes blanks. `parseFilling` reads the size. A SKU must match on name (exact, then containment, then Fuse 0.3) **and** have a `master_skus.filling` within 10% of the printed size, nearest wins. The fill column is the actual fill (300 ml is stored as 295), hence the tolerance.
+  3. The **manufacturer's live SKUs are searched before all SKUs**.
+  4. A tie between look-alikes (`MCaf396` / `Mcaf396_WB`) is broken by **how this manufacturer's past lines with the same printed name were booked** (`GET /invoice/sku-history`). Otherwise it stays blank and the SKU cell lists the candidates.
+
+  Backtested on every prod invoice line (372): right 233 → 341, wrong 93 → 2, blank 46 → 29. The dialog fetches the manufacturer's SKUs and history once, in `runParse`. The FIFO allocation is untouched.
 - `matchMfg` tries **`registered_name` before `name`**: an invoice header prints the legal entity ("REVE PHARMACEUTICALS PVT LTD") where `master_mfgs.name` is the short form we type internally ("Reve"), and the fuzzy pass often couldn't bridge that gap. `registered_name` comes from `details_mfg` via `purchaseOrdersSql.mfgOptions`. Every field gets its **exact** comparison (`exactMatch`) before any field gets a fuzzy one, so a code or short name that already matches character-for-character can't lose to a merely-plausible registered-name hit; the fuzzy pass then runs in the same priority order.
 - Pure and network-free, so `scripts/_check-invoice-mapping.ts` exercises it directly.
 

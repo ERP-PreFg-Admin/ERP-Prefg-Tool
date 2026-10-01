@@ -16,8 +16,8 @@ import type { Sku } from "@/types/masters"
 const FILLING_UOMS = ["ml", "g", "pairs", "units"]
 
 /**
- * Scoped SKU edit dialog — only Status, SKU Type, Category, Sub-Category,
- * Filling and MRP go through the approval flow here. Name/Brand are intentionally left
+ * Scoped SKU edit dialog — only Supply Name, Status, SKU Type, Category, Sub-Category,
+ * Filling and MRP go through the approval flow here. Uniware Name/Brand are intentionally left
  * out of this dialog (read-only elsewhere) per product decision.
  */
 export function EditSkuDialog({
@@ -38,6 +38,7 @@ export function EditSkuDialog({
 }) {
   const { toast } = useToast()
   const [form, setForm] = useState({
+    supply_name: sku?.supply_name ?? "",
     sku_type: sku?.sku_type ?? "",
     category: sku?.category ?? "",
     subcategory: sku?.subcategory ?? "",
@@ -58,6 +59,7 @@ export function EditSkuDialog({
     if (sku) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- resets form fields when the dialog opens for a different SKU row
       setForm({
+        supply_name: sku.supply_name ?? "",
         sku_type: sku.sku_type ?? "",
         category: sku.category ?? "",
         subcategory: sku.subcategory ?? "",
@@ -135,6 +137,23 @@ export function EditSkuDialog({
         <div className="grid gap-4 py-2">
           {isInReview && <InReviewBanner entityLabel="SKU" />}
           {isDraft && !loadingInfo && rejection && <RejectionBanner rejection={rejection} canEdit={canEdit} />}
+
+          {/* Uniware Name is shown read-only — the DWH sync owns it */}
+          <div className="grid gap-1">
+            <Label className="text-muted-foreground">Uniware Name</Label>
+            <p className="text-sm">{sku.name}</p>
+          </div>
+          <div className="grid gap-1">
+            <Label htmlFor="sku-supply-name">Supply Name</Label>
+            <Input
+              id="sku-supply-name"
+              maxLength={500}
+              value={form.supply_name}
+              onChange={(e) => set("supply_name", e.target.value)}
+              placeholder="Name used for supply / POs"
+              disabled={isInReview || !canEdit}
+            />
+          </div>
 
           {/* Row 1: SKU Type | Status */}
           <div className="grid grid-cols-2 gap-3">

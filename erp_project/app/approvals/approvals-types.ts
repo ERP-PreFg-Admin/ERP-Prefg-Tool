@@ -38,6 +38,7 @@ export function isCreateApproval(approval: Pick<Approval, "approval_type" | "ite
 
 export const MODULE_LABEL: Record<string, string> = {
   SKU: "SKU",
+  SKU_NAME_BULK: "Bulk SKU Supply Name Upload",
   RM_RATE: "RM Rate (MFG)",
   PM_RATE: "PM Rate (MFG)",
   RM_VRM: "RM Rate (Vendor)",
@@ -79,7 +80,7 @@ export const BULK_MODULES = new Set([
   // absence here made an approval of one render a field diff over those three
   // internal keys instead of the CSV file card.
   "RM_VRM_BULK", "RM_RATE_BULK", "PM_VRM_BULK", "PM_RATE_BULK",
-  "MFG_MISC_BULK",
+  "MFG_MISC_BULK", "SKU_NAME_BULK",
 ])
 
 /** Maps a *_BULK module code to the base module it belongs to, so bulk
@@ -98,6 +99,7 @@ const BULK_GROUP_KEY: Record<string, string> = {
   PM_VRM_BULK:  "PM_VRM",
   PM_RATE_BULK: "PM_RATE",
   MFG_MISC_BULK: "MFG_MISC",
+  SKU_NAME_BULK: "SKU",
 }
 
 export function groupKeyFor(module: string) {
@@ -112,6 +114,7 @@ export function isNewRecord(items: ApprovalItem[]) {
 
 export const MODULE_COLOR: Record<string, string> = {
   SKU: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-900/40",
+  SKU_NAME_BULK: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-900/40",
   RM_RATE: "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/30 dark:text-purple-400 dark:border-purple-900/40",
   PM_RATE: "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-900/40",
   RM_VRM: "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-400 dark:border-green-900/40",

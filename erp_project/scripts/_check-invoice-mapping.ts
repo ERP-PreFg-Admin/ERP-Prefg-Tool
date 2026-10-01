@@ -119,9 +119,8 @@ const WAREHOUSES: WarehouseOption[] = [
   { id: 2, code: "GHY", name: "Guwahati CWH", location: "Guwahati", zone: "East", type: "CWH", entity_code: "PEP",      facility_code: "GHY_PEP", ship_to_pincode: "781017", bill_to_address: "Unit 1, Andheri East, Mumbai, Maharashtra - 400059" },
 ]
 assert.equal(matchWarehouse("Guwahati", WAREHOUSES)?.name, "Guwahati CWH")
-// Unrecognised destinations fall back to the Mother Warehouse, never to null:
-// destination is mandatory, and MWH is where unidentified inbound stock lands.
-assert.equal(matchWarehouse("Nowhere-ville", WAREHOUSES)?.type, "MWH")
-assert.equal(matchWarehouse(null, WAREHOUSES)?.type, "MWH")
+// Unrecognised destinations are null, not a guessed MWH — the review screen alerts.
+assert.equal(matchWarehouse("Nowhere-ville", WAREHOUSES), null)
+assert.equal(matchWarehouse(null, WAREHOUSES), null)
 
 console.log("Invoice mapping OK — 2 line items, _ref stripped, dates + SKU/warehouse matching intact")

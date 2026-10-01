@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { query, execute } from "@/lib/db"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import {
-  sendMfgSelectionEmail, sendSplitPoEmail, partitionSplits, type SelectedPoLine,
+  sendMfgSelectionEmail, sendSplitPoSummaryEmail, partitionSplits, type SelectedPoLine,
 } from "@/lib/mail/mailer"
 import { poSendMailSchema } from "@/lib/validation/purchase-orders"
 import { withGateway } from "@/lib/gateway/with-gateway"
@@ -19,11 +19,9 @@ import logger from "@/lib/logger"
 // the stored status is not changed here; raise/cancel already happened through
 // their own flows.
 //
-// Each manufacturer's group becomes ONE consolidated email, plus ONE email per
-// raised split PO. A split is a re-issue of demand the manufacturer already holds
-// against an order they can be pointed back at, so it gets its own mail and its
-// own document rather than a table inside a "PO Update" — see partitionSplits and
-// sendSplitPoEmail in lib/mail/mailer.ts.
+// Each manufacturer's group becomes ONE consolidated email, plus ONE summary
+// email covering all its raised split POs — see partitionSplits and
+// sendSplitPoSummaryEmail in lib/mail/mailer.ts.
 //
 // What this does mutate is email_sent_at, and only for the manufacturers whose
 // mail actually went out. PO Tracking shows a raised-but-unmailed PO as Draft
@@ -61,7 +59,7 @@ export const POST = withGateway({
       byMfg.get(r.mfg_id)!.lines.push({
         id: r.id, po_no: r.po_no, sku_code: r.sku_code, sku_name: r.sku_name, qty: Number(r.qty),
         status: r.status, reference_po: r.reference_po, destination: r.destination,
-        remarks: r.remarks, received_qty: Number(r.received_qty ?? 0),
+        remarks: r.remarks, received_qty: Number(r.received_qty ?? 0), po_type: r.po_type,
         unit_price: r.unit_price == null ? null : Number(r.unit_price),
       })
     }
@@ -87,16 +85,16 @@ export const POST = withGateway({
         }
       }
 
-      // po_no on these results: one manufacturer can now have several legs in a
-      // batch, so a partial failure has to name the PO and not just the vendor.
-      for (const line of splits) {
+      // po_no names the split leg so a partial failure is distinguishable from the consolidated one.
+      if (splits.length > 0) {
+        const po_no = splits.map((l) => l.po_no).join(", ")
         try {
-          const sent = await sendSplitPoEmail(mfgId, line)
-          results.push({ mfg_id: mfgId, mfg_name: group.mfg_name, po_no: line.po_no, sent })
-          if (sent) sentPoIds.push(line.id)
+          const sent = await sendSplitPoSummaryEmail(mfgId, splits)
+          results.push({ mfg_id: mfgId, mfg_name: group.mfg_name, po_no, sent })
+          if (sent) sentPoIds.push(...splits.map((l) => l.id))
         } catch (err: unknown) {
           const error = err instanceof Error ? err.message : String(err)
-          results.push({ mfg_id: mfgId, mfg_name: group.mfg_name, po_no: line.po_no, sent: false, error })
+          results.push({ mfg_id: mfgId, mfg_name: group.mfg_name, po_no, sent: false, error })
         }
       }
     }

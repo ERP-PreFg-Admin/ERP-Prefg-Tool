@@ -93,6 +93,7 @@ export function normalizeParsedInvoice(content: Record<string, unknown>): Parsed
     bill_to_state:    str(content?.bill_to_state),
     ship_to_name:     str(content?.ship_to_name),
     ship_to_address:  str(content?.ship_to_address),
+    ship_to_gstin:    str(content?.ship_to_gstin),
     purchase_order:   str(content?.purchase_order),
     total_amount:     num(content?.total_amount),
     line_items,

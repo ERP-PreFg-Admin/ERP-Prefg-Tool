@@ -40,6 +40,7 @@ export const EXTRACTION_SCHEMA = {
     // Same as bill_to_address: the PIN here is what resolves the destination
     // warehouse, ahead of the fuzzy `destination` label above.
     ship_to_address:  { type: "string", description: "Consignee / Ship-to full postal address as one line, ENDING with the 6-digit PIN code exactly as printed. Exclude the GSTIN and party name." },
+    ship_to_gstin:    { type: "string", description: "GSTIN printed inside the 'Consignee (Ship to)' block" },
     purchase_order:   { type: "string", description: "Buyer's purchase order / order reference printed in the header, labelled 'PO No', 'Order No' or 'Buyer's Order No'. Return the reference only, without the label." },
     total_amount:     { type: "number", description: "Grand total of the invoice, including tax" },
     line_items: {

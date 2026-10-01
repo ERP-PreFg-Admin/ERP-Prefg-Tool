@@ -113,6 +113,7 @@ export function parseJainam(text: string): ParsedInvoice {
     bill_to_state: clean(lines.find((l) => /^StateCode\s*:/i.test(l))?.split(":")[1]?.replace(/\s*\(\d+\)\s*/, "")),
     ship_to_name: gstinLines[1] !== undefined ? nameFrom(gstinLines[1] + 1) : null,
     ship_to_address: null,
+    ship_to_gstin: clean(lines[gstinLines[2]]?.match(/([0-9A-Z]{15})/)?.[1]),
     purchase_order: null,
     total_amount: num(lines.find((l) => /^Document Total/i.test(l))?.match(new RegExp(MONEY))?.[0]),
     line_items,

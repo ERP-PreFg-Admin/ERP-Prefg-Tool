@@ -5,12 +5,11 @@
 // below is either a false positive that would send stock to the wrong site, or
 // an address shape that actually turns up on Indian GST invoices.
 //
-// matchWarehouse's fuzzy/MWH-fallback behaviour is covered by
-// scripts/_check-invoice-mapping.ts; this file is the PIN pass.
+// Also the GSTIN / address rungs of matchWarehouse, and resolveFacility.
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { extractPincode, matchWarehouse } from "../../lib/invoice/invoice-mapping"
+import { extractPincode, matchWarehouse, matchWarehouseWithReason, resolveFacility } from "../../lib/invoice/invoice-mapping"
 import type { WarehouseOption } from "../../app/po-tracking/po-procurement/po-types"
 
 const PEP_BILL_TO = "Unit 1, Andheri East, Mumbai, Maharashtra - 400059"
@@ -100,9 +99,59 @@ test("two DIFFERENT sites on one PIN is ambiguous, so the PIN pass declines", ()
   assert.equal(w?.name, "Guwahati CWH", "resolved by label, not by an arbitrary PIN hit")
 })
 
-test("without addresses, matchWarehouse is exactly what it was", () => {
+test("without addresses, the label still answers — and nothing matched is null, not MWH", () => {
   assert.equal(matchWarehouse("Guwahati", WAREHOUSES)?.name, "Guwahati CWH")
-  assert.equal(matchWarehouse("Nowhere-ville", WAREHOUSES)?.type, "MWH")
-  assert.equal(matchWarehouse(null, WAREHOUSES)?.type, "MWH")
   assert.equal(matchWarehouse("Guwahati", WAREHOUSES, {})?.name, "Guwahati CWH")
+  assert.equal(matchWarehouse("Nowhere-ville", WAREHOUSES), null)
+  assert.equal(matchWarehouse(null, WAREHOUSES), null)
+})
+
+// The live master's shape: GSTIN is per (entity, state), so Pep's Maharashtra
+// GSTIN sits on both Mumbai and Nagpur, and Kreative's own is only on Mumbai.
+const KRE_MH = "27AAJCK9697F1ZS"
+const PEP_MH = "27AAICP2804J1ZC"
+const LIVE: WarehouseOption[] = [
+  { id: 16, code: null, name: "Mumbai", location: "Bhiwandi", zone: "West", type: "MWH", entity_code: "KREATIVE", facility_code: "HYP_B2B_MUM2", ship_to_pincode: "421302", bill_to_address: null, ship_to_gstin: KRE_MH, ship_to_address: "Global Logistics, Nasik Highway, Kukse Borivali, Bhiwandi", ship_to_city: "Bhiwandi", entity_pan: "AAJCK9697F" },
+  { id: 16, code: null, name: "Mumbai", location: "Bhiwandi", zone: "West", type: "MWH", entity_code: "PEP", facility_code: "MUM_WAREHOUSE2", ship_to_pincode: "421302", bill_to_address: null, ship_to_gstin: PEP_MH, ship_to_address: "Global Logistics, Nasik Highway, Kukse Borivali, Bhiwandi", ship_to_city: "Bhiwandi", entity_pan: "AAICP2804J" },
+  { id: 18, code: null, name: "Nagpur", location: "Nagpur", zone: "West", type: "CWH", entity_code: "KREATIVE", facility_code: "HYP_DLNAG", ship_to_pincode: "441501", bill_to_address: null, ship_to_gstin: PEP_MH, ship_to_address: "Hingna MIDC, Nagpur", ship_to_city: "Nagpur", entity_pan: "AAJCK9697F" },
+  { id: 18, code: null, name: "Nagpur", location: "Nagpur", zone: "West", type: "CWH", entity_code: "PEP", facility_code: "Mcaff_Nagpur", ship_to_pincode: "441501", bill_to_address: null, ship_to_gstin: PEP_MH, ship_to_address: "Hingna MIDC, Nagpur", ship_to_city: "Nagpur", entity_pan: "AAICP2804J" },
+]
+
+test("Cheryl: ship-to GSTIN + PIN agree on Mumbai, on Kreative's row", () => {
+  const m = matchWarehouseWithReason("BHIWANDI", LIVE, {
+    shipTo: "Ground Floor, A-1,172/6,7,8 & 9, GLOBAL, BHIWANDI - 421302, Dist : THANE, INDIA",
+    shipToGstin: KRE_MH,
+  })
+  assert.equal(m?.option.name, "Mumbai")
+  assert.equal(m?.option.entity_code, "KREATIVE")
+  assert.equal(m?.by, "gstin+pin")
+})
+
+test("a GSTIN shared by two sites cannot decide alone", () => {
+  assert.equal(matchWarehouseWithReason(null, LIVE, { shipToGstin: PEP_MH }), null)
+})
+
+test("a GSTIN on exactly one site decides when there is no PIN", () => {
+  const m = matchWarehouseWithReason(null, LIVE, { shipToGstin: KRE_MH })
+  assert.equal(m?.option.name, "Mumbai")
+  assert.equal(m?.by, "gstin")
+})
+
+test("no PIN printed: the master's address words decide", () => {
+  const m = matchWarehouseWithReason(null, LIVE, { shipTo: "Plot 4, Hingna MIDC Area, Nagpur" })
+  assert.equal(m?.option.name, "Nagpur")
+  assert.equal(m?.by, "address")
+})
+
+test("the PIN inside the master's printed address counts when the column is empty", () => {
+  const blankPin = LIVE.map((o) => o.name === "Nagpur" ? { ...o, ship_to_pincode: null, ship_to_address: "Hingna MIDC, Nagpur 441501" } : o)
+  assert.equal(matchWarehouseWithReason(null, blankPin, { shipTo: "Somewhere 441501" })?.option.name, "Nagpur")
+})
+
+test("resolveFacility picks the billed entity's row, by PAN", () => {
+  assert.equal(resolveFacility("Mumbai", KRE_MH, LIVE)?.facility_code, "HYP_B2B_MUM2")
+  assert.equal(resolveFacility("Mumbai", PEP_MH, LIVE)?.facility_code, "MUM_WAREHOUSE2")
+  assert.equal(resolveFacility("Mumbai", "27AAFCD3098K1ZX", LIVE), null, "our PAN, but no row at this site")
+  assert.equal(resolveFacility("Mumbai", "", LIVE), null)
+  assert.equal(resolveFacility("Mumbai", "not-a-gstin", LIVE), null)
 })

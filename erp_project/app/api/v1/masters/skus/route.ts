@@ -145,9 +145,11 @@ export const POST = withGateway({
         // the current record so they never spuriously show up in the diff.
         const name = body.name?.trim() || current.name
         const brand = body.brand?.trim() ?? current.brand ?? ""
+        const supplyName = body.supply_name ?? String(current.supply_name ?? "")
 
         const proposed: Record<string, string> = {
           name,
+          supply_name: supplyName,
           brand: brand || "",
           category: category?.trim() || "",
           subcategory: subcategory?.trim() || "",

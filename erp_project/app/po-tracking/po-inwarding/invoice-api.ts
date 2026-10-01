@@ -5,6 +5,8 @@ import type { OpenPoOption, ParsedInvoice } from "@/types/invoice"
 import type { DetectedMfg } from "@/lib/invoice/invoice-detect"
 import { monthIST } from "@/lib/date"
 import { tooLargeMessage } from "./invoice-form"
+import type { SkuHistoryRow, SkuMatchContext } from "@/lib/invoice/invoice-mapping"
+import type { SkuOption } from "../po-procurement/po-types"
 
 /** Thrown with the server's own message so the dialog can show something actionable. */
 export class InvoiceApiError extends Error {
@@ -186,4 +188,24 @@ export async function fetchOpenPos(mfgId: string): Promise<OpenPoOption[]> {
   } catch {
     return []
   }
+}
+
+/** The manufacturer's live SKUs and past bookings for the SKU matcher. Either call
+ *  failing just means matching against all SKUs with no tie-break. */
+export async function fetchSkuMatchContext(mfgId: string, allSkus: SkuOption[]): Promise<SkuMatchContext> {
+  if (!mfgId) return { allSkus }
+  const get = async <T>(url: string, key: string): Promise<T[]> => {
+    try {
+      const data = await (await fetch(url)).json()
+      return Array.isArray(data[key]) ? data[key] : []
+    } catch {
+      return []
+    }
+  }
+  const id = encodeURIComponent(mfgId)
+  const [mfgSkus, history] = await Promise.all([
+    get<{ sku_code: string }>(`/api/v1/purchase-orders/mfg-skus?mfg_id=${id}`, "skus"),
+    get<SkuHistoryRow>(`/api/v1/purchase-orders/invoice/sku-history?mfg_id=${id}`, "history"),
+  ])
+  return { allSkus, mfgSkuCodes: mfgSkus.map((s) => s.sku_code), history }
 }

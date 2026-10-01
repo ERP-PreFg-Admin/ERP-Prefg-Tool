@@ -15,7 +15,7 @@ const ROW = new RegExp(
 
 // Sr. no, HSN and manufacturing date land on their own line below the row.
 const TAIL = /^(\d+)\s+(\d{6,8})\s+(\S+)/
-const SKU_LINE = /SKU\s*:?-?\s*([A-Z0-9]+)/i
+const SKU_LINE = /SKU(?:\s*CODE)?\s*:?-?\s*([A-Z0-9]+)/i
 
 export function matchesCheryl(text: string): boolean {
   return /NET INVOICE VALUE/i.test(text)
@@ -61,14 +61,21 @@ export function parseCheryl(text: string): ParsedInvoice {
   // label" is meaningless here — the invoice number is matched by its shape.
   const invoiceNo = lines.find((l) => /^[A-Z]{2,}\/[\dA-Z-]+\/\d+$/.test(l)) ?? null
 
-  const partyName = (label: RegExp) => {
+  // Each party prints name → address lines → label, below the previous block's marker.
+  const party = (label: RegExp) => {
     const at = lines.findIndex((l) => label.test(l))
-    if (at <= 0) return null
+    if (at <= 0) return { name: null, address: null }
+    let nameAt = 0
     for (let i = at - 1; i >= 0; i--) {
-      if (/^(GSTIN|State|D\.L\.|GstInvoice|:)/i.test(lines[i])) return clean(lines[i + 1])
+      if (/^(GSTIN|State|D\.L\.|GstInvoice|:)/i.test(lines[i])) { nameAt = i + 1; break }
     }
-    return clean(lines[0])
+    return { name: clean(lines[nameAt]), address: clean(lines.slice(nameAt + 1, at).join(", ")) }
   }
+  const billTo = party(/^Buyer\s*\/\s*Billed To/i)
+  const shipTo = party(/^Consignee\s*\/\s*Shipped To/i)
+
+  // "NAVI MUMBAI to BHIWANDI MCAFF/26-27/0370" — destination and our PO on one line.
+  const dispatch = text.match(/\bto\s+([A-Z][A-Z ]+?)\s+([A-Z]+\/[\dA-Z-]+\/\d+)\b/)
 
   const afterLabel = (label: RegExp, pattern: RegExp) => {
     const at = lines.findIndex((l) => label.test(l))
@@ -81,18 +88,19 @@ export function parseCheryl(text: string): ParsedInvoice {
     date: slashDateToTally(text),
     eway_bill_number: clean(text.match(/e-?way Bill No\.?\s*:?\s*(\d{10,})/i)?.[1]),
     from: clean(text.match(/^For,\s*(.+)$/mi)?.[1]),
-    destination: null,
+    destination: clean(dispatch?.[1]),
     vehicle_number: clean(text.match(/\b([A-Z]{2}\s?\d{1,2}\s?[A-Z]{1,3}\s?\d{3,4})\b/)?.[1]),
     currency: "INR",
     seller_gstin: gstins.find((g) => !isOurs(g)) ?? null,
     buyer_gstin: gstins.find((g) => isOurs(g)) ?? null,
-    bill_to_name: partyName(/^Buyer\s*\/\s*Billed To/i),
-    bill_to_address: null,
+    bill_to_name: billTo.name,
+    bill_to_address: billTo.address,
     bill_to_gstin: afterLabel(/^Buyer\s*\/\s*Billed To/i, /GSTIN\s*:?\s*([0-9A-Z]{15})/i),
     bill_to_state: afterLabel(/^Buyer\s*\/\s*Billed To/i, /^State\s+([A-Za-z ]+),/i),
-    ship_to_name: partyName(/^Consignee\s*\/\s*Shipped To/i),
-    ship_to_address: null,
-    purchase_order: null,
+    ship_to_name: shipTo.name,
+    ship_to_address: shipTo.address,
+    ship_to_gstin: afterLabel(/^Consignee\s*\/\s*Shipped To/i, /GSTIN\s*:?\s*([0-9A-Z]{15})/i),
+    purchase_order: clean(dispatch?.[2]),
     total_amount: num(text.match(/NET INVOICE VALUE\s*:?\s*([\d,]+\.\d{2})/i)?.[1]),
     line_items: rows(lines),
     extra: {},

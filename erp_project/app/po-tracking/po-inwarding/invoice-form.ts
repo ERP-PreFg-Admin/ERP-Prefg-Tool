@@ -3,10 +3,13 @@
 // invoice to a reviewable form, and the validation over it, can be read (and
 // exercised) without rendering anything.
 
-import { matchMfg, matchSku, matchWarehouse, toDateInputValue } from "@/lib/invoice/invoice-mapping"
+import {
+  extractPincode, matchMfg, matchSkuDetailed, matchWarehouseWithReason, parseFilling, resolveFacility, toDateInputValue,
+  type SkuMatch, type SkuMatchContext, type WarehouseMatchBy,
+} from "@/lib/invoice/invoice-mapping"
 import { MATCH_TOLERANCE } from "@/lib/invoice/three-way"
 import type { OpenPoOption, ParsedCharge, ParsedInvoice } from "@/types/invoice"
-import type { MfgOption, SkuOption, WarehouseOption } from "../po-procurement/po-types"
+import type { MfgOption, WarehouseOption } from "../po-procurement/po-types"
 
 /**
  * The invoice upload ceiling — the single source for the number AND the wording.
@@ -67,6 +70,11 @@ export type Row = {
   gst_percent:  string
   amount:       string
   total_amount: string
+  /** The SKU the matcher picked and why — the caption shows it only while sku_code still equals it. */
+  sku_auto?:       string
+  sku_why?:        string
+  /** Look-alikes the matcher couldn't choose between, comma-joined. */
+  sku_candidates?: string
   /** Existing open PO this line is received against, as a string id ("" = none).
    *  When set, the line books a receipt instead of creating a new inward PO. */
   reference_po_id: string
@@ -95,6 +103,9 @@ export type InvoiceForm = {
   billToState:   string
   shipToName:    string
   shipToAddress: string
+  shipToGstin:   string
+  /** Which signal picked the destination; "" when nothing did. */
+  destMatchedBy: WarehouseMatchBy | ""
 }
 
 export const EMPTY_FORM: InvoiceForm = {
@@ -102,6 +113,31 @@ export const EMPTY_FORM: InvoiceForm = {
   poRef: "", mfgId: "", destination: "", sellerGstin: "", buyerGstin: "",
   invoiceTotal: "", parsedFrom: "", parsedDest: "",
   billToName: "", billToAddress: "", billToState: "", shipToName: "", shipToAddress: "",
+  shipToGstin: "", destMatchedBy: "",
+}
+
+const MATCHED_BY_LABEL: Record<WarehouseMatchBy, string> = {
+  "gstin+pin": "GSTIN + PIN",
+  pin: "PIN",
+  address: "address",
+  gstin: "GSTIN",
+  label: "location name",
+}
+
+/** "Matched by GSTIN + PIN 421302", or null when the user picked it or nothing matched. */
+export function destinationEvidence(form: InvoiceForm): string | null {
+  if (!form.destMatchedBy || !form.destination) return null
+  const pin = extractPincode(form.shipToAddress)
+  const withPin = form.destMatchedBy === "pin" || form.destMatchedBy === "gstin+pin"
+  return `Matched by ${MATCHED_BY_LABEL[form.destMatchedBy]}${withPin && pin ? ` ${pin}` : ""}`
+}
+
+/** The alert when no warehouse matched, naming what the invoice printed. */
+export function noDestinationMessage(form: InvoiceForm): string {
+  const pin = extractPincode(form.shipToAddress)
+  const printed = [pin && `PIN ${pin}`, form.shipToGstin && `GSTIN ${form.shipToGstin}`].filter(Boolean).join(", ")
+  return `No warehouse matches this invoice${printed ? ` (${printed})` : ""}. ` +
+    "Pick the destination manually or fix it on /masters/warehouses."
 }
 
 /** Per-tab counter behind line_key. Only has to be unique within one review. */
@@ -122,6 +158,11 @@ export function formFromParsed(
   mfgOptions: MfgOption[],
   warehouseOptions: WarehouseOption[]
 ): InvoiceForm {
+  const dest = matchWarehouseWithReason(p.destination, warehouseOptions, {
+    shipTo: p.ship_to_address,
+    billTo: p.bill_to_address,
+    shipToGstin: p.ship_to_gstin,
+  })
   return {
     invoiceNo:     s(p.invoice_number),
     invoiceDate:   toDateInputValue(p.date),
@@ -130,12 +171,8 @@ export function formFromParsed(
     vehicleNo:     s(p.vehicle_number),
     poRef:         s(p.purchase_order),
     mfgId:         s(matchMfg(p.from, mfgOptions)?.id),
-    // The PIN in the printed ship-to block outranks the free-text destination
-    // label; bill-to's PIN separates the two legal entities at one site.
-    destination:   s(matchWarehouse(p.destination, warehouseOptions, {
-                     shipTo: p.ship_to_address,
-                     billTo: p.bill_to_address,
-                   })?.name),
+    destination:   s(dest?.option.name),
+    destMatchedBy: dest?.by ?? "",
     sellerGstin:   s(p.seller_gstin),
     // The bill-to block's GSTIN is the same number on most invoices, so it's a
     // reasonable fallback when the top-level field didn't come through.
@@ -148,28 +185,47 @@ export function formFromParsed(
     billToState:   s(p.bill_to_state),
     shipToName:    s(p.ship_to_name),
     shipToAddress: s(p.ship_to_address),
+    shipToGstin:   s(p.ship_to_gstin),
   }
 }
 
-export function rowsFromParsed(p: ParsedInvoice, skuOptions: SkuOption[]): Row[] {
-  return (p.line_items ?? []).map((li) => ({
-    line_key:     nextLineKey(),
-    sku_code:     s(matchSku(li.sku_code, li.sku_name, skuOptions)?.sku_code),
-    parsed_code:  s(li.sku_code),
-    sku_name:     s(li.sku_name),
-    batch:        s(li.batch),
-    mfg_date:     s(li.mfg_date),
-    expiry:       s(li.expiry),
-    hsn:          s(li.hsn),
-    qty:          s(li.qty),
-    rate:         s(li.rate),
-    mrp:          s(li.mrp),
-    discount:     s(li.discount),
-    gst_percent:  s(li.gst_percent),
-    amount:       s(li.amount),
-    total_amount: s(li.total_amount),
-    reference_po_id: "",
-  }))
+function skuWhy(m: SkuMatch, name: string | null | undefined): string {
+  const fill = parseFilling(name)
+  const size = fill != null ? ` + fill ${fill}` : ""
+  switch (m.by) {
+    case "code":         return `matched on SKU code ${m.sku?.sku_code}`
+    case "name+filling": return `matched by name${size}`
+    case "fuzzy-name":   return `closest name${size}`
+    case "history":      return "as booked on a past invoice"
+    default:             return ""
+  }
+}
+
+export function rowsFromParsed(p: ParsedInvoice, ctx: SkuMatchContext): Row[] {
+  return (p.line_items ?? []).map((li) => {
+    const m = matchSkuDetailed({ code: li.sku_code, name: li.sku_name }, ctx)
+    return {
+      line_key:       nextLineKey(),
+      sku_code:       s(m.sku?.sku_code),
+      sku_auto:       s(m.sku?.sku_code),
+      sku_why:        skuWhy(m, li.sku_name),
+      sku_candidates: m.sku ? "" : m.candidates.map((c) => c.sku_code).join(", "),
+      parsed_code:    s(li.sku_code),
+      sku_name:       s(li.sku_name),
+      batch:          s(li.batch),
+      mfg_date:       s(li.mfg_date),
+      expiry:         s(li.expiry),
+      hsn:            s(li.hsn),
+      qty:            s(li.qty),
+      rate:           s(li.rate),
+      mrp:            s(li.mrp),
+      discount:       s(li.discount),
+      gst_percent:    s(li.gst_percent),
+      amount:         s(li.amount),
+      total_amount:   s(li.total_amount),
+      reference_po_id: "",
+    }
+  })
 }
 
 /* ── FIFO allocation ──────────────────────────────────────────────────────── */
@@ -345,11 +401,23 @@ export function collectProblems(
   shortages: Shortage[] = [],
   /** Tax-inclusive sum of freight etc. — outside line_items but inside the
    *  printed total, so the reconciliation below has to add it back. */
-  chargeSum = 0
+  chargeSum = 0,
+  /** When given, a destination with no facility for the billed entity blocks
+   *  submit here instead of 400-ing at commit. */
+  warehouseOptions?: WarehouseOption[]
 ): string[] {
   const out: string[] = []
   if (!form.invoiceNo.trim()) out.push("Invoice number is required.")
   if (!form.destination)      out.push("Select a destination.")
+  if (form.destination && warehouseOptions) {
+    const facility = resolveFacility(form.destination, form.buyerGstin, warehouseOptions)
+    if (!facility?.facility_code?.trim()) {
+      const buyer = form.buyerGstin.trim()
+      out.push(buyer
+        ? `'${form.destination}' has no Uniware facility for the billed entity (GSTIN ${buyer}). Set it on /masters/warehouses.`
+        : "Buyer GSTIN is missing, so the Uniware facility can't be resolved.")
+    }
+  }
   if (rows.length === 0)      out.push("Add at least one line item.")
 
   // Name what the invoice printed rather than just "select a manufacturer" —

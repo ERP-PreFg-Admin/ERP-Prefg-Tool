@@ -132,12 +132,16 @@ export function InvoiceLineItems({
               // decides, and showing a picker would only invite it to be undone.
               const needsChoice = (bom?.count ?? 0) > 1
               const refPo = poById.get(r.reference_po_id)
+              // A tie the matcher couldn't break opens on just its look-alikes.
+              const tie = new Set((r.sku_candidates ?? "").split(", ").filter(Boolean))
+              const suggested = tie.size ? skuOptions.filter((o) => tie.has(o.sku_code)) : undefined
 
               return (
               <tr key={i} className="bg-background align-top [&>td]:border-t [&>td]:border-border [&>td]:px-1.5 [&>td]:py-1.5">
                 <td className="sticky left-0 z-10 bg-inherit shadow-[1px_0_0_var(--color-border)]">
                   <FuzzySelect
                     options={skuOptions}
+                    suggested={suggested}
                     value={r.sku_code}
                     onChange={(v) => setRow(i, "sku_code", v)}
                     getValue={(o) => o.sku_code}
@@ -146,9 +150,16 @@ export function InvoiceLineItems({
                     placeholder="Map to a SKU…"
                     className={cn("text-xs", !r.sku_code && warnCls)}
                   />
-                  {/* Say so when the mapping worked, not only when it didn't —
-                      a silent field looks the same as an unchecked one. */}
-                  {r.parsed_code && r.parsed_code !== r.sku_code && (
+                  {/* Say why the matcher picked it; a manual pick moves sku_code off sku_auto and drops the reason. */}
+                  {r.sku_code && r.sku_code === r.sku_auto && r.sku_why ? (
+                    <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] text-emerald-700 dark:text-emerald-500" title={r.sku_name}>
+                      <Check className="h-3 w-3 shrink-0" /> {r.sku_why}
+                    </p>
+                  ) : !r.sku_code && r.sku_candidates ? (
+                    <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] text-amber-700 dark:text-amber-500" title={r.sku_candidates}>
+                      <AlertTriangle className="h-3 w-3 shrink-0" /> {r.sku_candidates.split(", ").length} matches: {r.sku_candidates} — pick one
+                    </p>
+                  ) : r.parsed_code && r.parsed_code !== r.sku_code && (
                     <p
                       className={cn(
                         "mt-0.5 flex items-center gap-1 truncate text-[10px]",

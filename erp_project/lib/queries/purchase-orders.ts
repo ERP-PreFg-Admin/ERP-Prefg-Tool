@@ -537,7 +537,7 @@ export const purchaseOrdersSql = {
    *  narrows the destination dropdown to that entity's facilities. NULL for an
    *  unattributed SKU or a brand with no entity, which means "don't narrow". */
   skuOptions: `
-    SELECT sk.id, sk.sku_code, sk.name, sk.status, ent.code AS entity_code
+    SELECT sk.id, sk.sku_code, sk.name, sk.status, ent.code AS entity_code, sk.filling
     FROM master_skus sk
     LEFT JOIN master_brand  br  ON br.id  = sk.brand_id
     LEFT JOIN master_entity ent ON ent.id = br.entity_id
@@ -575,7 +575,14 @@ export const purchaseOrdersSql = {
       -- an invoice prints an address, not our internal site label, so the PIN is
       -- the only exact key the two sides share.
       dwe.ship_to_pincode,
-      dwe.bill_to_address
+      dwe.bill_to_address,
+      -- GSTIN narrows to (entity, state); the address lines back up a missing PIN.
+      dwe.ship_to_gstin,
+      dwe.ship_to_address,
+      dwe.ship_to_line1,
+      dwe.ship_to_line2,
+      dwe.ship_to_city,
+      e.pan             AS entity_pan
     FROM master_warehouse w
     LEFT JOIN details_warehouse_entity dwe
            ON dwe.warehouse_id = w.id AND dwe.status = 'active'
@@ -861,7 +868,7 @@ export const purchaseOrdersSql = {
   `,
 
   /**
-   * The "Remaining Open Purchase Orders" table in the manufacturer mail, and
+   * The "Current Open Purchase Orders" table in the manufacturer mail, and
    * the mfg-batch screen's open-PO panel.
    *
    * `qty` is the UNALLOCATED remainder, not the ordered quantity: a master that
@@ -907,7 +914,7 @@ export const purchaseOrdersSql = {
              -- Cancelling a PO cancels what has NOT arrived, so the mail quotes
              -- qty minus receipts, not the whole order.
              ${RECEIVED_TOTAL_EXPR} AS received_qty,
-             po.reference_po, COALESCE(ch.child_count, 0) AS child_count,
+             po.reference_po, po.po_type, COALESCE(ch.child_count, 0) AS child_count,
              ${EFFECTIVE_STATUS_EXPR} AS status
       FROM purchase_orders po
       INNER JOIN master_mfgs m ON m.id = po.mfg_id
@@ -967,7 +974,11 @@ export const purchaseOrdersSql = {
       sk.name            AS sku_name,
       m.code             AS mfg_code,
       m.name             AS mfg_name,
-      d.registered_name, d.gst_number, d.location, d.email AS mfg_email,
+      -- The manufacturing unit that makes this SKU, else the manufacturer's own row.
+      COALESCE(mu.registered_name, d.registered_name) AS registered_name,
+      COALESCE(mu.gst_number, d.gst_number)           AS gst_number,
+      COALESCE(mu.address, d.location)                AS location,
+      d.email AS mfg_email,
       wh.location        AS dest_location,
       u.name             AS raised_by_name,
       ent.code           AS entity_code,
@@ -981,6 +992,8 @@ export const purchaseOrdersSql = {
     INNER JOIN master_mfgs      m  ON m.id          = po.mfg_id
     INNER JOIN details_mfg      d  ON d.mfg_id      = m.id
     LEFT  JOIN master_skus      sk ON sk.sku_code    = po.sku_code
+    LEFT  JOIN map_mfg_unit_sku mus ON mus.mfg_id = po.mfg_id AND mus.sku_id = sk.id
+    LEFT  JOIN details_mfg_unit mu  ON mu.id = mus.unit_id AND mu.status = 'active'
     LEFT  JOIN master_warehouse wh ON wh.name        = po.destination
     LEFT  JOIN master_brand     br  ON br.id  = sk.brand_id
     LEFT  JOIN master_entity    ent ON ent.id = br.entity_id

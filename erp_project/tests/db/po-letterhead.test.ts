@@ -251,6 +251,42 @@ test("an inactive per-entity row is ignored, not printed", async () => {
   })
 })
 
+test("a SKU mapped to a manufacturing unit prints that unit; unmapped falls back to details_mfg", async () => {
+  // NG Electro's two plants (prisma/add_mfg_units.sql). The joins must stay LEFT
+  // and must not multiply the row.
+  await withRollback(async (conn) => {
+    const a = await anchors(conn)
+    if (!a) return
+
+    const [u] = await conn.execute<ResultSetHeader>(
+      `INSERT INTO details_mfg_unit (mfg_id, unit_code, registered_name, address, gst_number)
+       VALUES (?, 'QAU', 'QA Unit Pvt Ltd', 'QA Plot 36\nQA Town', '02QAUNIT0000H2ZL')`,
+      [a.mfgId]
+    )
+    const [d] = await conn.execute(`SELECT registered_name, gst_number FROM details_mfg WHERE mfg_id = ?`, [a.mfgId])
+    const mfgOwn = (d as { registered_name: string | null; gst_number: string | null }[])[0]
+
+    await conn.execute(`DELETE FROM map_mfg_unit_sku WHERE mfg_id = ? AND sku_id = (SELECT id FROM master_skus WHERE sku_code = ?)`, [a.mfgId, a.sku])
+    const unmapped = await readForEmail(conn, (await makePo(conn, a, { qty: 10 })).id)
+    assert.equal(unmapped.length, 1)
+    assert.equal(unmapped[0].gst_number, mfgOwn?.gst_number ?? null, "unmapped SKU keeps the manufacturer's own GSTIN")
+
+    await conn.execute(
+      `INSERT INTO map_mfg_unit_sku (mfg_id, sku_id, unit_id) SELECT ?, id, ? FROM master_skus WHERE sku_code = ?`,
+      [a.mfgId, u.insertId, a.sku]
+    )
+    const mapped = await readForEmail(conn, (await makePo(conn, a, { qty: 10 })).id)
+    assert.equal(mapped.length, 1, "the unit joins must not multiply the row")
+    assert.equal(mapped[0].registered_name, "QA Unit Pvt Ltd")
+    assert.equal(mapped[0].gst_number, "02QAUNIT0000H2ZL")
+    assert.equal(mapped[0].location, "QA Plot 36\nQA Town")
+
+    await conn.execute(`UPDATE details_mfg_unit SET status = 'inactive' WHERE id = ?`, [u.insertId])
+    const inactive = await readForEmail(conn, (await makePo(conn, a, { qty: 10 })).id)
+    assert.equal(inactive[0].gst_number, mfgOwn?.gst_number ?? null, "an inactive unit is ignored")
+  })
+})
+
 /* ── The create-PO destination guard ───────────────────────────────────────────
  * tests/unit/destination-entity.test.ts proves the RULE matches the dropdown's.
  * What only the DB can show is that the query feeding it returns the three facts

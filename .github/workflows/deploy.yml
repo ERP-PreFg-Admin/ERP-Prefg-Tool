@@ -53,6 +53,10 @@ jobs:
   build-and-push:
     needs: lint-and-build
     runs-on: ubuntu-latest
+    # Two pushes in quick succession would otherwise race `docker rm -f erp` on the same box.
+    concurrency:
+      group: deploy-${{ github.event.inputs.environment || 'test' }}
+      cancel-in-progress: false
     permissions:
       id-token: write
       # write, not read: the release step pushes a version tag.
@@ -124,6 +128,7 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push image
+        id: image
         env:
           REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           ENVIRONMENT: ${{ steps.target.outputs.environment }}
@@ -140,24 +145,90 @@ jobs:
             erp_project
           docker push "$REGISTRY/$ECR_REPOSITORY:$ENVIRONMENT-$IMAGE_TAG"
           docker push "$REGISTRY/$ECR_REPOSITORY:$ENVIRONMENT"
+          # The box pulls by digest, so a racing push can't move the tag under it.
+          echo "ref=$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/$ECR_REPOSITORY:$ENVIRONMENT-$IMAGE_TAG")" >> "$GITHUB_OUTPUT"
 
       - name: Roll out to EC2 via SSM
+        id: rollout
         env:
           ENVIRONMENT: ${{ steps.target.outputs.environment }}
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
         run: |
-          aws ssm send-command \
+          test -n "$IMAGE_REF"
+          # Values are baked in as a header; the body is a quoted heredoc so nothing in it expands here.
+          {
+            echo "set -euo pipefail"
+            echo "ENVIRONMENT='$ENVIRONMENT' REGISTRY='$REGISTRY' IMAGE_REF='$IMAGE_REF' AWS_REGION='$AWS_REGION' EXPECT_SHA='${GITHUB_SHA:0:7}'"
+            cat <<'REMOTE'
+          report() {
+            echo "--- container: $(docker inspect -f 'status={{.State.Status}} restarts={{.RestartCount}} image={{.Image}}' erp 2>&1)"
+            echo "--- expected image: $(docker image inspect -f '{{.Id}}' "$IMAGE_REF" 2>&1)"
+            echo "--- health: ${HEALTH:-<none>}"
+            echo "--- logs:"; docker logs --tail 80 erp 2>&1 || true
+          }
+          field() { printf '%s' "$HEALTH" | sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"; }
+          [ -n "$EXPECT_SHA" ] && [ -n "$IMAGE_REF" ]
+
+          aws ssm get-parameters-by-path --path /erp-app/$ENVIRONMENT --with-decryption --region $AWS_REGION --query 'Parameters[].[Name,Value]' --output text | tr '\t' '=' | sed "s|^/erp-app/$ENVIRONMENT/||" > /etc/erp/env.new
+          test -s /etc/erp/env.new
+          chmod 600 /etc/erp/env.new && mv /etc/erp/env.new /etc/erp/env
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $REGISTRY
+          docker pull "$IMAGE_REF"
+          docker rm -f erp || true
+          docker run -d --name erp --restart unless-stopped -p 127.0.0.1:3000:3000 --env-file /etc/erp/env -v /var/log/erp:/app/logs "$IMAGE_REF"
+          trap report EXIT
+
+          OK=
+          for i in $(seq 30); do
+            HEALTH=$(curl -fsS --max-time 5 http://127.0.0.1:3000/api/health 2>/dev/null || true)
+            if [ "$(field status)" = ok ] && [ "$(field commit)" = "$EXPECT_SHA" ] && [ "$(field env)" = "$ENVIRONMENT" ]; then OK=1; break; fi
+            sleep 3
+          done
+          [ -n "$OK" ] || { echo "FAIL: health never reported status=ok commit=$EXPECT_SHA env=$ENVIRONMENT"; exit 1; }
+
+          # Soak: a process that answers once then crash-loops would pass the poll between restarts.
+          sleep 20
+          [ "$(docker inspect -f '{{.RestartCount}}' erp)" = 0 ] || { echo "FAIL: container restarted during soak"; exit 1; }
+          [ "$(docker inspect -f '{{.Image}}' erp)" = "$(docker image inspect -f '{{.Id}}' "$IMAGE_REF")" ] || { echo "FAIL: running image is not $IMAGE_REF"; exit 1; }
+
+          docker image prune -f
+          echo "OK: $IMAGE_REF live as $EXPECT_SHA on $ENVIRONMENT"
+          REMOTE
+          } > remote.sh
+          jq -n --rawfile s remote.sh '{commands: ($s | split("\n"))}' > params.json
+          CMD_ID=$(aws ssm send-command \
             --targets "Key=tag:Name,Values=erp-app-${ENVIRONMENT}" \
             --document-name "AWS-RunShellScript" \
-            --comment "Deploy erp-app:${ENVIRONMENT} ${{ github.sha }}" \
-            --parameters "{\"commands\":[
-              \"set -euo pipefail\",
-              \"aws ssm get-parameters-by-path --path /erp-app/${ENVIRONMENT} --with-decryption --region $AWS_REGION --query 'Parameters[].[Name,Value]' --output text | tr '\\t' '=' | sed 's|^/erp-app/${ENVIRONMENT}/||' > /etc/erp/env.new\",
-              \"test -s /etc/erp/env.new\",
-              \"chmod 600 /etc/erp/env.new && mv /etc/erp/env.new /etc/erp/env\",
-              \"aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ steps.ecr-login.outputs.registry }}\",
-              \"docker pull ${{ steps.ecr-login.outputs.registry }}/$ECR_REPOSITORY:${ENVIRONMENT}\",
-              \"docker rm -f erp || true\",
-              \"docker run -d --name erp --restart unless-stopped -p 127.0.0.1:3000:3000 --env-file /etc/erp/env -v /var/log/erp:/app/logs ${{ steps.ecr-login.outputs.registry }}/$ECR_REPOSITORY:${ENVIRONMENT}\",
-              \"docker image prune -f\"
-            ]}" \
-            --query 'Command.CommandId' --output text
+            --comment "Deploy erp-app:${ENVIRONMENT} ${GITHUB_SHA}" \
+            --parameters file://params.json \
+            --query 'Command.CommandId' --output text)
+          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
+          echo "SSM command $CMD_ID"
+
+      # send-command is async: without this step the job is green whatever happened on the box.
+      - name: Verify rollout
+        env:
+          CMD_ID: ${{ steps.rollout.outputs.command_id }}
+        run: |
+          # Own loop, not `aws ssm wait command-executed`: that waiter gives up at ~100s.
+          DEADLINE=$((SECONDS + 360))
+          while :; do
+            STATES=$(aws ssm list-command-invocations --command-id "$CMD_ID" --query 'CommandInvocations[].[InstanceId,Status]' --output text)
+            if [ -z "$STATES" ] && [ $SECONDS -gt 30 ]; then
+              echo "::error::SSM command reached no instance — does tag Name=erp-app-<env> match a running, SSM-managed box?"; exit 1
+            fi
+            if [ -n "$STATES" ] && ! grep -qE 'Pending|InProgress|Delayed' <<< "$STATES"; then break; fi
+            [ $SECONDS -lt $DEADLINE ] || { echo "::error::Rollout still running after 6 min"; echo "$STATES"; exit 1; }
+            sleep 10
+          done
+
+          FAILED=0
+          while read -r INSTANCE STATUS; do
+            echo "::group::$INSTANCE — $STATUS"
+            aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE" \
+              --query '[StandardOutputContent, StandardErrorContent]' --output text
+            echo "::endgroup::"
+            [ "$STATUS" = Success ] || { echo "::error::Rollout on $INSTANCE ended $STATUS"; FAILED=1; }
+          done <<< "$STATES"
+          exit $FAILED

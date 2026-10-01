@@ -169,7 +169,7 @@ export function SkuVariantsDialog({
                 <TableHeader>
                   <TableRow>
                     <TableHead>SKU Code</TableHead>
-                    <TableHead>Name</TableHead>
+                    <TableHead>Uniware Name</TableHead>
                     <TableHead>SKU Type</TableHead>
                     <TableHead>Sub-Category</TableHead>
                     <TableHead>Filling</TableHead>

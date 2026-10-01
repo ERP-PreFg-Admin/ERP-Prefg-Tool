@@ -438,6 +438,39 @@ model details_mfg {
   @@index([mfg_id], map: "mfg_id")
 }
 
+/// A manufacturer's plant; the PO "To" block uses it for SKUs mapped in map_mfg_unit_sku.
+model details_mfg_unit {
+  id               Int                     @id @default(autoincrement())
+  mfg_id           Int
+  unit_code        String                  @db.VarChar(10)
+  registered_name  String?                 @db.VarChar(255)
+  address          String?                 @db.Text
+  gst_number       String?                 @db.VarChar(20)
+  cin              String?                 @db.VarChar(30)
+  status           details_mfg_unit_status @default(active)
+  created_on       DateTime                @default(now()) @db.DateTime(0)
+  master_mfgs      master_mfgs             @relation(fields: [mfg_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_mfg_unit_mfg")
+  map_mfg_unit_sku map_mfg_unit_sku[]
+
+  @@unique([mfg_id, unit_code], map: "uq_mfg_unit")
+}
+
+/// Which unit makes which SKU, one per (manufacturer, SKU). Unmapped → details_mfg.
+model map_mfg_unit_sku {
+  id               Int              @id @default(autoincrement())
+  mfg_id           Int
+  sku_id           Int
+  unit_id          Int
+  created_on       DateTime         @default(now()) @db.DateTime(0)
+  master_mfgs      master_mfgs      @relation(fields: [mfg_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_mus_mfg")
+  master_skus      master_skus      @relation(fields: [sku_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_mus_sku")
+  details_mfg_unit details_mfg_unit @relation(fields: [unit_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_mus_unit")
+
+  @@unique([mfg_id, sku_id], map: "uq_mfg_sku")
+  @@index([sku_id], map: "fk_mus_sku")
+  @@index([unit_id], map: "fk_mus_unit")
+}
+
 model details_sku {
   id           Int                      @id @default(autoincrement())
   sku_id       Int                      @unique(map: "sku_id")
@@ -717,6 +750,8 @@ model master_mfgs {
   code                    String                    @unique(map: "code") @db.VarChar(50)
   bom_misc                bom_misc[]
   details_mfg             details_mfg[]
+  details_mfg_unit        details_mfg_unit[]
+  map_mfg_unit_sku        map_mfg_unit_sku[]
   master_bom_mfg          master_bom_mfg[]
   master_cost_ext_fixed   master_cost_ext_fixed[]
   master_cost_int_dynamic master_cost_int_dynamic[]
@@ -764,6 +799,8 @@ model master_skus {
   id                                             Int                       @id @default(autoincrement())
   sku_code                                       String                    @unique(map: "sku_code") @db.VarChar(50)
   name                                           String                    @db.VarChar(200)
+  /// Supply/PO name, user-maintained via SKU approvals. The DWH sync owns `name`, never this.
+  supply_name                                    String?                   @db.VarChar(500)
   /// Free text, and the grouping key for variant families alongside
   /// base_sku_sno. Kept for display; `brand_id` is the access boundary.
   brand                                          String?                   @db.VarChar(100)
@@ -793,6 +830,7 @@ model master_skus {
   created_at                                     DateTime?                 @default(now()) @db.Timestamp(0)
   created_by                                     Int?
   details_sku                                    details_sku?
+  map_mfg_unit_sku                               map_mfg_unit_sku[]
   master_bom                                     master_bom[]
   master_cost_ext_fixed                          master_cost_ext_fixed[]
   master_cost_int_dynamic                        master_cost_int_dynamic[]
@@ -1215,6 +1253,11 @@ enum master_vendors_type {
   rm
   pm
   both
+}
+
+enum details_mfg_unit_status {
+  active
+  inactive
 }
 
 enum details_mfg_status {

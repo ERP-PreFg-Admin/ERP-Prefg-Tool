@@ -33,7 +33,7 @@ import {
   matchSummary, rowsFromParsed, sumLineItems, sumCharges, goodsGstPercent, toInwardPayload,
   type InvoiceForm, type Row, type Shortage,
 } from "./invoice-form"
-import { commitInvoice, fetchOpenPos, InvoiceApiError, parseInvoiceFile, type InwardStep } from "./invoice-api"
+import { commitInvoice, fetchOpenPos, fetchSkuMatchContext, InvoiceApiError, parseInvoiceFile, type InwardStep } from "./invoice-api"
 import { clearDraft, loadDraft, saveDraft, savedAgo, type InvoiceDraft } from "./invoice-draft"
 import { InvoiceFields } from "./InvoiceFields"
 import { InvoiceLineItems } from "./InvoiceLineItems"
@@ -286,8 +286,10 @@ export default function AddInvoiceDialog({
       if (detected && mfgOptions.some((m) => m.id === detected.mfgId)) {
         next.mfgId = String(detected.mfgId)
       }
+      // SKUs are matched once, here, with this manufacturer's SKUs and past bookings to hand.
+      const skuCtx = await fetchSkuMatchContext(next.mfgId, skuOptions)
       setForm(next)
-      setRows(rowsFromParsed(parsed, skuOptions))
+      setRows(rowsFromParsed(parsed, skuCtx))
       setExtra(parsed.extra ?? {})
       setCharges(parsed.charges ?? [])
       setGstDerived(parsed.gst_derived === true)
@@ -309,8 +311,8 @@ export default function AddInvoiceDialog({
     [charges, rows]
   )
   const problems = useMemo(
-    () => collectProblems(form, rows, poById, shortages, chargeSum),
-    [form, rows, poById, shortages, chargeSum]
+    () => collectProblems(form, rows, poById, shortages, chargeSum, warehouseOptions),
+    [form, rows, poById, shortages, chargeSum, warehouseOptions]
   )
   const matched  = useMemo(() => matchSummary(form, rows, shortages), [form, rows, shortages])
   const receiveCount = useMemo(() => rows.filter((r) => r.reference_po_id).length, [rows])

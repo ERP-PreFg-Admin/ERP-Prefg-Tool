@@ -92,7 +92,7 @@ export default async function SkusPage({
       [null, null, null, null, ...scopeParams(scope.brandIds), status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory, missingBom],
       { label: "selectAllFiltered" }
     )
-    const ranked = fuzzyRank(allMatching, search, ["sku_code", "name", "brand"])
+    const ranked = fuzzyRank(allMatching, search, ["sku_code", "name", "supply_name", "brand"])
     total = ranked.length
     rows = ranked.slice(offset, offset + size)
   } else {

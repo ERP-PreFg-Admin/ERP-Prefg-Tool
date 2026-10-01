@@ -60,6 +60,7 @@ export type ParsedInvoice = {
   /** "Consignee (Ship to)" block. */
   ship_to_name:     string | null
   ship_to_address:  string | null
+  ship_to_gstin:    string | null
   purchase_order:   string | null
   total_amount:     number | null
   line_items:       ParsedLineItem[]

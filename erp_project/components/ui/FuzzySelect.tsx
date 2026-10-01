@@ -35,8 +35,11 @@ export function FuzzySelect<T = string>({
   getLabel = (opt: T) => String(opt),
   getValue = (opt: T) => String(opt),
   searchKeys,
+  suggested,
 }: {
   options: T[]
+  /** Shown instead of `options` until the user types; typing still searches all of `options`. */
+  suggested?: T[]
   value: string
   onChange: (value: string) => void
   onAddNew?: () => void
@@ -63,10 +66,11 @@ export function FuzzySelect<T = string>({
     [options, searchKeys]
   )
 
+  const showingSuggested = !query && !!suggested?.length
   const filtered = useMemo(() => {
-    if (!query) return options
+    if (!query) return suggested?.length ? suggested : options
     return fuse.search(query).map((r) => r.item)
-  }, [query, fuse, options])
+  }, [query, fuse, options, suggested])
 
   const selectedOption = useMemo(
     () => options.find((opt) => getValue(opt) === value),
@@ -205,6 +209,11 @@ export function FuzzySelect<T = string>({
               {getLabel(opt)}
             </div>
           ))}
+          {showingSuggested && (
+            <div className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+              Type to search all {options.length}
+            </div>
+          )}
           {onAddNew && (
             <div
               className={cn(

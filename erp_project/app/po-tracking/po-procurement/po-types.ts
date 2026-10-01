@@ -81,7 +81,7 @@ export type PoRow = {
   po_raised_by: number | null
 }
 
-export type SkuOption       = { id: number; sku_code: string; name: string; status: string; entity_code: string | null }
+export type SkuOption       = { id: number; sku_code: string; name: string; status: string; entity_code: string | null; filling?: number | null }
 /** `registered_name` is the legal entity from details_mfg — the name a supplier
  *  invoice header prints. matchMfg matches on it ahead of `name`. */
 export type MfgOption       = { id: number; code: string; name: string; registered_name: string | null }
@@ -116,6 +116,14 @@ export type WarehouseOption = {
    *  column. Its PIN is what separates the two legal entities at one site, so
    *  matchWarehouse extracts it rather than the master storing it twice. */
   bill_to_address: string | null
+  /** Per (entity, state), not per site — two sites in one state share it. */
+  ship_to_gstin?: string | null
+  ship_to_address?: string | null
+  ship_to_line1?: string | null
+  ship_to_line2?: string | null
+  ship_to_city?: string | null
+  /** master_entity.pan — what resolveFacility compares the buyer GSTIN's PAN to. */
+  entity_pan?: string | null
   /**
    * Set by warehousesForEntity ONLY when there is no entity to narrow by — an
    * unattributed SKU. The site's rows collapse to one option there, and naming

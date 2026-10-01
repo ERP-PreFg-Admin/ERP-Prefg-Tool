@@ -184,27 +184,30 @@ export default function SplitPODialog({
                       <div className="font-mono text-xs font-semibold">{String(i + 1).padStart(2, "0")}</div>
                       <div className="font-mono text-[9px] text-muted-foreground">S{String(i + 1).padStart(3, "0")}</div>
                     </div>
-                    <Select
-                      value={row.destination}
-                      onChange={(e) => setRow(i, "destination", e.target.value)}
-                      className="flex-1"
-                    >
-                      <option value="">— Destination —</option>
-                      {destinations.map((w) => (
-                        <option key={warehouseKey(w)} value={w.name}>
-                          {warehouseLabel(w)}
-                        </option>
-                      ))}
-                    </Select>
+                    {/* Select's flex item is its wrapper div, so the shrink rule goes here */}
+                    <div className="flex-1 min-w-0">
+                      <Select
+                        value={row.destination}
+                        onChange={(e) => setRow(i, "destination", e.target.value)}
+                        className="w-full truncate"
+                      >
+                        <option value="">— Destination —</option>
+                        {destinations.map((w) => (
+                          <option key={warehouseKey(w)} value={w.name}>
+                            {warehouseLabel(w)}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
                     <Input
                       type="number" min={1} placeholder="Qty"
                       value={row.qty} onChange={(e) => setRow(i, "qty", e.target.value)}
-                      className="w-24"
+                      className="w-24 shrink-0"
                     />
                     {rows.length > 1 && (
                       <button
                         onClick={() => removeRow(i)}
-                        className="text-muted-foreground hover:text-destructive transition-colors p-1"
+                        className="shrink-0 text-muted-foreground hover:text-destructive transition-colors p-1"
                         aria-label="Remove row"
                       >
                         <X className="h-4 w-4" />

@@ -3,7 +3,7 @@
 // Two things here are easy to get backwards, and both are silent:
 //
 //   1. Over-removal. "Don't include splits in raised/cancelled" is one filter; the
-//      Remaining Open snapshot must keep them, because a split IS still open
+//      Current Open snapshot must keep them, because a split IS still open
 //      demand and dropping it makes the manufacturer's outstanding list short by
 //      whatever was split. openLines comes from ongoingByMfg and is deliberately
 //      unfiltered — the test below is what says so.
@@ -20,7 +20,9 @@ process.env.GMAIL_APP_PASSWORD = "test-pass"
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { partitionSplits, poSection, type SelectedPoLine } from "../../lib/mail/mailer"
+import {
+  partitionSplits, poSection, splitSummarySection, isImpromptuLine, type SelectedPoLine,
+} from "../../lib/mail/mailer"
 
 const line = (over: Partial<SelectedPoLine> = {}): SelectedPoLine => ({
   id: 1, po_no: "PEP-2608-001", sku_code: "SKU-A", sku_name: "Face Wash",
@@ -82,7 +84,7 @@ test("the consolidated Newly Raised table cannot contain a split", () => {
   assert.equal(html.includes("PEP-2608-002"), false, "the split must not be listed")
 })
 
-test("the Remaining Open table still lists a split — it is still open demand", () => {
+test("the Current Open table still lists a split — it is still open demand", () => {
   // The over-removal guard. openLines comes from ongoingByMfg untouched, so a
   // split that has not been received yet appears here even though it was mailed
   // separately. Filtering it would understate what the manufacturer still owes.
@@ -90,7 +92,29 @@ test("the Remaining Open table still lists a split — it is still open demand",
     { po_no: "PEP-2608-001", sku_code: "SKU-A", sku_name: "Face Wash", qty: 400 },
     { po_no: "PEP-2608-002", sku_code: "SKU-A", sku_name: "Face Wash", qty: 200 },
   ]
-  const html = poSection("Remaining Open Purchase Orders", open)
+  const html = poSection("Current Open Purchase Orders", open)
 
   assert.ok(html.includes("PEP-2608-002"), "the split must still show as open")
+})
+
+test("the split summary lists every split with its address and totals the qty", () => {
+  const html = splitSummarySection([
+    { po_no: "PEP-2608-001-S001", sku_code: "SKU-A", sku_name: "Face Wash",
+      qty: 1200, ship_to_name: "GGN MW", ship_to_lines: ["Plot 4, Sector 37", "Gurugram, Haryana - 122001"] },
+    { po_no: "PEP-2608-001-S002", sku_code: "SKU-A", sku_name: "Face Wash",
+      qty: 800, ship_to_name: "Mumbai", ship_to_lines: ["Mumbai"] },
+  ])
+
+  assert.ok(html.includes("PEP-2608-001-S001") && html.includes("PEP-2608-001-S002"))
+  assert.ok(html.includes("Plot 4, Sector 37<br>Gurugram, Haryana - 122001"))
+  assert.equal(html.includes("Mumbai<br>Mumbai"), false, "fallback name/location must not repeat")
+  assert.equal(html.includes("Split From"), false)
+  assert.ok(/Total<\/td>\s*<td[^>]*>2,000<\/td>/.test(html), "totals row should sum Split Qty")
+})
+
+test("open section is dropped only for impromptu lines", () => {
+  assert.equal(isImpromptuLine({ po_no: "IMP-2610-001", po_type: null }), true)
+  assert.equal(isImpromptuLine({ po_no: "PEP-2610-001", po_type: "impromptu" }), true)
+  assert.equal(isImpromptuLine({ po_no: "PEP-2610-002", po_type: "normal" }), false)
+  assert.equal([line({ po_no: "IMP-1" }), line({ po_no: "PEP-1" })].every(isImpromptuLine), false)
 })

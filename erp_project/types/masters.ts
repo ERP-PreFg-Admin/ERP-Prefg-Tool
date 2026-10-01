@@ -25,6 +25,8 @@ export type Sku = {
   id: number
   sku_code: string
   name: string
+  /** User-maintained supply name; `name` is the Uniware/DWH one. Optional since not every query selects it. */
+  supply_name?: string | null
   /** Free text, and the grouping key for variant families with base_sku_sno.
    *  Display only — never use it in an access predicate; see brand_id. */
   brand: string | null

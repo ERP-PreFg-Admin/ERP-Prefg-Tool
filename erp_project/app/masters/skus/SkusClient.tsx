@@ -44,6 +44,16 @@ import { EditSkuDialog } from "./EditSkuDialog"
 import { SkuVariantsDialog } from "./SkuVariantsDialog"
 import type { Sku, CostingGap } from "@/types/masters"
 import { useEditGuard } from "@/components/AccessContext"
+import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
+import type { MasterField } from "@/components/masters/field-config"
+
+// Edit-only CSV; the server flags unknown codes and requires remarks on every row.
+const SUPPLY_NAME_CSV_FIELDS: MasterField[] = [
+  { key: "sku_code",    label: "SKU Code",    required: true, sample: "MCaf208_WB" },
+  { key: "supply_name", label: "Supply Name", required: true, sample: "Coffee Body Wash 200ml",
+    validate: (v) => (v.length > 500 ? "must be 500 characters or fewer" : null) },
+  { key: "remarks",     label: "Remarks",     sample: "Supply name backfill" },
+]
 
 /** Fields whose absence is surfaced via the row-level "incomplete data" flag. */
 function missingFieldsFor(row: Sku): string[] {
@@ -205,12 +215,21 @@ export default function SkusClient({
       <MasterToolbar>
         <UrlSearchInput
           initialValue={currentSearch}
-          placeholder="Search by code, name, brand…"
+          placeholder="Search by code, Uniware / supply name, brand…"
         />
 
         <FilterToggleButton open={filterPanel.open} onToggle={filterPanel.toggle} activeCount={activeFilterCount} />
 
         <MasterToolbarActions>
+          <CsvImportDialog
+            entityLabel="SKU"
+            title="Upload SKU Supply Names via CSV"
+            endpoint="/api/v1/masters/skus/supply-name-bulk"
+            templateFilename="sku_supply_name_template.csv"
+            fields={SUPPLY_NAME_CSV_FIELDS}
+            enableDuplicateCheck
+            onSuccess={refresh}
+          />
           <DownloadButton
             endpoint="/api/v1/masters/skus/export"
             label="SKUs"
@@ -321,7 +340,8 @@ export default function SkusClient({
             <TableHeader>
               <TableRow>
                 <TableHead>SKU Code</TableHead>
-                <TableHead>Name</TableHead>
+                <TableHead>Uniware Name</TableHead>
+                <TableHead>Supply Name</TableHead>
                 <TableHead>Brand</TableHead>
                 <TableHead>SKU Type</TableHead>
                 <TableHead>Category</TableHead>
@@ -337,7 +357,7 @@ export default function SkusClient({
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={12} className="text-center py-10">
+                  <TableCell colSpan={13}className="text-center py-10">
                     <EmptyState hasFilters={hasFilters} filteredMessage="No SKUs match your filters." />
                   </TableCell>
                 </TableRow>
@@ -379,6 +399,7 @@ export default function SkusClient({
                         </div>
                       </TableCell>
                       <TableCell className="font-medium text-wrap">{row.name}</TableCell>
+                      <TableCell className="text-wrap">{row.supply_name || <span className="text-muted-foreground">—</span>}</TableCell>
                       <TableCell className="text-muted-foreground">{row.brand ?? "—"}</TableCell>
                       <TableCell className="text-muted-foreground">{row.sku_type ?? "—"}</TableCell>
                       <TableCell className="text-muted-foreground">{row.category ?? "—"}</TableCell>

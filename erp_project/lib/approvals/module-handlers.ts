@@ -15,7 +15,7 @@
  * beginTransaction / commit / rollback — that is the route handler's job.
  */
 
-import { skuHandler } from "./handlers/sku"
+import { skuHandler, skuNameBulkHandler } from "./handlers/sku"
 import { rmRateHandler, rmVrmHandler, rmMatHandler, rmBulkHandler, rmVrmBulkHandler, rmRateBulkHandler } from "./handlers/raw-materials"
 import { pmRateHandler, pmVrmHandler, pmMatHandler, pmBulkHandler, pmVrmBulkHandler, pmRateBulkHandler } from "./handlers/packing-materials"
 import { vendorHandler, vendorBulkHandler } from "./handlers/vendors"
@@ -33,6 +33,7 @@ export type { DiffItem, ModuleHandler }
 
 export const MODULE_HANDLERS: Record<string, ModuleHandler> = {
   SKU:     skuHandler,
+  SKU_NAME_BULK: skuNameBulkHandler,
   RM_RATE: rmRateHandler,
   PM_RATE: pmRateHandler,
   RM_VRM:  rmVrmHandler,

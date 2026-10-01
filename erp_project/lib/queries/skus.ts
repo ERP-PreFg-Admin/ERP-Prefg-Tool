@@ -15,7 +15,7 @@
  * unqualified `brand` there is ambiguous (ER_NON_UNIQ_ERROR).
  */
 const SKU_COLUMNS = `
-  master_skus.id, master_skus.sku_code, master_skus.name, master_skus.brand,
+  master_skus.id, master_skus.sku_code, master_skus.name, master_skus.supply_name, master_skus.brand,
   master_skus.sku_type, master_skus.category, master_skus.subcategory,
   master_skus.filling, master_skus.filling_uom, master_skus.mrp, master_skus.gst,
   master_skus.active_bom_id, master_skus.status,
@@ -437,5 +437,19 @@ export const skus = {
   selectBrandIdsByCodes: `
     SELECT sku_code, brand_id FROM master_skus WHERE sku_code IN (?)
   `,
+
+  /** Supply-name CSV: everything the preview and staging need per code.
+   *  Parameters: [skuCodes] — needs query(), not execute(), for IN (?) expansion. */
+  selectForSupplyNameByCodes: `
+    SELECT id, sku_code, name, supply_name, status, brand_id FROM master_skus WHERE sku_code IN (?)
+  `,
+
+  /** SKU_NAME_BULK apply. Parameters: [sku_code] */
+  selectForSupplyNameByCode: `
+    SELECT id, sku_code, supply_name, status FROM master_skus WHERE sku_code = ? LIMIT 1
+  `,
+
+  /** Parameters: [supply_name, id] */
+  updateSupplyName: `UPDATE master_skus SET supply_name = ? WHERE id = ?`,
 
 }

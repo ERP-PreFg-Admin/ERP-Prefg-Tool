@@ -16,12 +16,15 @@ const CHERYL = [
   "GstInvoice08SUPRIYAC",
   "KREATIVE BEAUTY PRIVATE LIMITED",
   "304, Building No A, Boomerang Business Park",
+  "Chandivali Road",
+  "MUMBAI - 400072, INDIA",
   "Buyer / Billed To",
   "D.L. No. :",
   "State Maharashtra, 27 PAN : AAJCK9697F:",
   `GSTIN ${OURS}, Registered:`,
   "KREATIVE BEAUTY PRIVATE LIMITED",
   "Ground Floor, A-1,172/6,7,8 & 9, GLOBAL",
+  "BHIWANDI - 421302, Dist : THANE, INDIA",
   "Consignee / Shipped To",
   "D.L. No. :",
   "State Maharashtra, 27 PAN : AAJCK9697F",
@@ -31,13 +34,14 @@ const CHERYL = [
   "Vehicle No. :",
   "CLAR/2627/1167",
   "MH43Y9462",
+  "NAVI MUMBAI to BHIWANDI MCAFF/26-27/0370",
   "Product Batch No. Rate Value in",
   "52,481.52080.9900C26G202 648.00HYPHEN 10% VITAMIN C",
   "COCKTAIL SERUM - 20 ml",
   "Sale",
   "1 33049990 JUL-26",
   "NET INVOICE VALUE : 61,928.000",
-  "NOTE : SKU:- HYPMUBX0045F020",
+  "NOTE : SKU CODE: HYPMUBX0045F020",
   "For, CHERYL LABORATORIES PRIVATE LIMITED",
   `GSTIN : ${CHERYL_GSTIN}, Registered`,
 ].join("\n")
@@ -91,6 +95,18 @@ test("Cheryl's layout is recognised and reconciles", () => {
   assert.equal(item.amount, 52481.52)
   assert.equal(item.batch, "C26G202")
   assert.equal(item.hsn, "33049990")
+})
+
+test("Cheryl's addresses, ship-to GSTIN, destination, PO and SKU are read", () => {
+  const r = parseLocallyVerbose(CHERYL)
+  assert.equal(r.ok, true, r.ok ? "" : `rejected: ${r.reason}`)
+  if (!r.ok) return
+  assert.match(r.parsed.bill_to_address ?? "", /400072/)
+  assert.match(r.parsed.ship_to_address ?? "", /421302/)
+  assert.equal(r.parsed.ship_to_gstin, OURS)
+  assert.equal(r.parsed.destination, "BHIWANDI")
+  assert.equal(r.parsed.purchase_order, "MCAFF/26-27/0370")
+  assert.equal(r.parsed.line_items[0].sku_code, "HYPMUBX0045F020")
 })
 
 test("Cheryl's date is dd/mm/yyyy under a 'Dt.' label, not Tally's dd-mmm-yy", () => {

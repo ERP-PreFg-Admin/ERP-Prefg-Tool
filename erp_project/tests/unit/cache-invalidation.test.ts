@@ -53,6 +53,7 @@ test("a bulk module invalidates whatever its singular counterpart does", () => {
     ["PM_BULK", "PM_MAT"],
     ["RM_RATE_BULK", "RM_RATE"],
     ["PM_RATE_BULK", "PM_RATE"],
+    ["SKU_NAME_BULK", "SKU"],
   ] as [string, string][]) {
     const a = CACHE_TAGS_BY_MODULE[bulk] ?? []
     const b = CACHE_TAGS_BY_MODULE[singular] ?? []

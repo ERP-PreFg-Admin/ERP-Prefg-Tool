@@ -209,6 +209,7 @@ export const CACHE_TAGS_BY_MODULE: Record<string, string[]> = {
   WAREHOUSE:      ["ref:po-options"],
   // …and their SKU pickers.
   SKU:            ["ref:skus", "ref:po-options"],
+  SKU_NAME_BULK:  ["ref:skus", "ref:po-options"],
   VENDOR:         ["ref:vendors"],
   VENDOR_BULK:    ["ref:vendors"],
   RM_MAT:         ["ref:rm"],

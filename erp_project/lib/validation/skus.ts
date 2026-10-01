@@ -21,6 +21,8 @@ export const skuUpdateSchema = z.object({
   // status/sku_type/category/subcategory/mrp) — the route falls back to the
   // record's current values for any of these left unset.
   name: z.string().trim().min(1).optional(),
+  // Omitted ⇒ unchanged; "" ⇒ cleared.
+  supply_name: z.string().trim().max(500).optional(),
   brand: z.string().optional(),
   category: z.string().optional(),
   subcategory: z.string().optional(),
