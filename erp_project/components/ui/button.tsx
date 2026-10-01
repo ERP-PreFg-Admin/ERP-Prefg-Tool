@@ -83,10 +83,14 @@ function Button({
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     >
-      {/* asChild renders the caller's own element — injecting a spinner into it
-          would break Slot's single-child contract, so pending only disables. */}
-      {pending && !asChild && <Loader2 className="animate-spin" aria-hidden />}
-      {children}
+      {/* Slot needs exactly one child — even a `false` sibling breaks it, so
+          asChild gets children alone and pending only disables. */}
+      {asChild ? children : (
+        <>
+          {pending && <Loader2 className="animate-spin" aria-hidden />}
+          {children}
+        </>
+      )}
     </Comp>
   )
 }
