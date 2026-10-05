@@ -36,7 +36,7 @@ const SPLITTABLE = new Set(["raised", "punched", "partially_received"])
 export const POST = withGateway({
   paramsSchema: poIdParamSchema,
   schema: poSplitSchema,
-  access: { pageSlug: "/po-tracking", level: "editor" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "editor" },
   handler: async ({ body, params, session, ctx }) => {
     const poId = params.id
     // PO ids are sequential integers, so the filtered list isn't a boundary —

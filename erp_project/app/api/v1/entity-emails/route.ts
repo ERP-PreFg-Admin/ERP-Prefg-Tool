@@ -28,7 +28,7 @@ function assertKnownReport(entityType: string, entityCode: string): void {
 
 export const POST = withGateway({
   schema: entityEmailCreateSchema,
-  access: { pageSlug: "/po-tracking", level: "editor" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "editor" },
   handler: async ({ body, session }) => {
     // Empty string, not just undefined, becomes NULL: the form's "All entities"
     // option submits "" and a literal '' would match no entity in
@@ -119,7 +119,7 @@ export const POST = withGateway({
  */
 export const PATCH = withGateway({
   schema: entityEmailUpdateSchema,
-  access: { pageSlug: "/po-tracking", level: "editor" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "editor" },
   handler: async ({ body }) => {
     const existing = await query<{ id: number }>(entityEmails.selectById, [body.id])
     if (existing.length === 0) {

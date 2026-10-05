@@ -18,7 +18,7 @@ const paramsSchema = z.object({
 })
 
 export const GET = withGateway({
-  access: { pageSlug: "/po-tracking", level: "viewer" },
+  access: { pageSlug: "/po-tracking/po-inwarding", level: "viewer" },
   handler: async ({ req, session }) => {
     const parsed = paramsSchema.safeParse({
       mfg_id: req.nextUrl.searchParams.get("mfg_id"),

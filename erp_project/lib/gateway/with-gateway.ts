@@ -3,7 +3,7 @@ import type { Session } from "next-auth"
 import type { z } from "zod"
 import { auth } from "@/lib/auth"
 import { execute } from "@/lib/db"
-import { resolveAccess, type AccessLevel } from "@/lib/permissions"
+import { resolveAccessAny, type AccessLevel } from "@/lib/permissions"
 import { activitySql } from "@/lib/queries/activity"
 import { createRequestContext } from "@/lib/request-context"
 import logger from "@/lib/logger"
@@ -11,7 +11,11 @@ import { ApiError, toErrorResponse } from "./errors"
 import { acquire , type RateLimitRule } from "./rate-limit"
 import { enforceScope, type ScopeRule } from "./scope-rules"
 
-type AccessRule = { pageSlug: string; level: Exclude<AccessLevel, "none"> }
+type AccessRule = {
+  // One slug, or every page that calls this route — any of them grants access.
+  pageSlug: string | readonly string[]
+  level: Exclude<AccessLevel, "none">
+}
 
 /**
  * Records one `activity_log` row per mutating request, for /admin > Activity.
@@ -89,7 +93,8 @@ export function withGateway<TBody = unknown, TParams = Record<string, string>>(o
 
       if (opts.access) {
         const roles = session.user.roles ?? []
-        const level = await resolveAccess(ctx.userId, roles, opts.access.pageSlug)
+        const slugs = typeof opts.access.pageSlug === "string" ? [opts.access.pageSlug] : opts.access.pageSlug
+        const level = await resolveAccessAny(ctx.userId, roles, slugs)
         const ok = opts.access.level === "viewer" ? level !== "none" : level === "editor"
         // Worded for the person who hit it, not for the log: this message is
         // surfaced verbatim by every client call site (`data.error`), and

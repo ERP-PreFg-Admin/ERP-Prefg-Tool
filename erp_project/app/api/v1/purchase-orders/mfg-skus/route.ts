@@ -18,7 +18,7 @@ import { ApiError } from "@/lib/gateway/errors"
 import { mfgSkusQuerySchema } from "@/lib/validation/purchase-order-detail"
 
 export const GET = withGateway({
-  access: { pageSlug: "/po-tracking", level: "viewer" },
+  access: { pageSlug: ["/po-tracking/po-procurement", "/po-tracking/po-inwarding"], level: "viewer" },
   handler: async ({ req, session }) => {
     const parsed = mfgSkusQuerySchema.safeParse(Object.fromEntries(req.nextUrl.searchParams))
     if (!parsed.success) {

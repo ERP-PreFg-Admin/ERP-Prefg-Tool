@@ -20,7 +20,7 @@ import { brandCode } from "@/lib/constants"
 
 // GET /api/v1/purchase-orders — list all POs the caller is scoped to, with MFG + SKU details
 export const GET = withGateway({
-  access: { pageSlug: "/po-tracking", level: "viewer" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "viewer" },
   handler: async ({ session }) => {
     const scope = await getUserScope(Number(session.user.id))
     const rows = await query<any>(purchaseOrdersSql.selectAll, [
@@ -49,7 +49,7 @@ export const GET = withGateway({
 // Auth + body validation handled by withGateway (see lib/gateway/with-gateway.ts).
 export const POST = withGateway({
   schema: poActionSchema,
-  access: { pageSlug: "/po-tracking", level: "editor" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "editor" },
   handler: async ({ body, session, ctx }) => {
   const userId = Number(session.user.id)
 

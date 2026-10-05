@@ -41,7 +41,7 @@ const MAX_BYTES = 10 * 1024 * 1024
 // ── History list ─────────────────────────────────────────────────────────────
 
 export const GET = withGateway({
-  access: { pageSlug: "/po-tracking", level: "viewer" },
+  access: { pageSlug: ["/po-tracking/invoices", "/po-tracking/po-inwarding"], level: "viewer" },
   handler: async ({ req, session }) => {
     const sp = req.nextUrl.searchParams
     // Clamped rather than rejected: this is a pager, not public API surface
@@ -81,7 +81,7 @@ export const POST = withGateway({
   // No `schema`: this is multipart, and withGateway's Zod step would consume the
   // body as JSON. The `payload` field is validated below with the same schema.
   rateLimit: { limit: 20, windowMs: 10 * 60_000, concurrency: 1, instanceConcurrency: 3 },
-  access: { pageSlug: "/po-tracking", level: "editor" },
+  access: { pageSlug: ["/po-tracking/invoices", "/po-tracking/po-inwarding"], level: "editor" },
   handler: async ({ req, session, ctx }) => {
     const userId = Number(session.user.id)
     const form = await req.formData().catch(() => null)

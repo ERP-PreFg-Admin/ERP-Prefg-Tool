@@ -20,7 +20,7 @@ import { uniwareEnabled } from "@/lib/uniware"
 import { runDocumentSync } from "@/lib/uniware/document-sync"
 
 export const POST = withGateway({
-  access: { pageSlug: "/po-tracking", level: "editor" },
+  access: { pageSlug: ["/po-tracking/po-procurement", "/po-tracking/invoices"], level: "editor" },
   handler: async ({ ctx }) => {
     if (!uniwareEnabled()) {
       throw new ApiError(400, "uniware_unconfigured", "Uniware is not configured on this environment.")

@@ -17,7 +17,7 @@ const CLOSEABLE = new Set(["raised", "punched", "partially_received"])
 
 export const POST = withGateway({
   paramsSchema: poIdParamSchema,
-  access: { pageSlug: "/po-tracking", level: "editor" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "editor" },
   handler: async ({ params, session, ctx }) => {
   const userId = Number(session.user.id)
   const poId = params.id

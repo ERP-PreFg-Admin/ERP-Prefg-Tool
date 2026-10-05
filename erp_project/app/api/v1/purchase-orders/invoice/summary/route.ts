@@ -17,7 +17,7 @@ import type { InvoiceHistoryHeader } from "@/types/invoice"
 const CAP = 5000
 
 export const GET = withGateway({
-  access: { pageSlug: "/po-tracking", level: "viewer" },
+  access: { pageSlug: ["/po-tracking/invoices", "/po-tracking/po-inwarding"], level: "viewer" },
   handler: async ({ req, session }) => {
     const sp = req.nextUrl.searchParams
     // Scoped exactly like the list: a summary counting invoices the user cannot

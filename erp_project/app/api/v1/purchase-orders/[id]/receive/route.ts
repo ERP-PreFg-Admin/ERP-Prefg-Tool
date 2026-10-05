@@ -17,7 +17,7 @@ import { receivePo } from "@/lib/po/po-receive"
 export const POST = withGateway({
   paramsSchema: poIdParamSchema,
   schema: poReceiveSchema,
-  access: { pageSlug: "/po-tracking", level: "editor" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "editor" },
   handler: async ({ params, body, session, ctx }) => {
     const poId = params.id
     // PO ids are sequential integers, so the filtered list isn't a boundary —

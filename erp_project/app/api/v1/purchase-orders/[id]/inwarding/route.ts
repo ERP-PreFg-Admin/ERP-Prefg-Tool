@@ -32,7 +32,7 @@ export const GET = withGateway({
   // but the mail itself has already gone out by then.
   rateLimit: { limit: 10, windowMs: 10 * 60_000, concurrency: 1 },
   paramsSchema: poIdParamSchema,
-  access: { pageSlug: "/po-tracking", level: "viewer" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "viewer" },
   handler: async ({ params, session, ctx }) => {
     const poId = params.id
     const logCtx = { ...ctx, route: `/api/v1/purchase-orders/${poId}/inwarding` }

@@ -13,7 +13,7 @@ import { ApiError } from "@/lib/gateway/errors"
 import type { PoHistoryRow } from "@/app/po-tracking/po-procurement/po-types"
 
 export const GET = withGateway({
-  access: { pageSlug: "/po-tracking", level: "viewer" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "viewer" },
   handler: async ({ req, session }) => {
     const poId = new URL(req.url).searchParams.get("po_id")
     if (!poId || isNaN(Number(poId))) {

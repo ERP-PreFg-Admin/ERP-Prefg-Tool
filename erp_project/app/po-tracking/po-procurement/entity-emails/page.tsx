@@ -26,7 +26,7 @@ export default async function EntityEmailsPage({
   const session = await auth()
   if (!session) redirect("/auth/signin")
   const userId = parseInt(session.user.id)
-  const access = await resolveAccess(userId, session.user.roles, "/po-tracking")
+  const access = await resolveAccess(userId, session.user.roles, "/po-tracking/po-procurement")
   if (access === "none") redirect("/auth/unauthorized")
   const canEdit = access === "editor"
 

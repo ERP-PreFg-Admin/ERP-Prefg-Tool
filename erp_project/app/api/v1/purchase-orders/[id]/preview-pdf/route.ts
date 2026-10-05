@@ -16,7 +16,7 @@ import { recordProcessedEvent, recordFailedEvent , makeEventId, recordRawEvent }
 
 export const GET = withGateway({
   paramsSchema: poIdParamSchema,
-  access: { pageSlug: "/po-tracking", level: "viewer" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "viewer" },
   handler: async ({ params, session, ctx }) => {
     const poId = params.id
     // PO ids are sequential integers, so the filtered list isn't a boundary —

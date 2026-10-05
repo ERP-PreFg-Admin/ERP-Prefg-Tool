@@ -35,7 +35,7 @@ export const maxDuration = 300
 
 export const POST = withGateway({
   schema: syncFacilityCodeSchema,
-  access: { pageSlug: "/manufacturing", level: "editor" },
+  access: { pageSlug: ["/manufacturing", "/po-tracking/mfg-overview"], level: "editor" },
   handler: async ({ body, session, ctx }) => {
     const userId = Number(session.user.id)
     const facility = body.facility_code.trim()

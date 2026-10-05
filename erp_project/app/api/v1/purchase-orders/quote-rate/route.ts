@@ -23,7 +23,7 @@ import { ApiError } from "@/lib/gateway/errors"
 import { quoteRateQuerySchema } from "@/lib/validation/purchase-order-detail"
 
 export const GET = withGateway({
-  access: { pageSlug: "/po-tracking", level: "viewer" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "viewer" },
   handler: async ({ req, session }) => {
     const parsed = quoteRateQuerySchema.safeParse(Object.fromEntries(req.nextUrl.searchParams))
     if (!parsed.success) {

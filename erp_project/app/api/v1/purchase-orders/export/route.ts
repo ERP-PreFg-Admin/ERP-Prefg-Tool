@@ -42,7 +42,7 @@ import logger from "@/lib/logger"
 const ROW_LIMIT = 50_000
 
 export const GET = withGateway({
-  access: { pageSlug: "/po-tracking", level: "viewer" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "viewer" },
   handler: async ({ req, session, ctx }) => {
     const sp          = req.nextUrl.searchParams
     const format      = sp.get("format") === "xlsx" ? "xlsx" : "csv"

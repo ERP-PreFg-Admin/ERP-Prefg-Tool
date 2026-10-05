@@ -11,7 +11,7 @@ export default async function RmPmProcurementPage() {
   const session = await auth()
   if (!session) redirect("/auth/signin")
   const userId = parseInt(session.user.id)
-  const access = await resolveAccess(userId, session.user.roles, "/po-tracking")
+  const access = await resolveAccess(userId, session.user.roles, "/po-tracking/rm-pm-procurement")
   if (access === "none") redirect("/auth/unauthorized")
 
   return (

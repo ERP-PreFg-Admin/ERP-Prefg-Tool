@@ -20,7 +20,7 @@ const paramsSchema = z.object({ id: z.coerce.number().int().positive() })
 
 export const GET = withGateway({
   paramsSchema,
-  access: { pageSlug: "/po-tracking", level: "viewer" },
+  access: { pageSlug: ["/po-tracking/invoices", "/po-tracking/po-inwarding"], level: "viewer" },
   // selectInvoiceById is a bare `WHERE si.id = ?` returning si.* — GSTINs,
   // bill-to address, line rates. The LIST applies mfg + destination + brand
   // scope; this must too, or the scope is one incremented id away from nothing.

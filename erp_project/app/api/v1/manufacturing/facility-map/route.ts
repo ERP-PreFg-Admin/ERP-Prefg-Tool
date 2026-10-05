@@ -77,7 +77,7 @@ async function vendorCodeFor(mfgId: number, whId: number): Promise<string | null
 
 export const POST = withGateway({
   schema: facilityMapActionSchema,
-  access: { pageSlug: "/manufacturing", level: "editor" },
+  access: { pageSlug: ["/manufacturing", "/po-tracking/mfg-overview"], level: "editor" },
   handler: async ({ body, session, ctx }) => {
     const userId = Number(session.user.id)
     const scope = await getUserScope(userId)

@@ -12,7 +12,7 @@ import type { SkuHistoryRow } from "@/lib/invoice/invoice-mapping"
 const paramsSchema = z.object({ mfg_id: z.coerce.number().int().positive() })
 
 export const GET = withGateway({
-  access: { pageSlug: "/po-tracking", level: "viewer" },
+  access: { pageSlug: "/po-tracking/po-inwarding", level: "viewer" },
   handler: async ({ req, session }) => {
     const parsed = paramsSchema.safeParse({ mfg_id: req.nextUrl.searchParams.get("mfg_id") })
     if (!parsed.success) return NextResponse.json({ history: [] })

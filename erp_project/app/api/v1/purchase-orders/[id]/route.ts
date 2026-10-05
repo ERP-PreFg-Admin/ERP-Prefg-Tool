@@ -19,7 +19,7 @@ import { todayIST } from "@/lib/date"
 
 export const PUT = withGateway({
   paramsSchema: poIdParamSchema,
-  access: { pageSlug: "/po-tracking", level: "editor" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "editor" },
   handler: async ({ req, params, session }) => {
   const userId = Number(session.user.id)
   const poId = params.id
@@ -146,7 +146,7 @@ export const PUT = withGateway({
 // Sets or clears the S3 attachment on a PO. Deletes the old S3 object when replacing.
 export const PATCH = withGateway({
   paramsSchema: poIdParamSchema,
-  access: { pageSlug: "/po-tracking", level: "editor" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "editor" },
   handler: async ({ req, params, session, ctx }) => {
   const userId = Number(session.user.id)
   const poId = params.id

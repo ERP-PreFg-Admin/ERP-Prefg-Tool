@@ -21,7 +21,7 @@ export default async function PoProcurementPage({
   const session = await auth()
   if (!session) redirect("/auth/signin")
   const userId = parseInt(session.user.id)
-  const access = await resolveAccess(userId, session.user.roles, "/po-tracking")
+  const access = await resolveAccess(userId, session.user.roles, "/po-tracking/po-procurement")
   if (access === "none") redirect("/auth/unauthorized")
 
   const sp              = await searchParams

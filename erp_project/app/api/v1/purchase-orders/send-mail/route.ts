@@ -30,7 +30,7 @@ import logger from "@/lib/logger"
 // promote the legs that succeeded.
 export const POST = withGateway({
   schema: poSendMailSchema,
-  access: { pageSlug: "/po-tracking", level: "editor" },
+  access: { pageSlug: "/po-tracking/po-procurement", level: "editor" },
   handler: async ({ body, session, ctx }) => {
     const poIds = body.po_ids.map(Number)
 

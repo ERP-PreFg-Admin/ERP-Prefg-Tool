@@ -59,3 +59,13 @@ export async function resolveAccess(
   }
   return "none"
 }
+
+/** Best level across several page slugs — for a route shared by more than one page. */
+export async function resolveAccessAny(
+  userId: number,
+  roles: string[],
+  pageSlugs: readonly string[]
+): Promise<AccessLevel> {
+  const levels = await Promise.all(pageSlugs.map((s) => resolveAccess(userId, roles, s)))
+  return bestAccess(levels)
+}

@@ -97,7 +97,7 @@ type Row = {
 // the wrong facility answers "not found", which would be stored as a real status.
 
 export const POST = withGateway({
-  access: { pageSlug: "/po-tracking", level: "editor" },
+  access: { pageSlug: ["/po-tracking/po-procurement", "/po-tracking/invoices"], level: "editor" },
   schema: syncFilterSchema,
   handler: async ({ body, session, ctx }) => {
     if (!uniwareEnabled()) {
