@@ -21,7 +21,8 @@ import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } 
 import logger from "@/lib/logger"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { assertPoInScope } from "@/lib/po/po-guard"
-import { isDraftPo } from "@/lib/po/po-rules"
+import { isDraftPo, splitChildPrice } from "@/lib/po/po-rules"
+import { makePoRateResolver } from "@/lib/po/po-rate"
 import { ApiError } from "@/lib/gateway/errors"
 import { poIdParamSchema, poSplitSchema } from "@/lib/validation/purchase-order-detail"
 
@@ -105,6 +106,18 @@ export const POST = withGateway({
       mfgMap[mfgId] = rows[0] ?? { code: String(mfgId), name: String(mfgId) }
     }
 
+    // A child at the parent's manufacturer carries the parent's rate; at another
+    // one, that manufacturer's agreed rate. Resolved before the transaction opens.
+    const resolveRate = makePoRateResolver()
+    const prices: { unitPrice: number | null; totalAmount: number | null }[] = []
+    for (const { mfg_id, qty } of splits) {
+      prices.push(
+        Number(mfg_id) === Number(po.mfg_id)
+          ? splitChildPrice(po.unit_price, Number(qty))
+          : await resolveRate(Number(mfg_id), po.sku_code, Number(qty))
+      )
+    }
+
     const conn: PoolConnection = await pool.getConnection()
     await conn.beginTransaction()
     try {
@@ -129,8 +142,8 @@ export const POST = withGateway({
         // line for parents raised before that column existed. See insertSplit.
         const [childResult] = await conn.execute(
           purchaseOrdersSql.insertSplit,
-          [childPoNo, mfg_id, po.sku_code, Number(qty), po.expected_on, childStatus,
-           destination || null, po.po_no, po.recipe_id ?? null, mfg_id, po.sku_code]
+          [childPoNo, mfg_id, po.sku_code, Number(qty), prices[i].unitPrice, prices[i].totalAmount,
+           po.expected_on, childStatus, destination || null, po.po_no, po.recipe_id ?? null, mfg_id, po.sku_code]
         )
         const childId = (childResult as any).insertId
 

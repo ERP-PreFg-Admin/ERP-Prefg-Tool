@@ -26,3 +26,15 @@ export function poTolerance(qty: number): number {
 export function isDraftPo(po: { status: string | null; email_sent_at: string | Date | null }): boolean {
   return po.status === "draft" || (po.status === "raised" && !po.email_sent_at)
 }
+
+/** A split child's price: the rate in paise, amount = that rate × the child's qty
+ *  (same rounding as lib/po/po-rate.ts). No rate → NULL, never 0. */
+export function splitChildPrice(
+  unitPrice: number | string | null | undefined,
+  qty: number
+): { unitPrice: number | null; totalAmount: number | null } {
+  const rate = unitPrice == null || unitPrice === "" ? NaN : Number(unitPrice)
+  if (!Number.isFinite(rate) || rate <= 0) return { unitPrice: null, totalAmount: null }
+  const rounded = Number(rate.toFixed(2))
+  return { unitPrice: rounded, totalAmount: Number((rounded * qty).toFixed(2)) }
+}

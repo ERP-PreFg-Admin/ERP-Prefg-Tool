@@ -717,12 +717,12 @@ export const purchaseOrdersSql = {
    * a new one, so a child must not pick up a Recipe version the parent never had.
    * Falls back to the live line for parents raised before this column existed.
    *
-   * Parameters: [po_no, mfg_id, sku_code, qty, expected_on, status, destination, reference_po,
-   *   parent_bom_id, mfg_id, sku_code]
+   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, status,
+   *   destination, reference_po, parent_bom_id, mfg_id, sku_code]
    */
   insertSplit: `
-    INSERT INTO purchase_orders (po_no, mfg_id, date, sku_code, qty, expected_on, status, destination, reference_po, po_type, recipe_id)
-    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, ?, 'normal', COALESCE(?, ${RECIPE_ID_FOR_LINE}))
+    INSERT INTO purchase_orders (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, destination, reference_po, po_type, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, ?, ?, ?, 'normal', COALESCE(?, ${RECIPE_ID_FOR_LINE}))
   `,
 
   /**

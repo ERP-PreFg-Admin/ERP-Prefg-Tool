@@ -238,7 +238,10 @@ export const manufacturingSql = {
     LEFT JOIN (
       SELECT mfg_id,
         COUNT(*) AS open_pos,
-        SUM(COALESCE(total_amount, 0)) AS open_value
+        -- Split children are priced, but the parent keeps its full value, so
+        -- counting both would double the split qty.
+        SUM(CASE WHEN reference_po IS NOT NULL AND COALESCE(po_type, '') <> 'inward'
+                 THEN 0 ELSE COALESCE(total_amount, 0) END) AS open_value
       FROM purchase_orders
       WHERE status NOT IN ('received', 'cancelled')
       GROUP BY mfg_id

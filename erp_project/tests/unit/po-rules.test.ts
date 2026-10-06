@@ -3,7 +3,7 @@
 // forever over a rounding remainder — so every boundary is pinned here.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { isDraftPo, poTolerance } from "../../lib/po/po-rules"
+import { isDraftPo, poTolerance, splitChildPrice } from "../../lib/po/po-rules"
 
 test("poTolerance is 10% of qty, floored", () => {
   assert.equal(poTolerance(50), 5)
@@ -74,5 +74,17 @@ test("the send is what stops it being a draft", () => {
 test("a PO past raised is never a draft, mailed or not", () => {
   for (const status of ["punched", "partially_received", "received", "short_closed", "cancelled"]) {
     assert.equal(isDraftPo({ status, email_sent_at: null }), false, status)
+  }
+})
+
+test("a split child carries the parent's rate, amount from its own qty", () => {
+  assert.deepEqual(splitChildPrice(123.45, 1000), { unitPrice: 123.45, totalAmount: 123450 })
+  // mysql2 returns DECIMAL as a string
+  assert.deepEqual(splitChildPrice("98.7654", 3), { unitPrice: 98.77, totalAmount: 296.31 })
+})
+
+test("an unpriced parent gives an unpriced child — NULL, never 0", () => {
+  for (const p of [null, undefined, "", 0, "0", "abc"]) {
+    assert.deepEqual(splitChildPrice(p as never, 500), { unitPrice: null, totalAmount: null }, String(p))
   }
 })
