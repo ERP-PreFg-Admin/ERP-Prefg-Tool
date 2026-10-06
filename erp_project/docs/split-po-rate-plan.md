@@ -33,10 +33,9 @@ and with a stored PDF. Only **2** have a priced parent. Dev: 2 and 2.
 In the split route (`app/api/v1/purchase-orders/[id]/split/route.ts`, the
 `insertSplit` call at `:92`):
 
-| Child's manufacturer | Child `unit_price` |
-|---|---|
-| same as the parent (the only case `SplitPODialog` sends) | **the parent's `unit_price`** |
-| different (API only) | resolved at the child's manufacturer via `makePoRateResolver`, as any PO is priced — the parent's agreed rate belongs to the parent's manufacturer |
+Every child takes **the parent PO's `unit_price`** (read by `selectForSplit`),
+whichever manufacturer it goes to — the parent's PO is the single source of the
+rate, not a fresh costing lookup.
 
 `total_amount = round(unit_price × child qty, 2)`, with `unit_price` already in
 paise — the same rule as `lib/po/po-rate.ts:71-72`, so a manufacturer multiplying
@@ -83,8 +82,9 @@ pick up the price immediately. The other 6 have unpriced parents: nothing to cop
 2. **Other value roll-ups** outside `lib/queries/` (e.g. a dashboard summing in
    JS) would double count the same way. Grep `total_amount` in `lib/services/`
    and `app/` before shipping.
-3. **Different-manufacturer splits** price from that manufacturer's costing and
-   may be unpriced if the SKU is not mapped there — correct, and visible.
+3. **Different-manufacturer splits** (API only — `SplitPODialog` always sends the
+   parent's) also carry the parent's rate, which was agreed at the parent's
+   manufacturer. Chosen deliberately: the parent PO is the source of the price.
 
 ## Verification
 
