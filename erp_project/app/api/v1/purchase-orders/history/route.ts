@@ -1,8 +1,7 @@
 // GET /api/v1/purchase-orders/history?po_id=123
 //
-// Returns the history_pos audit trail for one PO — every create/update the
-// PO bulk CSV flow recorded against it (see poBulkHandler.applyAndArchive),
-// newest first. Shown from PoTable's Actions menu via PoHistoryDialog.tsx.
+// Returns the history_pos audit trail for one PO, newest first, each row tagged
+// with its source (bulk CSV, invoice, receipt, split). Shown via PoHistoryDialog.tsx.
 
 import { NextResponse } from "next/server"
 import { query } from "@/lib/db"

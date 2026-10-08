@@ -267,7 +267,10 @@ export type MfgSkuOption = { sku_code: string; sku_name: string; boms?: RecipeCh
 
 export type SplitRow = { destination: string; qty: string }
 
-/** One history_pos row — an audit entry from the PO bulk CSV create/update flow. */
+/** Where a history_pos row came from — derived in selectPoHistoryByPoId. */
+export type PoHistorySource = "bulk_csv" | "invoice" | "invoice_receipt" | "receipt" | "split" | "other"
+
+/** One history_pos row: bulk CSV, invoice inwarding, a receipt or a split. */
 export type PoHistoryRow = {
   id: number
   action_type: "create" | "update"
@@ -276,4 +279,11 @@ export type PoHistoryRow = {
   new_value: string | null
   changed_on: string | null
   changed_by_name: string | null
+  source: PoHistorySource
+  invoice_no: string | null
+  uploaded_by_name: string | null
+  uploaded_on: string | null
+  // Only bulk CSV rows went through an approval.
+  approved_by_name: string | null
+  approved_on: string | null
 }

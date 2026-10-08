@@ -814,12 +814,47 @@ export const purchaseOrdersSql = {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
-  /** All history_pos entries for one PO, newest first — shown in PoTable's Actions menu. Params: [po_id] */
+  /** All history_pos entries for one PO, newest first, each with where it came from.
+   *  history_pos has no source column, so it is derived: an inward PO's create is the invoice,
+   *  a receipt with an inward PO minted beside it is an invoice receipt, an s3_key a PO_BULK
+   *  approval staged is the bulk CSV (whose uploader/approver live on that approval). Params: [po_id] */
   selectPoHistoryByPoId: `
     SELECT h.id, h.action_type, h.field_name, h.old_value, h.new_value, h.changed_on,
-           u.name AS changed_by_name
+           u.name AS changed_by_name,
+           CASE
+             WHEN h.action_type = 'create' AND COALESCE(po.po_type, '') = 'inward' THEN 'invoice'
+             WHEN h.field_name = 'received_qty' AND inv.id IS NOT NULL            THEN 'invoice_receipt'
+             WHEN h.field_name = 'received_qty'                                   THEN 'receipt'
+             WHEN h.field_name = 'split'                                          THEN 'split'
+             WHEN ba.id IS NOT NULL                                               THEN 'bulk_csv'
+             ELSE 'other'
+           END AS source,
+           CASE WHEN COALESCE(po.po_type, '') = 'inward' THEN po.invoice_no ELSE inv.invoice_no END AS invoice_no,
+           COALESCE(bu.name, u.name)          AS uploaded_by_name,
+           COALESCE(ba.raised_on, h.changed_on) AS uploaded_on,
+           bau.name AS approved_by_name,
+           ba.approved_on
     FROM history_pos h
+    LEFT JOIN purchase_orders po ON po.id = h.po_id
     LEFT JOIN users u ON u.id = h.changed_by
+    LEFT JOIN approvals ba ON ba.id = (
+      SELECT ai.approval_id FROM approval_items ai
+      JOIN approvals a2 ON a2.id = ai.approval_id
+      WHERE h.s3_key IS NOT NULL AND h.s3_key <> ''
+        AND a2.module = 'PO_BULK' AND ai.field_name = 's3_key' AND ai.new_value = h.s3_key
+      ORDER BY ai.approval_id DESC LIMIT 1
+    )
+    LEFT JOIN users bu  ON bu.id  = ba.raised_by
+    LEFT JOIN users bau ON bau.id = ba.approved_by
+    LEFT JOIN purchase_orders inv ON inv.id = (
+      SELECT p2.id FROM history_pos h2
+      JOIN purchase_orders p2 ON p2.id = h2.po_id
+      WHERE h.field_name = 'received_qty'
+        AND h2.action_type = 'create' AND p2.po_type = 'inward' AND p2.reference_po = h.po_no
+        AND h2.changed_on BETWEEN h.changed_on - INTERVAL 60 SECOND AND h.changed_on + INTERVAL 60 SECOND
+      ORDER BY ABS(TIMESTAMPDIFF(SECOND, h2.changed_on, h.changed_on)), p2.id
+      LIMIT 1
+    )
     WHERE h.po_id = ?
     ORDER BY h.changed_on DESC, h.id DESC
   `,
