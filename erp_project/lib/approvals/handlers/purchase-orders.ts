@@ -88,8 +88,8 @@ export async function createBulkPoRow(
   const year = new Date().getFullYear()
   const month = String(new Date().getMonth() + 1).padStart(2, "0")
   const poPrefix = `${brand}-${poType === "impromptu" ? "IMP" : "PO"}-${year}${month}`
-  const [cntRows] = await conn.execute(purchaseOrdersSql.countByPrefix, [`${poPrefix}-%`])
-  const seq = (Number((cntRows as any[])[0]?.cnt ?? 0) + 1).toString().padStart(3, "0")
+  const [seqRows] = await conn.execute(purchaseOrdersSql.lastSeqByPrefix, [`${poPrefix}-%`])
+  const seq = (Number((seqRows as { last_seq: number }[])[0]?.last_seq ?? 0) + 1).toString().padStart(3, "0")
   const newPoNo = `${poPrefix}-${seq}`
 
   // The price staged at upload (what the approver saw); files staged

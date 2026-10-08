@@ -163,8 +163,8 @@ async function writeInvoiceAndPos(
    *  parent PO's number, which the SKU pass never saw. */
   const nextPoNo = async (brand: string) => {
     if (!nextSeq.has(brand)) {
-      const [rows] = await conn.execute(purchaseOrdersSql.countByPrefix, [`${brand}-INW-${yyyymm}-%`])
-      nextSeq.set(brand, Number((rows as { cnt: number }[])[0]?.cnt ?? 0) + 1)
+      const [rows] = await conn.execute(purchaseOrdersSql.lastSeqByPrefix, [`${brand}-INW-${yyyymm}-%`])
+      nextSeq.set(brand, Number((rows as { last_seq: number }[])[0]?.last_seq ?? 0) + 1)
     }
     const seq = nextSeq.get(brand)!
     nextSeq.set(brand, seq + 1)

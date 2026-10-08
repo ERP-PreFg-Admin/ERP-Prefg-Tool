@@ -407,8 +407,18 @@ export const purchaseOrdersSql = {
     ORDER BY id LIMIT 1
   `,
 
-  countByPrefix: `
-    SELECT COUNT(*) AS cnt FROM purchase_orders WHERE po_no LIKE ?
+  /**
+   * The highest sequence number under a PO-number prefix (0 when none). The next
+   * PO is this + 1. Not COUNT(*): once a PO is deleted (an invoice revert) the
+   * count falls below the highest number and the next PO reuses a live one —
+   * the 2026-10-08 "collided with a concurrent request" outage. Only a purely
+   * numeric last segment counts, so split children (…-001-S001) are ignored.
+   * Params: ["<prefix>-%"]
+   */
+  lastSeqByPrefix: `
+    SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(po_no, '-', -1) AS UNSIGNED)), 0) AS last_seq
+    FROM purchase_orders
+    WHERE po_no LIKE ? AND SUBSTRING_INDEX(po_no, '-', -1) REGEXP '^[0-9]+$'
   `,
 
   /**

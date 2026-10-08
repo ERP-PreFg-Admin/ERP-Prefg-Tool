@@ -3,7 +3,7 @@
 // declared inside the handler body of app/api/v1/purchase-orders/route.ts).
 //
 // The codes are not cosmetic: they prefix po_no, and the per-month sequence is
-// derived by counting existing rows with purchaseOrdersSql.countByPrefix
+// derived by counting existing rows with purchaseOrdersSql.lastSeqByPrefix
 // (`${brand}-PO-${yyyymm}-%`). Change a code and the count matches nothing, so
 // the sequence silently restarts at 001 and the brand ends up with two parallel
 // PO series. That is what these assertions exist to stop.
@@ -72,7 +72,7 @@ test("brandInitial is one letter, from the mapped code where there is one", () =
 test("an unmapped brand falls back to its own first letter, never its full name", () => {
   assert.equal(brandInitial("DND"), "D")
   assert.equal(brandInitial("Some New Brand"), "S")
-  // the prod typo of Fein — shares F, which is safe because countByPrefix
+  // the prod typo of Fein — shares F, which is safe because lastSeqByPrefix
   // scopes the sequence to the prefix, so the two share one series
   assert.equal(brandInitial("Fien"), "F")
 })

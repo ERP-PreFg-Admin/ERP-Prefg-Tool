@@ -144,8 +144,8 @@ export const POST = withGateway({
   const month   = String(new Date().getMonth() + 1).padStart(2, "0")
   const typeTag = po_type === "normal" ? "PO" : "IMP"
   const poPrefix = `${brand}-${typeTag}-${year}${month}`
-  const countRows = await query<{ cnt: number }>(purchaseOrdersSql.countByPrefix, [`${poPrefix}-%`])
-  const seq  = (Number(countRows[0]?.cnt ?? 0) + 1).toString().padStart(3, "0")
+  const seqRows = await query<{ last_seq: number }>(purchaseOrdersSql.lastSeqByPrefix, [`${poPrefix}-%`])
+  const seq  = (Number(seqRows[0]?.last_seq ?? 0) + 1).toString().padStart(3, "0")
   const po_no = `${poPrefix}-${seq}`
 
   // Resolved server-side from the agreed rate, not taken from the body: a

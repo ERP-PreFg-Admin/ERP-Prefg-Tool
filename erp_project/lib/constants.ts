@@ -64,7 +64,7 @@ const BRANDS : Record<string , {code: string , entity : string}> = {
     entity: "PEP"
   },
   // MCAFF, not FEIN: Fein POs share mCaffeine's number series by decision, so
-  // the prefix — and therefore countByPrefix's sequence — is the same one.
+  // the prefix — and therefore lastSeqByPrefix's sequence — is the same one.
   fein: {
     code: "MCAFF",
     entity: "PEP",
@@ -100,7 +100,7 @@ export function brandCode(raw:string):string {
  * land in a PO number verbatim, spaces and all.
  *
  * Two brands CAN share an initial — prod already has Fein and its typo Fien,
- * both F. That is safe: the sequence is counted with countByPrefix against the
+ * both F. That is safe: the sequence is counted with lastSeqByPrefix against the
  * prefix itself, so they share one series rather than colliding on a number.
  */
 export function brandInitial(raw: string): string {
