@@ -228,7 +228,9 @@ const FROM_JOINS = `
 const SELECT_COLS = `
   SELECT
     po.id, po.po_no, po.date, po.sku_code, po.qty, po.unit_price,
-    po.total_amount, po.expected_on, po.received_qty, po.invoice_no,
+    po.amount_pre_gst, po.total_amount, po.expected_on,
+    -- Implied by the PO's own amounts, not master_skus: a sent PO keeps its rate.
+    CASE WHEN po.amount_pre_gst > 0 THEN ROUND((po.total_amount / po.amount_pre_gst - 1) * 100, 1) END AS gst_percent, po.received_qty, po.invoice_no,
     po.uniware_po_code,
     po.destination, po.remarks, ${DISPLAY_STATUS_EXPR} AS status, po.status AS raw_status,
     po.po_type, po.attachment_key,
@@ -263,6 +265,7 @@ const SAFE_SORT_COLS: Record<string, string> = {
   sku_code:     "po.sku_code",
   qty:          "po.qty",
   unit_price:   "po.unit_price",
+  amount_pre_gst: "po.amount_pre_gst",
   total_amount: "po.total_amount",
   expected_on:  "po.expected_on",
   status:       `(${DISPLAY_STATUS_EXPR})`,
@@ -390,13 +393,28 @@ export const purchaseOrdersSql = {
   `,
 
   /** Count of POs with a given po_no prefix — used for brand-scoped PO number generation. Parameters: ['MCA-PO-202606-%'] */
+  /**
+   * The live special PO (npd / tech_transfer / cpr) already raised for this
+   * (manufacturer, SKU, type), if any — each may be raised once. Cancelled ones
+   * free the pair; split children belong to their parent and never count.
+   * Params: [mfg_id, sku_code, po_type]
+   */
+  selectLiveSpecialPo: `
+    SELECT po_no FROM purchase_orders
+    WHERE mfg_id = ? AND sku_code = ? AND po_type = ?
+      AND COALESCE(status, '') <> 'cancelled'
+      AND reference_po IS NULL
+    ORDER BY id LIMIT 1
+  `,
+
   countByPrefix: `
     SELECT COUNT(*) AS cnt FROM purchase_orders WHERE po_no LIKE ?
   `,
 
   /**
    * Insert an impromptu PO as draft (pending approval).
-   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, po_type, destination, remarks, mfg_id, sku_code]
+   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, amount_pre_gst, total_amount,
+   *   expected_on, po_type, destination, remarks, mfg_id, sku_code]
    *
    * recipe_id is deliberately the LAST column on every insert below: its two
    * resolver params then append to the existing array instead of being threaded
@@ -405,18 +423,19 @@ export const purchaseOrdersSql = {
    */
   insert: `
     INSERT INTO purchase_orders
-      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, remarks, recipe_id)
-    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ${RECIPE_ID_FOR_LINE})
+      (po_no, mfg_id, date, sku_code, qty, unit_price, amount_pre_gst, total_amount, expected_on, status, po_type, destination, remarks, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ${RECIPE_ID_FOR_LINE})
   `,
 
   /**
    * Insert a normal PO directly as raised (no approval needed).
-   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, remarks, mfg_id, sku_code]
+   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, amount_pre_gst, total_amount,
+   *   expected_on, destination, remarks, mfg_id, sku_code]
    */
   insertNormal: `
     INSERT INTO purchase_orders
-      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, remarks, recipe_id)
-    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, 'raised', 'normal', ?, ?, ${RECIPE_ID_FOR_LINE})
+      (po_no, mfg_id, date, sku_code, qty, unit_price, amount_pre_gst, total_amount, expected_on, status, po_type, destination, remarks, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, ?, 'raised', 'normal', ?, ?, ${RECIPE_ID_FOR_LINE})
   `,
 
   /**
@@ -613,6 +632,12 @@ export const purchaseOrdersSql = {
    *
    * Parameters: [destination, destination, sku_code]
    */
+  /** A warehouse by name, for the bulk upload's destination check. Case-insensitive
+   *  (collation); returns the canonical spelling to store. Params: [name] */
+  selectWarehouseByName: `
+    SELECT name, status FROM master_warehouse WHERE name = ? LIMIT 1
+  `,
+
   selectDestinationEntityCheck: `
     SELECT
       ent.code AS entity_code,
@@ -673,8 +698,8 @@ export const purchaseOrdersSql = {
    * Parameters: [id]
    */
   selectForSplit: `
-    SELECT id, po_no, mfg_id, sku_code, recipe_id, qty, unit_price, total_amount,
-           received_qty, expected_on, status, reference_po, email_sent_at
+    SELECT id, po_no, mfg_id, sku_code, recipe_id, qty, unit_price, amount_pre_gst, total_amount,
+           received_qty, expected_on, status, reference_po, email_sent_at, po_type
     FROM purchase_orders WHERE id = ? LIMIT 1
   `,
 
@@ -717,33 +742,35 @@ export const purchaseOrdersSql = {
    * a new one, so a child must not pick up a Recipe version the parent never had.
    * Falls back to the live line for parents raised before this column existed.
    *
-   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, total_amount, expected_on, status,
-   *   destination, reference_po, parent_bom_id, mfg_id, sku_code]
+   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, amount_pre_gst, total_amount,
+   *   expected_on, status, destination, reference_po, po_type, parent_bom_id, mfg_id, sku_code]
    */
   insertSplit: `
-    INSERT INTO purchase_orders (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, destination, reference_po, po_type, recipe_id)
-    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, ?, ?, ?, 'normal', COALESCE(?, ${RECIPE_ID_FOR_LINE}))
+    INSERT INTO purchase_orders (po_no, mfg_id, date, sku_code, qty, unit_price, amount_pre_gst, total_amount, expected_on, status, destination, reference_po, po_type, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, ${RECIPE_ID_FOR_LINE}))
   `,
 
   /**
    * Insert a PO directly as 'raised' for the bulk CSV flow.
-   * Parameters: [po_no, mfg_id, sku_code, qty, expected_on, destination, remarks, csv_source_key, mfg_id, sku_code]
+   * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, amount_pre_gst, total_amount,
+   *   expected_on, po_type, destination, remarks, csv_source_key, mfg_id, sku_code]
    */
   insertBulkPo: `
     INSERT INTO purchase_orders
-      (po_no, mfg_id, date, sku_code, qty, unit_price, total_amount, expected_on, status, po_type, destination, remarks, csv_source_key, recipe_id)
-    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, 'raised', 'normal', ?, ?, ?, ${RECIPE_ID_FOR_LINE})
+      (po_no, mfg_id, date, sku_code, qty, unit_price, amount_pre_gst, total_amount, expected_on, status, po_type, destination, remarks, csv_source_key, recipe_id)
+    VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, ?, 'raised', ?, ?, ?, ?, ${RECIPE_ID_FOR_LINE})
   `,
 
   /**
    * Update editable fields on a draft PO. recipe_id is re-resolved because this is
    * the one edit that can change the SKU or the manufacturer, either of which
    * would leave the stamped Recipe describing an order that no longer exists.
-   * Parameters: [mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, remarks, mfg_id, sku_code, id]
+   * Parameters: [mfg_id, sku_code, qty, unit_price, amount_pre_gst, total_amount,
+   *   expected_on, destination, remarks, mfg_id, sku_code, id]
    */
   updateDraft: `
     UPDATE purchase_orders
-    SET mfg_id = ?, sku_code = ?, qty = ?, unit_price = ?, total_amount = ?,
+    SET mfg_id = ?, sku_code = ?, qty = ?, unit_price = ?, amount_pre_gst = ?, total_amount = ?,
         expected_on = ?, destination = ?, remarks = ?, recipe_id = ${RECIPE_ID_FOR_LINE}
     WHERE id = ?
   `,
@@ -758,8 +785,8 @@ export const purchaseOrdersSql = {
    * PO it names). Params: [po_no]
    */
   selectByPoNo: `
-    SELECT id, po_no, status, expected_on, destination, remarks, sku_code, recipe_id,
-           qty, COALESCE(received_qty, 0) AS received_qty
+    SELECT id, po_no, status, expected_on, destination, remarks, sku_code, recipe_id, po_type,
+           email_sent_at, qty, COALESCE(received_qty, 0) AS received_qty
     FROM purchase_orders
     WHERE po_no = ?
     LIMIT 1
@@ -966,7 +993,7 @@ export const purchaseOrdersSql = {
   selectForEmail: `
     SELECT
       po.po_no, po.date, po.expected_on, po.destination,
-      po.sku_code, po.qty, po.unit_price, po.total_amount,
+      po.sku_code, po.qty, po.unit_price, po.amount_pre_gst, po.total_amount, po.po_type,
       -- The order this one was split off, when it is a split. The split PO
       -- document exists to name it (lib/pdf/split-po-document.tsx); the ordinary
       -- document ignores it.

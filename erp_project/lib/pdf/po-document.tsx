@@ -28,6 +28,7 @@ import {
   Document, Page, Text, View, StyleSheet, Font, renderToBuffer,
 } from "@react-pdf/renderer"
 import { IST } from "@/lib/date"
+import { poPrintedAmounts, poDeclaration, isSpecialPoType, DEFAULT_GST_PERCENT } from "@/lib/po/po-rules"
 import type { PoLetterhead, PoShipTo } from "@/lib/pdf/po-letterhead"
 
 // react-pdf only breaks lines at whitespace, so one long unbroken token (a PO
@@ -39,6 +40,8 @@ export type PoEmailData = {
   /** The order this PO was split off, or null. Read only by
    *  lib/pdf/split-po-document.tsx — this document ignores it. */
   reference_po: string | null
+  /** npd / tech_transfer / cpr print 0s and a pricing-to-be-confirmed declaration. */
+  po_type: string | null
   date: string | null
   expected_on: string | null
   destination: string | null
@@ -47,6 +50,8 @@ export type PoEmailData = {
   sku_name: string | null
   qty: number
   unit_price: number | null
+  /** unit_price × qty; null on inward POs, which print the total + 18%. */
+  amount_pre_gst: number | null
   total_amount: number | null
   mfg_name: string
   mfg_code: string
@@ -67,7 +72,7 @@ export type PoEmailData = {
 export const TEAL   = "#1e7a7a"
 export const YELLOW = "#FFE500"
 export const BD     = "#cccccc"
-export const GST_RATE = 0.18
+export const GST_RATE = DEFAULT_GST_PERCENT / 100
 export const EMPTY_ROWS = 8
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -177,9 +182,10 @@ const S = StyleSheet.create({
 
 // ── Document ───────────────────────────────────────────────────────────────────
 function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
-  const base  = num(d.total_amount)
-  const gst   = base > 0 ? Math.round(base * GST_RATE) : 0
-  const grand = base + gst
+  // Base, GST and total as stored on the PO, at its own GST rate.
+  const { base, gst, grand, gstPercent } = poPrintedAmounts(d)
+  // A special PO (npd / tech_transfer / cpr) prints its 0s; elsewhere a blank price is “—”.
+  const zero  = isSpecialPoType(d.po_type)
   const lh    = d.letterhead
   const ship  = d.ship_to
 
@@ -261,8 +267,8 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
             <Text style={[S.cDs, S.tdTx]}>{d.sku_name ?? "—"}</Text>
             <Text style={[S.cSk, S.tdTx]}>{d.sku_code}</Text>
             <Text style={[S.cQt, S.tdTx]}>{num(d.qty).toLocaleString("en-IN")}</Text>
-            <Text style={[S.cPr, S.tdTx]}>{d.unit_price ? fmtN(d.unit_price) : "—"}</Text>
-            <Text style={[S.cAm, S.tdTx]}>{base > 0 ? fmtN(base) : "—"}</Text>
+            <Text style={[S.cPr, S.tdTx]}>{zero ? "0.00" : d.unit_price ? fmtN(d.unit_price) : "—"}</Text>
+            <Text style={[S.cAm, S.tdTx]}>{zero ? "0.00" : base > 0 ? fmtN(base) : "—"}</Text>
           </View>
 
           {/* Empty rows */}
@@ -286,7 +292,7 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
             <Text style={[S.cSk, S.thTx]}>Total</Text>
             <Text style={[S.cQt, S.thTx]}>{num(d.qty).toLocaleString("en-IN")}</Text>
             <Text style={[S.cPr, S.tdTx]}> </Text>
-            <Text style={[S.cAm, S.thTx]}>{base > 0 ? fmtN(base) : "—"}</Text>
+            <Text style={[S.cAm, S.thTx]}>{zero ? "0.00" : base > 0 ? fmtN(base) : "—"}</Text>
           </View>
         </View>
 
@@ -315,7 +321,7 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
             </View>
             <View style={S.btmRight}>
               <Text style={[S.btmVal, { textAlign: "right", fontFamily: "Helvetica-Bold", color: TEAL }]}>
-                {gst > 0 ? fmtN(gst) : "—"}
+                {zero ? "0.00" : gst > 0 ? fmtN(gst) : "—"}
               </Text>
             </View>
           </View>
@@ -323,9 +329,9 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
           {/* Row 3: Total — yellow highlight */}
           <View style={S.totalHL}>
             <Text style={{ flex: 1, fontFamily: "Helvetica-Bold", fontSize: 8 }}>Total</Text>
-            <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 8, marginRight: 20 }}>{GST_RATE * 100}%</Text>
+            <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 8, marginRight: 20 }}>{gstPercent != null ? `${gstPercent}%` : ""}</Text>
             <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 9, color: TEAL }}>
-              {grand > 0 ? fmtN(grand) : "—"}
+              {zero ? "0.00" : grand > 0 ? fmtN(grand) : "—"}
             </Text>
           </View>
 
@@ -363,10 +369,7 @@ function PurchaseOrderDoc({ d }: { d: PoEmailData }) {
         {/* ── Declaration ── */}
         <View style={S.decl}>
           <Text style={S.declTitle}>Declaration</Text>
-          <Text style={S.declTxt}>
-            We declare that this purchase order the actual price of the goods described
-            and that all particulars are true and correct.
-          </Text>
+          <Text style={S.declTxt}>{poDeclaration(d.po_type)}</Text>
         </View>
 
       </Page>

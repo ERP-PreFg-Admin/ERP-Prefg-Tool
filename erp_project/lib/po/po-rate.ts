@@ -16,27 +16,34 @@
  * manufacturer, or a total of zero.
  */
 
+import { query } from "@/lib/db"
 import { agreedRatesByMfg, type AgreedRate } from "@/lib/costing/agreed-rates"
+import { classifyRate, type RateVerdict } from "@/lib/po/po-rate-note"
+import type { PoPrice } from "@/lib/po/po-rules"
 import logger from "@/lib/logger"
 
-export type PoRate = { unitPrice: number | null; totalAmount: number | null }
+export type PoRate = PoPrice
 
-function usable(r: AgreedRate | undefined): number | null {
-  if (!r) return null
-  return r.rate > 0 ? r.rate : null
+/** master_skus.gst for a SKU, or null (poTotal then falls back to 18). */
+export async function skuGstPercent(skuCode: string | null): Promise<number | null> {
+  if (!skuCode) return null
+  const [row] = await query<{ gst: string | null }>(`SELECT gst FROM master_skus WHERE sku_code = ? LIMIT 1`, [skuCode])
+  return row?.gst == null ? null : Number(row.gst)
 }
-
-const missingLines = (r: AgreedRate) => r.rm_lines_without_rate + r.pm_lines_without_rate
 
 /**
  * Cached per manufacturer — agreedRatesByMfg runs three queries and returns the
  * whole manufacturer's map, so a bulk upload of 300 rows costs one call per
- * distinct manufacturer rather than 300.
+ * distinct manufacturer rather than 300. Returns the full verdict (status +
+ * unrated-line counts) for callers that report it.
  */
-export function makePoRateResolver(asOf?: string | null) {
+export function makePoRateClassifier(asOf?: string | null) {
   const cache = new Map<number, Map<string, AgreedRate>>()
+  const gstCache = new Map<string, number | null>()
 
-  return async function resolve(mfgId: number, skuCode: string | null, qty: number): Promise<PoRate> {
+  return async function classify(mfgId: number, skuCode: string | null, qty: number, poType?: string): Promise<RateVerdict> {
+    const gstKey = (skuCode ?? "").toLowerCase()
+    if (!gstCache.has(gstKey)) gstCache.set(gstKey, await skuGstPercent(skuCode))
     let rates = cache.get(mfgId)
     if (!rates) {
       const byExactCase = await agreedRatesByMfg(mfgId, null, asOf)
@@ -47,28 +54,28 @@ export function makePoRateResolver(asOf?: string | null) {
       rates = new Map([...byExactCase].map(([k, v]) => [k.toLowerCase(), v]))
       cache.set(mfgId, rates)
     }
-    const agreed = skuCode ? rates.get(skuCode.toLowerCase()) : undefined
-    const raw = usable(agreed)
-    if (raw == null) {
-      logger.warn({ module: "PO_RATE", mfgId, skuCode, message: "No agreed rate at all — PO raised unpriced" })
-      return { unitPrice: null, totalAmount: null }
-    }
-    // Used, not refused — but never silently. These are the SKUs whose cost
-    // masters need filling, and the rate they ship on is too low until then.
-    const missing = agreed ? missingLines(agreed) : 0
-    if (missing > 0) {
+    const verdict = classifyRate(skuCode ? rates.get(skuCode.toLowerCase()) : undefined, qty, gstCache.get(gstKey), poType)
+    if (verdict.status === "special") return verdict
+    if (verdict.unitPrice == null) {
+      logger.warn({ module: "PO_RATE", mfgId, skuCode, status: verdict.status, message: "No agreed rate at all — PO raised unpriced" })
+    } else if (verdict.status === "partial") {
+      // Used, not refused — but never silently. These are the SKUs whose cost
+      // masters need filling, and the rate they ship on is too low until then.
       logger.warn({
         module: "PO_RATE", mfgId, skuCode, partial: true,
-        rmLinesWithoutRate: agreed!.rm_lines_without_rate,
-        pmLinesWithoutRate: agreed!.pm_lines_without_rate,
+        rmLinesWithoutRate: verdict.rmMissing,
+        pmLinesWithoutRate: verdict.pmMissing,
         message: "Partial agreed rate — unrated lines counted as zero, rate is understated",
       })
     }
-    // Rounded to paise BEFORE the multiply, and the amount derived from the
-    // rounded figure. The costing carries ~10 decimals; a manufacturer reading
-    // the PO will multiply the rate they can see by the quantity, and that has
-    // to equal the amount printed beside it.
-    const unitPrice = Number(raw.toFixed(2))
-    return { unitPrice, totalAmount: Number((unitPrice * qty).toFixed(2)) }
+    return verdict
+  }
+}
+
+export function makePoRateResolver(asOf?: string | null) {
+  const classify = makePoRateClassifier(asOf)
+  return async function resolve(mfgId: number, skuCode: string | null, qty: number): Promise<PoRate> {
+    const { unitPrice, gstPercent, amountPreGst, totalAmount } = await classify(mfgId, skuCode, qty)
+    return { unitPrice, gstPercent, amountPreGst, totalAmount }
   }
 }

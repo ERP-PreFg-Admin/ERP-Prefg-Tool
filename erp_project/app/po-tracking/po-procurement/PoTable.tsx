@@ -238,7 +238,7 @@ export default function PoTable({
                   <SortHead colKey="qty"          {...sh} className="text-right">PO Qty</SortHead>
                   <TableHead>Received</TableHead>
                   <SortHead colKey="unit_price"   {...sh}>Rate</SortHead>
-                  <SortHead colKey="total_amount" {...sh}>Amount</SortHead>
+                  <SortHead colKey="total_amount" {...sh}>Amount (incl. GST)</SortHead>
                   {/* Inwarding only: an invoice number arrives with a supplier
                       invoice, which is what raises an inward PO. On FG PO
                       Tracking the column was always "—", taking width from the

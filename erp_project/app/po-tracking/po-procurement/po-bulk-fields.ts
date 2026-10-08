@@ -1,6 +1,7 @@
 import type { MasterField } from "@/components/masters/field-config"
 import { STATUS_CONFIG, STATUS_KEYS } from "./po-types"
 import { dateCellRemark, parseDateCell } from "@/lib/date"
+import { BULK_PO_TYPES, parseBulkPoType } from "@/lib/po/po-rules"
 
 // "rejected" is an approval-outcome state, not something a human should type
 // into a CSV — STATUS_KEYS already excludes it (see po-types.ts).
@@ -54,6 +55,15 @@ export const PO_BULK_CSV_FIELDS: MasterField[] = [
     options: STATUS_OPTIONS,
     validate: (raw) =>
       STATUS_KEYS.includes(raw.trim().toLowerCase()) ? null : `must be one of ${STATUS_KEYS.join(", ")} (got "${raw}")`,
+  },
+  {
+    // Blank = normal. npd / tech_transfer / cpr are raised at price 0, once per
+    // SKU × manufacturer; those and impromptu need remarks (checked server-side).
+    key: "po_type", label: "PO Type", aliases: ["po type"], type: "select", sample: "normal",
+    placeholder: BULK_PO_TYPES.join(" / "),
+    options: BULK_PO_TYPES.map((t) => ({ value: t, label: t })),
+    validate: (raw) =>
+      parseBulkPoType(raw) === "invalid" ? `must be one of ${BULK_PO_TYPES.join(", ")} (got "${raw}")` : null,
   },
   {
     // Why the PO was raised — the same note the Add PO dialog collects, stored

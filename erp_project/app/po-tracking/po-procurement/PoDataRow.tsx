@@ -17,6 +17,7 @@ import type { BadgeVariant, PoRow } from "./po-types"
 import { STATUS_CONFIG } from "./po-types"
 import { fmtDate, fmtInt, fmtMoney, fmtRate, isImpromptu, num } from "./po-utils"
 import { ProgressCell } from "./PoTableCells"
+import { isSpecialPoType, SPECIAL_PO_LABEL } from "@/lib/po/po-rules"
 import PoActionMenu, { type MenuAction } from "./PoActionMenu"
 import UniwareStatusBadge from "../UniwareStatusBadge"
 
@@ -166,6 +167,11 @@ export default function PoDataRow({
         {(r.po_type === "impromptu" || isImpromptu(r.po_no)) && (
           <Badge variant="warning" className="ml-1.5 px-1.5 py-0 text-[10px]">IMP</Badge>
         )}
+        {isSpecialPoType(r.po_type) && (
+          <Badge variant="info" className="ml-1.5 px-1.5 py-0 text-[10px]" title={`${SPECIAL_PO_LABEL[r.po_type]} PO — price 0, pricing to be confirmed`}>
+            {r.po_type === "tech_transfer" ? "TT" : r.po_type.toUpperCase()}
+          </Badge>
+        )}
         {/* Violet is this table's colour for "part of this order lives
             elsewhere" — on the master saying how many splits, on the child
             saying which order it came off. */}
@@ -228,7 +234,14 @@ export default function PoDataRow({
         {fmtRate(r.unit_price)}
       </TableCell>
 
-      <TableCell className="text-xs tabular-nums whitespace-nowrap">{fmtMoney(r.total_amount)}</TableCell>
+      <TableCell className="text-xs tabular-nums whitespace-nowrap">
+        {fmtMoney(r.total_amount)}
+        {r.amount_pre_gst != null && r.gst_percent != null && (
+          <div className="text-[10px] text-muted-foreground">
+            {fmtMoney(r.amount_pre_gst)} + {Number(r.gst_percent)}% GST
+          </div>
+        )}
+      </TableCell>
 
       {/* Inwarding only — see the matching header in PoTable. */}
       {showInvoiceColumns && (
@@ -244,6 +257,11 @@ export default function PoDataRow({
         <TableCell className="text-xs tabular-nums whitespace-nowrap">
           {r.invoice_rate == null ? (
             <span className="text-muted-foreground">—</span>
+          ) : isSpecialPoType(r.po_type) ? (
+            // A special PO has no agreed rate, so there is nothing to disagree with.
+            <span className="text-muted-foreground" title={`No agreed rate (${SPECIAL_PO_LABEL[r.po_type]}) — the invoice rate is taken as is`}>
+              {fmtRate(r.invoice_rate)}
+            </span>
           ) : (
             <span
               className={

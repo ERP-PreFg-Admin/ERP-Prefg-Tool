@@ -33,9 +33,10 @@ import {
 } from "@react-pdf/renderer"
 import {
   type PoEmailData,
-  TEAL, YELLOW, BD, GST_RATE, EMPTY_ROWS,
+  TEAL, YELLOW, BD, EMPTY_ROWS,
   num, fmtN, fmtDate,
 } from "@/lib/pdf/po-document"
+import { poPrintedAmounts, poDeclaration, isSpecialPoType } from "@/lib/po/po-rules"
 
 // Same reason as the ordinary document: react-pdf only breaks at whitespace, so
 // one long unbroken token (a PO code, an account number) overflows its column.
@@ -132,9 +133,10 @@ const S = StyleSheet.create({
 })
 
 function SplitPurchaseOrderDoc({ d }: { d: PoEmailData }) {
-  const base  = num(d.total_amount)
-  const gst   = base > 0 ? Math.round(base * GST_RATE) : 0
-  const grand = base + gst
+  // Base, GST and total as stored on the PO, at its own GST rate.
+  const { base, gst, grand, gstPercent } = poPrintedAmounts(d)
+  // A special PO (npd / tech_transfer / cpr) prints its 0s; elsewhere a blank price is “—”.
+  const zero  = isSpecialPoType(d.po_type)
   const lh    = d.letterhead
   const ship  = d.ship_to
 
@@ -207,8 +209,8 @@ function SplitPurchaseOrderDoc({ d }: { d: PoEmailData }) {
             <Text style={[S.cDs, S.tdTx]}>{d.sku_name ?? "—"}</Text>
             <Text style={[S.cSk, S.tdTx]}>{d.sku_code}</Text>
             <Text style={[S.cQt, S.tdTx]}>{num(d.qty).toLocaleString("en-IN")}</Text>
-            <Text style={[S.cPr, S.tdTx]}>{d.unit_price ? fmtN(d.unit_price) : "—"}</Text>
-            <Text style={[S.cAm, S.tdTx]}>{base > 0 ? fmtN(base) : "—"}</Text>
+            <Text style={[S.cPr, S.tdTx]}>{zero ? "0.00" : d.unit_price ? fmtN(d.unit_price) : "—"}</Text>
+            <Text style={[S.cAm, S.tdTx]}>{zero ? "0.00" : base > 0 ? fmtN(base) : "—"}</Text>
           </View>
 
           {Array.from({ length: EMPTY_ROWS }).map((_, i) => (
@@ -228,7 +230,7 @@ function SplitPurchaseOrderDoc({ d }: { d: PoEmailData }) {
             <Text style={[S.cSk, S.thTx]}>Total</Text>
             <Text style={[S.cQt, S.thTx]}>{num(d.qty).toLocaleString("en-IN")}</Text>
             <Text style={[S.cPr, S.tdTx]}> </Text>
-            <Text style={[S.cAm, S.thTx]}>{base > 0 ? fmtN(base) : "—"}</Text>
+            <Text style={[S.cAm, S.thTx]}>{zero ? "0.00" : base > 0 ? fmtN(base) : "—"}</Text>
           </View>
         </View>
 
@@ -253,16 +255,16 @@ function SplitPurchaseOrderDoc({ d }: { d: PoEmailData }) {
             </View>
             <View style={S.btmRight}>
               <Text style={[S.btmVal, { textAlign: "right", fontFamily: "Helvetica-Bold", color: TEAL }]}>
-                {gst > 0 ? fmtN(gst) : "—"}
+                {zero ? "0.00" : gst > 0 ? fmtN(gst) : "—"}
               </Text>
             </View>
           </View>
 
           <View style={S.totalHL}>
             <Text style={{ flex: 1, fontFamily: "Helvetica-Bold", fontSize: 8 }}>Total</Text>
-            <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 8, marginRight: 20 }}>{GST_RATE * 100}%</Text>
+            <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 8, marginRight: 20 }}>{gstPercent != null ? `${gstPercent}%` : ""}</Text>
             <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 9, color: TEAL }}>
-              {grand > 0 ? fmtN(grand) : "—"}
+              {zero ? "0.00" : grand > 0 ? fmtN(grand) : "—"}
             </Text>
           </View>
 
@@ -297,10 +299,7 @@ function SplitPurchaseOrderDoc({ d }: { d: PoEmailData }) {
 
         <View style={S.decl}>
           <Text style={S.declTitle}>Declaration</Text>
-          <Text style={S.declTxt}>
-            We declare that this purchase order the actual price of the goods described
-            and that all particulars are true and correct.
-          </Text>
+          <Text style={S.declTxt}>{poDeclaration(d.po_type)}</Text>
         </View>
 
       </Page>

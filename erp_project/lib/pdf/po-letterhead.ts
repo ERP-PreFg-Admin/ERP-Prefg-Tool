@@ -24,6 +24,7 @@ export type PoEmailRow = {
   po_no: string
   /** The order this PO was split off, or null. Only the split document prints it. */
   reference_po: string | null
+  po_type?: string | null
   date: string | null
   expected_on: string | null
   destination: string | null
@@ -32,6 +33,7 @@ export type PoEmailRow = {
   sku_name: string | null
   qty: number | string
   unit_price: number | string | null
+  amount_pre_gst?: number | string | null
   total_amount: number | string | null
   mfg_name: string
   mfg_code: string

@@ -3,7 +3,7 @@
 // forever over a rounding remainder — so every boundary is pinned here.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { isDraftPo, poTolerance, splitChildPrice } from "../../lib/po/po-rules"
+import { isDraftPo, poTolerance, splitChildPrice, poTotal, poPrintedAmounts, impliedGstPercent, DEFAULT_GST_PERCENT } from "../../lib/po/po-rules"
 
 test("poTolerance is 10% of qty, floored", () => {
   assert.equal(poTolerance(50), 5)
@@ -77,14 +77,40 @@ test("a PO past raised is never a draft, mailed or not", () => {
   }
 })
 
-test("a split child carries the parent's rate, amount from its own qty", () => {
-  assert.deepEqual(splitChildPrice(123.45, 1000), { unitPrice: 123.45, totalAmount: 123450 })
+test("a split child carries the parent's rate and GST; total includes the GST", () => {
+  assert.deepEqual(splitChildPrice(123.45, 1000, 18), { unitPrice: 123.45, gstPercent: 18, amountPreGst: 123450, totalAmount: 145671 })
   // mysql2 returns DECIMAL as a string
-  assert.deepEqual(splitChildPrice("98.7654", 3), { unitPrice: 98.77, totalAmount: 296.31 })
+  assert.deepEqual(splitChildPrice("98.7654", 3, "5.00"), { unitPrice: 98.77, gstPercent: 5, amountPreGst: 296.31, totalAmount: 311.13 })
 })
 
 test("an unpriced parent gives an unpriced child — NULL, never 0", () => {
   for (const p of [null, undefined, "", 0, "0", "abc"]) {
-    assert.deepEqual(splitChildPrice(p as never, 500), { unitPrice: null, totalAmount: null }, String(p))
+    assert.deepEqual(splitChildPrice(p as never, 500, 18), { unitPrice: null, gstPercent: 18, amountPreGst: null, totalAmount: null }, String(p))
   }
+})
+
+test("poTotal uses the SKU's GST; 0% is a real rate, missing falls back to 18", () => {
+  assert.equal(poTotal(100, 10, 0).totalAmount, 1000)
+  assert.equal(poTotal(100, 10, "12.00").totalAmount, 1120)
+  for (const g of [null, undefined, "", "abc", -1]) assert.equal(poTotal(100, 10, g).gstPercent, DEFAULT_GST_PERCENT, String(g))
+})
+
+test("the PDF prints the stored base and GST; the rate comes from the PO's own amounts", () => {
+  assert.deepEqual(poPrintedAmounts({ amount_pre_gst: "642600", total_amount: "674730" }),
+    { base: 642600, gst: 32130, grand: 674730, gstPercent: 5 })
+})
+
+test("impliedGstPercent survives paise rounding and needs a pre-GST amount", () => {
+  assert.equal(impliedGstPercent("296.31", "311.13"), 5)
+  assert.equal(impliedGstPercent(370.38, 437.05), 18)
+  assert.equal(impliedGstPercent(1000, 1000), 0)
+  assert.equal(impliedGstPercent(null, "1000"), null)
+  assert.equal(impliedGstPercent("0", "0"), null)
+})
+
+test("a PO with no GST snapshot (inward) prints as before: total + flat 18%", () => {
+  assert.deepEqual(poPrintedAmounts({ amount_pre_gst: null, total_amount: "1000" }),
+    { base: 1000, gst: 180, grand: 1180, gstPercent: 18 })
+  assert.deepEqual(poPrintedAmounts({ amount_pre_gst: null, total_amount: null }),
+    { base: 0, gst: 0, grand: 0, gstPercent: 18 })
 })

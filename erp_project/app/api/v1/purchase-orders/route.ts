@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { query, pool } from "@/lib/db"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { makePoRateResolver } from "@/lib/po/po-rate"
+import { priceBulkRows } from "@/lib/po/po-bulk-pricing"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { skus as skusSql } from "@/lib/queries/skus"
 import { manufacturers as mfgsSql } from "@/lib/queries/manufacturers"
@@ -66,6 +67,18 @@ export const POST = withGateway({
       body.rows.map((r) => String((r as Record<string, unknown>).sku_code ?? ""))
     )
 
+    // Priced here, at upload: the preview shows the notes, and the staged CSV
+    // carries the price the approver approves (lib/po/po-bulk-pricing.ts).
+    const priced = await priceBulkRows(body.rows)
+    if (body.action === "check_duplicates") {
+      return NextResponse.json({ duplicates: priced.flags, info: priced.info, unknown_skus: priced.unknownSkus })
+    }
+    // Flagged rows were left out of the preview's upload; re-checked here, never trusted.
+    const skipped = body.rows.length - priced.staged.length
+    if (priced.staged.length === 0) {
+      throw new ApiError(400, "nothing_to_stage", "Every row was flagged — nothing to submit. Check the remarks column.")
+    }
+
     const yyyymm = monthIST()
     const eventId = makeEventId("PO_BULK", "stage")
     recordRawEvent("PO_BULK", eventId, { rowCount: body.rows.length })
@@ -73,14 +86,14 @@ export const POST = withGateway({
     const conn: PoolConnection = await pool.getConnection()
     await conn.beginTransaction()
     try {
-      const { key: s3Key, filename } = await uploadRowsAsCsv(body.rows, `imports/po-bulk/${yyyymm}`, "po_bulk")
+      const { key: s3Key, filename } = await uploadRowsAsCsv(priced.staged, `imports/po-bulk/${yyyymm}`, "po_bulk")
       const approvalId = await stageBulkUploadApproval(conn, {
-        userId, module: "PO_BULK", s3Key, filename, rowCount: body.rows.length,
+        userId, module: "PO_BULK", s3Key, filename, rowCount: priced.staged.length,
       })
       await conn.commit()
-      logger.info({ ...ctx, eventId, approvalId, s3Key, rowCount: body.rows.length, message: "PO bulk upload staged for approval" })
+      logger.info({ ...ctx, eventId, approvalId, s3Key, rowCount: body.rows.length, skipped, message: "PO bulk upload staged for approval" })
       recordProcessedEvent("PO_BULK", eventId, { approvalId, s3Key, rowCount: body.rows.length })
-      return NextResponse.json({ ok: true, approval_id: approvalId, staged: body.rows.length })
+      return NextResponse.json({ ok: true, approval_id: approvalId, staged: priced.staged.length, skipped })
     } catch (err: any) {
       await conn.rollback()
       logger.error({ ...ctx, eventId, err: err.message, stack: err.stack, message: "PO bulk upload staging failed" })
@@ -139,7 +152,7 @@ export const POST = withGateway({
   // client-supplied price is a second source of truth, and the invoice
   // three-way match compares against this same number. `unit_price` /
   // `total_amount` stay in the schema for back-compat but are ignored.
-  const { unitPrice, totalAmount } = await makePoRateResolver()(Number(mfg_id), sku_code, Number(qty))
+  const { unitPrice, amountPreGst, totalAmount } = await makePoRateResolver()(Number(mfg_id), sku_code, Number(qty))
 
   const eventId = makeEventId("PO", "create")
   recordRawEvent("PO", eventId, { mfg_id, sku_code, qty, unit_price: unitPrice, expected_on, destination, reason, po_type })
@@ -150,7 +163,7 @@ export const POST = withGateway({
     await conn.beginTransaction()
     try {
       const [poResult] = await conn.execute(purchaseOrdersSql.insertNormal, [
-        po_no, Number(mfg_id), sku_code, Number(qty), unitPrice, totalAmount, expected_on || null, destination || null,
+        po_no, Number(mfg_id), sku_code, Number(qty), unitPrice, amountPreGst, totalAmount, expected_on || null, destination || null,
         reason?.trim() || null,
         Number(mfg_id), sku_code,
       ])
@@ -178,7 +191,7 @@ export const POST = withGateway({
   await conn.beginTransaction()
   try {
     const [poResult] = await conn.execute(purchaseOrdersSql.insert, [
-      po_no, Number(mfg_id), sku_code, Number(qty), unitPrice, totalAmount, expected_on || null, po_type, destination || null,
+      po_no, Number(mfg_id), sku_code, Number(qty), unitPrice, amountPreGst, totalAmount, expected_on || null, po_type, destination || null,
       reason?.trim() || null,
       Number(mfg_id), sku_code,
     ])

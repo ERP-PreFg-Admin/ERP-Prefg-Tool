@@ -20,10 +20,14 @@ import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { skus as skusSql } from "@/lib/queries/skus"
 import { parseS3Import } from "@/lib/import-s3"
 import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
+import type { PoolConnection } from "mysql2/promise"
 import { type ModuleHandler, s3KeyOf } from "./types"
 import { brandCode } from "@/lib/constants"
 import { isoDate, normalizeDateCell } from "@/lib/date"
 import { makePoRateResolver } from "@/lib/po/po-rate"
+import { stagedPrice } from "@/lib/po/po-rate-note"
+import { BULK_PO_TYPES, isSpecialPoType, specialPoPrice } from "@/lib/po/po-rules"
+import { bulkUpdateBlock } from "@/lib/po/po-bulk-check"
 
 export const poHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
@@ -35,6 +39,73 @@ export const poHandler: ModuleHandler = {
 }
 
 
+
+/**
+ * One CREATE row of an approved PO_BULK file, on the approval's open connection
+ * (no transaction of its own). Exported so the approval-time rules — the staged
+ * type and price, the once-per-pair re-check — are testable under withRollback.
+ */
+export async function createBulkPoRow(
+  conn: PoolConnection,
+  row: Record<string, string>,
+  ctx: { s3Key: string; approverId: number; resolvePoRate: ReturnType<typeof makePoRateResolver> },
+): Promise<{ poId: number; poNo: string } | { skip: string }> {
+  const { s3Key, approverId, resolvePoRate } = ctx
+  const mfgCode = row.mfg_code?.trim()
+  const skuCode = row.sku_code?.trim()
+  const qty = Number(row.qty)
+  if (!mfgCode || !skuCode || !Number.isFinite(qty) || qty <= 0) {
+    return { skip: `(blank po_no, sku=${skuCode || "?"}): missing/invalid mfg_code, sku_code, or qty` }
+  }
+
+  const [mfgRows] = await conn.execute(`SELECT id FROM master_mfgs WHERE code = ? LIMIT 1`, [mfgCode])
+  const mfg = (mfgRows as any[])[0]
+  if (!mfg) { return { skip: `${skuCode}: manufacturer "${mfgCode}" not found` } }
+
+  const [skuRows] = await conn.execute(skusSql.selectStatusAndBrandByCode, [skuCode])
+  const sku = (skuRows as any[])[0]
+  if (!sku) { return { skip: `${skuCode}: SKU not found` } }
+
+  // The type the server staged at upload; files staged before the column read as normal.
+  const poType = row.priced_at?.trim() ? (row.po_type?.trim() || "normal") : "normal"
+  if (!(BULK_PO_TYPES as readonly string[]).includes(poType)) {
+    return { skip: `${skuCode}: invalid po_type "${poType}"` }
+  }
+  // Re-checked here, on this connection: another file may have been approved
+  // since upload, and earlier rows of this file are visible to it too.
+  if (isSpecialPoType(poType)) {
+    const [live] = await conn.execute(purchaseOrdersSql.selectLiveSpecialPo, [mfg.id, skuCode, poType])
+    const clash = (live as { po_no: string }[])[0]
+    if (clash) { return { skip: `${skuCode}: a ${poType} PO is already raised at ${mfgCode} (${clash.po_no})` } }
+  }
+
+  const expectedOn = normalizeDateCell(row.expected_on) || null
+  const destination = row.destination?.trim() || null
+  const remarks = row.remarks?.trim().slice(0, 300) || null
+
+  const rawBrand = sku.brand?.trim() || skuCode.split("-")[0]
+  const brand = brandCode(rawBrand)
+  const year = new Date().getFullYear()
+  const month = String(new Date().getMonth() + 1).padStart(2, "0")
+  const poPrefix = `${brand}-${poType === "impromptu" ? "IMP" : "PO"}-${year}${month}`
+  const [cntRows] = await conn.execute(purchaseOrdersSql.countByPrefix, [`${poPrefix}-%`])
+  const seq = (Number((cntRows as any[])[0]?.cnt ?? 0) + 1).toString().padStart(3, "0")
+  const newPoNo = `${poPrefix}-${seq}`
+
+  // The price staged at upload (what the approver saw); files staged
+  // before upload-time pricing carry no priced_at and resolve here.
+  const { unitPrice, amountPreGst, totalAmount } = isSpecialPoType(poType)
+    ? specialPoPrice()
+    : stagedPrice(row) ?? await resolvePoRate(mfg.id, skuCode, qty)
+
+  const [poResult] = await conn.execute(purchaseOrdersSql.insertBulkPo, [
+    newPoNo, mfg.id, skuCode, qty, unitPrice, amountPreGst, totalAmount, expectedOn, poType, destination, remarks, s3Key,
+    mfg.id, skuCode,
+  ])
+  const poId = (poResult as any).insertId
+  await conn.execute(purchaseOrdersSql.insertPoHistory, [poId, newPoNo, "create", null, null, null, s3Key, approverId])
+  return { poId, poNo: newPoNo }
+}
 
 const VALID_STATUSES = ["draft", "raised", "punched", "short_closed", "partially_received", "received", "cancelled"]
 
@@ -68,6 +139,9 @@ export const poBulkHandler: ModuleHandler = {
           if (rawStatus && !VALID_STATUSES.includes(rawStatus)) {
             skipped++; skipReasons.push(`${poNo}: invalid status "${row.status}"`); continue
           }
+          // Re-checked here: the PO may have been mailed since the file was uploaded.
+          const blocked = bulkUpdateBlock(existing, row)
+          if (blocked) { skipped++; skipReasons.push(`${poNo}: ${blocked}`); continue }
           const rawExpectedOn = normalizeDateCell(row.expected_on) || null
           const rawDestination = row.destination?.trim() || null
           // Truncated, not rejected: the column is VARCHAR(300) and a long note
@@ -96,44 +170,8 @@ export const poBulkHandler: ModuleHandler = {
           updated++
         } else {
           // ── Create path ──────────────────────────────────────────────────
-          const mfgCode = row.mfg_code?.trim()
-          const skuCode = row.sku_code?.trim()
-          const qty = Number(row.qty)
-          if (!mfgCode || !skuCode || !Number.isFinite(qty) || qty <= 0) {
-            skipped++; skipReasons.push(`(blank po_no, sku=${skuCode || "?"}): missing/invalid mfg_code, sku_code, or qty`); continue
-          }
-
-          const [mfgRows] = await conn.execute(`SELECT id FROM master_mfgs WHERE code = ? LIMIT 1`, [mfgCode])
-          const mfg = (mfgRows as any[])[0]
-          if (!mfg) { skipped++; skipReasons.push(`${skuCode}: manufacturer "${mfgCode}" not found`); continue }
-
-          const [skuRows] = await conn.execute(skusSql.selectStatusAndBrandByCode, [skuCode])
-          const sku = (skuRows as any[])[0]
-          if (!sku) { skipped++; skipReasons.push(`${skuCode}: SKU not found`); continue }
-
-          const expectedOn = normalizeDateCell(row.expected_on) || null
-          const destination = row.destination?.trim() || null
-          const remarks = row.remarks?.trim().slice(0, 300) || null
-
-          const rawBrand = sku.brand?.trim() || skuCode.split("-")[0]
-          const brand = brandCode(rawBrand)
-          const year = new Date().getFullYear()
-          const month = String(new Date().getMonth() + 1).padStart(2, "0")
-          const poPrefix = `${brand}-PO-${year}${month}`
-          const [cntRows] = await conn.execute(purchaseOrdersSql.countByPrefix, [`${poPrefix}-%`])
-          const seq = (Number((cntRows as any[])[0]?.cnt ?? 0) + 1).toString().padStart(3, "0")
-          const newPoNo = `${poPrefix}-${seq}`
-
-          // Server-resolved, cached per manufacturer. An unrated recipe yields
-          // null rather than an understated figure — see lib/po/po-rate.ts.
-          const { unitPrice, totalAmount } = await resolvePoRate(mfg.id, skuCode, qty)
-
-          const [poResult] = await conn.execute(purchaseOrdersSql.insertBulkPo, [
-            newPoNo, mfg.id, skuCode, qty, unitPrice, totalAmount, expectedOn, destination, remarks, s3Key,
-            mfg.id, skuCode,
-          ])
-          const poId = (poResult as any).insertId
-          await conn.execute(purchaseOrdersSql.insertPoHistory, [poId, newPoNo, "create", null, null, null, s3Key, approverId])
+          const res = await createBulkPoRow(conn, row, { s3Key, approverId, resolvePoRate })
+          if ("skip" in res) { skipped++; skipReasons.push(res.skip); continue }
           created++
         }
       } catch (err: any) {

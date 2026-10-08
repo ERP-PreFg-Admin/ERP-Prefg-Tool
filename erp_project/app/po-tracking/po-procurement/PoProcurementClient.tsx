@@ -338,6 +338,8 @@ export default function PoProcurementClient({
               endpoint="/api/v1/purchase-orders"
               templateFilename="po_bulk_template.csv"
               fields={PO_BULK_CSV_FIELDS}
+              enableDuplicateCheck
+              checkValidRowsOnly
               onSuccess={afterAction}
             />
             <Button variant="outline" size="lg" onClick={() => router.push("/po-tracking/po-procurement/entity-emails")}>
@@ -402,6 +404,9 @@ export default function PoProcurementClient({
                   <option value="">All Types</option>
                   <option value="normal">Normal</option>
                   <option value="impromptu">Impromptu</option>
+                  <option value="npd">NPD</option>
+                  <option value="tech_transfer">Tech Transfer</option>
+                  <option value="cpr">CPR</option>
                   {/* Procurement filters inward POs out at the query, so
                       offering the type here would only ever return nothing. */}
                   {isInwarding && <option value="inward">Inward</option>}

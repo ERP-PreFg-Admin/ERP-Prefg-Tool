@@ -18,6 +18,9 @@ export type PoRow = {
   bom_code: string | null
   qty: string | number
   unit_price: string | number | null
+  gst_percent: string | number | null
+  amount_pre_gst: string | number | null
+  /** Includes GST (amount_pre_gst × (1 + gst_percent/100)); inward POs mirror the invoice. */
   total_amount: string | number | null
   expected_on: string | null
   received_qty: string | number | null
@@ -70,7 +73,7 @@ export type PoRow = {
    * action, which is limited to POs still awaiting approval.
    */
   raw_status: PoStatus | null
-  po_type: "normal" | "impromptu" | "inward" | null
+  po_type: "normal" | "impromptu" | "inward" | "npd" | "tech_transfer" | "cpr" | null
   attachment_key: string | null
   csv_source_key: string | null
   email_sent_at: string | null

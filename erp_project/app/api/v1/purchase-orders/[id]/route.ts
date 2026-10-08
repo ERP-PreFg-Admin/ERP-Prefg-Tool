@@ -16,6 +16,8 @@ import { poIdParamSchema } from "@/lib/validation/purchase-order-detail"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { todayIST } from "@/lib/date"
+import { poTotal } from "@/lib/po/po-rules"
+import { skuGstPercent } from "@/lib/po/po-rate"
 
 export const PUT = withGateway({
   paramsSchema: poIdParamSchema,
@@ -28,7 +30,8 @@ export const PUT = withGateway({
   await assertPoInScope(Number(session.user.id), poId)
 
   const body = await req.json()
-  const { mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, reason } = body
+  // total_amount from the body is ignored — recomputed below with the SKU's GST.
+  const { mfg_id, sku_code, qty, unit_price, expected_on, destination, reason } = body
 
   if (!mfg_id)                  return NextResponse.json({ error: "Manufacturer is required." }, { status: 400 })
   if (!sku_code)                 return NextResponse.json({ error: "SKU is required." }, { status: 400 })
@@ -91,12 +94,13 @@ export const PUT = withGateway({
   const conn: PoolConnection = await pool.getConnection()
   await conn.beginTransaction()
   try {
-    const unitPrice   = unit_price   != null && unit_price   !== "" ? Number(unit_price)   : null
-    const totalAmount = total_amount != null && total_amount !== "" ? Number(total_amount) : null
+    const { unitPrice, amountPreGst, totalAmount } =
+      poTotal(unit_price, Number(qty), await skuGstPercent(sku_code))
 
     // Update PO fields
     await conn.execute(purchaseOrdersSql.updateDraft, [
-      Number(mfg_id), sku_code, Number(qty), unitPrice, totalAmount, expected_on || null, destination || null,
+      Number(mfg_id), sku_code, Number(qty), unitPrice, amountPreGst, totalAmount,
+      expected_on || null, destination || null,
       reason?.trim() || null,
       // Re-resolved: this edit can change the SKU or the manufacturer, either of
       // which leaves the stamped Recipe describing an order that no longer exists.

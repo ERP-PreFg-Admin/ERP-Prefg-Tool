@@ -6,7 +6,8 @@ import { MATCH_TOLERANCE } from "@/lib/invoice/three-way"
  * route re-serializes them to CSV, uploads to S3, and stages a PO_BULK
  * approval — poBulkHandler.applyAndArchive does the real create/update. */
 export const poBulkSchema = z.object({
-  action: z.literal("bulk"),
+  // check_duplicates is CsvImportDialog's post-parse preview: priced, nothing staged.
+  action: z.enum(["bulk", "check_duplicates"]),
   rows: z.array(z.record(z.string(), z.string())),
 })
 

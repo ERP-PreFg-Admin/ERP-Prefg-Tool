@@ -12,13 +12,13 @@ import { splitChildPrice } from "../../lib/po/po-rules"
 after(closePool)
 
 async function insertChild(conn: PoolConnection, parent: { po_no: string; mfg_id: number; sku_code: string; unit_price: number | null }, n: number, qty: number) {
-  const price = splitChildPrice(parent.unit_price, qty)
+  const price = splitChildPrice(parent.unit_price, qty, 18)
   const [res] = await conn.execute<ResultSetHeader>(purchaseOrdersSql.insertSplit, [
-    `${parent.po_no}-S00${n}`, parent.mfg_id, parent.sku_code, qty, price.unitPrice, price.totalAmount,
-    null, "raised", null, parent.po_no, null, parent.mfg_id, parent.sku_code,
+    `${parent.po_no}-S00${n}`, parent.mfg_id, parent.sku_code, qty, price.unitPrice, price.amountPreGst, price.totalAmount,
+    null, "raised", null, parent.po_no, "normal", null, parent.mfg_id, parent.sku_code,
   ])
-  const [rows] = await conn.execute(`SELECT unit_price, total_amount FROM purchase_orders WHERE id = ?`, [res.insertId])
-  return (rows as { unit_price: string | null; total_amount: string | null }[])[0]
+  const [rows] = await conn.execute(`SELECT unit_price, amount_pre_gst, total_amount FROM purchase_orders WHERE id = ?`, [res.insertId])
+  return (rows as { unit_price: string | null; amount_pre_gst: string | null; total_amount: string | null }[])[0]
 }
 
 async function openValue(conn: PoolConnection, mfgId: number): Promise<number | null> {
@@ -30,19 +30,20 @@ async function openValue(conn: PoolConnection, mfgId: number): Promise<number | 
 test("a split child is stored with the parent's rate and its own amount", async () => {
   await withRollback(async (conn) => {
     const a = await anchors(conn)
-    if (!a) return
+    assert.ok(a, "this schema has no manufacturer / active SKU / user")
     const parent = await makePo(conn, a, { qty: 3000, unit_price: 123.45 })
 
     const child = await insertChild(conn, parent, 1, 1000)
     assert.equal(Number(child.unit_price), 123.45)
-    assert.equal(Number(child.total_amount), 123450)
+    assert.equal(Number(child.amount_pre_gst), 123450)
+    assert.equal(Number(child.total_amount), 145671, "total includes 18% GST")
   })
 })
 
 test("an unpriced parent gives an unpriced child", async () => {
   await withRollback(async (conn) => {
     const a = await anchors(conn)
-    if (!a) return
+    assert.ok(a, "this schema has no manufacturer / active SKU / user")
     const parent = await makePo(conn, a, { qty: 3000, unit_price: null })
 
     const child = await insertChild(conn, parent, 1, 1000)
@@ -54,11 +55,11 @@ test("an unpriced parent gives an unpriced child", async () => {
 test("splitting does not change the manufacturer's open value", async () => {
   await withRollback(async (conn) => {
     const a = await anchors(conn)
-    if (!a) return
+    assert.ok(a, "this schema has no manufacturer / active SKU / user")
     const parent = await makePo(conn, a, { qty: 3000, unit_price: 100 })
 
     const before = await openValue(conn, a.mfgId)
-    if (before == null) return // anchor mfg has no active details_mfg row in this schema
+    assert.ok(before != null, "the anchor manufacturer has no active details_mfg row")
 
     await insertChild(conn, parent, 1, 1000)
     await insertChild(conn, parent, 2, 2000)

@@ -1,10 +1,4 @@
 // Attachment size ceiling for outbound mail.
-//
-// Split out of lib/mail/mailer.ts so it is unit-testable: importing the mailer pulls
-// in lib/db (which opens a pool at module load), lib/pdf and lib/uniware, none of
-// which belong in a pure test. Same reasoning as lib/po-split.ts vs
-// lib/po/po-receive.ts.
-
 /**
  * SESv2 caps a raw message at 40 MB. Nodemailer base64-encodes attachments into
  * the MIME body, which inflates them by roughly 33%, so the usable raw budget is

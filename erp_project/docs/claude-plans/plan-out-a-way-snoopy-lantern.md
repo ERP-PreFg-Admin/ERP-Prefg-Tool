@@ -1,281 +1,264 @@
+> **SUPERSEDED 2026-10-06** by `docs/po-bulk-type-plan.md`: the PO type now comes from an explicit
+> `po_type` CSV column (normal · impromptu · npd · tech_transfer · cpr), never from remarks.
+
 # NPD Purchase Orders
+
+> **Revised 2026-10-06.** Re-checked against the code after `badaabf` / v0.1.15
+> and aligned with `docs/po-bulk-pricing-plan.md`, which this now builds on.
+> What changed is listed at the end.
 
 ## Context
 
 New products are ordered ~3 months ahead, before their recipe exists and before
-any cost is agreed. Today that PO cannot be raised at all: `poCreateSchema`
-demands a positive `recipe_id`, the API rejects a non-`active` SKU, the SKU
-picker `INNER JOIN`s `master_recipe_mfg` so an NPD SKU never appears, and the
-rate is computed from Agreed Final Costing and is a read-only field in both
-dialogs.
+any cost is agreed. Today that PO cannot be raised through the Add PO dialog:
+`poCreateSchema` demands a positive `recipe_id`, the API rejects a non-`active`
+SKU, the SKU picker `INNER JOIN`s `master_recipe_mfg` so an NPD SKU never
+appears, and the rate is computed from Agreed Final Costing.
 
-Decisions taken with Ajay before writing this:
+Decisions taken with Ajay:
 
 | | |
 |---|---|
-| Entry path | **CSV bulk upload on the existing FG PO page.** No new page, no new dialog, no new permission slug. |
+| Entry path | **CSV bulk upload on the existing FG PO page.** No new page, dialog or permission slug. |
 | How NPD is recognised | The CSV's existing **`remarks` column** — NPD files always say something containing "NPD". |
-| Price | **Zero.** No rate on an NPD PO at all; the supplier invoice carries the truth later. The PO is **never re-rated**. |
-| SKU | The CSV always carries a SKU code. If it exists in `master_skus`, use it. If not, **insert it, marked NPD** so it stands as a visible to-do: recipe and costs still owed. |
-| Approval | Yes — the CSV path already stages a `PO_BULK` approval, so this is satisfied for free. |
-| Uniware | Nothing to do. Procurement POs are never pushed; only inward POs at invoice time. |
+| Price | **None.** Stored as `unit_price = NULL`, never re-rated; the supplier invoice carries the truth. Applies even when the SKU already has costing. |
+| SKU | If the code exists in `master_skus`, use it. If not, **insert a stub marked NPD** so it stands as a visible to-do: recipe and costs still owed. |
+| Approval | The existing `PO_BULK` approval. |
+| Uniware | Nothing to do — procurement POs are never pushed. |
+
+## Sequencing and gates
+
+**Depends on `docs/po-bulk-pricing-plan.md` landing first.** That plan prices
+rows at upload and adds the non-blocking per-row preview note; NPD is one more
+status in the same classifier and one more note in the same preview.
+
+1. **Migration on dev only** — `po_type` gains `'npd'`. **Stop.** Prod needs its
+   own go-ahead, and must run **before** the deploy (MySQL rejects an unknown
+   ENUM value, so a deploy without it fails every NPD row).
+2. **Detection + pricing status** (pure) + unit tests.
+3. **Upload and approval path** — preview verdict, locked "no price", stub SKU,
+   NPD PO number, `po_type = 'npd'`. Gate: the DB test below.
+4. **Splits inherit NPD.** Gate: splitting an NPD PO on dev yields NPD children.
+5. **PDF wording**, both templates. **Gate: Ajay approves the wording before the
+   first NPD PO is mailed** — the first send freezes the PDF in S3.
+6. **UI badge + filter.** Deploy.
 
 ## The decision
 
-**NPD is a fourth `po_type`, not a status and not a new column** — mirroring
-exactly how `inward` was added (`prisma/add_inward_po_type.sql`, and the
-reasoning in `docs/superpowers/specs/2026-08-03-invoice-inwarding-design.md`).
-One enum value buys filtering, badging, reporting and the PDF branch.
+**NPD is a fourth `po_type`**, not a status and not a new column — exactly how
+`inward` was added (`prisma/add_inward_po_type.sql`). One enum value buys
+filtering, badging, reporting and the PDF branch.
 
-`remarks` is parsed **once, at ingest**, and the verdict is stored as
-`po_type = 'npd'`. Nothing downstream ever does `LIKE '%NPD%'` — remarks is
-free text and must not become a query predicate.
+`remarks` is parsed **once, at upload**, and the verdict travels in the staged
+CSV and is stored as `po_type = 'npd'`. Nothing downstream ever does
+`LIKE '%NPD%'`.
 
-**"Zero price" is stored as `unit_price = NULL`, not `0`.** Three reasons, and
-the third is the one that matters:
-
-1. `insertBulkPo` already writes no price columns, so NULL is what the path
-   does today — the price needs *no code at all*.
-2. The PDF and mail layers already collapse `0` into nothing anyway:
-   `po-document.tsx:264` is `d.unit_price ? … : "—"` and `mailer.ts:212` is
-   `po.unit_price ? Number(…) : null`. Both are falsy checks, so a stored `0`
-   and a NULL are indistinguishable by the time they reach paper.
-3. **A stored `0` is dangerous where NULL is safe.** `three-way.ts:341` guards
-   the unpriced case on NULL; a literal `0` slips past that guard and values
-   received goods at ₹0 rather than flagging them unpriced. Same shape in
-   `supplier-invoices.ts:171` (`SUM(rejected_qty * unit_price)`). NULL means
-   "no price"; `0` asserts "free", and the codebase already believes the
-   difference.
+**No price is `NULL`, not `0`.** A stored `0` asserts "free" and slips past the
+unpriced guard in `lib/invoice/three-way.ts:364` (`po_unit_price == null`),
+valuing received goods at ₹0 instead of flagging them unpriced. Same shape in
+`supplier-invoices.ts` (`SUM(rejected_qty * unit_price)`). The PDF and mail
+layers already render a NULL price as `—`.
 
 ## What already works — do not touch
 
-Worth stating, because it's most of the problem:
-
-- **`expected_on` has no upper bound.** Only backdating is forbidden
-  (`lib/validation/purchase-orders.ts:36-43`). A 3-month-ahead date is already legal.
-- **`recipe_id` already degrades to NULL.** `RECIPE_ID_FOR_LINE`
-  (`lib/queries/purchase-orders.ts:102-114`) is a scalar subquery that resolves
-  to NULL with no live line, and *every* join from `purchase_orders` to
-  `master_recipe` is LEFT — the row is never dropped.
-- **`sku_code`, `unit_price`, `total_amount`, `recipe_id` are all nullable already.**
-- **The bulk path writes no price and no `recipe_id`** — so an unpriced,
-  recipe-less PO is already exactly what this path produces. Zero price needs
-  nothing built.
-- **The bulk path already skips the `status = 'active'` SKU gate** — it only
-  checks `if (!sku)` (`lib/approvals/handlers/purchase-orders.ts:110`). So a
-  `new launch` SKU needs no gate change on this path.
-- **`master_skus_status` already has `new launch`** (`prisma/schema.prisma:1271-1279`,
-  stored as the literal `"new launch"`). Nothing reads it. It is the correct
-  status for a stub — no migration needed.
-- **`sku_type` is free-text `varchar`, not an enum**, and its dropdown is built
-  from `SELECT DISTINCT sku_type` (`lib/queries/skus.ts:256-258`, cached in
-  `lib/cached-reference-data.ts:87`). So `'NPD'` needs **no migration and no UI
-  code** — it appears in the SKU Master filter the moment the first stub exists.
-- **Brand scope survives an unknown code.** `assertSkuCodesInBrandScope`
-  (`lib/brand-guard.ts:110-111`) iterates only rows it found, so a brand-new
-  `sku_code` passes. See step 4 for the check that has to replace it.
-- **`overviewByMfg.open_value` needs no change.** `SUM(COALESCE(total_amount, 0))`
-  (`lib/queries/manufacturing.ts:139`) — an unpriced NPD PO contributes 0, which
-  is honest, and is already what every bulk-created PO does today. This was a
-  required fix while the rate was ₹50; at zero price it disappears.
+- **`expected_on` has no upper bound** — only backdating is refused.
+- **`recipe_id` degrades to NULL** through `RECIPE_ID_FOR_LINE`, and every join
+  from `purchase_orders` to `master_recipe` is LEFT.
+- **`sku_code`, `unit_price`, `total_amount`, `recipe_id` are nullable.**
+- **The bulk path skips the `status = 'active'` SKU gate** — it only checks the
+  SKU exists (`handlers/purchase-orders.ts:112`), so a `new launch` stub passes.
+- **`master_skus_status` already has `new launch`** (`schema.prisma:1322`,
+  stored as the literal `"new launch"`).
+- **`sku_type` is free text**, its dropdown built from `SELECT DISTINCT`, so
+  `'NPD'` needs no migration and appears in the SKU Master filter on first use.
+- **`overviewByMfg.open_value`** sums `COALESCE(total_amount, 0)` — an unpriced
+  NPD PO contributes 0, honestly.
+- **PO mails need nothing.** NPD lines sit in the normal Raised/Cancelled/Open
+  tables; the Excel's Rate cell is already blank for a NULL price; an NPD send is
+  not impromptu, so it keeps the Current Open table; the split summary mail has
+  no price column.
 
 ## Changes
 
 ### 1. Migration — `prisma/add_npd_po_type.sql`
 
-Copy the header convention from `prisma/add_inward_po_type.sql` (WHAT / WHY /
-SAFETY / RE-RUNNABLE / STATE AS OF, surveyed per schema / Verify with).
+Header convention from `prisma/add_inward_po_type.sql`.
 
 ```sql
 ALTER TABLE purchase_orders
   MODIFY COLUMN po_type ENUM('normal','impromptu','inward','npd') DEFAULT 'impromptu';
 ```
 
-Append at the end so no existing ordinal moves. Keep
-`prisma/schema.prisma`'s `purchase_orders_type` enum in sync. **Dev only** until
-Ajay gives a separate go-ahead for prod.
+Appended last so no existing ordinal moves; keep `schema.prisma`'s
+`purchase_orders_type` in sync. Re-runnable (a MODIFY to the same definition is a
+no-op).
 
 ### 2. Detection — `lib/po/po-rules.ts`
 
-This file is already the home of pure PO predicates (`isDraftPo`, `poTolerance`)
-and is unit-testable. One addition:
-
 ```ts
-/** NPD is declared in the uploader's own remarks text, not a dedicated column.
- *  Not \bNPD\b: "_" is a word char, so NPD_TRIAL would miss. */
+/** NPD is declared in the uploader's remarks. Not \bNPD\b: "_" is a word char. */
 export function isNpdRemark(remarks: string | null | undefined): boolean {
   return /(^|[^a-z0-9])npd([^a-z0-9]|$)/i.test(remarks ?? "")
 }
 ```
 
-No rate constant — there is no rate.
+### 3. Pricing status — `lib/po/po-rate-note.ts` (from the bulk-pricing plan)
 
-### 3. CSV columns — `app/po-tracking/po-procurement/po-bulk-fields.ts`
+Add a fifth status, **`npd`**, checked **before** any rate lookup: no price, note
+`NPD — no price; the invoice governs`. This is what makes an NPD row on an
+*already costed* SKU stay unpriced — today's `resolvePoRate` would price it.
 
-Two fields promoted from "export-only, ignored on import" to declared optional.
-Both exist only to build the SKU stub in step 5:
+### 4. Upload — `app/api/v1/purchase-orders/route.ts`
 
-| Field | Why |
-|---|---|
-| `brand` | Explicit brand for a **new** SKU stub. Not derived — `skuCode.split("-")[0]` is a guess and silently wrong. |
-| `sku_name` | The stub's `name`. Already an export column, so a downloaded file already carries it. |
+Inside the bulk-pricing plan's `priceBulkRows`, for each create row with
+`isNpdRemark(remarks)`:
 
-`unit_price` stays ignored on import, exactly as the block comment at `:13-15`
-already says. Nothing to change there.
+- status `npd` → staged `unit_price` / `total_amount` blank, `priced_at` set, and
+  a new staged column **`po_type = npd`** (server-written, like the price — a
+  client-sent `po_type` is overwritten).
+- **Unknown SKU** → note `New SKU — will be created as an NPD stub (brand X)`
+  instead of `will be skipped`. Needs the CSV `brand` cell; without it the row is
+  **flagged** (blocking): a stub with a guessed brand is wrong silently.
+- **Brand scope for new codes.** `assertSkuCodesInBrandScope`
+  (`lib/brand-guard.ts:97`) only checks codes it finds, so a new code passes
+  unchecked. For each NPD row with a new code, resolve its `brand` and
+  `assertInScope(scope, "brand", brandId)`, rejecting the upload on a violation.
+  It must be here: the handler runs as the approver, and the approvals queue is
+  not brand-scoped.
 
-### 4. Brand scope for new SKUs — `app/api/v1/purchase-orders/route.ts`
+The preview note per row is the mitigation for risk 1: the uploader sees the
+NPD verdict before submitting.
 
-In the bulk branch, beside the existing `assertSkuCodesInBrandScope` call
-(`:63-66`). It must be **here, at upload**, not in the handler — the comment at
-`:61-62` explains why: the handler runs as the approver and the approvals queue
-is deliberately not brand-scoped, so upload is the only point the uploader's own
-grant is knowable.
+### 5. CSV columns — `app/po-tracking/po-procurement/po-bulk-fields.ts`
 
-For every row that is NPD (`isNpdRemark`) **and** carries a `brand` cell,
-resolve the brand and `assertInScope(scope, "brand", brandId)`. Reject the whole
-upload on a violation, as the existing call does.
+Declare two optional fields, both used only for the stub: `brand` (explicit —
+never `skuCode.split("-")[0]`) and `sku_name` (already an export column). The
+`unit_price` column stays undeclared; the server writes it.
 
-### 5. Bulk handler — `lib/approvals/handlers/purchase-orders.ts`
+### 6. Approval — `lib/approvals/handlers/purchase-orders.ts`
 
-All inside the existing create path (`:96-131`):
+Create path (`:98-138`), reading the staged columns:
 
-- `const isNpd = isNpdRemark(remarks)` — read `remarks` up before the SKU lookup
-  (it's currently read at `:114`, after).
-- **SKU upsert, marked NPD.** Replace the `if (!sku) { skipped++ }` bail at
-  `:110`: if `!sku` **and** `isNpd`, insert a stub, then carry on with the brand
-  just written. A non-NPD row with an unknown SKU still skips, unchanged.
+- `const isNpd = row.po_type === "npd"` — the **staged verdict**, not a second
+  parse of remarks, so approval cannot disagree with what the uploader saw.
+- **Stub SKU.** Where `if (!sku) { skipped++ }` sits (`:112`): if `!sku && isNpd`,
+  insert the stub and carry on with its brand. A non-NPD unknown SKU still skips.
+  `skusSql.insertSku` (`lib/queries/skus.ts:301`) writes six columns and has no
+  `sku_type` — add one.
 
-  The existing `skusSql.insertSku` writes 6 columns
-  (`sku_code, name, brand, category, status, created_by`) and has no `sku_type`
-  slot, so it needs one added — that is the only query change here.
+  | Column | Value |
+  |---|---|
+  | `sku_code` | the CSV cell |
+  | `name` | `row.sku_name \|\| skuCode` |
+  | `brand` | the CSV `brand` cell |
+  | **`sku_type`** | **`'NPD'`** — the to-do mark |
+  | `status` | `'new launch'` — keeps it out of the Add PO dialog |
+  | `created_by` | `approverId` |
 
-  | Column | Value | Why |
-  |---|---|---|
-  | `sku_code` | the CSV cell | as given, unchanged |
-  | `name` | `row.sku_name \|\| skuCode` | `sku_name` is already an export column |
-  | `brand` | the CSV `brand` cell | explicit, never guessed from the code prefix |
-  | **`sku_type`** | **`'NPD'`** | **the mark.** Free text, so no migration; shows in the SKU Type column and becomes a filter value automatically |
-  | `status` | `'new launch'` | already in the enum. Keeps the stub out of the normal Add PO dialog, which demands `active` |
-  | `created_by` | `approverId` | |
+- **Price** comes from the staged columns (blank = NULL), per the bulk-pricing
+  plan. No rate lookup for NPD.
+- **PO number:** `${brand}-${isNpd ? "NPD" : "PO"}-${yyyymm}-${seq}`
+  (`:122`), matching the `IMP` tag in the create route.
+- **`insertBulkPo`** (`lib/queries/purchase-orders.ts:732`) hard-codes
+  `'normal'` — make `po_type` a parameter. It already takes `unit_price` and
+  `total_amount`; its docstring (`:730`) still omits them — fix it in the same
+  edit, since the new parameter changes the count. Keep `recipe_id`'s two
+  resolver params at the tail.
 
-  Together these make the to-do list answerable with no new screen: SKU Master,
-  filter SKU Type = NPD, and the Recipe column already renders `—` for anything
-  with no recipe (`app/masters/skus/SkusClient.tsx:79`). Setting `sku_type` also
-  silences the spurious "SKU Type" missing-field warning a bare stub would raise
-  (`SkusClient.tsx:51`).
-- **PO number.** `${brand}-${isNpd ? "NPD" : "PO"}-${yyyymm}-${seq}` — same shape
-  as the `IMP` tag at `app/api/v1/purchase-orders/route.ts:131`.
-- Pass `isNpd ? "npd" : "normal"` as the new `po_type` param.
+### 7. Splits inherit NPD — **new**
 
-**No price logic.** `insertBulkPo` writes no `unit_price` and no `total_amount`
-today, and that is precisely the wanted behaviour.
+`insertSplit` (`lib/queries/purchase-orders.ts:725`) stamps every child
+`'normal'`. An NPD PO that is split would yield normal children: no badge, no
+filter, and the ordinary price declaration on their PDF. Pass
+`po.po_type === 'npd' ? 'npd' : 'normal'` from the split route
+(`app/api/v1/purchase-orders/[id]/split/route.ts`), so only NPD changes and the
+existing impromptu behaviour is untouched. Children carry no price already.
 
-### 6. `insertBulkPo` — `lib/queries/purchase-orders.ts:725`
+### 8. PDF — both templates
 
-One change: `po_type` becomes a parameter instead of the hardcoded `'normal'`.
-Keep `recipe_id` last — the docstring at `:398-404` explains that its two
-resolver params must stay at the tail of the array or a miscount shifts every
-value silently.
+At no price every money cell already renders `—`. Two residual problems, in
+**both** `lib/pdf/po-document.tsx` and `lib/pdf/split-po-document.tsx`:
 
-### 7. PDF — say why the prices are blank
+- the GST row prints an `18%` label (`po-document.tsx:310`) beside `—` amounts;
+- the declaration (`po-document.tsx:367`, `split-po-document.tsx:301`) affirms
+  "the actual price of the goods" on a document that states none.
 
-At zero price every money cell already renders `—` (`po-document.tsx:264, 265,
-289, 318, 328`), so there is no fabricated number on the document. Two residual
-problems worth one small branch:
+When `po_type === 'npd'`: suppress the percentage label and replace the
+declaration with a pricing-to-be-confirmed line. **Wording is Ajay's call.**
 
-- `:326` prints the GST label **"18%"** unconditionally, even when every money
-  cell beside it is `—`.
-- `:366-369` prints *"We declare that this purchase order the actual price of
-  the goods described and that all particulars are true and correct"* over a
-  document that states no price at all.
+Needs `po_type` on the PDF row: `selectForEmail` does not select it — add it
+there and to `PoEmailRow` (`lib/pdf/po-letterhead.ts`). (`buildSelectByIds`
+already selects it, since the impromptu mail change.)
 
-So, when `po_type === 'npd'`: suppress the GST percentage label and replace the
-declaration with a line saying pricing is to be confirmed and the invoice
-governs. Exact wording is Ajay's call.
-
-This needs `po_type` on the row: `purchaseOrdersSql.selectForEmail`
-(`:955-995`) does not select it — add it there and to `PoEmailRow` in
-`lib/pdf/po-letterhead.ts:23-67`.
-
-`lib/mail/mailer.ts:110-125` freezes the PDF bytes into S3 on first send, so
-this has to be right before the first NPD PO is mailed — it is not correctable
-afterwards.
-
-### 8. UI — read-only, three small edits
+### 9. UI — read-only
 
 - `po-types.ts:73` — add `"npd"` to the `po_type` union.
-- `PoDataRow.tsx:166` — an `NPD` badge, cloning the inline `IMP` badge one line above.
-- The `poType` URL param and its server plumbing already exist
-  (`buildFilterParams`, `EXCLUDE_INWARD`); `npd` just needs offering wherever
-  `impromptu`/`inward` are.
+- `PoDataRow.tsx:166` — an `NPD` badge beside the `IMP` one.
+- `PoProcurementClient.tsx:~404` — offer `npd` in the PO Type filter.
 
-No new tab, no new page, no `lib/pages.ts` entry, no `page_permissions` row.
+No new tab, page, `lib/pages.ts` entry or `page_permissions` row.
 
 ## Deliberately not doing
 
-- **The Add PO / Impromptu dialogs.** CSV is the stated route. Making the dialogs
-  NPD-capable means a second SKU picker that isn't recipe-rooted and relaxing
-  `poCreateSchema.recipe_id` — roughly triple the diff. Add it when someone
-  actually needs to raise a one-off NPD PO by hand.
-- **Re-rating an NPD PO when costing lands.** Explicitly chosen against: the
-  invoice carries the truth.
-- **A `three-way.ts` PO-rate-vs-invoice-rate variance check.** None exists today
-  (`poLeg` is presence-only, `:401-417`), and adding one is its own piece of work.
-  An NPD PO has no rate to compare, so it is not this change's problem.
+- **NPD in the Add PO / Impromptu dialogs** — needs a non-recipe SKU picker and a
+  relaxed `poCreateSchema.recipe_id`, roughly triple the diff.
+- **Re-rating an NPD PO when costing lands** — the invoice carries the truth.
+- **A PO-rate vs invoice-rate variance check** — none exists, and an NPD PO has
+  no rate to compare.
+- **Auto-clearing the NPD mark** on first recipe activation — see risk 3.
 
 ## Verification
 
 ```
-npm test                                  # isNpdRemark truth table
-npm run test:db                           # the bulk-handler test below
+npm test                                  # isNpdRemark + npd pricing status
+npm run test:db                           # bulk handler + split, below
 npm run lint:changed
-npx tsc --noEmit --incremental false      # plain tsc can pass on a file next build rejects
-npm run build                             # stop `npm run dev` first — Next 16 locks .next
+npx tsc --noEmit --incremental false
+npm run build                             # stop `npm run dev` first
 ```
 
-**`tests/unit/po-rules.test.ts`** — extend with `isNpdRemark`: true for `"NPD"`,
-`"npd trial batch"`, `"NPD-Q3"`, `"For NPD launch"`, `"NPD_TRIAL"`; false for
-`""`, `null`, `"expanded"`, `"unpdated"`.
-
-**`tests/db/po-bulk-npd.test.ts`** (new) — `poBulkHandler.applyAndArchive` takes
-an already-open `PoolConnection` and opens no transaction of its own, so it is
-testable under `withRollback()` (unlike a route handler — `CLAUDE.md` Testing §3).
-Assert, for a two-row NPD file (one known SKU, one new code):
-`po_type = 'npd'`, **`unit_price IS NULL` and `total_amount IS NULL`**,
-`po_no` matching `-NPD-`, `recipe_id IS NULL`, and a `master_skus` stub carrying
-`sku_type = 'NPD'`, `status = 'new launch'` and the brand from the CSV. Also
-assert the known-SKU row was **not** re-marked — an existing SKU keeps its own
-`sku_type`.
-
-**Manual, end to end:** upload a CSV on `/po-tracking/po-procurement` with
-`remarks = "NPD trial batch"`, a known SKU and a new code, `expected_on` ~3 months
-out → approve the `PO_BULK` approval → confirm two POs with the NPD badge, no
-rate, and the PO Type filter selecting them; then SKU Master → filter **SKU Type
-= NPD** lists the new stub with `—` in its Recipe column; then the preview PDF
-shows blank prices with the to-be-confirmed wording and no stray "18%".
+- **`tests/unit/po-rules.test.ts`** — `isNpdRemark` true for `"NPD"`,
+  `"npd trial batch"`, `"NPD-Q3"`, `"For NPD launch"`, `"NPD_TRIAL"`; false for
+  `""`, `null`, `"expanded"`, `"unpdated"`.
+- **Pricing-status unit test** — `npd` wins over a fully costed rate.
+- **`tests/db/po-bulk-npd.test.ts`** (new, `withRollback`) — a staged NPD file
+  with a costed known SKU and a new code: both POs `po_type = 'npd'`,
+  `unit_price IS NULL`, `total_amount IS NULL`, `po_no` matching `-NPD-`; a stub
+  with `sku_type = 'NPD'`, `status = 'new launch'` and the CSV brand; the known
+  SKU's own `sku_type` untouched.
+- **Split** — splitting that NPD PO yields children with `po_type = 'npd'`.
+- **Manual on dev** — upload with `remarks = "NPD trial batch"`: preview shows the
+  NPD note on both rows and the stub note on the new one → approve → two NPD POs,
+  badge and filter work, no rate → SKU Master filter SKU Type = NPD lists the stub
+  → preview PDF (normal and split) shows `—` prices, the new wording, no `18%`.
 
 ## Risks
 
 1. **`remarks` is a human-typed trigger.** A file that means NPD but doesn't say
-   "NPD" creates ordinary POs — which, since the bulk path is priceless anyway,
-   differ only by badge and PO number. Low blast radius, but the CSV preview
-   should show the resolved PO type per row so the uploader sees the verdict
-   before approving.
-2. **Uniware vendor items.** `lib/mfg-facility-push.ts:130-140` refuses to push a
-   vendor item for a SKU with no agreed costing. Harmless while the PO is open,
-   but the invoice-time inward PO needs that vendor item to exist — so the recipe
-   and rates must land before the first NPD delivery is invoiced. This is the
-   real deadline the NPD to-do list is counting down to.
-3. **Nothing clears the NPD mark.** Once the recipe and costs land, someone must
-   edit `sku_type` off `'NPD'` in SKU Master — that edit goes through the normal
-   SKU approval flow. Auto-clearing it on first recipe activation is a fair
-   follow-up, deliberately not built now: the mark is a human to-do list, and a
-   list that empties itself silently is worse than one that doesn't.
-   No collision risk with `isKitSku` (`lib/masters/kit-sku.ts`), which requires
+   so creates normal POs **priced from costing** — larger blast radius than when
+   this was first written, since the bulk path now prices. The preview's per-row
+   NPD note is the guard.
+2. **Uniware vendor items.** `lib/mfg-facility-push.ts` refuses a vendor item for
+   a SKU with no agreed costing, but the invoice-time inward PO needs one — so the
+   recipe and rates must land before the first NPD delivery is invoiced. That is
+   the real deadline the NPD to-do list counts down to.
+3. **Nothing clears the NPD mark.** Once costing lands, someone edits `sku_type`
+   in SKU Master (normal SKU approval). No collision with `isKitSku`, which needs
    `sku_type = 'Gift Kit'` **and** `subcategory = 'Kit'`.
-4. **Split children lose all value — pre-existing.** `insertSplit`
-   (`lib/queries/purchase-orders.ts:716-719`) writes no `unit_price` and no
-   `total_amount`. Irrelevant for NPD POs, which have none either; reporting it
-   because it silently halves the value of any *priced* PO that gets split.
-5. **Two dev/prod divergences to respect:** `master_mfgs` ids and codes differ
-   above id 16, and the migration is dev-only until separately approved.
+4. **Approvals pending at deploy** carry no staged `po_type` → treated as normal,
+   exactly as today. An NPD file uploaded before the deploy is not retro-detected.
+5. **Dev/prod divergence:** `master_mfgs` ids differ above 16; the migration is
+   dev-only until approved.
+
+## What changed in this revision
+
+- **Pricing:** the bulk path now prices from costing (`resolvePoRate`). The old
+  "zero price needs no code" no longer holds — NPD must skip pricing explicitly
+  (step 3).
+- **Built on the bulk-pricing plan:** verdict, price and `po_type` are fixed at
+  upload and staged, so approval reads them rather than re-deriving.
+- **Splits (step 7):** `insertSplit` hard-codes `'normal'`; NPD children now
+  inherit `'npd'`.
+- **Split PDF** added to step 8; it has the same declaration.
+- **Unknown SKU without a `brand` cell** is now a blocking flag, not a guess.
+- **Line references** refreshed; `buildSelectByIds` already returns `po_type`.

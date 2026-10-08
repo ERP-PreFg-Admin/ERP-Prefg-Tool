@@ -39,6 +39,7 @@ export function CsvImportDialog({
   fields,
   onSuccess,
   enableDuplicateCheck,
+  checkValidRowsOnly,
   requireAllValid,
 }: {
   /** Singular label, e.g. "SKU". */
@@ -56,6 +57,9 @@ export function CsvImportDialog({
    *  parsing and merges the response into each row's remarks. The endpoint
    *  must support that action (see app/api/v1/masters/manufacturers/route.ts). */
   enableDuplicateCheck?: boolean
+  /** Send only rows that passed the field checks to that preview check, so a row
+   *  that won't be uploaded can't affect the others (e.g. claim a PO's once-per-pair slot). */
+  checkValidRowsOnly?: boolean
   /** When true, ANY flagged row blocks the Upload button entirely — no
    *  partial upload of just the valid rows. Defaults to false (existing
    *  behavior: valid rows upload, invalid rows are silently excluded). */
@@ -219,7 +223,11 @@ export function CsvImportDialog({
       // validate() carries _remarks as a string[], which fails that schema
       // for the WHOLE array and 400s the request (silently, via the catch
       // below) if left in.
-      const plainRows = parsed.map(({ _error, _remarks, _edit, ...fields }) => fields)
+      const sent = parsed.map((r, i) => [r, i] as const).filter(([r]) => !checkValidRowsOnly || !isFlagged(r))
+      const plainRows = sent.map(([{ _error, _remarks, _edit, ...fields }]) => fields)
+      // The server answers by position in what was sent; map back to file rows.
+      const remap = <T,>(m: Record<number, T> | undefined): Record<number, T> =>
+        Object.fromEntries(Object.entries(m ?? {}).map(([k, v]) => [sent[Number(k)][1], v]))
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -227,20 +235,31 @@ export function CsvImportDialog({
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Duplicate check failed")
-      const duplicates: Record<number, string[]> = data.duplicates ?? {}
+      const duplicates: Record<number, string[]> = remap(data.duplicates)
       // Rows the server recognizes as an edit of an existing record (not a
       // blocking duplicate) — only populated by modules that opt into this
       // (manufacturers/vendors' check_duplicates action); absent everywhere
       // else, so this is a no-op for every other CsvImportDialog consumer.
       // `current` carries the matched record's existing field values, used
       // below to build the before/after change list shown in the Edits table.
-      const editMatches: Record<number, { id: number; code: string; current: Record<string, unknown> }> = data.editMatches ?? {}
+      const editMatches: Record<number, { id: number; code: string; current: Record<string, unknown> }> = remap(data.editMatches)
       // Fields only required when a row turns out to be a NEW record — see
       // requiredForCreateOnly on MasterField. Deferred here because whether a
       // row is new vs. an edit is only known once editMatches comes back.
       const createOnlyFields = cols.filter((f) => f.required && f.requiredForCreateOnly)
+      // Non-blocking per-row notes (e.g. the PO route's upload-time price).
+      const info: Record<number, string[]> = remap(data.info)
+      const unknownSkus = Number(data.unknown_skus ?? 0)
+      if (unknownSkus > 0) {
+        toast({
+          title: `${unknownSkus} row${unknownSkus !== 1 ? "s have SKUs" : " has a SKU"} not in SKU Master`,
+          description: "Flagged in red and left out of the upload. Add the SKU in SKU Master, or download the flagged rows to fix them.",
+          variant: "error",
+        })
+      }
       setRows((prev) =>
-        prev.map((row, i) => {
+        prev.map((parsedRow, i) => {
+          const row = info[i]?.length ? { ...parsedRow, _info: [...(parsedRow._info ?? []), ...info[i]] } : parsedRow
           const msgs = duplicates[i]
           const match = editMatches[i]
           const remarks = msgs?.length ? [...(row._remarks ?? []), ...msgs] : row._remarks
@@ -303,7 +322,8 @@ export function CsvImportDialog({
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "bulk", rows: valid }),
+        // _info is display-only and an array — a strict rows schema rejects it.
+        body: JSON.stringify({ action: "bulk", rows: valid.map(({ _info, ...r }) => r) }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Upload failed")

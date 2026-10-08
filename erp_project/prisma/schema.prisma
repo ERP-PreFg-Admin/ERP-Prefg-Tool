@@ -63,6 +63,9 @@ model purchase_orders {
   bom_id         Int?
   qty            Decimal                 @db.Decimal(12, 3)
   unit_price     Decimal?                @db.Decimal(12, 4)
+  /// unit_price × qty. total_amount = this plus the SKU's GST (master_skus.gst).
+  /// See prisma/add_po_gst_columns.sql.
+  amount_pre_gst Decimal?                @db.Decimal(14, 4)
   total_amount   Decimal?                @db.Decimal(14, 4)
   expected_on    DateTime?               @db.Date
   received_qty   Decimal?                @default(0.000) @db.Decimal(12, 3)
@@ -1168,6 +1171,10 @@ enum purchase_orders_type {
   normal
   impromptu
   inward
+  /// Special types: price 0, once per (sku, mfg, type). See prisma/add_special_po_types.sql.
+  npd
+  tech_transfer
+  cpr
 }
 
 enum page_permissions_access {
