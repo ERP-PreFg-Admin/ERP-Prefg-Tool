@@ -63,7 +63,7 @@ export const POST = withGateway({
 
   const approverId = parseInt(session.user.id)
 
-  type ApprovalRow = { id: number; module: string; entity_id: number; raised_by: number; status: string }
+  type ApprovalRow = { id: number; module: string; entity_id: number; raised_by: number; raised_on: Date; status: string }
   const [approval] = await query<ApprovalRow>(approvalsSql.getById, [approvalId])
   if (!approval) {
     logger.warn({ ...logCtx, message: "Approval not found" })
@@ -101,7 +101,7 @@ export const POST = withGateway({
   await conn.beginTransaction()
   try {
     if (action === "approve") {
-      await handler.applyAndArchive(conn, approval.entity_id, items, approverId, approval.raised_by)
+      await handler.applyAndArchive(conn, approval.entity_id, items, approverId, approval.raised_by, approval.raised_on)
       await conn.execute(approvalsSql.markApproved, [approverId, approvalId])
       logger.info({ ...eventLogCtx, message: "Approval applied and archived", approverId })
     } else {

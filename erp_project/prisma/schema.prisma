@@ -609,6 +609,8 @@ model history_mrm {
   status         Boolean?  @default(true)
   remarks        String?   @db.VarChar(300)
   changed_by     Int?
+  approved_by    Int?
+  submitted_on   DateTime? @db.DateTime(0)
 }
 
 model history_vrm {
@@ -623,6 +625,8 @@ model history_vrm {
   status         history_vrm_status?
   remarks        String?               @db.VarChar(300)
   changed_by     Int?
+  approved_by    Int?
+  submitted_on   DateTime?             @db.DateTime(0)
   master_vendors master_vendors?       @relation(fields: [vendor_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "history_vrm_ibfk_1")
 
   @@index([vendor_id], map: "vendor_id")

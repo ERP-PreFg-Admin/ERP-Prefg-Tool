@@ -510,19 +510,19 @@ export const packingMaterials = {
   `,
 
   /** Archive old PM vendor rate to history_cost_ven before overwriting.
-   *  Parameters: [mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by]
+   *  Parameters: [mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by, approved_by, submitted_on]
    */
   archiveToHistoryVrm: `
-    INSERT INTO history_cost_ven (mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by)
-    VALUES ('pm', ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO history_cost_ven (mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by, approved_by, submitted_on)
+    VALUES ('pm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   /** Archive old PM mfg rate to history_cost_mfg before overwriting.
-   *  Parameters: [mfg_id, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by]
+   *  Parameters: [mfg_id, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by, approved_by, submitted_on]
    */
   archiveToHistoryMrm: `
-    INSERT INTO history_cost_mfg (mfg_id, mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by)
-    VALUES (?, 'pm', ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO history_cost_mfg (mfg_id, mtrl_type, mtrl_id, vendor_id, rate, effective_from, effective_to, status, remarks, changed_by, approved_by, submitted_on)
+    VALUES (?, 'pm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   /** Find the first vendor_id linked to a PM in the vendor rate master. Parameters: [pm_id] */
@@ -597,9 +597,10 @@ export const packingMaterials = {
    */
   selectVendorRateHistory: `
     SELECT h.id, h.rate, h.effective_from, h.effective_to, h.updated_on, h.status, h.remarks,
-           u.name AS changed_by_name
+           h.submitted_on, u.name AS changed_by_name, au.name AS approved_by_name
     FROM history_cost_ven h
     LEFT JOIN users u ON u.id = h.changed_by
+    LEFT JOIN users au ON au.id = h.approved_by
     WHERE h.mtrl_type = 'pm' AND h.mtrl_id = ? AND h.vendor_id = ?
     ORDER BY h.updated_on DESC, h.id DESC
   `,
@@ -609,9 +610,10 @@ export const packingMaterials = {
    */
   selectMfgRateHistory: `
     SELECT h.id, h.rate, h.effective_from, h.effective_to, h.updated_on, h.status, h.remarks,
-           u.name AS changed_by_name
+           h.submitted_on, u.name AS changed_by_name, au.name AS approved_by_name
     FROM history_cost_mfg h
     LEFT JOIN users u ON u.id = h.changed_by
+    LEFT JOIN users au ON au.id = h.approved_by
     WHERE h.mtrl_type = 'pm' AND h.mtrl_id = ? AND h.mfg_id = ?
     ORDER BY h.updated_on DESC, h.id DESC
   `,

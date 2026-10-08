@@ -198,7 +198,7 @@ export const approvalsSql = {
 
   /** Single approval header used by the approve/reject handler. Parameters: [id] */
   getById: `
-    SELECT id, module, entity_id, raised_by, status
+    SELECT id, module, entity_id, raised_by, raised_on, status
     FROM approvals
     WHERE id = ?
   `,

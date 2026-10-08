@@ -232,6 +232,17 @@ export function calendarYears(viewYear: number, min?: string, max?: string): num
   return Array.from({ length: to - from + 1 }, (_, i) => from + i)
 }
 
+const dateTimeIST = new Intl.DateTimeFormat("en-IN", {
+  timeZone: IST, day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+})
+
+/** A stored UTC instant as IST wall-clock, e.g. `"07 Oct 2026, 03:42 pm"`. `"—"` when absent. */
+export function formatDateTimeIST(v: string | Date | null | undefined): string {
+  if (v == null || v === "") return "—"
+  const d = v instanceof Date ? v : new Date(v)
+  return Number.isNaN(d.getTime()) ? "—" : dateTimeIST.format(d)
+}
+
 /** `"2026-08-25"` → `"25 Aug 2026"`. `""` for anything unparseable — a trigger
  *  reading "Invalid Date" is worse than one reading its placeholder. */
 export function formatDisplay(iso: string): string {

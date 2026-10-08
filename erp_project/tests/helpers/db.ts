@@ -241,12 +241,12 @@ export async function readRmMfgRate(conn: PoolConnection, id: number) {
 /** MRM archive rows for one rate, newest first — what applyAndArchive should have written. */
 export async function readMrmHistory(conn: PoolConnection, mfgId: number, rmId: number) {
   const [rows] = await conn.execute(
-    `SELECT rate, effective_from, effective_to, status, remarks, changed_by
+    `SELECT rate, effective_from, effective_to, status, remarks, changed_by, approved_by, submitted_on
      FROM history_cost_mfg WHERE mfg_id = ? AND mtrl_id = ? AND mtrl_type = 'rm'
      ORDER BY id DESC`,
     [mfgId, rmId]
   )
-  return rows as { rate: string | number; effective_from: string | null; effective_to: string | null; status: number | string | null; remarks: string | null; changed_by: number | null }[]
+  return rows as { rate: string | number; effective_from: string | null; effective_to: string | null; status: number | string | null; remarks: string | null; changed_by: number | null; approved_by: number | null; submitted_on: Date | null }[]
 }
 
 /** MySQL DECIMAL comes back as a string; compare as numbers. */

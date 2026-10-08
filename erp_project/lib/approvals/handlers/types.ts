@@ -21,7 +21,9 @@ export interface ModuleHandler {
      *  handlers that attribute an archived change to who made it (e.g.
      *  RM_VRM/RM_RATE/PM_VRM/PM_RATE's history_cost_ven/history_cost_mfg archive row).
      *  Optional so existing handlers that ignore it need no changes. */
-    raisedBy?: number
+    raisedBy?: number,
+    /** approvals.raised_on — the rate handlers archive it as submitted_on. */
+    raisedOn?: Date | string
   ): Promise<void>
 }
 

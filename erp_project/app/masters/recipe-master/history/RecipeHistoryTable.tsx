@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/table"
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import { cn } from "@/lib/utils"
-import { formatDateTime } from "../recipe-format"
+import { AuditStamp } from "@/components/masters/AuditStamp"
 import { ChangeTypeBadges } from "../ChangeTypeBadges"
 import { StatusBadge } from "@/components/masters/StatusBadge"
 import type { RecipeHistoryListItem } from "@/types/masters"
@@ -51,16 +51,6 @@ function groupBySku(rows: RecipeHistoryListItem[]): SkuGroup[] {
     }
   }
   return groups
-}
-
-function AuditCell({ when, who }: { when: string | Date | null; who: string | null }) {
-  if (!when && !who) return <span className="text-muted-foreground/50">—</span>
-  return (
-    <div>
-      <p>{formatDateTime(when)}</p>
-      <p className="text-xs text-muted-foreground">{who ?? "—"}</p>
-    </div>
-  )
 }
 
 export function RecipeHistoryTable({
@@ -108,9 +98,9 @@ export function RecipeHistoryTable({
             <TableRow>
               <TableHead>Recipe Code</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Created</TableHead>
-              <TableHead>Updated</TableHead>
-              <TableHead>Approved</TableHead>
+              <TableHead>Uploaded By</TableHead>
+              <TableHead>Updated By</TableHead>
+              <TableHead>Approved By</TableHead>
               <TableHead>Type of Change</TableHead>
               <TableHead>Reason</TableHead>
             </TableRow>
@@ -177,13 +167,13 @@ export function RecipeHistoryTable({
                             <StatusBadge status={row.status} />
                           </TableCell>
                           <TableCell className="text-sm">
-                            <AuditCell when={row.created_at} who={row.created_by_name} />
+                            <AuditStamp name={row.created_by_name} at={row.created_at} />
                           </TableCell>
                           <TableCell className="text-sm">
-                            <AuditCell when={row.updated_at} who={row.updated_by_name} />
+                            <AuditStamp name={row.updated_by_name} at={row.updated_at} />
                           </TableCell>
                           <TableCell className="text-sm">
-                            <AuditCell when={row.approved_on} who={row.approved_by_name} />
+                            <AuditStamp name={row.approved_by_name} at={row.approved_on} />
                           </TableCell>
                           <TableCell className="whitespace-nowrap"><ChangeTypeBadges value={row.change_type} /></TableCell>
                           <TableCell className="text-sm max-w-[220px] truncate" title={row.change_reason ?? undefined}>

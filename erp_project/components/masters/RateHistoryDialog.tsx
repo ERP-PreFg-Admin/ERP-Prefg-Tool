@@ -9,6 +9,8 @@
 import { useAsyncData } from "@/lib/hooks/useAsync"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
+import { AuditStamp } from "@/components/masters/AuditStamp"
+import { IST } from "@/lib/date"
 
 type RateHistoryEntry = {
   id: number
@@ -19,16 +21,14 @@ type RateHistoryEntry = {
   status: boolean | number | string | null
   remarks: string | null
   changed_by_name: string | null
+  // NULL on rows archived before prisma/add_rate_history_audit_columns.sql.
+  approved_by_name: string | null
+  submitted_on: string | null
 }
 
 function formatDate(val: string | null) {
   if (!val) return "—"
-  return new Date(val).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-}
-
-function formatDateTime(val: string | null) {
-  if (!val) return "—"
-  return new Date(val).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+  return new Date(val).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: IST })
 }
 
 /** history_cost_mfg.status is a plain boolean/tinyint; history_cost_ven.status is a status enum string — normalize both. */
@@ -111,9 +111,11 @@ export function RateHistoryDialog({
                 {formatDate(entry.effective_from)} → {entry.effective_to ? formatDate(entry.effective_to) : "present"}
               </p>
 
-              <p className="text-xs text-muted-foreground">
-                By {entry.changed_by_name ?? "Unknown"} on {formatDateTime(entry.updated_on)}
-              </p>
+              {/* The archive row is the superseded rate; its stamps belong to the change that replaced it. */}
+              <div className="grid grid-cols-2 gap-3 border-t border-border pt-1.5">
+                <AuditStamp label="Uploaded by" name={entry.changed_by_name} at={entry.submitted_on} />
+                <AuditStamp label="Approved by" name={entry.approved_by_name} at={entry.updated_on} />
+              </div>
 
               {entry.remarks && (
                 <p className="text-xs text-foreground leading-relaxed">&ldquo;{entry.remarks}&rdquo;</p>

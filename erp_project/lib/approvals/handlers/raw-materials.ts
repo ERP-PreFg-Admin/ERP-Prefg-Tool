@@ -20,7 +20,7 @@ export const rmRateHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
     await conn.execute(rmSql.setRateStatus, [status, entityId])
   },
-  async applyAndArchive(conn, entityId, items, _approverId, raisedBy) {
+  async applyAndArchive(conn, entityId, items, approverId, raisedBy, raisedOn) {
     const fieldMap = buildFieldMap(items)
     const [rows] = await conn.execute(rmSql.selectRateById, [entityId])
     const cur = (rows as any[])[0]
@@ -30,7 +30,7 @@ export const rmRateHandler: ModuleHandler = {
       cur.mfg_id, cur.rm_id, cur.approved_vendor_id ?? 0,
       cur.curr_rate, cur.effective_from, supersededOn(fieldMap.effective_from),
       cur.status === STATUS.ACTIVE ? 1 : 0,
-      fieldMap.remarks || null, raisedBy ?? null,
+      fieldMap.remarks || null, raisedBy ?? null, approverId, raisedOn ?? null,
     ])
     await conn.execute(rmSql.updateMfgRate, [
       fieldMap.curr_rate      !== undefined ? roundToTwoDecimals(fieldMap.curr_rate) : cur.curr_rate,
@@ -46,7 +46,7 @@ export const rmVrmHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
     await conn.execute(rmSql.setVendorRateStatus, [status, entityId])
   },
-  async applyAndArchive(conn, entityId, items, _approverId, raisedBy) {
+  async applyAndArchive(conn, entityId, items, approverId, raisedBy, raisedOn) {
     const fieldMap = buildFieldMap(items)
     const [rows] = await conn.execute(rmSql.selectVendorRateById, [entityId])
     const cur = (rows as any[])[0]
@@ -55,7 +55,7 @@ export const rmVrmHandler: ModuleHandler = {
     await conn.execute(rmSql.archiveToHistoryVrm, [
       cur.rm_id, cur.vendor_id,
       cur.curr_rate, cur.effective_from, cur.effective_to, cur.status,
-      fieldMap.remarks || null, raisedBy ?? null,
+      fieldMap.remarks || null, raisedBy ?? null, approverId, raisedOn ?? null,
     ])
     await conn.execute(rmSql.updateVendorRate, [
       fieldMap.curr_rate      !== undefined ? roundToTwoDecimals(fieldMap.curr_rate) : cur.curr_rate,

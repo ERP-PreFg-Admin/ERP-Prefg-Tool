@@ -13,7 +13,8 @@
  */
 
 import type { Approval, ApprovalItem } from "@/app/approvals/approvals-types"
-import { isCreateApproval, isNewRecord, BULK_MODULES, fmtDate } from "@/app/approvals/approvals-types"
+import { isCreateApproval, isNewRecord, BULK_MODULES } from "@/app/approvals/approvals-types"
+import { AuditStamp } from "@/components/masters/AuditStamp"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { APPROVAL_STATUS, APPROVAL_STATUS_VARIANT, type ApprovalStatus } from "@/lib/constants"
@@ -41,22 +42,6 @@ function ChangesCell({ items, newOnly }: { items: ApprovalItem[]; newOnly: boole
   )
 }
 
-function PersonCell({ name, date }: { name: string; date: string }) {
-  return (
-    <div className="space-y-0.5">
-      <div className="flex items-center gap-1.5">
-        {/* <div className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-muted-foreground select-none">
-          {getInitials(name)}
-          
-
-        </div> */}
-        <span className="text-xs font-medium text-foreground">{name}</span>
-      </div>
-      <div className="text-[11px] text-muted-foreground">{fmtDate(date)}</div>
-    </div>
-  )
-}
-
 function StatusPill({ status }: { status: ApprovalStatus }) {
   return (
     <Badge variant={APPROVAL_STATUS_VARIANT[status]} className="h-4 px-1.5 py-0 text-[10px] capitalize">
@@ -67,14 +52,18 @@ function StatusPill({ status }: { status: ApprovalStatus }) {
 
 function ApprovalCell({ approval }: { approval: Approval }) {
   if (approval.status !== "approved" && approval.status !== "rejected") {
-    return <StatusPill status={APPROVAL_STATUS.PENDING} />
+    return (
+      <div className="space-y-1">
+        <StatusPill status={APPROVAL_STATUS.PENDING} />
+        <div className="text-[11px] text-muted-foreground">Awaiting approval</div>
+      </div>
+    )
   }
-  if (!approval.approved_by_name || !approval.approved_on) return <span className="text-xs text-muted-foreground">—</span>
 
   return (
     <div className="space-y-1">
       <StatusPill status={approval.status} />
-      <PersonCell name={approval.approved_by_name} date={approval.approved_on} />
+      <AuditStamp name={approval.approved_by_name} at={approval.approved_on} />
       {approval.status === "rejected" && approval.remarks && (
         <RejectionRemarksCallout remarks={approval.remarks} dense />
       )}
@@ -112,7 +101,7 @@ function HistoryRow({
         )}
       </TableCell>
       <TableCell className="py-2.5 text-xs text-foreground/90">{reason || <span className="text-muted-foreground">—</span>}</TableCell>
-      <TableCell className="py-2.5"><PersonCell name={approval.raised_by_name} date={approval.raised_on} /></TableCell>
+      <TableCell className="py-2.5"><AuditStamp name={approval.raised_by_name} at={approval.raised_on} /></TableCell>
       <TableCell className="py-2.5"><ApprovalCell approval={approval} /></TableCell>
     </TableRow>
   )
@@ -130,11 +119,11 @@ export function HistoryTable({
     <div className="rounded-lg border border-border overflow-hidden">
       <Table>
         <TableHeader>
-          <TableRow className="hover:bg-transparent bg-muted/40">
-            <TableHead className="h-8 text-[10px] font-semibold uppercase tracking-wide">Details</TableHead>
-            <TableHead className="h-8 text-[10px] font-semibold uppercase tracking-wide">Reason</TableHead>
-            <TableHead className="h-8 text-[10px] font-semibold uppercase tracking-wide">Submitted By</TableHead>
-            <TableHead className="h-8 text-[10px] font-semibold uppercase tracking-wide">Approval</TableHead>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="h-8">Details</TableHead>
+            <TableHead className="h-8">Reason</TableHead>
+            <TableHead className="h-8">Uploaded By</TableHead>
+            <TableHead className="h-8">Approved By</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

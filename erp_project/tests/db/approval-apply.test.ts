@@ -44,8 +44,9 @@ test("RM_RATE approval archives the OLD rate and writes the new one", async (t) 
 
     const before = await readMrmHistory(conn, a.mfgId, rate.rm_id)
 
+    const raisedOn = new Date("2026-10-01T06:30:00Z")
     await MODULE_HANDLERS.RM_RATE.applyAndArchive(
-      conn, rate.id, diff({ curr_rate: "155.50", remarks: "renegotiated" }), a.userId, a.userId
+      conn, rate.id, diff({ curr_rate: "155.50", remarks: "renegotiated" }), a.userId, a.userId, raisedOn
     )
 
     const live = await readRmMfgRate(conn, rate.id)
@@ -57,6 +58,8 @@ test("RM_RATE approval archives the OLD rate and writes the new one", async (t) 
     assert.equal(num(after[0].rate), 120, "the archived row holds the PRE-change rate")
     assert.equal(after[0].remarks, "renegotiated", "the submitter's reason is archived with it")
     assert.equal(after[0].changed_by, a.userId, "attributed to the submitter, not the approver")
+    assert.equal(after[0].approved_by, a.userId, "the approver is archived too")
+    assert.equal(after[0].submitted_on?.getTime(), raisedOn.getTime(), "and when it was submitted")
   })
 })
 
