@@ -47,10 +47,10 @@ function ConsolidatedDiffTable({ rows, newOnly }: { rows: (DiffRow & { tag: "RM"
       {expanded && (
       <Table>
         <TableHeader>
-          <TableRow className="hover:bg-transparent bg-muted/40">
-            <TableHead className="h-7 text-[10px] font-semibold uppercase tracking-wide">Material</TableHead>
-            {!newOnly && <TableHead className="h-7 text-[10px] font-semibold uppercase tracking-wide">Old Value</TableHead>}
-            <TableHead className="h-7 text-[10px] font-semibold uppercase tracking-wide">{newOnly ? "Value" : "New Value"}</TableHead>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="h-7">Material</TableHead>
+            {!newOnly && <TableHead className="h-7">Old Value</TableHead>}
+            <TableHead className="h-7">{newOnly ? "Value" : "New Value"}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

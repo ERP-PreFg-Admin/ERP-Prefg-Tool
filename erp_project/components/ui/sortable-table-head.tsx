@@ -15,7 +15,8 @@ export type SortDir = "asc" | "desc"
  *  default, so a long header used to paint straight over the next one
  *  ("INCI Name" across "Make", "Manufacturer" across "Status"). Body cells
  *  already clip; this is the header's half of the same guard. */
-const HEAD_CLASS = "bg-muted/50 font-medium text-muted-foreground overflow-hidden"
+// Look comes from TableHead; only the overflow guard is added here.
+const HEAD_CLASS = "overflow-hidden"
 
 /** Whole cell is a button so clicking anywhere in the header sorts it; a faint
  *  chevron hints inactive columns are sortable, filled arrows show direction. */

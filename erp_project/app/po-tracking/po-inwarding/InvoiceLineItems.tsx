@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
+import { HEAD_BG, HEAD_ROW_LOOK } from "@/components/ui/table"
 import { AlertTriangle, Check, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { TableEmpty } from "@/components/ui/empty-state"
@@ -74,12 +75,12 @@ export function InvoiceLineItems({
         <table className="w-full min-w-320 border-separate border-spacing-0 text-xs">
           {/* z-20, not z-10: the frozen first column below sits at z-10 and would
               otherwise paint over the header it scrolls past. */}
-          <thead className="sticky top-0 z-20 bg-muted">
-            <tr className="[&>th]:whitespace-nowrap [&>th]:px-2 [&>th]:py-1.5 [&>th]:text-left [&>th]:font-medium [&>th]:text-muted-foreground">
+          <thead className={cn("sticky top-0 z-20", HEAD_BG)}>
+            <tr className={cn(HEAD_ROW_LOOK, "[&>th]:whitespace-nowrap [&>th]:px-2 [&>th]:py-1.5 [&>th]:text-left")}>
               {/* Frozen: the SKU picker stays pinned while the other 14 columns
                   scroll under it. Needs its own opaque background — the thead's
                   sits behind it, not on it. */}
-              <th className="min-w-56 sticky left-0 bg-muted shadow-[1px_0_0_var(--color-border)]">SKU *</th>
+              <th className={cn("min-w-56 sticky left-0 shadow-[1px_0_0_var(--color-border)]", HEAD_BG)}>SKU *</th>
               <th className="min-w-56">Reference PO *</th>
               <th className="min-w-32">Recipe Code</th>
               <th className="min-w-48">Product Name</th>

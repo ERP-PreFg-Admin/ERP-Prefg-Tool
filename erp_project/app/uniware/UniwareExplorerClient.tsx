@@ -25,8 +25,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty-state"
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table"
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow, HEAD_BG, HEAD_ROW_LOOK } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import { IST } from "@/lib/date"
 
@@ -228,10 +227,10 @@ function RawBlock({
               scroll sideways instead would drag the whole table with it. */}
           <div className="overflow-x-auto rounded-md border border-border">
             <table className="w-full text-[11px]">
-              <thead className="bg-muted/50">
-                <tr>
+              <thead className={HEAD_BG}>
+                <tr className={HEAD_ROW_LOOK}>
                   {shownItemCols.map((k) => (
-                    <th key={k} className="whitespace-nowrap px-2 py-1 text-left font-medium">{k}</th>
+                    <th key={k} className="whitespace-nowrap px-2 py-1 text-left">{k}</th>
                   ))}
                 </tr>
               </thead>
@@ -537,7 +536,7 @@ export default function UniwareExplorerClient() {
           <Card>
             <CardContent className="p-0">
               <Table>
-                <TableHeader className="bg-muted/40 [&_tr]:border-b [&_tr]:border-border">
+                <TableHeader className="[&_tr]:border-b [&_tr]:border-border">
                   <TableRow>
                     <TableHead className="w-7 px-1" />
                     <TableHead>PO Code</TableHead>

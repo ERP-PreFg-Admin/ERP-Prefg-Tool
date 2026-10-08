@@ -2,6 +2,7 @@
 "use client"
 
 import { useState } from "react"
+import { HEAD_BG, HEAD_ROW_LOOK } from "@/components/ui/table"
 import { Upload, AlertCircle, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -453,12 +454,12 @@ export function CsvImportDialog({
                 </div>
                 <div className="overflow-x-auto max-h-[40vh] overflow-y-auto">
                   <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-background border-b border-border">
-                      <tr>
-                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Name</th>
-                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Code</th>
-                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Changes</th>
-                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Remarks</th>
+                    <thead className={cn("sticky top-0 border-b border-border", HEAD_BG)}>
+                      <tr className={HEAD_ROW_LOOK}>
+                        <th className="px-3 py-2 text-left">Name</th>
+                        <th className="px-3 py-2 text-left">Code</th>
+                        <th className="px-3 py-2 text-left">Changes</th>
+                        <th className="px-3 py-2 text-left">Remarks</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -527,17 +528,17 @@ export function CsvImportDialog({
                 </div>
                 <div className="overflow-x-auto max-h-[55vh] overflow-y-auto">
                   <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-background border-b border-border">
-                      <tr>
+                    <thead className={cn("sticky top-0 border-b border-border", HEAD_BG)}>
+                      <tr className={HEAD_ROW_LOOK}>
                         {cols.map((f) => (
                           <th
                             key={f.key}
-                            className="px-3 py-2 text-left font-medium text-muted-foreground"
+                            className="px-3 py-2 text-left"
                           >
                             {f.label}
                           </th>
                         ))}
-                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">
+                        <th className="px-3 py-2 text-left">
                           Remarks
                         </th>
                       </tr>

@@ -20,9 +20,9 @@ export default function MfgMonthlyPoSummary({ rows }: { rows: MfgMonthlyPoRow[] 
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="text-xs">SKU</TableHead>
-                <TableHead className="text-right text-xs">PO Qty</TableHead>
-                <TableHead className="text-right text-xs">Received Qty</TableHead>
+                <TableHead>SKU</TableHead>
+                <TableHead className="text-right">PO Qty</TableHead>
+                <TableHead className="text-right">Received Qty</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

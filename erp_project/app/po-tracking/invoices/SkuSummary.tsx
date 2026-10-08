@@ -5,6 +5,7 @@
 // lib/invoice/three-way.ts; this only lays it out.
 
 import { cn } from "@/lib/utils"
+import { HEAD_BG, HEAD_ROW_LOOK } from "@/components/ui/table"
 
 export default function SkuSummary({ title, head, rows, foot, note }: {
   title: string
@@ -30,8 +31,8 @@ export default function SkuSummary({ title, head, rows, foot, note }: {
         {note && <span className="ml-auto text-muted-foreground">{note}</span>}
       </div>
       <table className="w-full text-[11px]">
-        <thead>
-          <tr className="[&>th]:whitespace-nowrap [&>th]:px-1.5 [&>th]:py-1 [&>th]:font-medium [&>th]:text-muted-foreground">
+        <thead className={HEAD_BG}>
+          <tr className={cn(HEAD_ROW_LOOK, "[&>th]:whitespace-nowrap [&>th]:px-1.5 [&>th]:py-1")}>
             {head.map((h, i) => (
               <th key={h} className={i === 0 ? "text-left" : "text-right"}>{h}</th>
             ))}

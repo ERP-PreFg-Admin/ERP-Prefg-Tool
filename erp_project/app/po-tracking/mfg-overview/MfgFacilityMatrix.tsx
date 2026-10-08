@@ -29,6 +29,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react"
+import { HEAD_BG, HEAD_ROW_LOOK } from "@/components/ui/table"
 import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { SearchInput } from "@/components/masters/SearchInput"
@@ -249,20 +250,20 @@ export function MfgFacilityMatrix({
             <table className="w-full border-separate border-spacing-0 text-xs">
               {/* z-20 beats the frozen columns' z-10, or they paint over the
                   header they scroll past. */}
-              <thead className="sticky top-0 z-20 bg-muted">
+              <thead className={cn("sticky top-0 z-20", HEAD_BG)}>
                 {/* Padding is NOT set on the row: a `[&>th]:px-2` here outranks a
                     `p-0` on the child th (0,1,1 vs 0,1,0), and the facility headers
                     need to clear it so their button fills the cell. Same trap the
                     body rows document below. */}
-                <tr className="[&>th]:align-bottom [&>th]:font-medium [&>th]:text-muted-foreground">
-                  <th className={cn("sticky left-0 z-20 bg-muted px-2 py-1.5 text-left", MFG_COL)}>
+                <tr className={cn(HEAD_ROW_LOOK, "[&>th]:align-bottom")}>
+                  <th className={cn("sticky left-0 z-20 px-2 py-1.5 text-left", HEAD_BG, MFG_COL)}>
                     Manufacturer
                   </th>
                   {/* Also frozen: a count with its denominator scrolled off screen
                       gives no clue why the cell is amber. */}
                   <th
                     className={cn(
-                      "sticky z-20 bg-muted px-2 py-1.5 text-right shadow-[1px_0_0_var(--color-border)]",
+                      "sticky z-20 px-2 py-1.5 text-right shadow-[1px_0_0_var(--color-border)]", HEAD_BG,
                       TOTAL_LEFT, TOTAL_COL
                     )}
                   >

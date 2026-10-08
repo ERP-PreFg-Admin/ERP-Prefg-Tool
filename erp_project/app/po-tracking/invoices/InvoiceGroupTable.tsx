@@ -17,6 +17,7 @@
 // render the same table rather than two that drift.
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
+import { HEAD_BG, HEAD_ROW_LOOK } from "@/components/ui/table"
 import { ChevronDown, ChevronRight, ExternalLink, FileText, Loader2, RotateCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -237,8 +238,8 @@ function GrnSection({ lines }: { lines: InvoiceGrnLine[] }) {
               </span>
             </div>
             <table className="w-full text-[11px]">
-              <thead>
-                <tr className="[&>th]:whitespace-nowrap [&>th]:px-1.5 [&>th]:py-1 [&>th]:text-left [&>th]:font-medium [&>th]:text-muted-foreground">
+              <thead className={HEAD_BG}>
+                <tr className={cn(HEAD_ROW_LOOK, "[&>th]:whitespace-nowrap [&>th]:px-1.5 [&>th]:py-1 [&>th]:text-left")}>
                   <th className="w-8">#</th>
                   <th>SKU</th>
                   <th>Inward PO</th>
@@ -522,8 +523,8 @@ export default function InvoiceGroupTable({
     <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
         <table className="w-full min-w-[52rem] text-xs">
-          <thead className="sticky top-0 z-10 bg-muted">
-            <tr className="[&>th]:whitespace-nowrap [&>th]:px-2 [&>th]:py-2 [&>th]:text-left [&>th]:font-medium [&>th]:text-muted-foreground">
+          <thead className={cn("sticky top-0 z-10", HEAD_BG)}>
+            <tr className={cn(HEAD_ROW_LOOK, "[&>th]:whitespace-nowrap [&>th]:px-2 [&>th]:py-2 [&>th]:text-left")}>
               {/* Manufacturer and Entered each carry two facts in one column —
                   code under name, date under person. Everything else gets its
                   own column: these are looked at side by side and scanned down,
@@ -724,8 +725,8 @@ export default function InvoiceGroupTable({
                               <DocumentsSection documents={documents[inv.id] ?? []} onOpen={openOriginal} />
                             ) : view === "grns" ? <GrnSection lines={grns[inv.id] ?? []} /> : (
                             <table className="w-full text-[11px]">
-                              <thead>
-                                <tr className="[&>th]:whitespace-nowrap [&>th]:px-1.5 [&>th]:py-1 [&>th]:text-left [&>th]:font-medium [&>th]:text-muted-foreground">
+                              <thead className={HEAD_BG}>
+                                <tr className={cn(HEAD_ROW_LOOK, "[&>th]:whitespace-nowrap [&>th]:px-1.5 [&>th]:py-1 [&>th]:text-left")}>
                                   <th className="w-8">#</th>
                                   <th>SKU</th>
                                   <th>Product</th>

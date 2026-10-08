@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { HEAD_BG, HEAD_ROW_LOOK } from "@/components/ui/table"
 import { X } from "lucide-react"
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
@@ -432,16 +433,16 @@ export default function AddPODialog({
             // reachable no matter how many SKUs are on the order.
             <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
               <table className="w-full text-xs">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">SKU</th>
-                    <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">Recipe</th>
-                    <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">PO Qty</th>
-                    <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">Rate / Unit</th>
-                    <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">Expected Dispatch</th>
-                    <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">Destination WH</th>
-                    <th className="px-2 py-1.5 text-left font-medium text-muted-foreground"></th>
-                    <th className="px-2 py-1.5 text-left font-medium text-muted-foreground"></th>
+                <thead className={HEAD_BG}>
+                  <tr className={HEAD_ROW_LOOK}>
+                    <th className="px-2 py-1.5 text-left">SKU</th>
+                    <th className="px-2 py-1.5 text-left">Recipe</th>
+                    <th className="px-2 py-1.5 text-left">PO Qty</th>
+                    <th className="px-2 py-1.5 text-left">Rate / Unit</th>
+                    <th className="px-2 py-1.5 text-left">Expected Dispatch</th>
+                    <th className="px-2 py-1.5 text-left">Destination WH</th>
+                    <th className="px-2 py-1.5 text-left"></th>
+                    <th className="px-2 py-1.5 text-left"></th>
                   </tr>
                 </thead>
                 <tbody>

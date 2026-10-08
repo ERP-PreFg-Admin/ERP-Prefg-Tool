@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { HEAD_BG, HEAD_ROW_LOOK } from "@/components/ui/table"
 import { Loader2, AlertCircle, Download } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -144,12 +145,12 @@ export default function CsvPreviewDialog({
 
             <div className="overflow-auto rounded-lg border border-border">
               <table className="w-full text-xs border-collapse">
-                <thead className="sticky top-0 z-10 bg-muted/90 backdrop-blur">
-                  <tr>
+                <thead className={`sticky top-0 z-10 ${HEAD_BG}`}>
+                  <tr className={HEAD_ROW_LOOK}>
                     {headers.map((h) => (
                       <th
                         key={h}
-                        className="whitespace-nowrap border-b border-border px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                        className="whitespace-nowrap border-b border-border px-3 py-2 text-left"
                       >
                         {h}
                       </th>

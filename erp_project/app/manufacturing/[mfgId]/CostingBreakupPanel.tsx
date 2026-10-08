@@ -19,6 +19,7 @@
 "use client"
 
 import { Download } from "lucide-react"
+import { HEAD_BG, HEAD_ROW_LOOK } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { wastageFraction } from "@/lib/costing/final-costing"
 import type { BreakupLine, CostingBreakup } from "./costing-breakup"
@@ -51,6 +52,7 @@ function GroupHeadRow({ label }: { label: string }) {
     <tr>
       <th
         colSpan={5}
+        // eslint-disable-next-line no-restricted-syntax -- a section label inside the body, not a column header
         className="bg-muted/60 px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
       >
         {label}
@@ -134,13 +136,13 @@ export default function CostingBreakupPanel(
           {/* A plain table, not the shared primitives: this is nested inside a
               table cell and must not inherit the outer table's fixed layout. */}
           <table className="w-full border-collapse">
-            <thead>
-              <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
-                <th className="w-24 px-2 pb-1 text-left font-medium">Code</th>
-                <th className="px-2 pb-1 text-left font-medium">Material</th>
-                <th className="w-14 px-2 pb-1 text-right font-medium">Qty</th>
-                <th className="w-20 px-2 pb-1 text-right font-medium">Rate</th>
-                <th className="w-20 px-2 pb-1 text-right font-medium">Cost</th>
+            <thead className={HEAD_BG}>
+              <tr className={`${HEAD_ROW_LOOK} border-b border-border`}>
+                <th className="w-24 px-2 py-1 text-left">Code</th>
+                <th className="px-2 py-1 text-left">Material</th>
+                <th className="w-14 px-2 py-1 text-right">Qty</th>
+                <th className="w-20 px-2 py-1 text-right">Rate</th>
+                <th className="w-20 px-2 py-1 text-right">Cost</th>
               </tr>
             </thead>
             <tbody>

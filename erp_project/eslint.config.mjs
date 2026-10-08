@@ -70,10 +70,44 @@ const uiDataBoundary = {
   },
 };
 
+/**
+ * One table-header look, set in components/ui/table.tsx (TableHead, HEAD_BG,
+ * HEAD_ROW_LOOK). Headers may set layout — width, alignment, padding, sticky —
+ * but not their own look. See docs/table-header-plan.md.
+ */
+const HEAD_LOOK_MSG =
+  "Table headers take their look from components/ui/table.tsx — use TableHead, or HEAD_BG / " +
+  "HEAD_ROW_LOOK on a hand-written header. Set layout only. See docs/table-header-plan.md."
+const LOOK = "(^|\\s)(bg-(?!accent|inherit)|text-\\[\\d|text-(xs|sm|base|lg)(\\s|$)|uppercase|tracking-|font-(semibold|bold))"
+const tableHeaderLook = {
+  name: "erp/table-header-look",
+  files: ["app/**/*.tsx", "components/**/*.tsx"],
+  ignores: ["components/ui/table.tsx"],
+  rules: {
+    "no-restricted-syntax": ["error",
+      ...["Literal[value", "TemplateElement[value.raw"].flatMap((node) => [
+        {
+          selector: `JSXOpeningElement[name.name=/^(th|TableHead|SortableTableHead|SortHead)$/] JSXAttribute[name.name="className"] ${node}=/${LOOK}/]`,
+          message: HEAD_LOOK_MSG,
+        },
+        {
+          selector: `JSXOpeningElement[name.name=/^(thead|TableHeader)$/] JSXAttribute[name.name="className"] ${node}=/(^|\\s)bg-/]`,
+          message: HEAD_LOOK_MSG,
+        },
+      ]),
+      {
+        selector: "Literal[value=/\\[&>th\\]:(bg-|text-\\[|uppercase|tracking-|font-(semibold|bold))/]",
+        message: HEAD_LOOK_MSG,
+      },
+    ],
+  },
+};
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   uiDataBoundary,
+  tableHeaderLook,
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

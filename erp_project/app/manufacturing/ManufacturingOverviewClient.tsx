@@ -5,8 +5,7 @@ import Link from "next/link"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table"
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow, HEAD_BG, HEAD_ROW_LOOK } from "@/components/ui/table"
 import type { MfgMonthlyPoRow, MfgOverviewRow } from "@/types/masters"
 import { fillRate, fmtInt, fmtMoney, seriesBarClass } from "./mfg-utils"
 
@@ -26,11 +25,11 @@ function MonthlyPoMiniTable({ rows }: { rows: MfgMonthlyPoRow[] }) {
   return (
     <div className="max-h-24 overflow-y-auto rounded-md border border-border">
       <table className="w-full text-[11px]">
-        <thead className="sticky top-0 bg-muted/50">
-          <tr>
-            <th className="px-2 py-1 text-left font-medium text-muted-foreground">SKU</th>
-            <th className="px-2 py-1 text-right font-medium text-muted-foreground">PO Qty</th>
-            <th className="px-2 py-1 text-right font-medium text-muted-foreground">Recv. Qty</th>
+        <thead className={`sticky top-0 ${HEAD_BG}`}>
+          <tr className={HEAD_ROW_LOOK}>
+            <th className="px-2 py-1 text-left">SKU</th>
+            <th className="px-2 py-1 text-right">PO Qty</th>
+            <th className="px-2 py-1 text-right">Recv. Qty</th>
           </tr>
         </thead>
         <tbody>

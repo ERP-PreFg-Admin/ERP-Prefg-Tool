@@ -16,10 +16,10 @@ export function DiffTable({ rows, newOnly }: { rows: DiffRow[]; newOnly?: boolea
     <div className="rounded-lg border border-border overflow-hidden">
       <Table>
         <TableHeader>
-          <TableRow className="hover:bg-transparent bg-muted/40">
-            <TableHead className="h-7 text-[10px] font-semibold uppercase tracking-wide">Field</TableHead>
-            {!newOnly && <TableHead className="h-7 text-[10px] font-semibold uppercase tracking-wide">Old Value</TableHead>}
-            <TableHead className="h-7 text-[10px] font-semibold uppercase tracking-wide">{newOnly ? "Value" : "New Value"}</TableHead>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="h-7">Field</TableHead>
+            {!newOnly && <TableHead className="h-7">Old Value</TableHead>}
+            <TableHead className="h-7">{newOnly ? "Value" : "New Value"}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

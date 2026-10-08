@@ -215,7 +215,7 @@ export default function PoTable({
               {/* The header sticks, so it needs its own ground and a hairline
                   under it — without them the column labels sit on top of the
                   scrolling rows with nothing separating the two. */}
-              <TableHeader className="sticky top-0 z-10 bg-muted/40 backdrop-blur-[2px] [&_tr]:border-b [&_tr]:border-border">
+              <TableHeader className="sticky top-0 z-10 [&_tr]:border-b [&_tr]:border-border">
                 <TableRow>
                   {hasSplits && <TableHead className="w-7 px-1" />}
                   {selectable && (

@@ -47,11 +47,18 @@ const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTML
 )
 TableRow.displayName = "TableRow"
 
+// The one header look (docs/table-header-plan.md). Opaque mix, not bg-muted/50,
+// so sticky headers don't show rows through.
+export const HEAD_BG = "bg-[color-mix(in_oklch,var(--muted)_50%,var(--background))]"
+// For hand-written <tr><th> headers; put HEAD_BG on the <thead>, not the row,
+// so a th's own background (sticky column, selected state) still wins.
+export const HEAD_ROW_LOOK = "[&>th]:text-xs [&>th]:font-medium [&>th]:text-muted-foreground"
+
 const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<HTMLTableCellElement>>(
   ({ className, ...props }, ref) => (
     <th
       ref={ref}
-      className={cn("h-10 px-4 text-left align-middle font-medium text-muted-foreground bg-background", className)}
+      className={cn("h-10 px-4 text-left align-middle text-xs font-medium text-muted-foreground", HEAD_BG, className)}
       {...props}
     />
   )

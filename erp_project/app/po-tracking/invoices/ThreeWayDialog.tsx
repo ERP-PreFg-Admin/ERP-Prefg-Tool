@@ -8,6 +8,7 @@
 // cache: it opens from a row that may never have been expanded.
 
 import { useCallback, useEffect, useState } from "react"
+import { HEAD_BG, HEAD_ROW_LOOK } from "@/components/ui/table"
 import { Check, CreditCard, ExternalLink, FileText, Loader2, Package, RotateCw, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -597,8 +598,8 @@ export default function ThreeWayDialog({
                   poRefs.length === 0
                     ? <p className="text-xs text-muted-foreground">No purchase order is linked to these lines.</p>
                     : <table className="w-full text-[11px]">
-                        <thead>
-                          <tr className="[&>th]:px-1.5 [&>th]:py-1 [&>th]:text-left [&>th]:font-medium [&>th]:text-muted-foreground">
+                        <thead className={HEAD_BG}>
+                          <tr className={cn(HEAD_ROW_LOOK, "[&>th]:px-1.5 [&>th]:py-1 [&>th]:text-left")}>
                             <th>Purchase order</th><th>SKU</th>
                             <th className="text-right">Ordered</th>
                             <th className="text-right">Received</th>
@@ -683,8 +684,8 @@ export default function ThreeWayDialog({
                     {grns.length === 0
                     ? <p className="text-xs text-muted-foreground">No goods receipt synced against this invoice yet.</p>
                     : <table className="w-full text-[11px]">
-                        <thead>
-                          <tr className="[&>th]:px-1.5 [&>th]:py-1 [&>th]:text-left [&>th]:font-medium [&>th]:text-muted-foreground">
+                        <thead className={HEAD_BG}>
+                          <tr className={cn(HEAD_ROW_LOOK, "[&>th]:px-1.5 [&>th]:py-1 [&>th]:text-left")}>
                             <th>GRN</th><th>SKU</th><th>Inward PO</th><th>Batch</th><th>Received</th>
                             <th className="text-right" title="Passed QC — good, sellable stock">QC passed</th><th className="text-right">Rejected</th>
                             <th className="text-right">Rate</th>
@@ -806,8 +807,8 @@ export default function ThreeWayDialog({
                       <p className="text-xs text-muted-foreground">No invoice document stored.</p>
                     )}
                     <table className="w-full text-[11px]">
-                      <thead>
-                        <tr className="[&>th]:px-1.5 [&>th]:py-1 [&>th]:text-left [&>th]:font-medium [&>th]:text-muted-foreground">
+                      <thead className={HEAD_BG}>
+                        <tr className={cn(HEAD_ROW_LOOK, "[&>th]:px-1.5 [&>th]:py-1 [&>th]:text-left")}>
                           <th className="w-8">#</th><th>SKU</th><th>Product</th>
                           <th className="text-right">Qty</th><th className="text-right">Rate</th>
                           <th className="text-right">Line total</th>
