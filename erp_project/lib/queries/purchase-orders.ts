@@ -1107,6 +1107,50 @@ lowOpenByMfg: `
   ORDER BY open_qty ASC
 `,
 
+  /** MFG Overview → Open POs: open qty per SKU × manufacturer, counted as PO Procurement's
+   *  Open tab counts it. old_pos = POs dated more than N days ago.
+   *  Params: [oldDays, ...scopeParams(mfgIds), ...scopeParams(warehouseNames), ...scopeParams(brandIds)] */
+  openQtyBySkuMfg: `
+    SELECT po.sku_code,
+           MAX(sk.name)                                      AS sku_name,
+           m.id AS mfg_id, m.code AS mfg_code, m.name AS mfg_name,
+           SUM(GREATEST(po.qty - ${RECEIVED_TOTAL_EXPR}, 0)) AS open_qty,
+           COUNT(*)                                          AS open_pos,
+           SUM(po.date < ${SQL_TODAY_IST} - INTERVAL ? DAY)  AS old_pos
+    FROM purchase_orders po
+    INNER JOIN master_mfgs m  ON m.id        = po.mfg_id
+    LEFT  JOIN master_skus sk ON sk.sku_code = po.sku_code
+    ${CHILD_AGG_JOIN}
+    WHERE COALESCE(po.po_type, '') <> 'inward'
+      AND ${DISPLAY_STATUS_EXPR} IN ('raised', 'punched', 'partially_received')
+      ${MASTERS_ONLY}
+      ${SCOPE_WHERE}
+    GROUP BY po.sku_code, m.id, m.code, m.name
+  `,
+
+  /** The open POs behind one Open POs chip or cell, oldest first.
+   *  Params: [mfgId, sku×2, olderThanDays×2, ...scope (6)] — sku / olderThanDays null = any. */
+  openPosForSkuMfg: `
+    SELECT po.id, po.po_no, po.date, DATEDIFF(${SQL_TODAY_IST}, po.date) AS age_days,
+           po.sku_code, sk.name AS sku_name, m.code AS mfg_code, m.name AS mfg_name,
+           po.qty, ${RECEIVED_TOTAL_EXPR} AS received_total,
+           GREATEST(po.qty - ${RECEIVED_TOTAL_EXPR}, 0) AS open_qty,
+           ${DISPLAY_STATUS_EXPR} AS status, po.expected_on, po.destination
+    FROM purchase_orders po
+    INNER JOIN master_mfgs m  ON m.id        = po.mfg_id
+    LEFT  JOIN master_skus sk ON sk.sku_code = po.sku_code
+    ${CHILD_AGG_JOIN}
+    WHERE COALESCE(po.po_type, '') <> 'inward'
+      AND ${DISPLAY_STATUS_EXPR} IN ('raised', 'punched', 'partially_received')
+      ${MASTERS_ONLY}
+      AND po.mfg_id = ?
+      AND (? IS NULL OR po.sku_code = ?)
+      AND (? IS NULL OR po.date < ${SQL_TODAY_IST} - INTERVAL ? DAY)
+      ${SCOPE_WHERE}
+    ORDER BY po.date ASC, po.id ASC
+    LIMIT 500
+  `,
+
 }
 
 // ── Filter parameter helpers ──────────────────────────────────────────────────

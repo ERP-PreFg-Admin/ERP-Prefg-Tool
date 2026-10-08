@@ -724,6 +724,28 @@ export const supplierInvoicesSql = {
 
   /** Hand the invoice back to the derived state. Parameters: [invoice_id] */
   deletePayment: `DELETE FROM invoice_payment WHERE invoice_id = ?`,
+
+  /** MFG Overview → Dispatch History: invoiced qty per manufacturer × SKU, by invoice_date.
+   *  Brand scope is per line, since one invoice can carry several brands.
+   *  Params: [from, to, mfgId×2, like×3, ...scopeParams(mfgIds), ...scopeParams(warehouseNames), ...scopeParams(brandIds)] */
+  dispatchedBySkuMfg: `
+    SELECT si.mfg_id, m.code AS mfg_code, m.name AS mfg_name,
+           ii.sku_code, MAX(ms.name) AS sku_name,
+           SUM(ii.qty)               AS qty,
+           COUNT(DISTINCT si.id)     AS invoices
+    FROM invoice_items_mfg ii
+    INNER JOIN invoice_mfg si ON si.id = ii.invoice_id
+    INNER JOIN master_mfgs m  ON m.id  = si.mfg_id
+    LEFT  JOIN master_skus ms ON ms.sku_code = ii.sku_code
+    WHERE si.invoice_date >= ? AND si.invoice_date <= ?
+      AND (? IS NULL OR si.mfg_id = ?)
+      AND (? IS NULL OR ii.sku_code LIKE ? OR ms.name LIKE ?)
+      AND (? IS NULL OR si.mfg_id      IN (?))
+      AND (? IS NULL OR si.destination IN (?))
+      AND (? IS NULL OR ms.brand_id IS NULL OR ms.brand_id IN (?))
+    GROUP BY si.mfg_id, m.code, m.name, ii.sku_code
+    ORDER BY m.code, qty DESC
+  `,
 }
 
 /** The user-chosen filters on /po-tracking/invoices. All optional — an absent

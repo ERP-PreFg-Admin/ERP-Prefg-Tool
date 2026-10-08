@@ -230,3 +230,25 @@ export async function buildMultiSheetXlsx(
   const raw = await workbook.xlsx.writeBuffer()
   return (raw as ArrayBuffer).slice(0)
 }
+
+/** A CSV or XLSX download as a Response, for routes that build their own columns. */
+export async function exportResponse(
+  format: "csv" | "xlsx",
+  filename: string,
+  sheetName: string,
+  columns: ExportColumn[],
+  rows: Record<string, unknown>[],
+): Promise<Response> {
+  const disposition = `attachment; filename="${filename}"`
+  if (format === "xlsx") {
+    return new Response(await buildXlsx(sheetName, columns, rows), {
+      headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": disposition,
+      },
+    })
+  }
+  return new Response(buildCsv(columns, rows), {
+    headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": disposition },
+  })
+}
