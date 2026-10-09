@@ -23,6 +23,10 @@ const EXEMPT = new Map<string, string>([
       "and every *_BULK module stores the uploader's user id, not an entity. " +
       "See lib/scope.ts, 'Deliberately NOT scoped yet'.",
   ],
+  [
+    "app/api/v1/admin/users/[id]/welcome/route.ts",
+    "Users are not a scoped entity — the /admin editor gate is the whole rule, as on PATCH /admin/users.",
+  ],
 ])
 
 function routeFiles(dir: string): string[] {

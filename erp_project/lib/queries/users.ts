@@ -16,39 +16,51 @@ export type AdminUser = {
   email: string
   status: string | null
   created_at: Date | string | null
+  welcome_sent_at: Date | string | null
   roles: string | null
   last_login: Date | string | null
 }
+
+export type WelcomeTarget = { id: number; name: string; email: string; status: string | null; welcome_sent_at: Date | string | null }
 
 export const usersSql = {
   /** All users with roles rolled up and last successful login. */
   selectAll: `
     SELECT
-      u.id, u.name, u.email, u.status, u.created_at,
+      u.id, u.name, u.email, u.status, u.created_at, u.welcome_sent_at,
       GROUP_CONCAT(DISTINCT r.role ORDER BY r.role SEPARATOR ',') AS roles,
       (SELECT MAX(sh.event_at) FROM session_history sh
         WHERE sh.user_id = u.id AND sh.event = 'login') AS last_login
     FROM users u
     LEFT JOIN user_roles r ON r.user_id = u.id
-    GROUP BY u.id, u.name, u.email, u.status, u.created_at
+    GROUP BY u.id, u.name, u.email, u.status, u.created_at, u.welcome_sent_at
     ORDER BY u.name ASC
   `,
 
   /** Params: [id] */
   selectById: `
     SELECT
-      u.id, u.name, u.email, u.status, u.created_at,
+      u.id, u.name, u.email, u.status, u.created_at, u.welcome_sent_at,
       GROUP_CONCAT(DISTINCT r.role ORDER BY r.role SEPARATOR ',') AS roles,
       (SELECT MAX(sh.event_at) FROM session_history sh
         WHERE sh.user_id = u.id AND sh.event = 'login') AS last_login
     FROM users u
     LEFT JOIN user_roles r ON r.user_id = u.id
     WHERE u.id = ?
-    GROUP BY u.id, u.name, u.email, u.status, u.created_at
+    GROUP BY u.id, u.name, u.email, u.status, u.created_at, u.welcome_sent_at
   `,
 
   /** Existence check for user_page_permissions overrides. Params: [id] */
   existsById: `SELECT id FROM users WHERE id = ? LIMIT 1`,
+
+  /** Params: [id] */
+  selectWelcomeTarget: `SELECT id, name, email, status, welcome_sent_at FROM users WHERE id = ? LIMIT 1`,
+
+  /** Params: [id]. The welcome sender — "who to contact" and the CC. */
+  selectContactById: `SELECT name, email FROM users WHERE id = ? LIMIT 1`,
+
+  /** Params: [id] */
+  markWelcomeSent: `UPDATE users SET welcome_sent_at = NOW() WHERE id = ?`,
 
   /** Params: [name, email, status] */
   insertUser: `INSERT INTO users (name, email, status) VALUES (?, ?, ?)`,

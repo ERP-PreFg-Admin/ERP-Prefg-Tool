@@ -15,7 +15,7 @@
 
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Pencil, UserPlus, AlertTriangle } from "lucide-react"
+import { Pencil, UserPlus, AlertTriangle, Mail } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -33,6 +33,7 @@ import type { AdminUser } from "@/lib/queries/users"
 import { splitRoles } from "./authority"
 import { UserDialog } from "./UserDialog"
 import { IST } from "@/lib/date"
+import { useToast } from "@/components/ui/toast"
 
 /** DATETIME(0) columns arrive as Date over the RSC boundary; nulls as null. */
 function formatDate(value: Date | string | null) {
@@ -125,6 +126,23 @@ export default function UsersClient({
   const [search, setSearch] = useState("")
   // null = closed, "new" = add, AdminUser = edit that user
   const [dialog, setDialog] = useState<AdminUser | "new" | null>(null)
+  const { toast } = useToast()
+  const [sending, setSending] = useState<number | null>(null)
+
+  async function resendWelcome(u: AdminUser) {
+    setSending(u.id)
+    try {
+      const res = await fetch(`/api/v1/admin/users/${u.id}/welcome`, { method: "POST" })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? "Request failed")
+      toast({ title: "Welcome mail sent", description: `To ${u.email}, with you in CC.`, variant: "success" })
+      router.refresh()
+    } catch (err) {
+      toast({ title: "Couldn't send the welcome mail", description: err instanceof Error ? err.message : "Something went wrong", variant: "error" })
+    } finally {
+      setSending(null)
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -162,10 +180,10 @@ export default function UsersClient({
                 <TableHead>User</TableHead>
                 <TableHead className="w-44">Designation</TableHead>
                 <TableHead>Roles</TableHead>
-                <TableHead className="w-24">Status</TableHead>
+                <TableHead className="w-32">Status</TableHead>
                 <TableHead className="w-44">Last login</TableHead>
                 <TableHead className="w-44">Added</TableHead>
-                <TableHead className="w-16 text-right">Actions</TableHead>
+                <TableHead className="w-24 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -204,10 +222,28 @@ export default function UsersClient({
                       </TableCell>
                       <TableCell><Designation roles={roles} /></TableCell>
                       <TableCell><RoleList roles={roles} /></TableCell>
-                      <TableCell><StatusBadge status={u.status} /></TableCell>
+                      <TableCell>
+                        <StatusBadge status={u.status} />
+                        <div className="mt-1 text-[11px] text-muted-foreground whitespace-nowrap">
+                          {u.welcome_sent_at
+                            ? `Welcome sent ${new Date(u.welcome_sent_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST })}`
+                            : "Welcome not sent"}
+                        </div>
+                      </TableCell>
                       <TableCell><When value={u.last_login} absent="Never signed in" /></TableCell>
                       <TableCell><When value={u.created_at} absent="Unknown" /></TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right whitespace-nowrap">
+                        {canEdit && u.status === "active" && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => resendWelcome(u)}
+                            disabled={sending === u.id}
+                            title={`Resend welcome mail to ${u.email}`}
+                          >
+                            <Mail className="h-4 w-4" />
+                          </Button>
+                        )}
                         <Button
                           size="icon"
                           variant="ghost"

@@ -83,12 +83,15 @@ export function UserDialog({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Request failed")
 
+      const welcome =
+        data.welcome === "sent" ? " Welcome mail sent."
+        : data.welcome === "failed" ? " The welcome mail couldn't be sent — resend it from the table." : ""
       toast({
         title: isNew ? "User added" : "User updated",
-        description: isNew
+        description: (isNew
           ? `${email.trim()} can now sign in with Google.`
-          : `${name.trim()} saved.`,
-        variant: "success",
+          : `${name.trim()} saved.`) + welcome,
+        variant: data.welcome === "failed" ? "info" : "success",
       })
       onSuccess()
     } catch (err) {

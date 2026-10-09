@@ -343,6 +343,8 @@ model users {
   email                                  String                    @unique(map: "email") @db.VarChar(100)
   status                                 users_status?             @default(active)
   created_at                             DateTime?                 @default(now()) @db.Timestamp(0)
+  /// When the welcome mail last went. See prisma/add_users_welcome_sent_at.sql.
+  welcome_sent_at                        DateTime?                 @db.DateTime(0)
   google_id                              String?                   @db.VarChar(255)
   approvals_approvals_raised_byTousers   approvals[]               @relation("approvals_raised_byTousers")
   approvals_approvals_approved_byTousers approvals[]               @relation("approvals_approved_byTousers")

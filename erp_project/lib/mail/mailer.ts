@@ -3,7 +3,7 @@ import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2"
 import {
   GMAIL_USER, GMAIL_APP_PASSWORD,
   MAIL_PROVIDER, MAIL_FROM, MAIL_FROM_NAME, SES_CONFIG_SET,
-  AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+  AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, APP_URL,
 } from "@/lib/env"
 import { query, execute } from "@/lib/db"
 import { uploadFile, getFileBuffer } from "@/lib/s3"
@@ -18,6 +18,7 @@ import { splitRecipients, type RecipientRow } from "@/lib/mail/recipients"
 import { fetchPurchaseOrderPdf, UniwareSessionStale } from "@/lib/uniware"
 import { buildMultiSheetXlsx, type ExportColumn } from "@/lib/export"
 import { assertAttachmentsWithinLimit } from "@/lib/mail/mail-limits"
+import { renderWelcomeMail } from "@/lib/mail/welcome-mail"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import crypto from "crypto"
@@ -108,7 +109,8 @@ export const MAIL_FLOW = {
   PO_SPLIT: "po_split",
   INWARD_INVOICE: "inward_invoice",
   OPS_DIGEST: "ops_digest",
-  LOW_OPEN_PO: "low_open_po"
+  LOW_OPEN_PO: "low_open_po",
+  WELCOME: "welcome",
 } as const
 
 export type MailFlow = (typeof MAIL_FLOW)[keyof typeof MAIL_FLOW]
@@ -1006,3 +1008,40 @@ export const sendOpsDigestEmail = (day: string, html: string) =>
 
 export const sendLowOpenPoEmail = (day: string, html: string) =>
   sendReportEmail(LOW_OPEN_PO_CODE, `Low open PO quantity — ${day}`, html, MAIL_FLOW.LOW_OPEN_PO, day)
+
+export type WelcomeOutcome = { sent: boolean; reason?: string }
+
+// To the new user, CC the admin who added them. Never throws — a failed welcome must not fail the create.
+export async function sendWelcomeEmail(o: {
+  user: { name: string; email: string }
+  admin: { name: string; email: string }
+}): Promise<WelcomeOutcome> {
+  const ctx = mailerCtx()
+  try {
+    // AUTH_URL is the site's own address at runtime; NEXT_PUBLIC_APP_URL is baked in at build.
+    const appUrl = process.env.AUTH_URL || APP_URL
+    const suppressedRows = await query<{ email: string }>(emailSuppressionsSql.selectAll)
+    const suppressed = new Set(suppressedRows.map((r) => r.email.toLowerCase()))
+    const { to, cc, dropped } = splitRecipients([{ email: o.admin.email, recipient_type: "cc" }], o.user.email, suppressed)
+    if (to.length === 0) {
+      logger.warn({ ...ctx, email: o.user.email, dropped: dropped.join(", "), message: "Welcome mail not sent — the address is suppressed after an earlier bounce or complaint" })
+      return { sent: false, reason: "suppressed" }
+    }
+    const m = renderWelcomeMail({ name: o.user.name, email: o.user.email, appUrl, admin: o.admin })
+    const info = await getTransporter().sendMail({
+      ...sesOptions,
+      from: fromHeader,
+      to: to.join(", "),
+      ...(cc.length ? { cc: cc.join(", ") } : {}),
+      subject: m.subject,
+      html: m.html,
+      text: m.text,
+    })
+    logger.info({ ...ctx, ...mailOutcome("sent", MAIL_FLOW.WELCOME, { recipients: to.length + cc.length, sesMessageId: info?.messageId }), email: o.user.email, message: "Welcome mail sent" })
+    return { sent: true }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    logger.error({ ...ctx, ...mailOutcome("failed", MAIL_FLOW.WELCOME, { recipients: 1 }), email: o.user.email, error: message, message: "Welcome mail failed" })
+    return { sent: false, reason: message }
+  }
+}

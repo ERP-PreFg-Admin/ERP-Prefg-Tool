@@ -9,13 +9,13 @@
 //   Request  { name, email, status, roles: string[] }
 //     Process → INSERT users + one user_roles row per role, in one transaction.
 //       The person can then sign in with Google: lib/auth.ts' signIn callback
-//       whitelists on this row's email + status. Nothing is emailed.
-//     Response 200 { ok, user } · 409 { error } duplicate email · 400 · 500
+//       whitelists on this row's email + status. An active user gets the welcome mail after commit.
+//     Response 200 { ok, user, welcome } · 409 { error } duplicate email · 400 · 500
 //
 // PATCH /api/v1/admin/users
 //   Request  { id, name, status, roles: string[] }
-//     Process → UPDATE users, then replace the user's roles wholesale.
-//     Response 200 { ok, user } · 404 · 400 · 500
+//     Process → UPDATE users, then replace the user's roles wholesale. First inactive → active sends the welcome.
+//     Response 200 { ok, user, welcome } · 404 · 400 · 500
 //
 // There is intentionally no DELETE: users.id is referenced by approvals,
 // sessions, session_history, master_* and invoice_mfg. Setting
@@ -26,13 +26,15 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import type { ResultSetHeader, PoolConnection } from "mysql2/promise"
 import { pool, query } from "@/lib/db"
-import { usersSql, type AdminUser } from "@/lib/queries/users"
+import { usersSql, type AdminUser, type WelcomeTarget } from "@/lib/queries/users"
 import { STATUS } from "@/lib/constants"
 import { ROLE_KEYS } from "@/lib/roles"
 import { EMAIL_REGEX } from "@/lib/validation/shared"
 import logger from "@/lib/logger"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
+import { shouldSendWelcome } from "@/lib/mail/welcome-mail"
+import { deliverWelcome, type WelcomeResult } from "@/lib/users/welcome"
 
 const ADMIN_PAGE = "/admin"
 
@@ -87,8 +89,12 @@ export const POST = withGateway({
       await conn.commit()
 
       logger.info({ ...ctx, module: "ADMIN_USERS", userIdCreated: res.insertId, email: body.email, message: "User created" })
+      let welcome: WelcomeResult = "skipped"
+      if (shouldSendWelcome({ before: null, after: body.status, welcomeSentAt: null })) {
+        welcome = await deliverWelcome({ id: res.insertId, name: body.name, email: body.email }, ctx.userId)
+      }
       const rows = await query<AdminUser>(usersSql.selectById, [res.insertId])
-      return NextResponse.json({ ok: true, user: rows[0] })
+      return NextResponse.json({ ok: true, user: rows[0], welcome })
     } catch (err) {
       await conn.rollback()
       const e = err as { code?: string; message?: string }
@@ -109,8 +115,8 @@ export const PATCH = withGateway({
   schema: updateSchema,
   access: { pageSlug: ADMIN_PAGE, level: "editor" },
   handler: async ({ body, ctx }) => {
-    const existing = await query<{ id: number }>(usersSql.existsById, [body.id])
-    if (existing.length === 0) throw new ApiError(404, "not_found", "User not found")
+    const [before] = await query<WelcomeTarget>(usersSql.selectWelcomeTarget, [body.id])
+    if (!before) throw new ApiError(404, "not_found", "User not found")
 
     const conn = await pool.getConnection()
     await conn.beginTransaction()
@@ -120,8 +126,12 @@ export const PATCH = withGateway({
       await conn.commit()
 
       logger.info({ ...ctx, module: "ADMIN_USERS", targetUserId: body.id, status: body.status, message: "User updated" })
+      let welcome: WelcomeResult = "skipped"
+      if (shouldSendWelcome({ before: before.status, after: body.status, welcomeSentAt: before.welcome_sent_at })) {
+        welcome = await deliverWelcome(before, ctx.userId)
+      }
       const rows = await query<AdminUser>(usersSql.selectById, [body.id])
-      return NextResponse.json({ ok: true, user: rows[0] })
+      return NextResponse.json({ ok: true, user: rows[0], welcome })
     } catch (err) {
       await conn.rollback()
       logger.error({ ...ctx, module: "ADMIN_USERS", error: (err as Error)?.message, message: "User update failed" })
