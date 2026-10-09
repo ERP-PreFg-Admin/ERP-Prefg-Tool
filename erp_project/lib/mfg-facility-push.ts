@@ -30,10 +30,13 @@ import logger from "@/lib/logger"
 /** `un_push_error` is VARCHAR(500). */
 const ERROR_MAX = 500
 
+/** Uniware's unitPrice is mandatory; a SKU with no agreed costing goes at this placeholder. */
+export const PLACEHOLDER_UNIT_PRICE = 1
+
 export type PushOutcome = {
   pushed: number
   failed: number
-  /** Rows not attempted because no unit price could be established. */
+  /** Rows sent at PLACEHOLDER_UNIT_PRICE because no agreed costing exists. Counted in `pushed` too when they succeed. */
   unpriced: number
   /** True when Uniware is not configured, so nothing was attempted at all. */
   skipped: boolean
@@ -97,18 +100,8 @@ export async function buildPriceMap(mfgId: number): Promise<Map<string, number>>
  * Never throws for a business failure: a partial success is the expected outcome
  * and the per-row state is the record. It only propagates a programming error.
  *
- * ⚠️ A row with no price is NOT pushed and NOT sent as 0.
- *
- * Unicommerce makes `unitPrice` mandatory, so 0 is the only way to push an
- * unpriced item — and 0 would become that vendor item's default purchase price in
- * their catalogue. A wrong price that looks deliberate is worse than a missing
- * mapping that reports itself: the mapping's absence is visible on this screen,
- * whereas a zero-priced catalogue entry is invisible until it prices something.
- * So the row stays mapped locally, unpushed, with the reason recorded.
- *
- * To send 0 instead, replace the `unpriced` branch below with `price = 0` — it is
- * deliberately one line, because it is a decision someone may reasonably take once
- * they know what it costs.
+ * A SKU with no agreed costing is still pushed, at PLACEHOLDER_UNIT_PRICE (₹1),
+ * since Uniware's unitPrice is mandatory. That becomes the vendor item's default price there.
  */
 export async function pushFacilityMap(mfgId: number, whId: number): Promise<PushOutcome> {
   const out: PushOutcome = { pushed: 0, failed: 0, unpriced: 0, skipped: false, errors: [] }
@@ -128,15 +121,10 @@ export async function pushFacilityMap(mfgId: number, whId: number): Promise<Push
   const prices = await buildPriceMap(mfgId)
 
   for (const row of targets) {
-    const price = prices.get(row.sku_code)
+    let price = prices.get(row.sku_code)
     if (price === undefined) {
       out.unpriced++
-      await execute(mfgFacilityMap.markPushFailed, [
-        "No agreed costing for this SKU, so Uniware's mandatory unitPrice cannot be set. " +
-        "Add the recipe and its rates, then retry.",
-        row.id,
-      ])
-      continue
+      price = PLACEHOLDER_UNIT_PRICE
     }
 
     try {

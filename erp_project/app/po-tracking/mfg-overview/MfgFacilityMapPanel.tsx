@@ -231,7 +231,7 @@ function PanelBody({
           : p.pushed > 0 ? `${p.pushed} sent to Uniware` : "Nothing could be sent",
         description: [
           p.pushed ? `${p.pushed} created` : null,
-          p.unpriced ? `${p.unpriced} have no agreed costing` : null,
+          p.unpriced ? `${p.unpriced} at ₹1 (no agreed costing)` : null,
           p.failed ? `${p.failed} rejected by Uniware` : null,
         ].filter(Boolean).join(" · ") || undefined,
         variant: p.pushed > 0 && !p.failed ? "success" : "error",
@@ -261,7 +261,7 @@ function PanelBody({
         ? "Uniware is not configured, so nothing was sent there."
         : [
             p.pushed ? `${p.pushed} sent to Uniware` : null,
-            p.unpriced ? `${p.unpriced} need agreed costing first` : null,
+            p.unpriced ? `${p.unpriced} at ₹1 (no agreed costing)` : null,
             p.failed ? `${p.failed} rejected by Uniware` : null,
           ].filter(Boolean).join(" · ")
       toast({
@@ -269,7 +269,7 @@ function PanelBody({
         description: detail || undefined,
         // `info`, not `error`: the mapping genuinely saved. Only the Uniware half
         // is outstanding, and it is retryable rather than broken.
-        variant: p.failed || p.unpriced ? "info" : "success",
+        variant: p.failed ? "info" : "success",
       })
       onClose()
     }
