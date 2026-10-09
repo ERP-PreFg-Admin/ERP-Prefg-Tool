@@ -2,19 +2,19 @@ import type { ParsedInvoice, ParsedLineItem } from "@/types/invoice"
 import { findGstins, isOurs } from "@/lib/invoice/gstin"
 import { MONEY, clean, num, toLines, slashDateToTally } from "./util"
 
-// SAP Business One. Its item row ends with amount and unit price run together:
-//   3304.99.90 76.00PcsUE260223 06/2028 499 381596.005021.00
-//                                           └amount─┘└price┘
-// Both always print two decimals, which is what lets them be told apart.
+// SAP Business One. The unit price sits before the UoM; amount and QUANTITY run together at the end:
+//   3304.99.90 76.00PcsUE260223 06/2028 499 381596.005021.00   = 5,021 units @ ₹76
+//              └price┘                     └amount─┘└─qty─┘
+// Reading it the other way round still multiplies out, so only MRP (₹499 here) gives it away.
 const ROW = new RegExp(
   String.raw`^(?<hsn>[\d.]+)\s+` +
   // uom is lazy and batch is anchored to letters-then-digits, or a greedy uom
   // eats the batch's own letter prefix: "PcsUE260223" -> uom "PcsUE", batch "260223".
-  String.raw`(?<qty>${MONEY})(?<uom>[A-Za-z]+?)` +
+  String.raw`(?<price>${MONEY})(?<uom>[A-Za-z]+?)` +
   String.raw`(?<batch>[A-Z]{1,4}\d+)\s+` +
   String.raw`(?<expiry>\d{1,2}\/\d{4})\s+` +
   String.raw`(?<mrp>[\d,]+(?:\.\d+)?)\s+` +
-  String.raw`(?<amount>${MONEY})(?<price>${MONEY})$`
+  String.raw`(?<amount>${MONEY})(?<qty>${MONEY})$`
 )
 
 const ITEM_START = /^(\d+)\s+(\S+)\s+(.*)$/

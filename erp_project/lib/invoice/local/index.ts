@@ -49,6 +49,11 @@ function rowReconciles(item: ParsedLineItem): boolean {
   return Math.abs(item.qty * item.rate - item.amount) < ROW_TOLERANCE
 }
 
+/** A pre-tax unit rate can never exceed the MRP printed beside it. No MRP, no verdict. */
+export function rateAboveMrp(item: ParsedLineItem): boolean {
+  return item.rate != null && item.mrp != null && item.mrp > 0 && item.rate > item.mrp
+}
+
 /**
  * Charges are part of the taxable value, so they belong in the SUM even though
  * they are not line items. Kain's invoice is the case in point: goods 529,100.39
@@ -125,6 +130,16 @@ export function parseLocallyVerbose(text: string): LocalParseResult {
       ok: false,
       layout: name,
       reason: `${broken.length} of ${parsed.line_items.length} rows fail qty x rate = amount`,
+    }
+  }
+
+  // A rate above the MRP means qty and rate were read swapped — qty x rate still multiplies out.
+  const overMrp = parsed.line_items.filter((i) => rateAboveMrp(i))
+  if (overMrp.length) {
+    return {
+      ok: false,
+      layout: name,
+      reason: `${overMrp.length} of ${parsed.line_items.length} rows have a rate above their MRP (qty and rate likely swapped)`,
     }
   }
 

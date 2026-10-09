@@ -5,7 +5,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { parseLocallyVerbose } from "../../lib/invoice/local"
+import { parseLocallyVerbose, rateAboveMrp } from "../../lib/invoice/local"
 
 const OURS = "27AAJCK9697F1ZS"
 const CHERYL_GSTIN = "27AAACC4638H1ZQ"
@@ -132,12 +132,48 @@ test("Jainam's layout is recognised and both rows reconcile", () => {
   assert.equal(r.parsed.total_amount, 457458)
   assert.equal(r.parsed.line_items.length, 2)
 
+  // Price sits before "Pcs"; the quantity is the figure fused onto the end of the amount.
   const [a, b] = r.parsed.line_items
-  assert.equal(a.qty, 76)
-  assert.equal(a.rate, 5021)
+  assert.equal(a.qty, 5021)
+  assert.equal(a.rate, 76)
   assert.equal(a.amount, 381596)
-  assert.equal(b.rate, 80)
+  assert.equal(b.qty, 80)
+  assert.equal(b.rate, 76)
   assert.equal(b.amount, 6080)
+})
+
+test("REGRESSION: Jainam qty is the trailing figure, not the one before 'Pcs'", () => {
+  // Read the other way round, each row still multiplied out, so 2,400 units @ ₹45
+  // was booked as 45 units @ ₹2,400. Only the ₹499 MRP gave it away.
+  const text = JAINAM
+    .replace("3304.99.90 76.00PcsUE260223 06/2028 499 381596.005021.00", "3304.99.90 45.00PcsUE260308 08/2028 499 108000.002400.00")
+    .replace("3304.99.90 76.00PcsUE260044 01/2028 499 6080.0080.00", "3304.99.90 45.00PcsUE260334 08/2028 499 3600.0080.00")
+    .replace("Basic Amount 387,676.00", "Basic Amount 111,600.00")
+    .replace("Document Total 457,458.00", "Document Total 131,688.00")
+  const r = parseLocallyVerbose(text)
+  assert.equal(r.ok, true, r.ok ? "" : `rejected: ${r.reason}`)
+  if (!r.ok) return
+  assert.deepEqual(r.parsed.line_items.map((i) => [i.qty, i.rate]), [[2400, 45], [80, 45]])
+  assert.ok(r.parsed.line_items.every((i) => (i.rate ?? 0) <= (i.mrp ?? Infinity)), "no rate above MRP")
+})
+
+test("a row priced above its MRP is refused, not booked", () => {
+  // Swap the Jainam row's figures back to the old (wrong) reading: 76 units @ ₹5,021 against a ₹499 MRP.
+  const swapped = JAINAM.replace(
+    "3304.99.90 76.00PcsUE260223 06/2028 499 381596.005021.00",
+    "3304.99.90 5021.00PcsUE260223 06/2028 499 381596.0076.00",
+  )
+  const r = parseLocallyVerbose(swapped)
+  assert.equal(r.ok, false)
+  assert.match(r.ok === false ? r.reason : "", /rate above their MRP/)
+})
+
+test("rateAboveMrp needs both figures, and a positive MRP", () => {
+  assert.equal(rateAboveMrp({ rate: 500, mrp: 499 } as never), true)
+  assert.equal(rateAboveMrp({ rate: 499, mrp: 499 } as never), false)
+  assert.equal(rateAboveMrp({ rate: 500, mrp: null } as never), false)
+  assert.equal(rateAboveMrp({ rate: 500, mrp: 0 } as never), false)
+  assert.equal(rateAboveMrp({ rate: null, mrp: 499 } as never), false)
 })
 
 test("Jainam's batch keeps its letter prefix", () => {
