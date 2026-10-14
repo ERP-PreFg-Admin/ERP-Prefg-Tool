@@ -4,13 +4,12 @@
 // Table: un_code_mfg_sku_wh_map — one row per (facility, mfg, SKU), plus a
 // `sku_id IS NULL` row per pair carrying that pair's Uniware vendor code.
 //
-//   { action: "set-vendor-code", mfg_id, wh_id, remarks? }
-//     Records that this manufacturer IS a Uniware vendor at this facility. Must
-//     come first — un_mfg_code is NOT NULL on every row, so there is nothing to
-//     write a SKU mapping with until it exists. This is the grey → pink transition.
-//     The code is NOT a parameter: it is master_mfgs.code, one per manufacturer,
-//     identical at every facility (see the branch below).
-//     Response 200 { ok } · 409 (code already another mfg's here) · 404
+//   { action: "set-vendor-code", mfg_id, wh_id, vendor_code?, remarks? }
+//     Makes this manufacturer a Uniware vendor at this facility (grey → pink): reads the
+//     facility's Vendors export, reuses the vendor Uniware already has, else creates one
+//     from lib/uniware/vendor-registry.ts. vendor_code only picks among several matches.
+//     Response 200 { ok, un_mfg_code, source } · 409 (ambiguous / no address / code taken)
+//     · 503 (vendor list unreadable) · 502 (Uniware refused the create) · 404
 //
 //   { action: "set-map", mfg_id, wh_id, sku_codes[] }
 //     Replaces the whole mapped-SKU set for that pair — upsert the ticked ones,
@@ -30,10 +29,12 @@ import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { facilityMapActionSchema } from "@/lib/validation/manufacturing"
 import { mfgFacilityMap } from "@/lib/queries/mfg-facility-map"
-import { manufacturers } from "@/lib/queries/manufacturers"
 import { getUserScope, assertInScope, type UserScope } from "@/lib/scope"
 import { assertSkuCodesInBrandScope } from "@/lib/brand-guard"
 import { pushFacilityMap } from "@/lib/mfg-facility-push"
+import { pullFacilityVendors, forgetFacilityVendors, createVendor } from "@/lib/uniware/vendors"
+import { matchVendor, soleExactMatch, type UniwareVendor } from "@/lib/uniware/vendor-match"
+import { vendorAddressFor, buildVendorCreatePayload, type VendorCreatePayload } from "@/lib/uniware/vendor-registry"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 
@@ -97,25 +98,63 @@ export const POST = withGateway({
 
     // ── set-vendor-code ──────────────────────────────────────────────────────
     if (body.action === "set-vendor-code") {
-      // ONE code per manufacturer, the same at every facility, and never supplied
-      // by the client. master_mfgs.code is already auto-generated once per
-      // manufacturer (MFG-<serial>-<XX>) and already unique, so deriving from it
-      // costs no column and no generator — and two manufacturers cannot collide,
-      // because the value comes from the manufacturer itself.
-      const mfgRows = await query<{ code: string | null }>(
-        manufacturers.selectCodeById, [body.mfg_id]
-      )
-      const code = mfgRows[0]?.code?.trim()
-      if (!code) {
-        throw new ApiError(
-          404, "mfg_code_missing",
-          "This manufacturer has no business code, so it cannot be registered as a Uniware vendor."
-        )
+      const mfg = (await query<{ code: string | null; name: string; registered_name: string | null; gst_number: string | null }>(
+        mfgFacilityMap.selectMfgForVendor, [body.mfg_id]
+      ))[0]
+      if (!mfg?.code?.trim()) {
+        throw new ApiError(404, "mfg_code_missing", "This manufacturer has no business code, so it cannot be registered as a Uniware vendor.")
+      }
+      const facilityCode = facility.facility_code?.trim()
+      if (!facilityCode) {
+        throw new ApiError(409, "facility_code_missing", `${facility.wh_name} · ${facility.entity_code} has no Unicommerce facility code — set it in Masters → Warehouses first.`)
+      }
+      const mfgName = mfg.registered_name?.trim() || mfg.name
+
+      // Always ask Uniware first: a vendor it already has is reused, never added twice.
+      let vendors: UniwareVendor[]
+      try {
+        vendors = await pullFacilityVendors(facilityCode)
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        throw new ApiError(503, "vendor_list_unavailable",
+          `Couldn't read ${facilityCode}'s vendor list from Uniware (${message}). Nothing was saved — try again in a minute.`)
+      }
+
+      let code: string
+      let create: VendorCreatePayload | null = null
+      if (body.vendor_code) {
+        const picked = vendors.find((v) => v.code === body.vendor_code)
+        if (!picked) {
+          throw new ApiError(400, "vendor_code_not_in_uniware", `'${body.vendor_code}' is not a vendor at ${facilityCode} in Uniware.`)
+        }
+        code = picked.code
+      } else {
+        // create_new answers the pick-list's "None of these"; a vendor already holding our code still wins.
+        const matches = body.create_new
+          ? vendors.filter((v) => v.code === mfg.code!.trim()).map((v) => ({ ...v, exact: true }))
+          : matchVendor(vendors, mfg)
+        const sole = soleExactMatch(matches)
+        if (sole) {
+          code = sole.code
+        } else if (matches.length > 0) {
+          // A loose or multiple hit is never auto-picked: the wrong vendor puts inwards on another ledger.
+          throw new ApiError(409, "vendor_ambiguous",
+            `${matches.length === 1 ? "A vendor" : `${matches.length} vendors`} at ${facilityCode} look${matches.length === 1 ? "s" : ""} like ${mfgName} — pick the one to use.`,
+            { candidates: matches.map(({ code: c, name }) => ({ code: c, name })) })
+        } else {
+          const address = vendorAddressFor(mfg.gst_number)
+          if (!address) {
+            throw new ApiError(409, "vendor_address_missing",
+              `${mfgName} isn't a vendor at ${facilityCode} in Uniware, and there's no address on file to create it. Nothing was saved.`)
+          }
+          code = mfg.code.trim()
+          create = buildVendorCreatePayload({ code, name: mfgName }, address)
+        }
       }
 
       const eventId = makeEventId("MFG_FACILITY_CODE", "set", `${body.mfg_id}-${body.wh_id}`)
       const logCtx = { ...ctx, eventId, module: "MFG_FACILITY_CODE" }
-      recordRawEvent("MFG_FACILITY_CODE", eventId, { mfgId: body.mfg_id, whId: body.wh_id, code })
+      recordRawEvent("MFG_FACILITY_CODE", eventId, { mfgId: body.mfg_id, whId: body.wh_id, code, create: !!create })
 
       // ⚠️ The guard that used to be the uq_wh_code UNIQUE index, dropped by
       // prisma/alter_un_code_mfg_sku_wh_map.sql for the re-grain. Two of our
@@ -163,13 +202,32 @@ export const POST = withGateway({
           code, userId, body.mfg_id, body.wh_id,
         ])
 
+        // Least reversible last: a Uniware vendor can't be deleted, our row can — so
+        // the row only commits once Uniware has accepted the vendor.
+        let source: "existing" | "created" | "sandbox" = "existing"
+        if (create) {
+          let sandbox: boolean
+          try {
+            ({ sandbox } = await createVendor(create, facilityCode))
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err)
+            throw new ApiError(502, "uniware_vendor_create_failed",
+              `Uniware refused to create ${code} at ${facilityCode}: ${message}. Nothing was saved.`)
+          }
+          source = sandbox ? "sandbox" : "created"
+          forgetFacilityVendors(facilityCode)
+        }
+
         await conn.commit()
-        logger.info({ ...logCtx, mfgId: body.mfg_id, whId: body.wh_id, code, message: "Facility vendor code set" })
-        recordProcessedEvent("MFG_FACILITY_CODE", eventId, { mfgId: body.mfg_id, whId: body.wh_id })
-        return NextResponse.json({ ok: true, un_mfg_code: code })
+        logger.info({ ...logCtx, mfgId: body.mfg_id, whId: body.wh_id, code, source, message: "Facility vendor code set" })
+        recordProcessedEvent("MFG_FACILITY_CODE", eventId, { mfgId: body.mfg_id, whId: body.wh_id, code, source })
+        return NextResponse.json({ ok: true, un_mfg_code: code, source })
       } catch (err: unknown) {
         await conn.rollback()
-        if (err instanceof ApiError) throw err
+        if (err instanceof ApiError) {
+          if (err.status >= 500) recordFailedEvent("MFG_FACILITY_CODE", eventId, { mfgId: body.mfg_id, whId: body.wh_id, code }, err.message)
+          throw err
+        }
         const message = err instanceof Error ? err.message : String(err)
         logger.error({ ...logCtx, err: message, message: "Facility vendor code failed" })
         recordFailedEvent("MFG_FACILITY_CODE", eventId, { mfgId: body.mfg_id, whId: body.wh_id }, message)

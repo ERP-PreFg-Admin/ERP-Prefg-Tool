@@ -490,6 +490,14 @@ export const mfgFacilityMap = {
     ORDER BY sk.sku_code
   `,
 
+  /** What Register matches against Uniware's vendor list and creates from. Params: [mfg_id] */
+  selectMfgForVendor: `
+    SELECT m.code, m.name, d.registered_name, d.gst_number
+    FROM master_mfgs m
+    LEFT JOIN details_mfg d ON d.mfg_id = m.id
+    WHERE m.id = ? LIMIT 1
+  `,
+
   /** Params: [id] */
   markPushed: `
     UPDATE un_code_mfg_sku_wh_map

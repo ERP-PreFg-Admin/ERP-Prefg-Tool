@@ -15,10 +15,9 @@
  * pair has a code there is nothing to write a SKU mapping with and the API returns
  * 409. That is also why a grey cell still opens this panel.
  *
- * It is DISPLAYED, never entered. One manufacturer has one Uniware vendor code —
- * `master_mfgs.code` — and it is the same at every facility; the route resolves it
- * and the client cannot send one. Registering is therefore a single button rather
- * than a text field, and there is nothing to "update" afterwards.
+ * It is never typed. Register reuses the vendor Uniware already has at the facility,
+ * or creates it as `master_mfgs.code`; the only client input is a pick among
+ * Uniware's own codes when several match (docs/uniware-vendor-create-plan.md).
  */
 
 import { useState } from "react"
@@ -110,15 +109,14 @@ function PanelBody({
     () => new Set(skus.filter(isMapped).map((s) => s.sku_id))
   )
   const [saving, setSaving] = useState<"map" | "code" | "push" | null>(null)
+  /** Uniware vendors that all look like this manufacturer, awaiting a pick. */
+  const [candidates, setCandidates] = useState<{ code: string; name: string }[] | null>(null)
   const [filter, setFilter] = useState<MapFilter>("all")
   const [q, setQ] = useState("")
 
   const hasCode = Boolean(cell.un_mfg_code)
-  /** What this manufacturer's code WILL be once registered: one per
-   *  manufacturer, identical at every facility, so it is knowable before the
-   *  write. `un_mfg_code` is only richer than mfg_code for legacy rows, which
-   *  were hand-typed per facility. */
-  const vendorCode = cell.un_mfg_code ?? cell.mfg_code ?? null
+  /** Known only once registered: Uniware's existing code here, or mfg_code if Register created it. */
+  const vendorCode = cell.un_mfg_code ?? null
 
   // The state as it WOULD be once saved, so the header badge tracks the
   // checkboxes rather than the stale server value.
@@ -193,19 +191,42 @@ function PanelBody({
     }
   }
 
-  /** Register this manufacturer as a Uniware vendor here. No code is sent — the
-   *  route resolves master_mfgs.code, the same value at every facility. */
-  async function registerVendor() {
-    const ok = await post(
-      { action: "set-vendor-code", mfg_id: cell.mfg_id, wh_id: cell.wh_id },
-      "code"
-    )
-    if (ok) {
+  /** Reuses the vendor Uniware already has at this facility, or creates it. `pick` answers
+   *  a "several vendors match" 409 with one of Uniware's own codes. */
+  async function registerVendor(pick?: string, createNew = false) {
+    setSaving("code")
+    try {
+      const res = await fetch("/api/v1/manufacturing/facility-map", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "set-vendor-code", mfg_id: cell.mfg_id, wh_id: cell.wh_id,
+          vendor_code: pick, create_new: createNew || undefined,
+        }),
+      })
+      const data = await res.json()
+      if (res.status === 409 && data.code === "vendor_ambiguous") {
+        setCandidates(data.details?.candidates ?? [])
+        return
+      }
+      if (!res.ok) {
+        toast({ title: "Not registered", description: data.error ?? "Request failed", variant: "error" })
+        return
+      }
+      setCandidates(null)
+      const code = data.un_mfg_code as string
       toast({
-        title: "Registered as Uniware vendor",
-        description: `${cell.mfg_name} is ${ok.un_mfg_code ?? vendorCode} at ${cell.wh_name}.`,
+        title: data.source === "created" ? "Created in Uniware"
+          : data.source === "sandbox" ? "Created in Uniware sandbox (TEST_FACILITY)"
+          : "Linked to Uniware vendor",
+        description: `${cell.mfg_name} is ${code} at ${cell.wh_name}.`,
         variant: "success",
       })
+      onSaved()
+    } catch {
+      toast({ title: "Not registered", description: "Network error — please try again.", variant: "error" })
+    } finally {
+      setSaving(null)
     }
   }
 
@@ -298,19 +319,37 @@ function PanelBody({
             {/* Read-only by design, not disabled-for-now: one manufacturer has one
                 code and a per-facility override is what this replaced. */}
             <div className="flex h-9 items-center rounded-lg border border-input bg-muted/40 px-3 font-mono text-sm">
-              {vendorCode ?? <span className="font-sans text-muted-foreground">No manufacturer code</span>}
+              {vendorCode ?? <span className="font-sans text-muted-foreground">Set on Register</span>}
             </div>
           </div>
           {canEdit && !hasCode && (
-            <Button size="sm" disabled={!vendorCode || saving !== null} onClick={registerVendor}>
-              {saving === "code" ? "Registering…" : "Register as Uniware vendor"}
+            <Button size="sm" disabled={!cell.mfg_code || saving !== null} onClick={() => registerVendor()}>
+              {saving === "code" ? "Checking Uniware…" : "Register as Uniware vendor"}
             </Button>
           )}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
-          One code per manufacturer, used at every facility — it is the
-          manufacturer&apos;s own code, so it cannot be edited here.
+          Register checks this facility&apos;s vendors in Uniware: if {cell.mfg_name} is already
+          there its code is used, otherwise it is created as {cell.mfg_code ?? "its manufacturer code"}.
         </p>
+        {candidates && (
+          <Callout variant="warning" className="mt-2">
+            <p className="mb-2">
+              {candidates.length === 1 ? "A Uniware vendor here looks like" : "Several Uniware vendors here look like"} {cell.mfg_name}. Which one is it?
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {candidates.map((c) => (
+                <Button key={c.code} size="sm" variant="outline" disabled={saving !== null} onClick={() => registerVendor(c.code)}>
+                  <span className="font-mono">{c.code}</span>
+                  {c.name && c.name !== c.code && <span className="ml-1 text-muted-foreground">· {c.name}</span>}
+                </Button>
+              ))}
+              <Button size="sm" variant="ghost" disabled={saving !== null} onClick={() => registerVendor(undefined, true)}>
+                None of these — create {cell.mfg_code}
+              </Button>
+            </div>
+          </Callout>
+        )}
       </section>
 
       {/* ── State of play ── */}

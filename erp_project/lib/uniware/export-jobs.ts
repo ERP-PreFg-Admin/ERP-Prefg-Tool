@@ -142,13 +142,11 @@ export async function pollExportJob(
     opts.onTick?.(i, status)
     const verdict = classifyJobStatus(status)
     if (verdict === "failed") throw new Error(`Export job ${jobCode} ended as ${status}`)
-    if (verdict === "done") {
-      if (!filePath) throw new Error(`Export job ${jobCode} succeeded but returned no filePath`)
-      return filePath
-    }
+    // A job can report SUCCESSFUL a poll or two before its file is attached — keep polling.
+    if (verdict === "done" && filePath) return filePath
     if (i < attempts) await new Promise((r) => setTimeout(r, delayMs))
   }
-  throw new Error(`Export job ${jobCode} was still running after ${attempts} checks`)
+  throw new Error(`Export job ${jobCode} had no file after ${attempts} checks`)
 }
 
 export async function downloadExportCsv(filePath: string): Promise<string> {

@@ -24,6 +24,8 @@ export const EXPORT_JOB_CREATE_PATH = "/services/rest/v1/export/job/create"
 export const EXPORT_JOB_STATUS_PATH = "/services/rest/v1/export/job/status"
 
 export const VENDOR_ITEM_CREATE_OR_EDIT_PATH = "/services/rest/v1/purchase/vendorItemType/createOrEdit"
+/** Create only — /edit would overwrite details kept by hand in Uniware. */
+export const VENDOR_CREATE_PATH = "/services/rest/v1/purchase/vendor/create"
 
 export function resolveUrl(pathOrUrl: string): string {
   if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl

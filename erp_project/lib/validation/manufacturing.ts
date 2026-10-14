@@ -182,21 +182,19 @@ export const setFacilityMapSchema = z.object({
 
 /**
  * Register this manufacturer as a Uniware vendor at this facility — the row that
- * makes the cell mappable at all.
+ * makes the cell mappable at all. The route reuses the vendor Uniware already has
+ * there, or creates one (docs/uniware-vendor-create-plan.md).
  *
- * **No `un_mfg_code`.** One manufacturer has ONE vendor code, the same at every
- * facility, and it is `master_mfgs.code` resolved server-side by the route. The
- * field is not merely hidden in the UI, it is not accepted: a schema that still
- * took it would let a caller post a code the form stopped offering, which is
- * exactly the per-facility divergence this replaced.
- *
- * Historic rows still hold hand-typed, mixed-case codes (`arovea`, `AROVEA_`,
- * `ReVe Pharma`) — those are left as they are, so the table carries both shapes.
+ * `vendor_code` is only a pick from Uniware's own list when several vendors match;
+ * the route refuses any code that isn't in that facility's Vendors export.
  */
 export const setFacilityVendorCodeSchema = z.object({
   action: z.literal("set-vendor-code"),
   mfg_id: z.coerce.number().int().positive(),
   wh_id: z.coerce.number().int().positive(),
+  vendor_code: z.string().trim().min(1).max(45).optional(),
+  /** "None of these" on the pick-list: create it even though names looked alike. */
+  create_new: z.boolean().optional(),
   remarks: z.string().trim().max(500).nullable().optional(),
 })
 

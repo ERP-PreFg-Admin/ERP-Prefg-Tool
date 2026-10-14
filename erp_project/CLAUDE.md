@@ -210,6 +210,16 @@ Writes are **direct, with
 no approval flow**, matching the parent relation (`master_recipe_mfg`, see
 `app/api/v1/manufacturing/lines/route.ts:5`).
 
+**Register (`set-vendor-code`) always asks Uniware first** (2026-10-09,
+`docs/uniware-vendor-create-plan.md`): it reads the facility's Vendors export and
+`matchVendor` (`lib/uniware/vendor-match.ts`) looks for the manufacturer. A **sole
+exact** match is reused as-is; any loose or multiple hit goes to a pick-list, never
+auto-picked (a wrong vendor puts inwards on another ledger). Only with no match does it
+**create** the vendor (`vendor/create`, never `/edit`) as `master_mfgs.code` from
+`lib/uniware/vendor-registry.ts` — addresses keyed by **GSTIN**, since mfg codes differ
+dev vs prod. The local row commits only after Uniware accepts. Off prod the create is
+skipped (`source: "sandbox"`); the vendor-list read still hits the real tenant.
+
 ### SKU variant families — RM is family-scoped, PM is SKU-scoped
 
 Two SKUs are variants iff they share **both** `master_skus.brand` and
