@@ -3,6 +3,9 @@ import { parseHeader, totalQuantities } from "./header"
 import { parseTallyRows, tallyBlocks } from "./tally"
 import { parseCheryl, matchesCheryl } from "./cheryl"
 import { parseJainam, matchesJainam } from "./jainam"
+import { parseCimera, matchesCimera, cimeraRows, cimeraDeclaredQty } from "./cimera"
+import { parseSamrvir, matchesSamrvir, samrvirRows, samrvirDeclaredQty } from "./samrvir"
+import { parseNgElectro, matchesNgElectro, ngElectroRows } from "./ngelectro"
 import { parseCharges, chargesTotal, type ParsedCharge } from "./charges"
 import { applyEwayGoods, parseEwayTotals } from "./eway"
 
@@ -30,11 +33,16 @@ type Layout = {
   parse: (text: string) => ParsedInvoice
   /** How many rows the supplier numbered, where the layout numbers them. */
   numberedRows?: (text: string) => number
+  /** The invoice's own quantity total, where it prints one outside a "Total" row. */
+  declaredQty?: (text: string) => number[]
 }
 
 const LAYOUTS: Layout[] = [
   { name: "cheryl", matches: matchesCheryl, parse: parseCheryl },
   { name: "jainam", matches: matchesJainam, parse: parseJainam },
+  { name: "cimera", matches: matchesCimera, parse: parseCimera, numberedRows: cimeraRows, declaredQty: cimeraDeclaredQty },
+  { name: "samrvir", matches: matchesSamrvir, parse: parseSamrvir, numberedRows: samrvirRows, declaredQty: samrvirDeclaredQty },
+  { name: "ngelectro", matches: matchesNgElectro, parse: parseNgElectro, numberedRows: ngElectroRows },
   { name: "tally", matches: (t) => /Description of Goods|Description of\b/i.test(t),
     parse: (t) => ({ ...parseHeader(t), line_items: parseTallyRows(t), extra: {} }),
     numberedRows: (t) => tallyBlocks(t).length },
@@ -180,7 +188,7 @@ export function parseLocallyVerbose(text: string): LocalParseResult {
 
   // The grand-total row carries the summed quantity. Integer, GST-free, and
   // quantity is what becomes received stock — the strongest check available.
-  const declaredQty = totalQuantities(text)
+  const declaredQty = layout.declaredQty?.(text) ?? totalQuantities(text)
   const qtySum = parsed.line_items.reduce((s, i) => s + (i.qty ?? 0), 0)
   if (declaredQty.length && !declaredQty.some((q) => Math.abs(q - qtySum) < QTY_TOLERANCE)) {
     return {

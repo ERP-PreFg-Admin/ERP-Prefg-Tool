@@ -214,3 +214,174 @@ test("a row whose numbers do not multiply out is refused", () => {
   assert.equal(r.ok, false)
   assert.match(r.ok === false ? r.reason : "", /fail qty x rate = amount/)
 })
+
+// The three layouts below were replayed against every prod invoice from their supplier before
+// shipping (docs/invoice-local-layouts-plan.md). Fixture figures are made up.
+
+const CIMERA_GSTIN = "05AAJCC1207D1ZC"
+
+const CIMERA = [
+  "GST E-INVOICE",
+  "Original for Buyer",
+  "CIMERA CARE PVT.LTD.",
+  `GSTIN : ${CIMERA_GSTIN}`,
+  "Name and address of Buyer :",
+  "PEP TECHNOLOGIES PVT LTD-MAHARASHTRA",
+  "A WING,304,BOOMERANG BUSINESS PARK",
+  "Phone No : 9680223399",
+  `GST No : ${PEP} Pan No. AAICP2804J`,
+  "Name and address of Consignee /Ship to :",
+  "PEP TECHNOLOGIES PVT LTD",
+  "UNIT A/1,GLOBAL LOGISTICS, KUKSE ROAD, THANE-421302",
+  "Phone No : 9680223399",
+  `GST No : ${PEP}`,
+  "Invoice No : CM009999 Date : 11-10-2026",
+  "C.Order No : MPO-00119999(MCaf370)Date : 24.07.2026",
+  "Description Cases Pack QTY FREE BATCH MFG EXP MRP Rate Dis IGST Value Amount",
+  "1. 33049930 M CAFFEINE TEST BODY LOTION 5 300ML 100 - WB901 10/26 9/28 499.00 50.0000 0.00 18.00% 900.0 5000.00",
+  "2. 33049930 M CAFFEINE TEST BODY LOTION 10 300ML 200 - WB902 10/26 9/28 499.00 50.0000 0.00 18.00% 1800.0 10000.00",
+  "OUR BANK DETAILS : - Total Qty : - 300.000 SUB TOTAL 15000.00",
+  "Grand total 17700.0ACCOUNT NO. : 0000000000, IFSC CODE : TEST0000000",
+  "For CIMERA CARE PVT.LTD.",
+  "I am satisfied with Marg ERP | Computerise YOUR SHOP",
+].join("\n")
+
+test("Cimera (Marg ERP) parses locally, SKU taken from the customer order", () => {
+  const r = parseLocallyVerbose(CIMERA)
+  assert.ok(r.ok, r.ok ? "" : r.reason)
+  assert.equal(r.layout, "cimera")
+  assert.equal(r.parsed.invoice_number, "CM009999")
+  assert.equal(r.parsed.date, "11-Oct-26")
+  assert.equal(r.parsed.from, "CIMERA CARE PVT.LTD.")
+  assert.equal(r.parsed.total_amount, 17700)
+  assert.equal(r.parsed.seller_gstin, CIMERA_GSTIN)
+  assert.deepEqual(
+    r.parsed.line_items.map((i) => [i.sku_code, i.batch, i.qty, i.rate, i.amount, i.gst_percent]),
+    [["MCaf370", "WB901", 100, 50, 5000, 18], ["MCaf370", "WB902", 200, 50, 10000, 18]],
+  )
+})
+
+test("Cimera leaves the SKU blank when the order names no code", () => {
+  const r = parseLocallyVerbose(CIMERA.replace("(MCaf370)", ""))
+  assert.ok(r.ok)
+  assert.equal(r.parsed.line_items[0].sku_code, null)
+})
+
+test("Cimera is refused when its Total Qty disagrees with the rows", () => {
+  const r = parseLocallyVerbose(CIMERA.replace("Total Qty : - 300.000", "Total Qty : - 310.000"))
+  assert.equal(r.ok, false)
+  assert.match(r.ok === false ? r.reason : "", /line quantities total/)
+})
+
+const SAMRVIR_GSTIN = "02ABCCS5315E1ZW"
+const PEP_HR = "06AAICP2804J1ZG"
+
+const SAMRVIR = [
+  "Tax Invoice",
+  "SAMRVIR BIOTECH PVT. LTD.",
+  `GSTIN No ${PEP_HR}:`,
+  "Ship to : M/S PEP TECHNOLOGIES PRIVATE LIMITED-SHIP TO…",
+  ":Invoice Date 06/10/2026",
+  "GURUGRAM:Destination",
+  ":E-Way Bill No. 372355426955",
+  "Bill to : M/S PEP TECHNOLOGIES PRIVATE LIMITED-BILL TO…",
+  "GGN MOTHER SB/9999/26-27",
+  "122003Pin Code :",
+  "122105Pin Code :",
+  "Jhammuwas, Tehshiltauru, Gurugram, Haryana, 122105,tauru",
+  `: ${SAMRVIR_GSTIN}GSTIN No`,
+  "100 5000.0033049910 Test Leave",
+  "In Cream 50ml",
+  "1 250 Ml Oct-26 Sep-28 599.00 18.00 900.0050.000Nos TSMC000001FGC-0001",
+  // The tail can run on from the name with no line break.
+  "20 1000.0033049910 Test Leave In Cream 50ml2 150 Ml Oct-26 Sep-28 599.00 18.00 180.0050.000Nos TSMC000002FGC-0001",
+  "Basic Amount",
+  "7,080.00Grand Total",
+  "AMOUNT IN VALUE : Seven Thousand Eighty Only.",
+  "Total Qty. : 120",
+].join("\n")
+
+test("Samrvir parses locally, rate split off the GST amount it runs into", () => {
+  const r = parseLocallyVerbose(SAMRVIR)
+  assert.ok(r.ok, r.ok ? "" : r.reason)
+  assert.equal(r.layout, "samrvir")
+  assert.equal(r.parsed.invoice_number, "SB/9999/26-27")
+  assert.equal(r.parsed.date, "6-Oct-26")
+  assert.equal(r.parsed.total_amount, 7080)
+  assert.equal(r.parsed.seller_gstin, SAMRVIR_GSTIN)
+  assert.equal(r.parsed.destination, "GURUGRAM")
+  assert.match(r.parsed.ship_to_address ?? "", /122105/)
+  assert.deepEqual(
+    r.parsed.line_items.map((i) => [i.sku_name, i.batch, i.qty, i.rate, i.amount]),
+    [
+      ["Test Leave In Cream 50ml", "TSMC000001", 100, 50, 5000],
+      ["Test Leave In Cream 50ml", "TSMC000002", 20, 50, 1000],
+    ],
+  )
+})
+
+test("a Samrvir item missing its tail line is refused, not dropped", () => {
+  const r = parseLocallyVerbose(SAMRVIR.replace(/^1 250 Ml.*$/m, "In Cream 50ml"))
+  assert.equal(r.ok, false)
+})
+
+const NG_GSTIN = "02AACCN5184H1ZM"
+
+const NG_ELECTRO = [
+  "13/10/2026",
+  "PEP TECHNOLOGIES PVT LTD MCAFFEINE",
+  "MBA9999/GIS00001",
+  "TAX INVOICE",
+  "N.G. Electro Products Pvt. Ltd.,",
+  "SALE ORDER NO. MBA/2627/SOR/FGS/00001",
+  "PEP TECHNOLOGIES PRIVATE LIMITED-GGN MOTHER WH",
+  "DELHIVERY LTD, PRAGATI INDUSTRIAL LOGISTIC PARK",
+  "JHAMMUWAS, TEHSHIL TAURU",
+  "GURUGRAM - 122105",
+  `GST NO. ${PEP_HR} PAN NO. AAICP2804J`,
+  "E-WAY BILL NO 362355130011",
+  "DESTINATION GURUGRAM",
+  `${NG_GSTIN}GST NO. :`,
+  "INS. NO.: INS. NO.:",
+  "MCAFFEINE TEST FOAM BODY",
+  "WASH 250ML",
+  "PO No : MPO-OO119999-1",
+  "1 33059019 5000.000 5000.000 18.00 900.000 0.000100.000TEST00011X250ML 5900.0000.00010/2026",
+  "09/2028",
+  "HYPMUBX000",
+  "1F0250",
+  "5FG000001 50.000",
+  "Net Amount Payable : Rupees Five Thousand Nine Hundred Only",
+  "0.000Round Off",
+  "5000.000Total Basic Amount",
+  "Material Amt Freight Amt Taxabale Amt GST Amt Gross Value",
+  "5000.00 5000.00 900.00 5900.00",
+].join("\n")
+
+test("NG Electro parses locally from its position-ordered text", () => {
+  const r = parseLocallyVerbose(NG_ELECTRO)
+  assert.ok(r.ok, r.ok ? "" : r.reason)
+  assert.equal(r.layout, "ngelectro")
+  assert.equal(r.parsed.invoice_number, "MBA9999/GIS00001")
+  assert.equal(r.parsed.date, "13-Oct-26")
+  assert.equal(r.parsed.total_amount, 5900)
+  assert.equal(r.parsed.seller_gstin, NG_GSTIN)
+  assert.equal(r.parsed.purchase_order, "MPO-OO119999-1")
+  assert.match(r.parsed.ship_to_address ?? "", /122105/)
+  assert.deepEqual(
+    r.parsed.line_items.map((i) => [i.sku_code, i.sku_name, i.batch, i.qty, i.rate, i.amount]),
+    // The batch stops where the "1X<pack>" suffix starts.
+    [["HYPMUBX0001F0250", "MCAFFEINE TEST FOAM BODY WASH 250ML", "TEST0001", 100, 50, 5000]],
+  )
+})
+
+test("NG Electro's SKU code drops a trailing tag like (NF)", () => {
+  const r = parseLocallyVerbose(NG_ELECTRO.replace("1F0250", "1F0250(NF)"))
+  assert.ok(r.ok)
+  assert.equal(r.parsed.line_items[0].sku_code, "HYPMUBX0001F0250")
+})
+
+test("an NG Electro row with freight folded in is refused", () => {
+  const r = parseLocallyVerbose(NG_ELECTRO.replace("0.000100.000TEST", "10.000100.000TEST"))
+  assert.equal(r.ok, false)
+})
