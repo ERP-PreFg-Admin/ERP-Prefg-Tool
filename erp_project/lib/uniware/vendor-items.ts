@@ -32,7 +32,8 @@ export async function createVendorItem(item: UniwareVendorItemInput): Promise<vo
     vendorItemType: {
       vendorCode: item.vendorCode,
       itemTypeSkuCode: item.itemTypeSkuCode,
-      vendorSkuCode: item.vendorSkuCode ?? undefined,
+      // Mandatory on a first create ("please fill valid value" without it); live catalogs use the SKU code.
+      vendorSkuCode: item.vendorSkuCode?.trim() || item.itemTypeSkuCode,
       inventory: item.inventory ?? undefined,
       unitPrice: item.unitPrice,
       priority: item.priority ?? undefined,
@@ -53,7 +54,7 @@ export async function createVendorItem(item: UniwareVendorItemInput): Promise<vo
   let data: {
     successful?: boolean
     message?: string
-    errors?: { description?: string; message?: string; fieldName?: string }[]
+    errors?: { code?: number; description?: string; message?: string; fieldName?: string }[]
     warnings?: { description?: string; message?: string }[]
   }
   try {
@@ -63,8 +64,12 @@ export async function createVendorItem(item: UniwareVendorItemInput): Promise<vo
   }
 
   if (!data.successful) {
+    // `description` is often generic; the real reason tends to be in `message`, so keep both.
     const msgs = (data.errors ?? [])
-      .map((e) => [e.fieldName, e.description || e.message].filter(Boolean).join(": "))
+      .map((e) => {
+        const detail = e.message && e.message !== e.description ? ` (${e.message})` : ""
+        return [e.fieldName, (e.description || e.message || "") + (e.description ? detail : "")].filter(Boolean).join(": ")
+      })
       .filter(Boolean)
     throw new Error(
       msgs.join("; ") || data.message ||

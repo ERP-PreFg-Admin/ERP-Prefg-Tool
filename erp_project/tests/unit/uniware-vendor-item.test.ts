@@ -84,7 +84,30 @@ test("the payload is nested under vendorItemType and carries only documented key
       `undocumented key on the payload: ${key}`
     )
   }
-  assert.equal("vendorSkuCode" in vit, false, "an omitted optional must not be sent at all")
+  assert.equal("inventory" in vit, false, "an omitted optional must not be sent at all")
+  // Proven on TEST_FACILITY 2026-10-14: a first create without it is refused.
+  assert.equal(vit.vendorSkuCode, "MCaf41_WB", "vendorSkuCode defaults to the SKU code")
+})
+
+test("an explicit vendorSkuCode is sent as given", async () => {
+  const cap = stubFetch({ successful: true })
+  const { createVendorItem } = await import("../../lib/uniware")
+  await createVendorItem({ ...ITEM, vendorSkuCode: "ARC-41" })
+  const vit = (cap.body as { vendorItemType: Record<string, unknown> }).vendorItemType
+  assert.equal(vit.vendorSkuCode, "ARC-41")
+})
+
+test("Uniware's message is kept when the description is generic", async () => {
+  stubFetch({
+    successful: false,
+    errors: [{ code: 1000, fieldName: null, description: "please fill valid value",
+      message: "No content to map to Object due to end of input" }],
+  }, 400)
+  const { createVendorItem } = await import("../../lib/uniware")
+  await assert.rejects(
+    () => createVendorItem(ITEM),
+    /please fill valid value \(No content to map to Object due to end of input\)/
+  )
 })
 
 test("HTTP 200 with successful:false is a failure, not a success", async () => {
