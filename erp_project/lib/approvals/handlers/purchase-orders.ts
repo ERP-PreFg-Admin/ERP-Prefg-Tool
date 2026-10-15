@@ -20,7 +20,7 @@ import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { skus as skusSql } from "@/lib/queries/skus"
 import { parseS3Import } from "@/lib/import-s3"
 import { recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
-import type { PoolConnection } from "mysql2/promise"
+import type { PoolConnection, ResultSetHeader } from "mysql2/promise"
 import { type ModuleHandler, s3KeyOf } from "./types"
 import { brandCode } from "@/lib/constants"
 import { isoDate, normalizeDateCell } from "@/lib/date"
@@ -28,7 +28,17 @@ import { makePoRateResolver } from "@/lib/po/po-rate"
 import { stagedPrice } from "@/lib/po/po-rate-note"
 import { BULK_PO_TYPES, isSpecialPoType, specialPoPrice, SPECIAL_PO_LABEL } from "@/lib/po/po-rules"
 import { ApiError } from "@/lib/gateway/errors"
-import { bulkUpdateBlock } from "@/lib/po/po-bulk-check"
+import { bulkUpdateBlock, type BulkUpdateTarget } from "@/lib/po/po-bulk-check"
+import { applyDraftPoEdit, draftEditFromItems } from "@/lib/po/po-edit"
+
+// PO_EDIT: an edit of a Draft PO, staged as field items + `reason`. Nothing on the PO
+// changes until approve; reject leaves it as it was.
+export const poEditHandler: ModuleHandler = {
+  async setStatus() {},
+  async applyAndArchive(conn, entityId, items, approverId, raisedBy) {
+    await applyDraftPoEdit(conn, entityId, draftEditFromItems(items), raisedBy ?? approverId)
+  },
+}
 
 /**
  * A special-type PO (NPD / Tech Transfer / CPR) may be approved only while no other live
@@ -77,11 +87,11 @@ export async function createBulkPoRow(
   }
 
   const [mfgRows] = await conn.execute(`SELECT id FROM master_mfgs WHERE code = ? LIMIT 1`, [mfgCode])
-  const mfg = (mfgRows as any[])[0]
+  const mfg = (mfgRows as { id: number }[])[0]
   if (!mfg) { return { skip: `${skuCode}: manufacturer "${mfgCode}" not found` } }
 
   const [skuRows] = await conn.execute(skusSql.selectStatusAndBrandByCode, [skuCode])
-  const sku = (skuRows as any[])[0]
+  const sku = (skuRows as { brand: string | null }[])[0]
   if (!sku) { return { skip: `${skuCode}: SKU not found` } }
 
   // The type the server staged at upload; files staged before the column read as normal.
@@ -120,7 +130,7 @@ export async function createBulkPoRow(
     newPoNo, mfg.id, skuCode, qty, unitPrice, amountPreGst, totalAmount, expectedOn, poType, destination, remarks, s3Key,
     mfg.id, skuCode,
   ])
-  const poId = (poResult as any).insertId
+  const poId = (poResult as ResultSetHeader).insertId
   await conn.execute(purchaseOrdersSql.insertPoHistory, [poId, newPoNo, "create", null, null, null, s3Key, approverId])
   return { poId, poNo: newPoNo }
 }
@@ -150,7 +160,7 @@ export const poBulkHandler: ModuleHandler = {
         if (poNo) {
           // ── Update path — status/expected_on/destination only ──────────
           const [existingRows] = await conn.execute(purchaseOrdersSql.selectByPoNo, [poNo])
-          const existing = (existingRows as any[])[0]
+          const existing = (existingRows as (BulkUpdateTarget & { id: number })[])[0]
           if (!existing) { skipped++; skipReasons.push(`${poNo}: PO not found`); continue }
 
           const rawStatus = row.status?.trim().toLowerCase() || null
@@ -192,9 +202,9 @@ export const poBulkHandler: ModuleHandler = {
           if ("skip" in res) { skipped++; skipReasons.push(res.skip); continue }
           created++
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         skipped++
-        skipReasons.push(`${poNo || "(new row)"}: ${err.message}`)
+        skipReasons.push(`${poNo || "(new row)"}: ${err instanceof Error ? err.message : String(err)}`)
       }
     }
 

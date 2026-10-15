@@ -1,8 +1,9 @@
-// PUT /api/v1/purchase-orders/[id]  — re-edit a draft PO and re-submit for approval
+// PUT /api/v1/purchase-orders/[id]  — edit a Draft PO: raised-but-unmailed stages a PO_EDIT approval,
+//                                     a stored draft is re-edited and re-submitted (PO approval)
 // PATCH /api/v1/purchase-orders/[id] — update attachment key (S3 file reference)
 
 import { NextResponse } from "next/server"
-import type { PoolConnection } from "mysql2/promise"
+import type { PoolConnection, ResultSetHeader } from "mysql2/promise"
 import { query, execute, pool } from "@/lib/db"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { s3FilesSql } from "@/lib/queries/s3-files"
@@ -12,7 +13,10 @@ import { manufacturers as mfgsSql } from "@/lib/queries/manufacturers"
 import { deleteFile } from "@/lib/s3"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { assertPoInScope, assertDestinationServesEntity } from "@/lib/po/po-guard"
-import { poIdParamSchema } from "@/lib/validation/purchase-order-detail"
+import { poIdParamSchema, poDraftEditSchema } from "@/lib/validation/purchase-order-detail"
+import { ApiError } from "@/lib/gateway/errors"
+import { getUserScope, assertInScope } from "@/lib/scope"
+import { planDraftPoEdit } from "@/lib/po/po-edit"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { todayIST } from "@/lib/date"
@@ -30,6 +34,12 @@ export const PUT = withGateway({
   await assertPoInScope(Number(session.user.id), poId)
 
   const body = await req.json()
+
+  // Raised but not yet mailed: staged as a PO_EDIT approval. A stored draft keeps its own re-submit flow.
+  const current = (await query<{ status: string; sku_code: string | null }>(purchaseOrdersSql.selectForEdit, [poId]))[0]
+  if (!current) return NextResponse.json({ error: "PO not found." }, { status: 404 })
+  if (current.status !== "draft") return editUnmailedPo(poId, userId, current.sku_code, body)
+
   // total_amount from the body is ignored — recomputed below with the SKU's GST.
   const { mfg_id, sku_code, qty, unit_price, expected_on, destination, reason } = body
 
@@ -62,7 +72,7 @@ export const PUT = withGateway({
   await assertDestinationServesEntity(sku_code, destination)
 
   // Verify PO exists and is draft
-  const poRows = await query<any>(purchaseOrdersSql.selectForEdit, [poId])
+  const poRows = await query<{ po_no: string; status: string }>(purchaseOrdersSql.selectForEdit, [poId])
   const po = poRows[0]
   if (!po) return NextResponse.json({ error: "PO not found." }, { status: 404 })
   if (po.status !== "draft") {
@@ -70,7 +80,7 @@ export const PUT = withGateway({
   }
 
   // Block if there is already a pending approval (approval not yet reviewed)
-  const pendingRows = await query<any>(approvalsSql.hasPending, ["PO", poId])
+  const pendingRows = await query<{ id: number }>(approvalsSql.hasPending, ["PO", poId])
   if (pendingRows.length > 0) {
     return NextResponse.json(
       { error: "A pending approval already exists for this PO. Wait for it to be reviewed before re-editing." },
@@ -79,7 +89,7 @@ export const PUT = withGateway({
   }
 
   // Verify current user is the original submitter
-  const raisedRows = await query<any>(purchaseOrdersSql.selectRaisedBy, [poId])
+  const raisedRows = await query<{ raised_by: number | null }>(purchaseOrdersSql.selectRaisedBy, [poId])
   const raisedBy = raisedRows[0]?.raised_by
   if (raisedBy && raisedBy !== userId) {
     return NextResponse.json({ error: "Only the original submitter can re-edit this PO." }, { status: 403 })
@@ -109,11 +119,11 @@ export const PUT = withGateway({
 
     // Fetch MFG details for readable diff
     const [mfgRows] = await conn.execute(mfgsSql.selectNameById, [Number(mfg_id)])
-    const mfg = (mfgRows as any[])[0] ?? { code: mfg_id, name: String(mfg_id) }
+    const mfg = (mfgRows as { code: string; name: string }[])[0] ?? { code: String(mfg_id), name: String(mfg_id) }
 
     // Insert new approval record
     const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, "PO", poId, "edit"])
-    const approvalId = (ar as any).insertId
+    const approvalId = (ar as ResultSetHeader).insertId
 
     // Insert approval_items so the approver sees the full request
     const diffItems: [string, string, string][] = [
@@ -134,16 +144,69 @@ export const PUT = withGateway({
     recordProcessedEvent("PO", eventId, { poId, approvalId })
     logger.info({ ...logCtx, poId, approvalId, message: "PO re-edit submitted for approval" })
     return NextResponse.json({ ok: true, approval_id: approvalId })
-  } catch (err: any) {
+  } catch (err: unknown) {
     await conn.rollback()
-    recordFailedEvent("PO", eventId, { poId, mfg_id, sku_code, qty }, err.message)
-    logger.error({ ...logCtx, poId, error: err.message, message: "PO re-edit failed" })
-    return NextResponse.json({ error: "Database error: " + err.message }, { status: 500 })
+    const message = err instanceof Error ? err.message : String(err)
+    recordFailedEvent("PO", eventId, { poId, mfg_id, sku_code, qty }, message)
+    logger.error({ ...logCtx, poId, error: message, message: "PO re-edit failed" })
+    return NextResponse.json({ error: "Database error: " + message }, { status: 500 })
   } finally {
     conn.release()
   }
   },
 })
+
+async function editUnmailedPo(poId: number, userId: number, skuCode: string | null, body: unknown) {
+  const parsed = poDraftEditSchema.safeParse(body)
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]
+    throw new ApiError(400, "invalid_body", issue.message, { field: issue.path.join(".") })
+  }
+  const edit = parsed.data
+
+  // A new destination must suit the SKU's legal entity and sit inside the editor's warehouse scope.
+  const destination = edit.destination?.trim() || null
+  if (destination) {
+    if (skuCode) await assertDestinationServesEntity(skuCode, destination)
+    assertInScope(await getUserScope(userId), "warehouse", destination)
+  }
+
+  const logCtx = { requestId: crypto.randomUUID(), userId, route: `/api/v1/purchase-orders/${poId}`, module: "PO_DRAFT_EDIT" }
+  const eventId = makeEventId("PO", "draft_edit", poId)
+  recordRawEvent("PO", eventId, { poId, ...edit })
+
+  const conn: PoolConnection = await pool.getConnection()
+  await conn.beginTransaction()
+  try {
+    // Validated and diffed on the locked row, but nothing on the PO changes until approve.
+    const plan = await planDraftPoEdit(conn, poId, { ...edit, destination })
+    const [pending] = await conn.execute(approvalsSql.hasPending, ["PO_EDIT", poId])
+    if ((pending as unknown[]).length > 0) {
+      throw new ApiError(409, "edit_pending", `${plan.po.po_no} already has an edit awaiting approval.`)
+    }
+
+    const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, "PO_EDIT", poId, "edit"])
+    const approvalId = (ar as ResultSetHeader).insertId
+    for (const c of plan.changes) {
+      await conn.execute(approvalsSql.insertApprovalItem, [approvalId, c.field, c.old, c.new])
+    }
+    await conn.execute(approvalsSql.insertApprovalItem, [approvalId, "reason", "", plan.reason])
+
+    await conn.commit()
+    recordProcessedEvent("PO", eventId, { poId, approvalId, changes: plan.changes })
+    logger.info({ ...logCtx, eventId, poId, approvalId, changes: plan.changes.map((c) => c.field), message: "Draft PO edit submitted for approval" })
+    return NextResponse.json({ ok: true, po_no: plan.po.po_no, approval_id: approvalId })
+  } catch (err: unknown) {
+    await conn.rollback()
+    if (err instanceof ApiError) throw err
+    const message = err instanceof Error ? err.message : String(err)
+    recordFailedEvent("PO", eventId, { poId }, message)
+    logger.error({ ...logCtx, eventId, poId, error: message, message: "Draft PO edit failed" })
+    throw err
+  } finally {
+    conn.release()
+  }
+}
 
 // PATCH /api/v1/purchase-orders/[id]
 // Body: { attachment_key: string | null }
@@ -164,7 +227,7 @@ export const PATCH = withGateway({
   logger.info({ ...patchCtx, poId, message: "PO attachment update started" })
 
   // Verify current user is the original submitter
-  const raisedRows = await query<any>(purchaseOrdersSql.selectRaisedBy, [poId])
+  const raisedRows = await query<{ raised_by: number | null }>(purchaseOrdersSql.selectRaisedBy, [poId])
   const raisedBy = raisedRows[0]?.raised_by
   if (raisedBy && raisedBy !== userId) {
     return NextResponse.json({ error: "Only the original submitter can update this PO." }, { status: 403 })

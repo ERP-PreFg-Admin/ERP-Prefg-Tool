@@ -27,6 +27,14 @@ export function isDraftPo(po: { status: string | null; email_sent_at: string | D
   return po.status === "draft" || (po.status === "raised" && !po.email_sent_at)
 }
 
+/** A Draft PO that may be edited in place: raised but not yet mailed. Stored drafts
+ *  re-submit for approval instead; inward POs and split children are never edited. */
+export function canDirectEditPo(po: {
+  status: string | null; email_sent_at: string | Date | null; po_type: string | null; reference_po: string | null
+}): boolean {
+  return po.status === "raised" && !po.email_sent_at && po.po_type !== "inward" && !po.reference_po
+}
+
 /** Never approved (stored draft or rejected) — not an order yet, so it can't be mailed.
  *  Mirrors purchaseOrdersSql.selectUnapprovedAmong, which send-mail enforces. */
 export function isUnapprovedPo(status: string | null): boolean {

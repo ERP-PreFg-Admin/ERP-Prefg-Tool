@@ -3,7 +3,20 @@
 // forever over a rounding remainder — so every boundary is pinned here.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { isDraftPo, poTolerance, splitChildPrice, poTotal, poPrintedAmounts, impliedGstPercent, DEFAULT_GST_PERCENT } from "../../lib/po/po-rules"
+import { isDraftPo, poTolerance, splitChildPrice, poTotal, poPrintedAmounts, impliedGstPercent, DEFAULT_GST_PERCENT, canDirectEditPo } from "../../lib/po/po-rules"
+
+test("canDirectEditPo: only a raised, unmailed, non-inward, non-child PO", () => {
+  const base = { status: "raised", email_sent_at: null, po_type: "normal", reference_po: null }
+  assert.equal(canDirectEditPo(base), true)
+  assert.equal(canDirectEditPo({ ...base, po_type: "impromptu" }), true)
+  assert.equal(canDirectEditPo({ ...base, email_sent_at: "2026-10-08T10:00:00Z" }), false) // mailed
+  assert.equal(canDirectEditPo({ ...base, status: "draft" }), false)                         // re-submits for approval instead
+  assert.equal(canDirectEditPo({ ...base, status: "partially_received" }), false)
+  assert.equal(canDirectEditPo({ ...base, po_type: "inward" }), false)
+  assert.equal(canDirectEditPo({ ...base, reference_po: "MCAFF-PO-202610-001" }), false)     // split child
+  // Everything it allows still reads as Draft on screen.
+  assert.equal(isDraftPo(base), true)
+})
 
 test("poTolerance is 10% of qty, floored", () => {
   assert.equal(poTolerance(50), 5)

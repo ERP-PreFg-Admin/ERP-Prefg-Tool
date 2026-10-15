@@ -9,7 +9,7 @@
  * The row owns no state. Actions are raised to PoTable, which owns the dialogs.
  */
 
-import { ChevronDown, ChevronRight, PackageCheck, Pencil, Scissors } from "lucide-react"
+import { ChevronDown, ChevronRight, PackageCheck, Scissors } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { TableCell, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
@@ -28,11 +28,9 @@ export default function PoDataRow({
   expanded = false,
   onToggleExpand,
   showExpandColumn,
-  sessionUserId,
   selectable,
   isSelected,
   onToggleRow,
-  onEdit,
   onSplit,
   onReceive,
   menuActions,
@@ -50,11 +48,9 @@ export default function PoDataRow({
   onToggleExpand?: () => void
   /** The chevron column exists at all only when some row on the page is split. */
   showExpandColumn: boolean
-  sessionUserId: number
   selectable: boolean
   isSelected: boolean
   onToggleRow: (id: number) => void
-  onEdit?: (row: PoRow) => void
   onSplit?: (row: PoRow) => void
   onReceive: (row: PoRow) => void
   menuActions: MenuAction[]
@@ -71,10 +67,6 @@ export default function PoDataRow({
 
   const isSplitMaster = childCount > 0
 
-  // Edit is gated on the stored status, not the displayed one: a raised PO
-  // awaiting its notification mail shows as Draft, but it has already cleared
-  // approval and the PUT route rejects it.
-  const canEdit  = !inwardingMode && r.raw_status === "draft" && r.po_raised_by === sessionUserId
   // Splits are one level deep, so a child never offers Split. Neither does a
   // master that is fully allocated — there is nothing left to hand out.
   // Nor a draft: `status` here is the DISPLAYED one, so this also covers a
@@ -93,9 +85,10 @@ export default function PoDataRow({
     && num(r.qty) - num(r.received_qty) - num(r.split_qty) > 0
 
   // A split master isn't mailable: the manufacturer needs the individual splits,
-  // each with its own quantity and destination.
+  // each with its own quantity and destination. Nor is a PO whose edit awaits approval.
+  const editPending = Number(r.edit_pending) === 1
   const unapproved = isUnapprovedPo(r.raw_status)
-  const selectDisabled = isSplitMaster || unapproved
+  const selectDisabled = isSplitMaster || editPending || unapproved
 
   return (
     <TableRow
@@ -140,7 +133,9 @@ export default function PoDataRow({
             checked={isSelected}
             disabled={selectDisabled}
             onChange={() => onToggleRow(r.id)}
-            title={unapproved ? "This PO isn't approved yet — it can be mailed once its approval goes through."
+            title={editPending
+              ? "An edit to this PO is awaiting approval — it can be mailed once that's approved or rejected."
+              : unapproved ? "This PO isn't approved yet — it can be mailed once its approval goes through."
               : selectDisabled ? "This PO is split — select the individual split POs to mail them." : undefined}
             className={cn(selectDisabled && "cursor-not-allowed opacity-40")}
             aria-label={`Select PO ${r.po_no}`}
@@ -192,7 +187,14 @@ export default function PoDataRow({
 
       {/* Beside the PO number: status is what the row is scanned for. */}
       <TableCell>
-        <Badge variant={cfg.variant} className="whitespace-nowrap">{cfg.label}</Badge>
+        <div className="flex flex-col items-start gap-1">
+          <Badge variant={cfg.variant} className="whitespace-nowrap">{cfg.label}</Badge>
+          {editPending && (
+            <Badge variant="info" className="whitespace-nowrap px-1.5 py-0 text-[10px]" title="An edit to this PO is awaiting approval">
+              In Review
+            </Badge>
+          )}
+        </div>
       </TableCell>
 
       {/* Manufacturer */}
@@ -327,14 +329,6 @@ export default function PoDataRow({
       {/* Actions */}
       <TableCell className="text-right">
         <div className="flex items-center justify-end gap-1.5">
-          {canEdit && (
-            <button
-              onClick={() => onEdit?.(r)}
-              className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 transition-colors dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-950/70"
-            >
-              <Pencil className="h-3 w-3" /> Edit
-            </button>
-          )}
           {canSplit && (
             <button
               onClick={() => onSplit?.(r)}

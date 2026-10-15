@@ -82,6 +82,8 @@ export type PoRow = {
   mfg_name: string
   mfg_email: string | null
   po_raised_by: number | null
+  /** 1 while a PO_EDIT approval is pending: reads Draft + In Review, can't be mailed. */
+  edit_pending: number | null
 }
 
 export type SkuOption       = { id: number; sku_code: string; name: string; status: string; entity_code: string | null; filling?: number | null }
@@ -268,7 +270,7 @@ export type MfgSkuOption = { sku_code: string; sku_name: string; boms?: RecipeCh
 export type SplitRow = { destination: string; qty: string }
 
 /** Where a history_pos row came from — derived in selectPoHistoryByPoId. */
-export type PoHistorySource = "bulk_csv" | "invoice" | "invoice_receipt" | "receipt" | "split" | "other"
+export type PoHistorySource = "bulk_csv" | "invoice" | "invoice_receipt" | "receipt" | "split" | "draft_edit" | "other"
 
 /** One history_pos row: bulk CSV, invoice inwarding, a receipt or a split. */
 export type PoHistoryRow = {

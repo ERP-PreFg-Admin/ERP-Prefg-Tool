@@ -36,6 +36,7 @@ import AddInvoiceDialog from "../po-inwarding/AddInvoiceDialog"
 import InvoiceHistoryDialog from "../po-inwarding/InvoiceHistoryDialog"
 import AddPODialog from "./AddPODialog"
 import ImpromptuPODialog from "./ImpromptuPODialog"
+import EditDraftPoDialog from "./EditDraftPoDialog"
 import SplitPODialog from "./SplitPODialog"
 import PoSelectionBar from "./PoSelectionBar"
 
@@ -140,6 +141,7 @@ export default function PoProcurementClient({
   const [showInvoiceHistory, setShowInvoiceHistory] = useState(false)
   const [showFilters,    setShowFilters]    = useState(false)
   const [editTarget,   setEditTarget]   = useState<PoRow | null>(null)
+  const [draftEditTarget, setDraftEditTarget] = useState<PoRow | null>(null)
   const [splitTarget,  setSplitTarget]  = useState<PoRow | null>(null)
 
   // Inwarding detail panel — URL-synced ?inwardFor=, fetch + cache.
@@ -505,7 +507,7 @@ export default function PoProcurementClient({
             rows={rows}
             childrenByParent={childrenByParent}
             sessionUserId={sessionUserId}
-            onEdit={setEditTarget}
+            onEdit={(r) => (r.raw_status === "draft" ? setEditTarget(r) : setDraftEditTarget(r))}
             onSplit={setSplitTarget}
             sortBy={currentSortBy}
             sortDir={currentSortDir}
@@ -595,6 +597,13 @@ export default function PoProcurementClient({
           destination: editTarget.destination,
           remarks:     editTarget.remarks,
         } : null}
+      />
+
+      <EditDraftPoDialog
+        po={draftEditTarget}
+        onClose={() => setDraftEditTarget(null)}
+        warehouseOptions={warehouseOptions}
+        onSaved={afterAction}
       />
 
       <SplitPODialog

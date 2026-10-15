@@ -79,6 +79,7 @@ test("every registered module that writes a master declares its tags", async () 
   const NO_CACHE: Record<string, string> = {
     PO: "purchase_orders is never cached — the PO list is read live",
     PO_BULK: "same as PO",
+    PO_EDIT: "same as PO",
     BOM: "recipes are read live; no cached recipe list exists",
     BOM_BULK: "same as BOM",
     MFG_MISC: "bom_misc feeds costing, which reads live",

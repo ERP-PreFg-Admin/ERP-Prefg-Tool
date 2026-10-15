@@ -69,6 +69,12 @@ export const entityLabelSql: Record<string, string> = {
     JOIN master_mfgs m ON m.id = po.mfg_id
     WHERE po.id = ? LIMIT 1
   `,
+  PO_EDIT: `
+    SELECT po.po_no AS code, m.name AS name, po.sku_code AS secondary_code, NULL AS secondary_name
+    FROM purchase_orders po
+    JOIN master_mfgs m ON m.id = po.mfg_id
+    WHERE po.id = ? LIMIT 1
+  `,
   PO_BULK: `
     SELECT u.name AS code, NULL AS name, NULL AS secondary_code, NULL AS secondary_name
     FROM users u WHERE u.id = ? LIMIT 1

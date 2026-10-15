@@ -41,6 +41,13 @@ export const POST = withGateway({
       await assertPoInScope(Number(session.user.id), poId)
     }
 
+    // An edit awaiting approval would change the PO under the manufacturer; refuse the batch, naming them.
+    const inReview = await query<{ po_no: string }>(purchaseOrdersSql.selectEditPendingAmong, [poIds])
+    if (inReview.length > 0) {
+      throw new ApiError(409, "edit_pending",
+        `${inReview.map((r) => r.po_no).join(", ")} ${inReview.length === 1 ? "has an edit" : "have edits"} awaiting approval — approve or reject before mailing.`)
+    }
+
     // A PO still waiting on (or refused) its approval isn't an order yet; the email_sent_at stamp already skips these.
     const unapproved = await query<{ po_no: string }>(purchaseOrdersSql.selectUnapprovedAmong, [poIds])
     if (unapproved.length > 0) {

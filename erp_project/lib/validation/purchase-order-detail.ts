@@ -23,6 +23,15 @@ export const poReceiveSchema = z.object({
   qty: z.coerce.number().positive("Received quantity must be greater than 0."),
 })
 
+// In-place edit of a raised-but-unmailed PO. SKU, manufacturer and rate are not editable.
+export const poDraftEditSchema = z.object({
+  qty: z.coerce.number().positive("Quantity must be greater than 0."),
+  expected_on: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected dispatch must be a date.").nullable().optional(),
+  destination: z.string().trim().nullable().optional(),
+  remarks: z.string().trim().max(300, "Remarks must be 300 characters or fewer.").nullable().optional(),
+  reason: z.string().trim().min(1, "Give a reason for the edit."),
+})
+
 export const quoteRateQuerySchema = z.object({
   sku_code: z.string().trim().min(1, "sku_code is required"),
   mfg_id: z.coerce.number().int().positive("mfg_id is required"),
@@ -36,5 +45,6 @@ export type PoIdParam = z.infer<typeof poIdParamSchema>
 export type PoSplit = z.infer<typeof poSplitSchema>
 export type PoCancel = z.infer<typeof poCancelSchema>
 export type PoReceive = z.infer<typeof poReceiveSchema>
-export type QuoteRateQuery = z.infer<typeof quoteRateQuerySchema>
+export type PoDraftEdit = z.infer<typeof poDraftEditSchema>
+export type QuoteRateQuery =z.infer<typeof quoteRateQuerySchema>
 export type MfgSkusQuery = z.infer<typeof mfgSkusQuerySchema>

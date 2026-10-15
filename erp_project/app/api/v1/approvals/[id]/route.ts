@@ -17,6 +17,7 @@ import { revalidateTag } from "next/cache"
 import { z } from "zod"
 import type { PoolConnection } from "mysql2/promise"
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { ApiError } from "@/lib/gateway/errors"
 import { query, pool } from "@/lib/db"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { MODULE_HANDLERS, type DiffItem } from "@/lib/approvals/module-handlers"
@@ -142,6 +143,8 @@ export const POST = withGateway({
       approvalId, module: approval.module, entityId: approval.entity_id, action,
     }, message)
 
+    // A handler's own refusal keeps its status and words; withGateway shapes the body.
+    if (err instanceof ApiError) throw err
     return NextResponse.json({ error: "Database error: " + message }, { status: 500 })
   } finally {
     conn.release()

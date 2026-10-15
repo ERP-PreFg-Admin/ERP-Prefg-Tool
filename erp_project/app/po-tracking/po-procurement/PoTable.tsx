@@ -1,7 +1,7 @@
 "use client"
 
-import { Ban, FileText, History, PackageCheck, XCircle } from "lucide-react"
-import { isUnapprovedPo } from "@/lib/po/po-rules"
+import { Ban, FileText, History, PackageCheck, Pencil, XCircle } from "lucide-react"
+import { canDirectEditPo, isUnapprovedPo } from "@/lib/po/po-rules"
 import { Fragment, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
@@ -120,8 +120,8 @@ export default function PoTable({
   // Select-all covers what a checkbox could reach: the unsplit masters on this
   // page, plus the children of the split ones. A split master is skipped —
   // mailing it means nothing, so ticking it would silently do nothing.
-  // A PO never approved can't be mailed either, so select-all skips it too.
-  const mailable = (r: PoRow) => !isUnapprovedPo(r.raw_status)
+  // An edit awaiting approval, or a PO never approved, can't be mailed either, so select-all skips them too.
+  const mailable = (r: PoRow) => Number(r.edit_pending) !== 1 && !isUnapprovedPo(r.raw_status)
   const pageIds = [
     ...rows.filter((r) => Number(r.child_count) === 0 && mailable(r)).map((r) => r.id),
     ...rows.flatMap((r) => (childrenByParent[r.po_no] ?? []).filter(mailable).map((c) => c.id)),
@@ -146,7 +146,26 @@ export default function PoTable({
     const canCancel     = !inwardingMode && ["raised", "punched"].includes(status)
       && receivedQty === 0 && allocatedQty === 0
 
+    // Every Draft row: a stored draft re-submits for approval (its raiser only); a raised
+    // PO not yet mailed is edited in place. Same rule the PUT route re-checks.
+    const canEdit = !inwardingMode && !!onEdit && (
+      (row.raw_status === "draft" && row.po_raised_by === sessionUserId)
+      || (canDirectEditPo({ status: row.raw_status, email_sent_at: row.email_sent_at, po_type: row.po_type, reference_po: row.reference_po })
+        && Number(row.child_count) === 0)
+    )
+
     const actions: MenuAction[] = []
+
+    if (canEdit) {
+      const pending = Number(row.edit_pending) === 1
+      actions.push({
+        label:   "Edit PO",
+        icon:    <Pencil className="h-3.5 w-3.5" />,
+        onClick: () => onEdit!(row),
+        disabled: pending,
+        disabledReason: pending ? "An edit is already awaiting approval" : undefined,
+      })
+    }
 
     if (onOpenInwarding) {
       actions.push({
@@ -197,10 +216,8 @@ export default function PoTable({
 
   const rowProps = {
     showExpandColumn: hasSplits,
-    sessionUserId,
     selectable,
     onToggleRow,
-    onEdit,
     onSplit,
     onReceive: setReceiveTarget,
     inwardingMode,

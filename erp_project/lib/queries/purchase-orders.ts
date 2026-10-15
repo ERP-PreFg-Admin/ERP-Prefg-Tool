@@ -260,6 +260,8 @@ const SELECT_COLS = `
       WHERE im.uniware_po_code = po.uniware_po_code
       LIMIT 1) AS uniware_status,
     (SELECT raised_by FROM approvals WHERE module = 'PO' AND entity_id = po.id ORDER BY id DESC LIMIT 1) AS po_raised_by,
+    -- An edit awaiting approval: the row reads Draft + In Review and can't be mailed.
+    EXISTS (SELECT 1 FROM approvals WHERE module = 'PO_EDIT' AND entity_id = po.id AND status = 'pending') AS edit_pending,
     (SELECT email FROM details_mfg WHERE mfg_id = m.id LIMIT 1) AS mfg_email
 `
 
@@ -717,8 +719,35 @@ export const purchaseOrdersSql = {
    * Parameters: [id]
    */
   selectForEdit: `
-    SELECT id, po_no, status, qty, COALESCE(received_qty, 0) AS received_qty
+    SELECT id, po_no, sku_code, status, qty, COALESCE(received_qty, 0) AS received_qty
     FROM purchase_orders WHERE id = ? LIMIT 1
+  `,
+
+  /** A PO locked for an in-place Draft edit, with what decides whether it still may be. Params: [id] */
+  selectForDraftEditLocked: `
+    SELECT po.id, po.po_no, po.sku_code, po.status, po.email_sent_at, po.po_type, po.reference_po,
+           po.qty, COALESCE(po.received_qty, 0) AS received_qty,
+           po.unit_price, po.amount_pre_gst, po.total_amount, po.expected_on, po.destination, po.remarks,
+           (SELECT s.gst FROM master_skus s WHERE s.sku_code = po.sku_code LIMIT 1) AS sku_gst,
+           (SELECT COUNT(*) FROM purchase_orders c
+             WHERE c.reference_po = po.po_no AND c.status <> 'cancelled') AS child_count
+    FROM purchase_orders po WHERE po.id = ? LIMIT 1 FOR UPDATE
+  `,
+
+  /** Which of these POs have a PO_EDIT awaiting approval. query() expands the array. Params: [ids[]] */
+  selectEditPendingAmong: `
+    SELECT po.po_no FROM purchase_orders po
+    WHERE po.id IN (?)
+      AND EXISTS (SELECT 1 FROM approvals a WHERE a.module = 'PO_EDIT' AND a.entity_id = po.id AND a.status = 'pending')
+    ORDER BY po.po_no
+  `,
+
+  /** Applies an approved Draft edit; rate, SKU and manufacturer stay as raised.
+   *  Params: [qty, amount_pre_gst, total_amount, expected_on, destination, remarks, id] */
+  updateDraftFields: `
+    UPDATE purchase_orders
+    SET qty = ?, amount_pre_gst = ?, total_amount = ?, expected_on = ?, destination = ?, remarks = ?
+    WHERE id = ?
   `,
 
   /** Fetch the user who originally submitted this PO. Parameters: [po_id] */
@@ -864,17 +893,28 @@ export const purchaseOrdersSql = {
              WHEN h.field_name = 'received_qty' AND inv.id IS NOT NULL            THEN 'invoice_receipt'
              WHEN h.field_name = 'received_qty'                                   THEN 'receipt'
              WHEN h.field_name = 'split'                                          THEN 'split'
+             WHEN EXISTS (SELECT 1 FROM history_pos he WHERE he.po_id = h.po_id AND he.field_name = 'edit_reason'
+                            AND ABS(TIMESTAMPDIFF(SECOND, he.changed_on, h.changed_on)) <= 2) THEN 'draft_edit'
              WHEN ba.id IS NOT NULL                                               THEN 'bulk_csv'
              ELSE 'other'
            END AS source,
            CASE WHEN COALESCE(po.po_type, '') = 'inward' THEN po.invoice_no ELSE inv.invoice_no END AS invoice_no,
            COALESCE(bu.name, u.name)          AS uploaded_by_name,
-           COALESCE(ba.raised_on, h.changed_on) AS uploaded_on,
-           bau.name AS approved_by_name,
-           ba.approved_on
+           COALESCE(ba.raised_on, pe.raised_on, h.changed_on) AS uploaded_on,
+           COALESCE(bau.name, peu.name) AS approved_by_name,
+           COALESCE(ba.approved_on, pe.approved_on) AS approved_on
     FROM history_pos h
     LEFT JOIN purchase_orders po ON po.id = h.po_id
     LEFT JOIN users u ON u.id = h.changed_by
+    -- A Draft edit is applied on approve, so its rows land within seconds of that PO_EDIT's approved_on.
+    LEFT JOIN approvals pe ON pe.id = (
+      SELECT a3.id FROM approvals a3
+      WHERE h.field_name IN ('qty', 'expected_on', 'destination', 'remarks', 'edit_reason')
+        AND a3.module = 'PO_EDIT' AND a3.entity_id = h.po_id AND a3.status = 'approved'
+        AND ABS(TIMESTAMPDIFF(SECOND, a3.approved_on, h.changed_on)) <= 5
+      ORDER BY a3.id DESC LIMIT 1
+    )
+    LEFT JOIN users peu ON peu.id = pe.approved_by
     LEFT JOIN approvals ba ON ba.id = (
       SELECT ai.approval_id FROM approval_items ai
       JOIN approvals a2 ON a2.id = ai.approval_id

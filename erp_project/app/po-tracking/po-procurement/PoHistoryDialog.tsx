@@ -11,6 +11,8 @@ import { formatDateTimeIST } from "@/lib/date"
 import type { PoHistoryRow } from "./po-types"
 
 const FIELD_LABEL: Record<string, string> = {
+  qty: "Qty",
+  edit_reason: "Reason",
   status: "Status",
   expected_on: "Expected Dispatch",
   destination: "Destination",
@@ -34,6 +36,7 @@ function sourceText(head: PoHistoryRow): string {
     case "invoice_receipt": return `Received against supplier invoice${inv}`
     case "receipt":         return "Manual goods receipt"
     case "split":           return "PO split"
+    case "draft_edit":      return "Edited while Draft"
     default:                return "Direct change"
   }
 }
