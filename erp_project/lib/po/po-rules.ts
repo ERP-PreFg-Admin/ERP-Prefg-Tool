@@ -27,6 +27,12 @@ export function isDraftPo(po: { status: string | null; email_sent_at: string | D
   return po.status === "draft" || (po.status === "raised" && !po.email_sent_at)
 }
 
+/** Never approved (stored draft or rejected) — not an order yet, so it can't be mailed.
+ *  Mirrors purchaseOrdersSql.selectUnapprovedAmong, which send-mail enforces. */
+export function isUnapprovedPo(status: string | null): boolean {
+  return status === "draft" || status === "rejected"
+}
+
 /** PO types a bulk CSV may carry. Blank = normal; inward is invoice-only. */
 export const BULK_PO_TYPES = ["normal", "impromptu", "npd", "tech_transfer", "cpr"] as const
 export type BulkPoType = (typeof BULK_PO_TYPES)[number]

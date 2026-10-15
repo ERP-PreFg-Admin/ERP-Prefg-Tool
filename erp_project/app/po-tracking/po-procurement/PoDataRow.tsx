@@ -17,7 +17,7 @@ import type { BadgeVariant, PoRow } from "./po-types"
 import { STATUS_CONFIG } from "./po-types"
 import { fmtDate, fmtInt, fmtMoney, fmtRate, isImpromptu, num } from "./po-utils"
 import { ProgressCell } from "./PoTableCells"
-import { isSpecialPoType, SPECIAL_PO_LABEL } from "@/lib/po/po-rules"
+import { isSpecialPoType, isUnapprovedPo, SPECIAL_PO_LABEL } from "@/lib/po/po-rules"
 import PoActionMenu, { type MenuAction } from "./PoActionMenu"
 import UniwareStatusBadge from "../UniwareStatusBadge"
 
@@ -94,7 +94,8 @@ export default function PoDataRow({
 
   // A split master isn't mailable: the manufacturer needs the individual splits,
   // each with its own quantity and destination.
-  const selectDisabled = isSplitMaster
+  const unapproved = isUnapprovedPo(r.raw_status)
+  const selectDisabled = isSplitMaster || unapproved
 
   return (
     <TableRow
@@ -139,7 +140,8 @@ export default function PoDataRow({
             checked={isSelected}
             disabled={selectDisabled}
             onChange={() => onToggleRow(r.id)}
-            title={selectDisabled ? "This PO is split — select the individual split POs to mail them." : undefined}
+            title={unapproved ? "This PO isn't approved yet — it can be mailed once its approval goes through."
+              : selectDisabled ? "This PO is split — select the individual split POs to mail them." : undefined}
             className={cn(selectDisabled && "cursor-not-allowed opacity-40")}
             aria-label={`Select PO ${r.po_no}`}
           />

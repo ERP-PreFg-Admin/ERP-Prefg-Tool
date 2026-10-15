@@ -7,6 +7,7 @@ import {
 import { poSendMailSchema } from "@/lib/validation/purchase-orders"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { assertPoInScope } from "@/lib/po/po-guard"
+import { ApiError } from "@/lib/gateway/errors"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 
@@ -40,10 +41,20 @@ export const POST = withGateway({
       await assertPoInScope(Number(session.user.id), poId)
     }
 
+    // A PO still waiting on (or refused) its approval isn't an order yet; the email_sent_at stamp already skips these.
+    const unapproved = await query<{ po_no: string }>(purchaseOrdersSql.selectUnapprovedAmong, [poIds])
+    if (unapproved.length > 0) {
+      throw new ApiError(409, "po_not_approved",
+        `${unapproved.map((r) => r.po_no).join(", ")} ${unapproved.length === 1 ? "isn't approved yet — it" : "aren't approved yet — they"} can be mailed once the PO approval goes through.`)
+    }
+
     const eventId = makeEventId("PO_SELECTION_EMAIL", "send-batch")
     recordRawEvent("PO_SELECTION_EMAIL", eventId, { poIds })
 
-    const poRows = await query<any>(purchaseOrdersSql.buildSelectByIds(poIds.length), poIds)
+    const poRows = await query<Omit<SelectedPoLine, "qty" | "received_qty" | "unit_price"> & {
+      mfg_id: number; mfg_code: string; mfg_name: string; child_count: number | string
+      qty: number | string; received_qty: number | string | null; unit_price: number | string | null
+    }>(purchaseOrdersSql.buildSelectByIds(poIds.length), poIds)
 
     // A PO that has been split isn't a thing to tell a manufacturer about — the
     // children are, each with its own quantity and destination, and they may not

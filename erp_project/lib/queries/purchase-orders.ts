@@ -500,6 +500,13 @@ export const purchaseOrdersSql = {
   /** Set status on a purchase_orders row. Parameters: [status, id] */
   setStatus: `UPDATE purchase_orders SET status = ? WHERE id = ?`,
 
+  /** POs never approved (stored draft or rejected) — mailing one hands the manufacturer an order nobody signed off. Params: [ids] */
+  selectUnapprovedAmong: `
+    SELECT po.po_no FROM purchase_orders po
+    WHERE po.id IN (?) AND po.status IN ('draft', 'rejected')
+    ORDER BY po.po_no
+  `,
+
   /**
    * Stamp the first successful notification send on a set of POs. This is what
    * promotes a PO from Draft to Raised in PO Tracking (see DISPLAY_STATUS_EXPR),

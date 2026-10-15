@@ -1,6 +1,7 @@
 "use client"
 
 import { Ban, FileText, History, PackageCheck, XCircle } from "lucide-react"
+import { isUnapprovedPo } from "@/lib/po/po-rules"
 import { Fragment, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
@@ -119,9 +120,11 @@ export default function PoTable({
   // Select-all covers what a checkbox could reach: the unsplit masters on this
   // page, plus the children of the split ones. A split master is skipped —
   // mailing it means nothing, so ticking it would silently do nothing.
+  // A PO never approved can't be mailed either, so select-all skips it too.
+  const mailable = (r: PoRow) => !isUnapprovedPo(r.raw_status)
   const pageIds = [
-    ...rows.filter((r) => Number(r.child_count) === 0).map((r) => r.id),
-    ...rows.flatMap((r) => (childrenByParent[r.po_no] ?? []).map((c) => c.id)),
+    ...rows.filter((r) => Number(r.child_count) === 0 && mailable(r)).map((r) => r.id),
+    ...rows.flatMap((r) => (childrenByParent[r.po_no] ?? []).filter(mailable).map((c) => c.id)),
   ]
   const allSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id))
 
