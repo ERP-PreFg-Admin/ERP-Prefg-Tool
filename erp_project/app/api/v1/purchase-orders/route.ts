@@ -18,6 +18,7 @@ import { ApiError } from "@/lib/gateway/errors"
 import { poActionSchema } from "@/lib/validation/purchase-orders"
 import { monthIST } from "@/lib/date"
 import { brandCode } from "@/lib/constants"
+import { isSpecialPoType, specialPoPrice, SPECIAL_PO_LABEL } from "@/lib/po/po-rules"
 
 // GET /api/v1/purchase-orders — list all POs the caller is scoped to, with MFG + SKU details
 export const GET = withGateway({
@@ -45,7 +46,8 @@ export const GET = withGateway({
 //     create-or-update-by-po_no work and writes history_pos entries.
 //
 //   (default) — { mfg_id, sku_code, qty, unit_price?, expected_on, destination, reason, po_type? }
-//     Creates a single PO. Normal → raised immediately. Impromptu → draft + approval.
+//     Creates a single PO. Normal → raised immediately. Impromptu, NPD, Tech Transfer
+//     and CPR → draft + approval (the special three at price 0).
 //
 // Auth + body validation handled by withGateway (see lib/gateway/with-gateway.ts).
 export const POST = withGateway({
@@ -142,7 +144,8 @@ export const POST = withGateway({
   // Generate po_no: {Brand}-{PO|IMP}-{yyyymm}-{nnnn}, sequence scoped per brand+type+month
   const year    = new Date().getFullYear()
   const month   = String(new Date().getMonth() + 1).padStart(2, "0")
-  const typeTag = po_type === "normal" ? "PO" : "IMP"
+  // Special types number as -PO-, like the bulk upload; the type shows as a badge.
+  const typeTag = po_type === "impromptu" ? "IMP" : "PO"
   const poPrefix = `${brand}-${typeTag}-${year}${month}`
   const seqRows = await query<{ last_seq: number }>(purchaseOrdersSql.lastSeqByPrefix, [`${poPrefix}-%`])
   const seq  = (Number(seqRows[0]?.last_seq ?? 0) + 1).toString().padStart(3, "0")
@@ -152,7 +155,18 @@ export const POST = withGateway({
   // client-supplied price is a second source of truth, and the invoice
   // three-way match compares against this same number. `unit_price` /
   // `total_amount` stay in the schema for back-compat but are ignored.
-  const { unitPrice, amountPreGst, totalAmount } = await makePoRateResolver()(Number(mfg_id), sku_code, Number(qty))
+  // Special types: one live PO per (mfg, SKU, type), raised at 0. Re-checked on approve.
+  const special = isSpecialPoType(po_type)
+  if (special) {
+    const [clash] = await query<{ po_no: string }>(purchaseOrdersSql.selectLiveSpecialPo, [Number(mfg_id), sku_code, po_type])
+    if (clash) {
+      throw new ApiError(409, "special_po_exists",
+        `A ${SPECIAL_PO_LABEL[po_type]} PO already exists for ${sku_code} at this manufacturer (${clash.po_no}).`)
+    }
+  }
+  const { unitPrice, amountPreGst, totalAmount } = special
+    ? specialPoPrice()
+    : await makePoRateResolver()(Number(mfg_id), sku_code, Number(qty))
 
   const eventId = makeEventId("PO", "create")
   recordRawEvent("PO", eventId, { mfg_id, sku_code, qty, unit_price: unitPrice, expected_on, destination, reason, po_type })
@@ -186,7 +200,7 @@ export const POST = withGateway({
     }
   }
 
-  // ── Impromptu PO: insert as draft and submit for approval ─────────────────
+  // ── Impromptu / NPD / Tech Transfer / CPR: insert as draft and submit for approval ──
   const conn: PoolConnection = await pool.getConnection()
   await conn.beginTransaction()
   try {
@@ -211,20 +225,21 @@ export const POST = withGateway({
       ["expected_on",  "", expected_on || ""],
       ["destination",  "", destination || ""],
     ]
-    if (unitPrice != null)  diffItems.push(["unit_price", "", String(unitPrice)])
+    if (special) diffItems.push(["po_type", "", SPECIAL_PO_LABEL[po_type]])
+    if (unitPrice != null)  diffItems.push(["unit_price", "", special ? `0 (${SPECIAL_PO_LABEL[po_type]})` : String(unitPrice)])
     if (reason?.trim())     diffItems.push(["reason",     "", reason.trim()])
     for (const [field, oldVal, newVal] of diffItems) {
       await conn.execute(approvalsSql.insertApprovalItem, [approvalId, field, oldVal, newVal])
     }
 
     await conn.commit()
-    logger.info({ ...ctx, eventId, poId, po_no, approvalId, message: "Impromptu PO submitted for approval" })
+    logger.info({ ...ctx, eventId, poId, po_no, approvalId, po_type, message: "PO submitted for approval" })
     recordProcessedEvent("PO", eventId, { poId, po_no, approvalId })
     return NextResponse.json({ ok: true, approval_id: approvalId, po_no })
   } catch (err: any) {
     await conn.rollback()
     recordFailedEvent("PO", eventId, { mfg_id, sku_code, qty, expected_on, destination, reason }, err.message)
-    logger.error({ ...ctx, eventId, err: err.message, stack: err.stack, message: "Impromptu PO create failed" })
+    logger.error({ ...ctx, eventId, err: err.message, stack: err.stack, po_type, message: "PO create for approval failed" })
     if (err.code === "ER_DUP_ENTRY") {
       throw new ApiError(409, "duplicate", "PO number already exists, please retry.")
     }

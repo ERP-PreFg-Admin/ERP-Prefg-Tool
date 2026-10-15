@@ -18,8 +18,11 @@ import type { RecipeChoice, MfgOption, MfgSkuOption, WarehouseOption } from "./p
 import { warehousesForEntity, warehouseLabel, warehouseKey } from "./po-utils"
 import { useQuotedRate } from "./useQuotedRate"
 import { todayIST } from "@/lib/date"
+import { SPECIAL_PO_TYPES, SPECIAL_PO_LABEL, type SpecialPoType } from "@/lib/po/po-rules"
 
 type PoType = "normal" | "impromptu"
+
+const SPECIAL_SHORT: Record<SpecialPoType, string> = { npd: "NPD", tech_transfer: "TT", cpr: "CPR" }
 
 type PoLineRowState = {
   sku_code: string
@@ -33,6 +36,8 @@ type PoLineRowState = {
   destination: string
   /** Which legal entity sells this SKU — narrows this row's destination list. */
   entity_code: string | null
+  /** NPD / Tech Transfer / CPR, or "" for a normal / impromptu PO. One per PO. */
+  special: SpecialPoType | ""
 }
 
 /**
@@ -64,6 +69,7 @@ function makeRow(s: MfgSkuOption, warehouseOptions: WarehouseOption[]): PoLineRo
     // Defaulted from THIS row's entity's warehouses, so the preselected
     // destination is always one the row can actually be sent to.
     destination: defaultDestination(warehousesForEntity(warehouseOptions, s.entity_code)),
+    special: "",
   }
 }
 
@@ -91,7 +97,7 @@ function PoLineRow({
   )
 
   return (
-    <tr className="border-b border-border last:border-0">
+    <tr className={`border-b border-border last:border-0 ${row.special ? "bg-blue-50/60 dark:bg-blue-950/20" : ""}`}>
       <td className="px-2 py-1.5 align-top">
         <div className="font-mono text-xs font-medium">{row.sku_code}</div>
         <div className="text-[11px] text-muted-foreground max-w-40 truncate">{row.sku_name}</div>
@@ -126,7 +132,39 @@ function PoLineRow({
         />
       </td>
       <td className="px-2 py-1.5 align-top whitespace-nowrap text-xs text-muted-foreground">
-        {rateLoading ? "Calculating…" : rate != null ? `₹${rate.toFixed(2)}` : "—"}
+        {row.special ? (
+          <div className="leading-tight">
+            <div className="font-medium text-blue-700 dark:text-blue-400">₹0.00</div>
+            <div className="text-[10px]">price to be confirmed</div>
+          </div>
+        ) : rateLoading ? "Calculating…" : rate != null ? `₹${rate.toFixed(2)}` : "—"}
+      </td>
+      {/* One type per PO: picking one clears the others, picking it again returns the row to normal.
+          Blue matches the NPD / TT / CPR badge in the PO list. */}
+      <td className="px-2 py-1.5 align-top">
+        <div role="group" aria-label="PO type" className="inline-flex h-8 overflow-hidden rounded-md border border-input bg-background shadow-sm">
+          {SPECIAL_PO_TYPES.map((t, i) => {
+            const on = row.special === t
+            return (
+              <button
+                key={t}
+                type="button"
+                aria-pressed={on}
+                title={on ? `${SPECIAL_PO_LABEL[t]} — click again for a normal PO` : `Raise as ${SPECIAL_PO_LABEL[t]} (₹0, needs approval)`}
+                onClick={() => onChange("special", on ? "" : t)}
+                className={[
+                  "px-2.5 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                  i > 0 ? "border-l border-input" : "",
+                  on
+                    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                ].join(" ")}
+              >
+                {SPECIAL_SHORT[t]}
+              </button>
+            )
+          })}
+        </div>
       </td>
       <td className="px-2 py-1.5 align-top">
         <DatePicker
@@ -199,6 +237,11 @@ export default function AddPODialog({
   const { toast } = useToast()
 
   const today = todayIST()
+  // Approval and a reason apply per PO: impromptu covers the batch, a special type its own row.
+  const specialRows = rows.filter((r) => r.special).length
+  const approvalRows = poType === "impromptu" ? rows.length : specialRows
+  const needsReason = poType === "impromptu" || specialRows > 0
+  const allApproval = rows.length > 0 && approvalRows === rows.length
 
   useEffect(() => {
     if (open) {
@@ -257,8 +300,8 @@ export default function AddPODialog({
 
     if (rows.length === 0) { setApiError("Add at least one SKU."); return }
 
-    if (poType === "impromptu" && !reason.trim()) {
-      setApiError("Remarks are required for Impromptu POs.")
+    if (needsReason && !reason.trim()) {
+      setApiError("Reason is required for Impromptu, NPD, Tech Transfer and CPR POs.")
       return
     }
 
@@ -275,26 +318,30 @@ export default function AddPODialog({
     if (Object.keys(errs).length > 0) { setRowErrors(errs); return }
 
     setSubmitting(true)
-    const outcomes: { sku_code: string; ok: boolean; message: string }[] = []
+    const outcomes: { sku_code: string; ok: boolean; message: string; forApproval?: boolean }[] = []
 
     for (const r of rows) {
       try {
-        const rateRes = await fetch(
-          `/api/v1/purchase-orders/quote-rate?sku_code=${encodeURIComponent(r.sku_code)}&mfg_id=${mfgId}`
-        )
-        const rateData = await rateRes.json()
-        if (!rateRes.ok || rateData.rate == null) {
-          outcomes.push({ sku_code: r.sku_code, ok: false, message: rateData.error ?? "Rate unavailable." })
-          continue
+        // A special-type PO is raised at 0, so it needs no agreed rate.
+        let unitPrice = 0
+        if (!r.special) {
+          const rateRes = await fetch(
+            `/api/v1/purchase-orders/quote-rate?sku_code=${encodeURIComponent(r.sku_code)}&mfg_id=${mfgId}`
+          )
+          const rateData = await rateRes.json()
+          if (!rateRes.ok || rateData.rate == null) {
+            outcomes.push({ sku_code: r.sku_code, ok: false, message: rateData.error ?? "Rate unavailable." })
+            continue
+          }
+          unitPrice = rateData.rate as number
         }
-        const unitPrice = rateData.rate as number
         const totalAmt  = unitPrice * Number(r.qty)
 
         const res = await fetch("/api/v1/purchase-orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            po_type:      poType,
+            po_type:      r.special || poType,
             mfg_id:       Number(mfgId),
             sku_code:     r.sku_code,
             recipe_id:       Number(r.recipe_id),
@@ -308,7 +355,7 @@ export default function AddPODialog({
         })
         const data = await res.json()
         if (!res.ok) { outcomes.push({ sku_code: r.sku_code, ok: false, message: data.error ?? "Failed to create PO." }); continue }
-        outcomes.push({ sku_code: r.sku_code, ok: true, message: data.po_no ?? "Created" })
+        outcomes.push({ sku_code: r.sku_code, ok: true, message: data.po_no ?? "Created", forApproval: !!data.approval_id })
       } catch {
         outcomes.push({ sku_code: r.sku_code, ok: false, message: "Network error." })
       }
@@ -319,9 +366,14 @@ export default function AddPODialog({
     const failed    = outcomes.filter((o) => !o.ok)
 
     if (failed.length === 0) {
+      const queued = succeeded.filter((o) => o.forApproval).length
+      const raised = succeeded.length - queued
       toast({
-        title: poType === "normal" ? "POs raised" : "Submitted for approval",
-        description: `${succeeded.length} PO${succeeded.length !== 1 ? "s" : ""} created.`,
+        title: queued === 0 ? "POs raised" : raised === 0 ? "Submitted for approval" : "POs raised and submitted",
+        description: [
+          raised > 0 && `${raised} PO${raised !== 1 ? "s" : ""} raised`,
+          queued > 0 && `${queued} sent for approval`,
+        ].filter(Boolean).join(", ") + ".",
         variant: "success",
       })
       onCreated()
@@ -360,9 +412,9 @@ export default function AddPODialog({
         <DialogHeader>
           <DialogTitle>Add Purchase Order</DialogTitle>
           <p className="text-xs text-muted-foreground pt-1">
-            {poType === "normal"
-              ? "Normal POs are raised immediately — no approval needed."
-              : "Impromptu POs are submitted for approval before being raised."}
+            {poType === "impromptu"
+              ? "Impromptu POs are submitted for approval before being raised."
+              : "Normal POs are raised immediately. Pick NPD, TT (Tech Transfer) or CPR under Type to raise that PO at ₹0 — it goes for approval first."}
           </p>
         </DialogHeader>
 
@@ -439,6 +491,7 @@ export default function AddPODialog({
                     <th className="px-2 py-1.5 text-left">Recipe</th>
                     <th className="px-2 py-1.5 text-left">PO Qty</th>
                     <th className="px-2 py-1.5 text-left">Rate / Unit</th>
+                    <th className="px-2 py-1.5 text-left">Type</th>
                     <th className="px-2 py-1.5 text-left">Expected Dispatch</th>
                     <th className="px-2 py-1.5 text-left">Destination WH</th>
                     <th className="px-2 py-1.5 text-left"></th>
@@ -468,8 +521,8 @@ export default function AddPODialog({
             <RemarksField
               id="apo-reason"
               label="Reason / Notes"
-              required={poType === "impromptu"}
-              helperText={poType === "impromptu" ? "Required for Impromptu POs — briefly explain why these are being raised." : ""}
+              required={needsReason}
+              helperText={needsReason ? "Required for Impromptu, NPD, Tech Transfer and CPR POs — briefly explain why these are being raised." : ""}
               placeholder="Why are these POs being raised? Any special instructions…"
               value={reason}
               onChange={setReason}
@@ -496,8 +549,8 @@ export default function AddPODialog({
             <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
             <Button onClick={handleSubmit} disabled={submitting || !mfgId}>
               {submitting
-                ? (poType === "normal" ? "Raising…" : "Submitting…")
-                : (poType === "normal" ? "Raise PO(s)" : "Submit for Approval")}
+                ? (approvalRows === 0 ? "Raising…" : "Submitting…")
+                : allApproval ? "Submit for Approval" : approvalRows > 0 ? "Raise / Submit PO(s)" : "Raise PO(s)"}
             </Button>
           </div>
         </DialogFooter>

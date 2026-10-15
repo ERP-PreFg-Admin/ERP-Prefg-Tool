@@ -444,7 +444,7 @@ try {
 | `PM_MAT` | PM base record | `master_pm` |
 | `VENDOR` | Vendor master | `master_vendors` + `details_vendor` |
 | `MFG` | Manufacturer master | `master_mfgs` + `details_mfg` |
-| `PO` | Purchase Order (impromptu) | `purchase_orders` — status → `raised`; triggers email send on approval |
+| `PO` | Purchase Order raised from Add PO as impromptu, or as NPD / Tech Transfer / CPR (ticked per row, price 0) | `purchase_orders` — status → `raised`; triggers email send on approval. A special type first re-checks one-live-PO-per-(mfg, SKU, type) and 409s if another was approved since submit (`assertSpecialPoStillFree`) |
 | `BOM` | Recipe master (module code stays `BOM`) | `master_recipe` + `details_recipe` (+ `history_recipe` snapshot) |
 | `MFG_MISC` | Per-SKU JW / Shrink Wrap / Shipper / Wastage % | `bom_misc`. **New lines are INSERTed straight away as `in_review`** rather than staged — there is no prior row to lock. Safe because every costing query filters `status = 'active'`, so an `in_review` row prices nothing. Approve flips it to the submitted status (default `active`); reject sets `rejected`. |
 | `*_BULK` | One approval per uploaded CSV file | `PO_BULK`, `VENDOR_BULK`, `MFG_BULK`, `RM_BULK`, `PM_BULK`, `RM_VRM_BULK`, `RM_RATE_BULK`, `PM_VRM_BULK`, `PM_RATE_BULK`, `BOM_BULK`, `MFG_MISC_BULK` — the file is staged in S3 and inserted row-by-row in `applyAndArchive` on approval. `entity_id` is the uploader's user id, except `MFG_MISC_BULK` which passes the **manufacturer** (`stageBulkUploadApproval`'s optional `entityId`), since the handler needs it to resolve each row's `sku_code` |

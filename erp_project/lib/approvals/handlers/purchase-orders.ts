@@ -1,4 +1,4 @@
-// ── PO (Impromptu purchase order — creation approval), PO_BULK (bulk CSV
+// ── PO (Impromptu / NPD / Tech Transfer / CPR — creation approval), PO_BULK (bulk CSV
 // create-or-update) ──────────────────────────────────────────────────────────
 // PO: the PO is inserted as 'draft' before approval is submitted.
 //     approve → set status to 'raised'   reject → set status to 'rejected'
@@ -26,14 +26,32 @@ import { brandCode } from "@/lib/constants"
 import { isoDate, normalizeDateCell } from "@/lib/date"
 import { makePoRateResolver } from "@/lib/po/po-rate"
 import { stagedPrice } from "@/lib/po/po-rate-note"
-import { BULK_PO_TYPES, isSpecialPoType, specialPoPrice } from "@/lib/po/po-rules"
+import { BULK_PO_TYPES, isSpecialPoType, specialPoPrice, SPECIAL_PO_LABEL } from "@/lib/po/po-rules"
+import { ApiError } from "@/lib/gateway/errors"
 import { bulkUpdateBlock } from "@/lib/po/po-bulk-check"
+
+/**
+ * A special-type PO (NPD / Tech Transfer / CPR) may be approved only while no other live
+ * one exists for its (mfg, SKU, type) — another may have been approved since submit.
+ */
+export async function assertSpecialPoStillFree(conn: PoolConnection, poId: number): Promise<void> {
+  const [rows] = await conn.execute(purchaseOrdersSql.selectTypeForApproval, [poId])
+  const po = (rows as { id: number; mfg_id: number; sku_code: string; po_type: string }[])[0]
+  if (!po || !isSpecialPoType(po.po_type)) return
+  const [live] = await conn.execute(purchaseOrdersSql.selectOtherLiveSpecialPo, [po.mfg_id, po.sku_code, po.po_type, po.id])
+  const clash = (live as { po_no: string }[])[0]
+  if (clash) {
+    throw new ApiError(409, "special_po_exists",
+      `A ${SPECIAL_PO_LABEL[po.po_type]} PO for ${po.sku_code} at this manufacturer is already raised (${clash.po_no}). Reject this one.`)
+  }
+}
 
 export const poHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
     await conn.execute(purchaseOrdersSql.setStatus, [status, entityId])
   },
   async applyAndArchive(conn, entityId) {
+    await assertSpecialPoStillFree(conn, entityId)
     await conn.execute(purchaseOrdersSql.setStatus, ["raised", entityId])
   },
 }

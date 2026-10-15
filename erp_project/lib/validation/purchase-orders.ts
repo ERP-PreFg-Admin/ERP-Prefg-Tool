@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { todayIST } from "@/lib/date"
 import { MATCH_TOLERANCE } from "@/lib/invoice/three-way"
+import { poTypeRequiresRemarks } from "@/lib/po/po-rules"
 
 /** CSV rows arrive as raw strings from CsvImportDialog's client-side parse; the
  * route re-serializes them to CSV, uploads to S3, and stages a PO_BULK
@@ -28,7 +29,8 @@ export const poCreateSchema = z
     destination: z.string().trim().optional().nullable(),
     // Stored on purchase_orders.remarks — capped to that column's width.
     reason: z.string().trim().max(300, "Remarks must be 300 characters or fewer.").optional().nullable(),
-    po_type: z.enum(["normal", "impromptu"]).optional().default("impromptu"),
+    // npd / tech_transfer / cpr are the special types: price 0, once per (SKU, mfg, type), always approved.
+    po_type: z.enum(["normal", "impromptu", "npd", "tech_transfer", "cpr"]).optional().default("impromptu"),
   })
   .refine((v) => Number(v.qty) > 0, {
     message: "Quantity must be greater than 0.",
@@ -43,8 +45,8 @@ export const poCreateSchema = z
     { message: "Backdating is not allowed for expected dispatch date.", path: ["expected_on"] }
   )
   .refine(
-    (v) => v.po_type !== "impromptu" || (v.reason?.trim() ?? "").length > 0,
-    { message: "Remarks are required for Impromptu POs.", path: ["reason"] }
+    (v) => !poTypeRequiresRemarks(v.po_type) || (v.reason?.trim() ?? "").length > 0,
+    { message: "Remarks are required for Impromptu, NPD, Tech Transfer and CPR POs.", path: ["reason"] }
   )
 
 export const poActionSchema = z.union([poBulkSchema, poCreateSchema])

@@ -407,6 +407,21 @@ export const purchaseOrdersSql = {
     ORDER BY id LIMIT 1
   `,
 
+  /** selectLiveSpecialPo, but not this PO — the approve-time re-check. Params: [mfg_id, sku_code, po_type, id] */
+  selectOtherLiveSpecialPo: `
+    SELECT po_no FROM purchase_orders
+    WHERE mfg_id = ? AND sku_code = ? AND po_type = ?
+      AND COALESCE(status, '') <> 'cancelled'
+      AND reference_po IS NULL
+      AND id <> ?
+    ORDER BY id LIMIT 1
+  `,
+
+  /** What approving a PO needs to re-check, locked. Params: [id] */
+  selectTypeForApproval: `
+    SELECT id, po_no, mfg_id, sku_code, po_type FROM purchase_orders WHERE id = ? FOR UPDATE
+  `,
+
   /**
    * The highest sequence number under a PO-number prefix (0 when none). The next
    * PO is this + 1. Not COUNT(*): once a PO is deleted (an invoice revert) the
