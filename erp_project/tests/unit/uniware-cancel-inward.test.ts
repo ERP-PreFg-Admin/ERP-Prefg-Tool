@@ -28,8 +28,8 @@ test("only inward POs are touched", () => {
 
 // The sync re-reads a PO every run until it goes terminal, so this has to be a
 // no-op the second time rather than reporting a fresh cancellation each sweep.
-test("it is idempotent", () => {
-  assert.match(SQL, /status <> 'cancelled'/)
+test("it is idempotent, and never overwrites a reverted inward PO", () => {
+  assert.match(SQL, /status NOT IN \('cancelled', 'reverted'\)/)
 })
 
 // The goods were credited to the PARENT order when the invoice was inwarded.

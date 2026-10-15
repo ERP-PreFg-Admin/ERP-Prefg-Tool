@@ -63,6 +63,7 @@ export const uniwareDocsSql = {
            uniware_po_code, attachment_key
       FROM invoice_mfg
      WHERE uniware_po_code IS NOT NULL AND uniware_po_code <> ''
+       AND reverted_at IS NULL
      ORDER BY id DESC
      LIMIT ?`,
 

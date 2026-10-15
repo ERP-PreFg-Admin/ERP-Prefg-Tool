@@ -11,7 +11,8 @@
 // signature per leg.
 
 import { NextResponse } from "next/server"
-import { execute, query } from "@/lib/db"
+import { execute, pool, query } from "@/lib/db"
+import { assertInvoiceWritable } from "@/lib/invoice/invoice-revert"
 import { supplierInvoicesSql } from "@/lib/queries/supplier-invoices"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
@@ -19,6 +20,22 @@ import { invoiceIdParamSchema, legVerifySchema } from "@/lib/validation/invoice-
 import { threeWayMatch } from "@/lib/invoice/three-way"
 import logger from "@/lib/logger"
 import type { InvoiceHistoryHeader, InvoiceLegVerification } from "@/types/invoice"
+
+// Check and write in one transaction, so a revert can't land between them.
+async function writeIfWritable(invoiceId: number, sql: string, params: unknown[]) {
+  const conn = await pool.getConnection()
+  await conn.beginTransaction()
+  try {
+    await assertInvoiceWritable(conn, invoiceId)
+    await conn.execute(sql, params as (string | number | null)[])
+    await conn.commit()
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
+  }
+}
 
 export const POST = withGateway({
   paramsSchema: invoiceIdParamSchema,
@@ -55,7 +72,8 @@ export const POST = withGateway({
         throw new ApiError(409, "leg_not_on_file",
           `The ${leg.toUpperCase()} document is not on file for this invoice, so there is nothing to verify.`)
       }
-      await execute(supplierInvoicesSql.upsertLegVerification, [invoiceId, leg, userId, remarks ?? null])
+      // A sign-off is a revert blocker, so it can't be added while one is pending or done.
+      await writeIfWritable(invoiceId, supplierInvoicesSql.upsertLegVerification, [invoiceId, leg, userId, remarks ?? null])
     } else {
       await execute(supplierInvoicesSql.deleteLegVerification, [invoiceId, leg])
     }

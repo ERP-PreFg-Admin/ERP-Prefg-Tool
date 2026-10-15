@@ -69,6 +69,7 @@ export default async function ApprovalsPage() {
       approvals={approvals}
       isApprover={isApprover}
       materialMap={buildMaterialMap(rmRows, pmRows, skuRows)}
+      viewerId={userId}
     />
   )
 }

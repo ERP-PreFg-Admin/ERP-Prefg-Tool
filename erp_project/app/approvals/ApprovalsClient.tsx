@@ -16,6 +16,15 @@ import ApprovalCard, { ApprovalRow, type MaterialMap } from "./ApprovalCard"
 import RejectDialog from "./RejectDialog"
 import BulkApproveDialog from "./BulkApproveDialog"
 import CsvPreviewDialog from "./CsvPreviewDialog"
+import UniwareGrnBlockDialog, { isUniwareBlock, toRefusal } from "../po-tracking/invoices/UniwareGrnBlockDialog"
+import type { InvoiceRevertRefusal } from "@/types/invoice"
+
+/** A requester never approves their own invoice revert; the handler refuses it too. */
+function approveBlockedReason(a: Approval, viewerId: number | undefined): string | undefined {
+  return a.module === "INVOICE_REVERT" && viewerId != null && a.raised_by === viewerId
+    ? "You requested this — another approver must approve it"
+    : undefined
+}
 
 /** Groups pending approvals by module — busiest module first — so the list
  *  reads as one light row per module instead of every approval stacked flat.
@@ -55,10 +64,13 @@ export default function ApprovalsClient({
   approvals: initialApprovals,
   isApprover,
   materialMap,
+  viewerId,
 }: {
   approvals:   Approval[]
   isApprover:  boolean
   materialMap: MaterialMap
+  /** The signed-in user, for the own-request check on invoice reverts. */
+  viewerId?:   number
 }) {
   const router = useRouter()
   const { toast } = useToast()
@@ -72,6 +84,7 @@ export default function ApprovalsClient({
   const [loading,        setLoading]        = useState(false)
   const [actionError,    setActionError]    = useState<Record<number, string>>({})
   const [csvPreview,     setCsvPreview]     = useState<{ s3Key: string; filename: string } | null>(null)
+  const [uniwareBlock,   setUniwareBlock]   = useState<InvoiceRevertRefusal | null>(null)
   // Guards against the SAME tick firing twice: `loading` is state, so two clicks
   // before React re-renders both read false and both POST. The route 409s the
   // second — it re-checks status = 'pending' — so no approval is applied twice,
@@ -116,6 +129,9 @@ export default function ApprovalsClient({
         if (!res.ok) {
           const message = data.error ?? "Failed to approve"
           setActionError(prev => ({ ...prev, [approval.id]: message }))
+          // A Uniware refusal on an invoice revert gets the blocking popup, not a toast.
+          const refusal = toRefusal(data)
+          if (isUniwareBlock(refusal)) { setUniwareBlock(refusal); return }
           toast({ title: "Approval failed", description: message, variant: "error" })
           return
         }
@@ -317,6 +333,7 @@ export default function ApprovalsClient({
                                 onReject={() => setRejectTarget(approval)}
                                 onOpenCsvFile={openCsvFile}
                                 materialMap={materialMap}
+                                approveBlockedReason={approveBlockedReason(approval, viewerId)}
                               />
                             ))
                           ) : (
@@ -333,6 +350,7 @@ export default function ApprovalsClient({
                                       onApprove={() => handleApprove(approval)}
                                       onReject={() => setRejectTarget(approval)}
                                       onOpenCsvFile={openCsvFile}
+                                      approveBlockedReason={approveBlockedReason(approval, viewerId)}
                                     />
                                   ))}
                                 </TableBody>
@@ -365,6 +383,8 @@ export default function ApprovalsClient({
         onClose={() => setBulkTarget(null)}
         onConfirm={() => bulkTarget && handleBulkApprove(bulkTarget)}
       />
+
+      <UniwareGrnBlockDialog refusal={uniwareBlock} onClose={() => setUniwareBlock(null)} />
 
       <CsvPreviewDialog
         open={csvPreview !== null}

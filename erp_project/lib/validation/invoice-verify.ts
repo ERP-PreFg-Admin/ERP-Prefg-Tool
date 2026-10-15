@@ -28,3 +28,10 @@ export const paymentSchema = z.object({
   utr: z.string().trim().max(64).optional().nullable(),
   remarks: z.string().trim().max(500).optional().nullable(),
 })
+
+/** Request a revert. A dry run only previews, so it needs neither the reason nor the typed number. */
+export const invoiceRevertSchema = z.object({
+  reason: z.string().trim().max(500).default(""),
+  confirm_invoice_no: z.string().trim().default(""),
+  dry_run: z.boolean().optional(),
+}).refine((b) => b.dry_run || b.reason.length > 0, { message: "Remarks are required to revert an invoice.", path: ["reason"] })

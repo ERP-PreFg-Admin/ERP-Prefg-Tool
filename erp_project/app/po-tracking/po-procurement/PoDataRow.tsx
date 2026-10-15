@@ -97,7 +97,7 @@ export default function PoDataRow({
         "transition-colors",
         // A cancelled PO is history, not work: dimmed so the eye skips it, and
         // brought back on hover if it's being read.
-        status === "cancelled" && "opacity-55 hover:opacity-100",
+        (status === "cancelled" || status === "reverted") && "opacity-55 hover:opacity-100",
         selectedPoId === r.id && "bg-primary/5",
         // An open master and its children read as one block, in the same violet
         // this table already uses for "part of this order lives elsewhere".

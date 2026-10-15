@@ -113,6 +113,10 @@ const INVOICE_LIST_BODY = `
          w.code AS destination_code,
          e.code AS entity_code, e.legal_name AS entity_name,
          u.name AS created_by_name,
+         si.reverted_at, si.revert_reason,
+         ru.name AS reverted_by_name, au.name AS revert_approved_by_name,
+         EXISTS (SELECT 1 FROM approvals ra WHERE ra.module = 'INVOICE_REVERT'
+                   AND ra.entity_id = si.id AND ra.status = 'pending') AS revert_pending,
          COUNT(sii.id)                   AS item_count,
          SUM(sii.link_type = 'received') AS received_count,
          -- Total quantity BILLED on this invoice. Safe to aggregate here beside
@@ -208,6 +212,8 @@ const INVOICE_LIST_BODY = `
   -- PAN, never the full GSTIN — see the line-item query for why.
   LEFT JOIN master_entity e ON e.pan = SUBSTRING(si.buyer_gstin, 3, 10)
   LEFT JOIN users u ON u.id = si.created_by
+  LEFT JOIN users ru ON ru.id = si.reverted_by
+  LEFT JOIN users au ON au.id = si.revert_approved_by
   LEFT JOIN invoice_items_mfg sii ON sii.invoice_id = si.id
   ${INVOICE_WHERE}
   GROUP BY si.id, w.code, e.code, e.legal_name
@@ -223,6 +229,7 @@ export const supplierInvoicesSql = {
     INNER JOIN invoice_mfg h ON h.id = i.invoice_id
     LEFT JOIN master_skus sk ON sk.sku_code = i.sku_code
     WHERE h.mfg_id = ? AND i.sku_code IS NOT NULL AND i.sku_name IS NOT NULL
+      AND h.reverted_at IS NULL
       AND (? IS NULL OR sk.brand_id IS NULL OR sk.brand_id IN (?))
     GROUP BY i.sku_name, i.sku_code
   `,
@@ -288,6 +295,7 @@ export const supplierInvoicesSql = {
     SELECT si.id, si.uniware_po_code, si.destination, si.buyer_gstin
     FROM invoice_mfg si
     WHERE ${SYNC_CANDIDATE_PREDICATE}
+      AND si.reverted_at IS NULL
     ORDER BY ${SYNC_CANDIDATE_ORDER}
     LIMIT ?
   `,
@@ -309,6 +317,7 @@ export const supplierInvoicesSql = {
     INNER JOIN master_mfgs m ON m.id = si.mfg_id
     ${INVOICE_WHERE}
       AND ${SYNC_CANDIDATE_PREDICATE}
+      AND si.reverted_at IS NULL
     ORDER BY ${SYNC_CANDIDATE_ORDER}
     LIMIT ?
   `,
@@ -361,6 +370,7 @@ export const supplierInvoicesSql = {
            si.attachment_key,
            si.uniware_po_code,
            si.created_at,
+           si.reverted_at,
            u.name           AS created_by_name,
            sii.line_no,
            sii.link_type,
@@ -441,7 +451,7 @@ export const supplierInvoicesSql = {
            e.code AS entity_code, e.legal_name AS entity_name,
            si.uniware_po_code,
            si.invoice_total, si.eway_bill_no, si.vehicle_no,
-           u.name AS created_by_name, si.created_at,
+           u.name AS created_by_name, si.created_at, si.reverted_at,
            m.code AS mfg_code, m.name AS mfg_name,
            sii.line_no, sii.sku_code, sii.parsed_sku_code, sii.sku_name,
            sii.batch, sii.mfg_date, sii.expiry, sii.hsn,
@@ -477,6 +487,16 @@ export const supplierInvoicesSql = {
     ${INVOICE_WHERE}
   `,
 
+  /** Reverted invoices the same filter matches, for the strip's "N reverted not counted".
+   *  Parameters: buildInvoiceParams(...) (15) */
+  countRevertedInvoices: `
+    SELECT COUNT(*) AS reverted_count
+    FROM invoice_mfg si
+    INNER JOIN master_mfgs m ON m.id = si.mfg_id
+    ${INVOICE_WHERE}
+      AND si.reverted_at IS NOT NULL
+  `,
+
   /**
    * The scope facts for one invoice — the same dimensions INVOICE_WHERE filters
    * the list on, minus brand (per LINE, see selectInvoiceLineBrandIds below).
@@ -505,10 +525,15 @@ export const supplierInvoicesSql = {
 
   /** Header for one invoice. Parameters: [id] */
   selectInvoiceById: `
-    SELECT si.*, m.code AS mfg_code, m.name AS mfg_name, u.name AS created_by_name
+    SELECT si.*, m.code AS mfg_code, m.name AS mfg_name, u.name AS created_by_name,
+           ru.name AS reverted_by_name, au.name AS revert_approved_by_name,
+           EXISTS (SELECT 1 FROM approvals ra WHERE ra.module = 'INVOICE_REVERT'
+                     AND ra.entity_id = si.id AND ra.status = 'pending') AS revert_pending
     FROM invoice_mfg si
     INNER JOIN master_mfgs m ON m.id = si.mfg_id
     LEFT JOIN users u ON u.id = si.created_by
+    LEFT JOIN users ru ON ru.id = si.reverted_by
+    LEFT JOIN users au ON au.id = si.revert_approved_by
     WHERE si.id = ?
   `,
 
@@ -630,6 +655,7 @@ export const supplierInvoicesSql = {
     INNER JOIN master_mfgs m ON m.id = si.mfg_id
     LEFT JOIN invoice_items_mfg sii ON sii.invoice_id = si.id
     ${INVOICE_WHERE}
+      AND si.reverted_at IS NULL
     GROUP BY si.id
     LIMIT ?
   `,
@@ -738,6 +764,7 @@ export const supplierInvoicesSql = {
     INNER JOIN master_mfgs m  ON m.id  = si.mfg_id
     LEFT  JOIN master_skus ms ON ms.sku_code = ii.sku_code
     WHERE si.invoice_date >= ? AND si.invoice_date <= ?
+      AND si.reverted_at IS NULL
       AND (? IS NULL OR si.mfg_id = ?)
       AND (? IS NULL OR ii.sku_code LIKE ? OR ms.name LIKE ?)
       AND (? IS NULL OR si.mfg_id      IN (?))

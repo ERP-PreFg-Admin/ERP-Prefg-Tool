@@ -368,3 +368,11 @@ test("upload: a mailed PO's edit row is flagged; its cancel row passes", async (
   assert.deepEqual(r.flags, { 0: ["P-M has been sent to the manufacturer — a CSV can only cancel or short-close it now"] })
   assert.equal(r.staged.length, 2)
 })
+
+test("bulkUpdateBlock: a reverted PO (its invoice was reverted) can't be touched by a CSV, not even cancelled", () => {
+  const reverted = po({ status: "reverted", po_no: "INW-9" })
+  const msg = "INW-9 is reverted — its invoice was reverted, so a CSV can't change it"
+  assert.equal(bulkUpdateBlock(reverted, { status: "short_closed" }), msg)
+  assert.equal(bulkUpdateBlock(reverted, { status: "cancelled" }), msg)
+  assert.equal(bulkUpdateBlock(po({ status: "cancelled" }), { status: "cancelled" }), null, "a plain cancelled PO is not blocked")
+})

@@ -125,3 +125,11 @@ test("a PO id param must be a positive integer", () => {
   assert.equal(poIdParamSchema.safeParse({ id: "abc" }).success, false)
   assert.equal(poIdParamSchema.safeParse({ id: "1; DROP TABLE" }).success, false)
 })
+
+test("invoice revert: remarks are compulsory on submit, optional only for a dry-run preview", async () => {
+  const { invoiceRevertSchema } = await import("../../lib/validation/invoice-verify")
+  assert.equal(invoiceRevertSchema.safeParse({ confirm_invoice_no: "INV-1" }).success, false, "no remarks")
+  assert.equal(invoiceRevertSchema.safeParse({ reason: "   ", confirm_invoice_no: "INV-1" }).success, false, "blank remarks")
+  assert.equal(invoiceRevertSchema.safeParse({ reason: "wrong qty", confirm_invoice_no: "INV-1" }).success, true)
+  assert.equal(invoiceRevertSchema.safeParse({ dry_run: true }).success, true, "a preview writes nothing, so needs none")
+})

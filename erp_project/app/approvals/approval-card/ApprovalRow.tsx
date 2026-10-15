@@ -39,7 +39,7 @@ function ChangesSummary({ items }: { items: Approval["items"] }) {
 }
 
 export function ApprovalRow({
-  approval, isApprover, loading, error, onApprove, onReject, onOpenCsvFile,
+  approval, isApprover, loading, error, onApprove, onReject, onOpenCsvFile, approveBlockedReason,
 }: {
   approval:      Approval
   isApprover:    boolean
@@ -48,6 +48,7 @@ export function ApprovalRow({
   onApprove:     () => void
   onReject:      () => void
   onOpenCsvFile: (approvalId: number, s3Key: string, filename: string) => void
+  approveBlockedReason?: string
 }) {
   const isBulk = BULK_MODULES.has(approval.module)
 
@@ -81,7 +82,7 @@ export function ApprovalRow({
       </TableCell>
       {isApprover && (
         <TableCell className="py-2 align-top w-px whitespace-nowrap">
-          <ApprovalActions loading={loading} onApprove={onApprove} onReject={onReject} />
+          <ApprovalActions loading={loading} onApprove={onApprove} onReject={onReject} approveBlockedReason={approveBlockedReason} />
           {error && <p className="text-[11px] text-destructive mt-1">{error}</p>}
         </TableCell>
       )}

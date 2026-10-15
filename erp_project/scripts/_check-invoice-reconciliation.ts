@@ -39,6 +39,8 @@ async function main() {
            SUM(ii.received_against_po_id IS NULL) AS no_ref_po
       FROM invoice_mfg i
       LEFT JOIN invoice_items_mfg ii ON ii.invoice_id = i.id
+     -- A reverted invoice is history: its inward POs are cancelled on purpose.
+     WHERE i.reverted_at IS NULL
      GROUP BY i.id, i.invoice_no, i.destination, i.invoice_total, i.attachment_key
      ORDER BY i.id`)
 

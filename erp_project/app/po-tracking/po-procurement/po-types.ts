@@ -1,6 +1,6 @@
 export type PoStatus =
   | "draft" | "raised" | "punched"
-  | "short_closed" | "partially_received" | "received" | "cancelled"
+  | "short_closed" | "partially_received" | "received" | "cancelled" | "reverted"
 
 export type PoRow = {
   id: number
@@ -152,6 +152,8 @@ export const STATUS_CONFIG: Record<string, { label: string; variant: BadgeVarian
   partially_received: { label: "Partially Received",  variant: "info" },
   received:           { label: "Received",            variant: "success" },
   cancelled:          { label: "Cancelled",           variant: "destructive" },
+  // An inward PO whose supplier invoice was reverted — kept for the record.
+  reverted:           { label: "Reverted",            variant: "outline" },
 }
 
 export const STATUS_KEYS = Object.keys(STATUS_CONFIG)
@@ -270,7 +272,7 @@ export type MfgSkuOption = { sku_code: string; sku_name: string; boms?: RecipeCh
 export type SplitRow = { destination: string; qty: string }
 
 /** Where a history_pos row came from — derived in selectPoHistoryByPoId. */
-export type PoHistorySource = "bulk_csv" | "invoice" | "invoice_receipt" | "receipt" | "split" | "draft_edit" | "other"
+export type PoHistorySource = "bulk_csv" | "invoice" | "invoice_receipt" | "receipt" | "split" | "draft_edit" | "invoice_revert" | "other"
 
 /** One history_pos row: bulk CSV, invoice inwarding, a receipt or a split. */
 export type PoHistoryRow = {

@@ -15,7 +15,7 @@ import type { MaterialMap } from "./types"
 
 export default function ApprovalCard({
   approval, isExpanded, isApprover, loading, error,
-  onToggle, onApprove, onReject, onOpenCsvFile, materialMap, alwaysExpanded,
+  onToggle, onApprove, onReject, onOpenCsvFile, materialMap, alwaysExpanded, approveBlockedReason,
 }: {
   approval:      Approval
   isExpanded:    boolean
@@ -34,6 +34,8 @@ export default function ApprovalCard({
    *  slows down approvals. Used on /approvals; history keeps the toggle
    *  since its list can be much longer. */
   alwaysExpanded?: boolean
+  /** Set when this viewer may not approve, e.g. their own invoice revert. */
+  approveBlockedReason?: string
 }) {
   const moduleColor = MODULE_COLOR[approval.module] ?? MODULE_COLOR_FALLBACK
   const isBulk      = BULK_MODULES.has(approval.module)
@@ -150,7 +152,7 @@ export default function ApprovalCard({
           onClick={e => e.stopPropagation()}
         >
           <div>{error && <p className="text-xs text-destructive">{error}</p>}</div>
-          <ApprovalActions loading={loading} onApprove={onApprove} onReject={onReject} />
+          <ApprovalActions loading={loading} onApprove={onApprove} onReject={onReject} approveBlockedReason={approveBlockedReason} />
         </div>
       )}
     </div>

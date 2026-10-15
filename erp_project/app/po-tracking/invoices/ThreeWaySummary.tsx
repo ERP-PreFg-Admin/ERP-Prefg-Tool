@@ -9,7 +9,7 @@ import { CreditCard, FileText, Package } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MATCH_TOLERANCE, type MatchBadge, type MatchSummary } from "@/lib/invoice/three-way"
 
-type Summary = MatchSummary & { truncated: boolean; cap: number }
+type Summary = MatchSummary & { truncated: boolean; cap: number; reverted_count?: number }
 
 /** Worst first: what needs doing leads, what is finished trails. */
 const BADGES: { key: MatchBadge; label: string; tone: string }[] = [
@@ -71,6 +71,12 @@ export default function ThreeWaySummary({ filterQuery, search, reloadKey }: {
         <span className="tabular-nums text-muted-foreground">
           {signatures} of {invoices * 3} verified
         </span>
+        {/* Reverted invoices stay in the list below but are left out of every figure here. */}
+        {(s.reverted_count ?? 0) > 0 && (
+          <span className="tabular-nums text-muted-foreground">
+            {s.reverted_count} reverted not counted
+          </span>
+        )}
         <span className="ml-auto text-muted-foreground">
           tolerance {(MATCH_TOLERANCE * 100).toFixed(0)}%
         </span>

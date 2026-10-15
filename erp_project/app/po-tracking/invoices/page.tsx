@@ -45,7 +45,7 @@ export default async function InvoicesPage() {
           the purchase orders each line was booked to.
         </p>
       </div>
-      <InvoicesClient mfgOptions={mfgOptions} destinations={destinations} />
+      <InvoicesClient mfgOptions={mfgOptions} destinations={destinations} canRevert={access === "editor"} />
     </div>
   )
 }

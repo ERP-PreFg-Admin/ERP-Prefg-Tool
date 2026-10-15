@@ -19,12 +19,14 @@ const FIELD_LABEL: Record<string, string> = {
   remarks: "Remarks",
   received_qty: "Received Qty",
   split: "Split off",
+  revert_reason: "Revert",
 }
 
 function badgeFor(head: PoHistoryRow): { label: string; variant: "success" | "info" | "secondary" } {
   if (head.action_type === "create") return { label: "Created", variant: "success" }
   if (head.source === "receipt" || head.source === "invoice_receipt") return { label: "Received", variant: "success" }
   if (head.source === "split") return { label: "Split", variant: "secondary" }
+  if (head.source === "invoice_revert") return { label: "Reverted", variant: "secondary" }
   return { label: "Updated", variant: "info" }
 }
 
@@ -37,6 +39,7 @@ function sourceText(head: PoHistoryRow): string {
     case "receipt":         return "Manual goods receipt"
     case "split":           return "PO split"
     case "draft_edit":      return "Edited while Draft"
+    case "invoice_revert":  return `Invoice reverted${inv}`
     default:                return "Direct change"
   }
 }

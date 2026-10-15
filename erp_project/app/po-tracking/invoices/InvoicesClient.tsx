@@ -20,10 +20,13 @@ import ThreeWaySummary from "./ThreeWaySummary"
 export default function InvoicesClient({
   mfgOptions,
   destinations,
+  canRevert = false,
 }: {
   mfgOptions: MfgOption[]
   /** Distinct warehouse names — invoice_mfg.destination stores the site name. */
   destinations: string[]
+  /** Editor on this page — may request an invoice revert. */
+  canRevert?: boolean
 }) {
   // Local, not URL-synced: InvoiceGroupTable fetches client-side, so there's no
   // server render to drive with a search param the way the masters pages do.
@@ -266,6 +269,8 @@ export default function InvoicesClient({
             reloadKey={reloadKey}
             matchFilter={match ? [match] : undefined}
             emptyHint="No invoices yet. They appear here once one is read on PO Inwarding via Add Invoice."
+            canRevert={canRevert}
+            onReverted={() => setReloadKey((k) => k + 1)}
           />
         </div>
       </CardContent>

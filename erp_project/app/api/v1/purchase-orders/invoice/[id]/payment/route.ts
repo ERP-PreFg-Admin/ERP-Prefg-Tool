@@ -11,7 +11,8 @@
 // of moves lives; the table itself only holds where the invoice is now.
 
 import { NextResponse } from "next/server"
-import { execute, query } from "@/lib/db"
+import { execute, pool, query } from "@/lib/db"
+import { assertInvoiceWritable } from "@/lib/invoice/invoice-revert"
 import { supplierInvoicesSql } from "@/lib/queries/supplier-invoices"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
@@ -19,6 +20,22 @@ import { invoiceIdParamSchema, paymentSchema } from "@/lib/validation/invoice-ve
 import { paymentNeedsUtr } from "@/lib/invoice/three-way"
 import logger from "@/lib/logger"
 import type { InvoicePayment } from "@/types/invoice"
+
+// Check and write in one transaction, so a revert can't land between them.
+async function writeIfWritable(invoiceId: number, sql: string, params: unknown[]) {
+  const conn = await pool.getConnection()
+  await conn.beginTransaction()
+  try {
+    await assertInvoiceWritable(conn, invoiceId)
+    await conn.execute(sql, params as (string | number | null)[])
+    await conn.commit()
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
+  }
+}
 
 export const POST = withGateway({
   paramsSchema: invoiceIdParamSchema,
@@ -47,7 +64,8 @@ export const POST = withGateway({
 
     // Kept only where it means something. Carrying a UTR on an invoice moved
     // back to 'initiated' would leave a reference for a payment not yet made.
-    await execute(supplierInvoicesSql.upsertPayment, [
+    // Setting a payment state is a revert blocker; clearing it (above) stays allowed.
+    await writeIfWritable(invoiceId, supplierInvoicesSql.upsertPayment, [
       invoiceId, status, paymentNeedsUtr(status) ? trimmed : null,
       remarks?.trim() || null, Number(session.user.id),
     ])

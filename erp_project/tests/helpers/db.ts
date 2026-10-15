@@ -271,3 +271,46 @@ export function ymd(v: Date | string | null | undefined): string | null {
 
 /** Today as YYYY-MM-DD, matching supersededOn's fallback. */
 export const today = (): string => ymd(new Date())!
+
+/**
+ * An inwarded invoice as invoice-inward.ts leaves one: header, one inward PO per line
+ * (status received), each line received against its procurement PO through receivePo.
+ */
+export async function makeInvoice(
+  conn: PoolConnection,
+  a: Anchors,
+  input: { lines: { against: TestPo; qty: number }[]; invoice_no?: string; uniware_po_code?: string | null },
+): Promise<{ invoiceId: number; invoiceNo: string; inwardIds: number[] }> {
+  const { supplierInvoicesSql } = await import("../../lib/queries/supplier-invoices")
+  const { purchaseOrdersSql } = await import("../../lib/queries/purchase-orders")
+  const { receivePo } = await import("../../lib/po/po-receive")
+
+  const invoiceNo = input.invoice_no ?? testPoNo("TEST-INV")
+  const [h] = await conn.execute<ResultSetHeader>(supplierInvoicesSql.insertHeader, [
+    a.mfgId, invoiceNo, null, "INR", null, null, null, null, null, null, null, null, null, null,
+    null, null, null, a.userId,
+  ])
+  const invoiceId = h.insertId
+  if (input.uniware_po_code) await conn.execute(supplierInvoicesSql.setUniwarePoCode, [input.uniware_po_code, invoiceId])
+
+  const inwardIds: number[] = []
+  for (const [i, line] of input.lines.entries()) {
+    await receivePo(conn, line.against.id, line.qty, a.userId)
+    const [inw] = await conn.execute<ResultSetHeader>(purchaseOrdersSql.insertInwardReceived, [
+      testPoNo("TEST-INW"), line.against.mfg_id, line.against.sku_code, line.qty, 100, 100 * line.qty,
+      null, null, invoiceNo, null, line.qty, line.against.po_no, null, line.against.mfg_id, line.against.sku_code,
+    ])
+    inwardIds.push(inw.insertId)
+    await conn.execute(supplierInvoicesSql.insertItem, [
+      invoiceId, i + 1, inw.insertId, line.against.id, "received", line.against.sku_code, null, null,
+      null, null, null, null, line.qty, 100, null, null, 18, 100 * line.qty, 118 * line.qty,
+    ])
+  }
+  return { invoiceId, invoiceNo, inwardIds }
+}
+
+/** A second user, for four-eyes tests. Null when the schema has only one. */
+export async function otherUser(conn: PoolConnection, notId: number): Promise<number | null> {
+  const [r] = await conn.execute("SELECT id FROM users WHERE id <> ? ORDER BY id LIMIT 1", [notId])
+  return (r as { id: number }[])[0]?.id ?? null
+}

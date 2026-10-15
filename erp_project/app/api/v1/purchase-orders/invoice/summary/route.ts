@@ -30,9 +30,11 @@ export const GET = withGateway({
       dateTo:      sp.get("dateTo")?.trim()      || null,
     })
 
-    const rows = await query<InvoiceHistoryHeader>(
-      supplierInvoicesSql.selectMatchFields, [...params, CAP + 1]
-    )
+    // Reverted invoices are left out of the match, but counted so the strip can say so.
+    const [rows, [reverted]] = await Promise.all([
+      query<InvoiceHistoryHeader>(supplierInvoicesSql.selectMatchFields, [...params, CAP + 1]),
+      query<{ reverted_count: number }>(supplierInvoicesSql.countRevertedInvoices, params),
+    ])
     const truncated = rows.length > CAP
     const batch = truncated ? rows.slice(0, CAP) : rows
 
@@ -51,6 +53,6 @@ export const GET = withGateway({
       // three-way match, and a hand-set payment does not change the documents.
     })))
 
-    return NextResponse.json({ ...summary, truncated, cap: CAP })
+    return NextResponse.json({ ...summary, truncated, cap: CAP, reverted_count: Number(reverted?.reverted_count ?? 0) })
   },
 })

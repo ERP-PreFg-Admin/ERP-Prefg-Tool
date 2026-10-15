@@ -30,6 +30,7 @@ model approvals {
   module                             String?           @db.VarChar(50)
   entity_id                          Int?
   approval_items                     approval_items[]
+  reverted_invoices                  supplier_invoices[]
   users_approvals_raised_byTousers   users             @relation("approvals_raised_byTousers", fields: [raised_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "approvals_ibfk_1")
   users_approvals_approved_byTousers users?            @relation("approvals_approved_byTousers", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "approvals_ibfk_2")
 
@@ -137,6 +138,8 @@ model supplier_invoices {
   id              Int                      @id @default(autoincrement())
   mfg_id          Int
   invoice_no      String                   @db.VarChar(100)
+  /// Generated: invoice_no while live, NULL once reverted. Never write it. See prisma/add_invoice_revert.sql.
+  live_invoice_no String?                  @db.VarChar(100)
   invoice_date    DateTime?                @db.Date
   currency        String?                  @db.VarChar(10)
   eway_bill_no    String?                  @db.VarChar(50)
@@ -170,10 +173,19 @@ model supplier_invoices {
   created_by      Int?
   created_at      DateTime                 @default(now()) @db.DateTime(0)
   mfgs            master_mfgs              @relation(fields: [mfg_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_supplier_invoices_mfg")
-  users           users?                   @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_supplier_invoices_user")
+  users           users?                   @relation("InvoiceCreatedBy", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_supplier_invoices_user")
+  /// Soft revert (INVOICE_REVERT approval). NULL reverted_at = live.
+  reverted_at        DateTime?  @db.DateTime(0)
+  reverted_by        Int?
+  revert_approved_by Int?
+  revert_approval_id Int?
+  revert_reason      String?    @db.VarChar(500)
+  reverter           users?     @relation("InvoiceRevertedBy", fields: [reverted_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_invoice_mfg_reverted_by")
+  revert_approver    users?     @relation("InvoiceRevertApprovedBy", fields: [revert_approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_invoice_mfg_revert_appr")
+  revert_approval    approvals? @relation(fields: [revert_approval_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_invoice_mfg_revert_apprvl")
   items           supplier_invoice_items[]
 
-  @@unique([mfg_id, invoice_no], map: "uq_supplier_invoice")
+  @@unique([mfg_id, live_invoice_no], map: "uq_supplier_invoice")
   @@index([mfg_id], map: "idx_supplier_invoices_mfg")
   @@index([uniware_po_code], map: "idx_supplier_invoices_uniware_po")
 }
@@ -358,7 +370,9 @@ model users {
   session_history                        session_history[]
   sessions                               sessions[]
   history_pos                            history_pos[]
-  supplier_invoices                      supplier_invoices[]
+  supplier_invoices                      supplier_invoices[] @relation("InvoiceCreatedBy")
+  invoices_reverted                      supplier_invoices[] @relation("InvoiceRevertedBy")
+  invoice_reverts_approved               supplier_invoices[] @relation("InvoiceRevertApprovedBy")
 }
 
 model details_bom {
@@ -1171,6 +1185,8 @@ enum purchase_orders_status {
   received
   cancelled
   rejected
+  /// An inward PO whose invoice was reverted. Terminal. See prisma/add_invoice_revert.sql.
+  reverted
 }
 
 enum purchase_orders_type {

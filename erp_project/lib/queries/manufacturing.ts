@@ -197,7 +197,7 @@ export const manufacturingSql = {
     FROM purchase_orders po
     LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
     WHERE po.mfg_id = ?
-      AND po.status NOT IN ('draft', 'cancelled', 'rejected')
+      AND po.status NOT IN ('draft', 'cancelled', 'rejected', 'reverted')
       AND YEAR(po.date) = YEAR(${SQL_TODAY_IST}) AND MONTH(po.date) = MONTH(${SQL_TODAY_IST})
     GROUP BY po.mfg_id, po.sku_code, sk.name
     ORDER BY sk.name ASC
@@ -211,7 +211,7 @@ export const manufacturingSql = {
       SUM(COALESCE(po.received_qty, 0)) AS received_qty
     FROM purchase_orders po
     LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
-    WHERE po.status NOT IN ('draft', 'cancelled', 'rejected')
+    WHERE po.status NOT IN ('draft', 'cancelled', 'rejected', 'reverted')
       AND YEAR(po.date) = YEAR(${SQL_TODAY_IST}) AND MONTH(po.date) = MONTH(${SQL_TODAY_IST})
       AND (? IS NULL OR po.mfg_id IN (?))
     GROUP BY po.mfg_id, po.sku_code, sk.name
@@ -243,7 +243,7 @@ export const manufacturingSql = {
         SUM(CASE WHEN reference_po IS NOT NULL AND COALESCE(po_type, '') <> 'inward'
                  THEN 0 ELSE COALESCE(total_amount, 0) END) AS open_value
       FROM purchase_orders
-      WHERE status NOT IN ('received', 'cancelled', 'draft', 'rejected')
+      WHERE status NOT IN ('received', 'cancelled', 'reverted', 'draft', 'rejected')
       GROUP BY mfg_id
     ) po ON po.mfg_id = m.id
     WHERE d.status = 'active'

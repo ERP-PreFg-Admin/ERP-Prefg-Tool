@@ -163,6 +163,31 @@ export type InvoiceHistoryHeader = {
   payment_status?:     ManualPaymentStatus | null
   /** Bank reference, once the money has moved. */
   payment_utr?:        string | null
+  /* ── Revert (docs/invoice-revert-plan.md §8a). Optional until the backend sends them. */
+  /** Set once an INVOICE_REVERT approval is approved. NULL = live. */
+  reverted_at?:             string | null
+  reverted_by_name?:        string | null
+  revert_approved_by_name?: string | null
+  revert_reason?:           string | null
+  /** 1 while a revert request is awaiting approval. */
+  revert_pending?:          number | null
+}
+
+/** The dry-run plan the revert route returns before anything is written. */
+export type InvoiceRevertPlan = {
+  invoice_no:      string
+  mfg_name:        string
+  uniware_po_code: string | null
+  receipts:   { po_id: number; po_no: string; before: number; after: number; reopen: boolean }[]
+  inward_pos: { po_id: number; po_no: string; status_before: string }[]
+}
+
+/** A refusal from the revert or approve routes. The two Uniware codes open the blocking popup. */
+export type InvoiceRevertRefusal = {
+  code?: string
+  error?: string
+  uniware_po_code?: string | null
+  grn_codes?: string[]
 }
 
 /** One invoice's payment state, for the dialog. */

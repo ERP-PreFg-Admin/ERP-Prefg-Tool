@@ -53,6 +53,7 @@ const TAB_DOT: Record<string, string> = {
   partially_received: "bg-blue-500",
   received: "bg-emerald-500",
   cancelled: "bg-destructive",
+  reverted: "bg-muted-foreground/40",
 }
 
 function SummaryCard({ icon: Icon, label, value, hint, accent }: { icon: LucideIcon; label: string; value: string; hint?: string; accent: string }) {

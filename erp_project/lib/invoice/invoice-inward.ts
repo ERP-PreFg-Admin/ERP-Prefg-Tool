@@ -123,8 +123,9 @@ async function resolveBrands(
   return brandBySku
 }
 
-/** Step 2's database work. Runs inside the caller's open transaction. */
-async function writeInvoiceAndPos(
+/** Step 2's database work. Runs inside the caller's open transaction. Exported for the
+ *  re-inward-after-revert DB test (tests/db/invoice-revert.test.ts). */
+export async function writeInvoiceAndPos(
   conn: PoolConnection,
   body: InvoiceInward,
   attachmentKey: string,
@@ -570,7 +571,9 @@ function describeDbError(err: unknown, invoiceNo: string): string {
   const message = err instanceof Error ? err.message : String(err)
   if ((err as { code?: string })?.code === "ER_DUP_ENTRY") {
     if (message.includes("uq_supplier_invoice")) {
-      return `Invoice ${invoiceNo} has already been entered for this manufacturer. Nothing was created or received.`
+      // Only a LIVE invoice holds the number; a reverted one has stepped aside.
+      return `Invoice ${invoiceNo} has already been entered for this manufacturer. Nothing was created or received. ` +
+        `If that entry was wrong, request a revert on the Invoices page; once it is approved, this number can be inwarded again.`
     }
     return "A PO number collided with a concurrent request. Please try again."
   }

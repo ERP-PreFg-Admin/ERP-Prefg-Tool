@@ -33,6 +33,7 @@ export const uniwareGrn = {
            si.uniware_grn_count
     FROM invoice_mfg si
     WHERE si.uniware_po_code IS NOT NULL
+      AND si.reverted_at IS NULL
     ORDER BY si.id DESC
     LIMIT ?
   `,
@@ -65,7 +66,7 @@ export const uniwareGrn = {
        SET status = 'cancelled'
      WHERE uniware_po_code = ?
        AND po_type = 'inward'
-       AND status <> 'cancelled'
+       AND status NOT IN ('cancelled', 'reverted')
   `,
 
   /**

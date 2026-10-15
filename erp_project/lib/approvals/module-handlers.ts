@@ -25,6 +25,7 @@ import { bomHandler, bomBulkHandler } from "./handlers/recipe"
 import { mfgMiscHandler, mfgMiscBulkHandler } from "./handlers/misc-cost"
 import { mfgLineHandler } from "./handlers/mfg-line"
 import { warehouseHandler } from "./handlers/warehouses"
+import { invoiceRevertHandler } from "./handlers/invoice-revert"
 
 import type { DiffItem, ModuleHandler } from "./handlers/types"
 export type { DiffItem, ModuleHandler }
@@ -44,6 +45,7 @@ export const MODULE_HANDLERS: Record<string, ModuleHandler> = {
   MFG:     mfgHandler,
   PO:      poHandler,
   PO_EDIT: poEditHandler,
+  INVOICE_REVERT: invoiceRevertHandler,
   PO_BULK: poBulkHandler,
   VENDOR_BULK: vendorBulkHandler,
   MFG_BULK: mfgBulkHandler,

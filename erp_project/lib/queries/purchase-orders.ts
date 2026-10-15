@@ -62,7 +62,7 @@ const UNALLOCATED_QTY_EXPR = `GREATEST(po.qty - ${ALLOCATED_QTY_EXPR} - COALESCE
 
 // Overrides the stored status with a computed "partially_received" whenever
 // some (but not all) of the ordered qty has come in — terminal/manual states
-// (cancelled, short_closed, received) always win over the quantity math.
+// (cancelled, short_closed, received, reverted) always win over the quantity math.
 // Receipts booked on a child count here, so a master that has only ever been
 // received against through its splits still reads as partially received.
 //
@@ -71,7 +71,7 @@ const UNALLOCATED_QTY_EXPR = `GREATEST(po.qty - ${ALLOCATED_QTY_EXPR} - COALESCE
 // email can never block booking stock that has actually arrived.
 const EFFECTIVE_STATUS_EXPR = `
   CASE
-    WHEN po.status IN ('cancelled', 'short_closed', 'received') THEN po.status
+    WHEN po.status IN ('cancelled', 'short_closed', 'received', 'reverted') THEN po.status
     WHEN po.qty > 0 AND ${RECEIVED_TOTAL_EXPR} >= po.qty THEN 'received'
     WHEN ${RECEIVED_TOTAL_EXPR} > 0 AND ${RECEIVED_TOTAL_EXPR} < po.qty THEN 'partially_received'
     ELSE po.status
@@ -386,9 +386,9 @@ export const purchaseOrdersSql = {
       COUNT(*) AS total,
       SUM(CASE WHEN ${DISPLAY_STATUS_EXPR} IN ('raised', 'punched', 'partially_received')
                THEN GREATEST(po.qty - ${RECEIVED_TOTAL_EXPR}, 0) ELSE 0 END) AS open_qty,
-      SUM(CASE WHEN ${DISPLAY_STATUS_EXPR} NOT IN ('draft', 'cancelled')
+      SUM(CASE WHEN ${DISPLAY_STATUS_EXPR} NOT IN ('draft', 'cancelled', 'reverted')
                THEN po.qty ELSE 0 END)                        AS committed_qty,
-      SUM(CASE WHEN ${DISPLAY_STATUS_EXPR} NOT IN ('draft', 'cancelled')
+      SUM(CASE WHEN ${DISPLAY_STATUS_EXPR} NOT IN ('draft', 'cancelled', 'reverted')
                THEN ${RECEIVED_TOTAL_EXPR} ELSE 0 END)        AS received_qty,
       SUM(CASE WHEN ${DISPLAY_STATUS_EXPR} IN ('raised', 'punched', 'partially_received')
                 AND po.expected_on IS NOT NULL AND po.expected_on < CURDATE()
@@ -890,6 +890,8 @@ export const purchaseOrdersSql = {
            u.name AS changed_by_name,
            CASE
              WHEN h.action_type = 'create' AND COALESCE(po.po_type, '') = 'inward' THEN 'invoice'
+             WHEN EXISTS (SELECT 1 FROM history_pos hv WHERE hv.po_id = h.po_id AND hv.field_name = 'revert_reason'
+                            AND ABS(TIMESTAMPDIFF(SECOND, hv.changed_on, h.changed_on)) <= 2) THEN 'invoice_revert'
              WHEN h.field_name = 'received_qty' AND inv.id IS NOT NULL            THEN 'invoice_receipt'
              WHEN h.field_name = 'received_qty'                                   THEN 'receipt'
              WHEN h.field_name = 'split'                                          THEN 'split'
@@ -1027,7 +1029,7 @@ export const purchaseOrdersSql = {
     ${CHILD_AGG_JOIN}
     WHERE po.mfg_id = ?
       ${APPROVED_ONLY}
-      AND ${EFFECTIVE_STATUS_EXPR} NOT IN ('received', 'cancelled')
+      AND ${EFFECTIVE_STATUS_EXPR} NOT IN ('received', 'cancelled', 'reverted')
       AND ${UNALLOCATED_QTY_EXPR} > 0
     ORDER BY po.date DESC, po.id DESC
   `,
@@ -1176,6 +1178,7 @@ lowOpenByMfg: `
     FROM history_pos h
     JOIN purchase_orders p ON p.id = h.po_id
     WHERE h.action_type = 'update' AND h.field_name = 'received_qty'
+      AND CAST(h.new_value AS DECIMAL(12,3)) > CAST(h.old_value AS DECIMAL(12,3))
     GROUP BY p.sku_code, p.mfg_id
   ) hr ON hr.sku_code = po.sku_code AND hr.mfg_id = po.mfg_id
   WHERE COALESCE(po.po_type, '') <> 'inward'

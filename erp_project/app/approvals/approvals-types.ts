@@ -10,6 +10,8 @@ export type Approval = {
   entity_id: number
   raised_on: string
   raised_by_name: string
+  /** Requester id — needed to stop someone approving their own invoice revert. */
+  raised_by?: number
   items: ApprovalItem[]
   entity_code: string | null
   entity_name: string | null
@@ -49,6 +51,7 @@ export const MODULE_LABEL: Record<string, string> = {
   MFG: "Manufacturer",
   PO: "Impromptu PO",
   PO_EDIT: "PO Edit",
+  INVOICE_REVERT: "Invoice Revert",
   PO_BULK: "Bulk PO Upload",
   VENDOR_BULK: "Bulk Vendor Upload",
   MFG_BULK: "Bulk Manufacturer Upload",
@@ -126,6 +129,7 @@ export const MODULE_COLOR: Record<string, string> = {
   VENDOR: "bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/30 dark:text-indigo-400 dark:border-indigo-900/40",
   MFG: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-900/40",
   PO_EDIT: "bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-950/30 dark:text-yellow-400 dark:border-yellow-900/40",
+  INVOICE_REVERT: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-900/40",
   PO: "bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-950/30 dark:text-yellow-400 dark:border-yellow-900/40",
   PO_BULK: "bg-cyan-50 text-cyan-700 border-cyan-200 dark:bg-cyan-950/30 dark:text-cyan-400 dark:border-cyan-900/40",
   VENDOR_BULK: "bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/30 dark:text-indigo-400 dark:border-indigo-900/40",

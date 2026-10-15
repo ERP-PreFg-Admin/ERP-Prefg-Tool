@@ -25,6 +25,8 @@ export type BulkUpdateTarget = {
  * re-uploaded export that only cancels isn't blocked by its unchanged columns.
  */
 export function bulkUpdateBlock(po: BulkUpdateTarget, row: Record<string, string | undefined>): string | null {
+  // Its invoice was reverted: history now, not something a CSV may change.
+  if (po.status === "reverted") return `${po.po_no} is reverted — its invoice was reverted, so a CSV can't change it`
   const status = row.status?.trim().toLowerCase() || null
   const statusChange = !!status && status !== po.status
   if (statusChange && !(BULK_SETTABLE_STATUSES as readonly string[]).includes(status!)) {

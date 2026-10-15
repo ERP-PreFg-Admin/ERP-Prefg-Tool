@@ -18,7 +18,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import { HEAD_BG, HEAD_ROW_LOOK } from "@/components/ui/table"
-import { ChevronDown, ChevronRight, ExternalLink, FileText, Loader2, RotateCw } from "lucide-react"
+import { ChevronDown, ChevronRight, ExternalLink, FileText, Loader2, RotateCcw, RotateCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select } from "@/components/ui/select"
@@ -32,6 +32,7 @@ import { PaymentCell, ThreeWayChips, matchOf } from "./ThreeWayCells"
 import ThreeWayDialog from "./ThreeWayDialog"
 import { MAX_PAGE_SIZE } from "@/lib/constants"
 import PaymentDialog from "./PaymentDialog"
+import RevertInvoiceDialog from "./RevertInvoiceDialog"
 import SkuSummary from "./SkuSummary"
 
 const num = (v: unknown) => (v == null || v === "" ? null : Number(v))
@@ -346,6 +347,34 @@ function DocumentsSection({
   )
 }
 
+/** Reverted / Revert pending under the invoice number. A reverted invoice is kept, never deleted. */
+function RevertMarker({ inv }: { inv: InvoiceHistoryHeader }) {
+  if (inv.reverted_at) {
+    return (
+      <Badge
+        variant="outline"
+        className="mt-0.5 px-1.5 py-0 text-[10px] text-muted-foreground"
+        title={[
+          `Reverted ${shortDate(inv.reverted_at)}`,
+          inv.reverted_by_name && `requested by ${inv.reverted_by_name}`,
+          inv.revert_approved_by_name && `approved by ${inv.revert_approved_by_name}`,
+          inv.revert_reason && `— ${inv.revert_reason}`,
+        ].filter(Boolean).join(" ")}
+      >
+        Reverted
+      </Badge>
+    )
+  }
+  if (inv.revert_pending) {
+    return (
+      <Badge variant="info" className="mt-0.5 px-1.5 py-0 text-[10px]" title="A revert of this invoice is awaiting approval">
+        Revert pending
+      </Badge>
+    )
+  }
+  return null
+}
+
 export default function InvoiceGroupTable({
   search = "",
   filterQuery = "",
@@ -354,6 +383,8 @@ export default function InvoiceGroupTable({
   emptyHint,
   className,
   matchFilter,
+  canRevert = false,
+  onReverted,
 }: {
   /** Server-side filter on invoice_no / manufacturer name. */
   search?: string
@@ -372,6 +403,10 @@ export default function InvoiceGroupTable({
   /** Match badges to keep. Empty = all. Applied to the PAGE, not the query —
    *  the match is derived in TS, so the server can't filter on it. */
   matchFilter?: MatchBadge[]
+  /** Offer "Request revert" in the expanded row. The route re-checks access and scope. */
+  canRevert?: boolean
+  /** Called after a revert request is submitted, so a host can refresh its summary. */
+  onReverted?: () => void
 }) {
   const [invoices, setInvoices] = useState<InvoiceHistoryHeader[]>([])
   const [total, setTotal]       = useState(0)
@@ -390,6 +425,8 @@ export default function InvoiceGroupTable({
   const [matchFor, setMatchFor] = useState<InvoiceHistoryHeader | null>(null)
   /** The row whose payment dialog is open. */
   const [payFor, setPayFor] = useState<InvoiceHistoryHeader | null>(null)
+  /** The row whose revert request dialog is open. */
+  const [revertFor, setRevertFor] = useState<InvoiceHistoryHeader | null>(null)
   const [items, setItems]       = useState<Record<number, InvoiceHistoryItem[]>>({})
   /** Receipt lines for the expanded invoice, keyed like `items`. */
   const [grns, setGrns] = useState<Record<number, InvoiceGrnLine[]>>({})
@@ -587,7 +624,8 @@ export default function InvoiceGroupTable({
                     onClick={() => toggle(inv.id)}
                     className={cn(
                       "cursor-pointer border-t border-border [&>td]:px-2 [&>td]:py-2",
-                      isOpen ? "bg-accent/50" : "hover:bg-accent/30"
+                      isOpen ? "bg-accent/50" : "hover:bg-accent/30",
+                      inv.reverted_at && "text-muted-foreground opacity-60"
                     )}
                   >
                     <td>
@@ -604,8 +642,9 @@ export default function InvoiceGroupTable({
                       </button>
                     </td>
                     <td>
-                      <div className="font-medium">{inv.invoice_no}</div>
+                      <div className={cn("font-medium", inv.reverted_at && "line-through")}>{inv.invoice_no}</div>
                       <div className="text-[11px] text-muted-foreground">{shortDate(inv.invoice_date)}</div>
+                      <RevertMarker inv={inv} />
                     </td>
                     <td className="whitespace-nowrap font-mono text-[11px]">
                       {inv.uniware_po_code ?? <span className="text-muted-foreground">—</span>}
@@ -719,7 +758,21 @@ export default function InvoiceGroupTable({
                                 <option value="grns">Goods receipts ({grnCount(grns[inv.id])})</option>
                                 <option value="documents">Documents ({documents[inv.id]?.length ?? 0})</option>
                               </Select>
+                              {canRevert && !inv.reverted_at && !inv.revert_pending && (
+                                <Button variant="outline" size="xs" onClick={() => setRevertFor(inv)}>
+                                  <RotateCcw className="h-3 w-3" /> Request revert
+                                </Button>
+                              )}
                             </div>
+
+                            {inv.reverted_at && (
+                              <p className="rounded-md border border-border bg-muted/40 px-2 py-1.5 text-[11px]">
+                                <span className="font-medium">Reverted {shortDate(inv.reverted_at)}</span>
+                                {inv.reverted_by_name && <> · requested by {inv.reverted_by_name}</>}
+                                {inv.revert_approved_by_name && <> · approved by {inv.revert_approved_by_name}</>}
+                                {inv.revert_reason && <span className="text-muted-foreground"> — {inv.revert_reason}</span>}
+                              </p>
+                            )}
 
                             {view === "documents" ? (
                               <DocumentsSection documents={documents[inv.id] ?? []} onOpen={openOriginal} />
@@ -948,6 +1001,13 @@ export default function InvoiceGroupTable({
         match={payFor ? matchOf(payFor) : null}
         onClose={() => setPayFor(null)}
         onSaved={() => void refreshPage()}
+      />
+
+      <RevertInvoiceDialog
+        key={`revert-${revertFor?.id ?? "none"}`}
+        invoice={revertFor}
+        onClose={() => setRevertFor(null)}
+        onRequested={() => { void refreshPage(); onReverted?.() }}
       />
     </div>
   )

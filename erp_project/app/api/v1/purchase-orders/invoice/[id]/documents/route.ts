@@ -17,7 +17,8 @@ export const runtime = "nodejs"
 export const maxDuration = 120
 
 import { NextResponse } from "next/server"
-import { query } from "@/lib/db"
+import { pool, query } from "@/lib/db"
+import { assertInvoiceWritable } from "@/lib/invoice/invoice-revert"
 import { uniwareDocsSql } from "@/lib/queries/uniware-documents"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
@@ -52,6 +53,10 @@ export const POST = withGateway({
 
     const [inv] = await query<Candidate>(uniwareDocsSql.selectSyncCandidateById, [params.id])
     if (!inv) throw new ApiError(404, "not_found", `Invoice id=${params.id} not found`)
+
+    // A reverted invoice is history, and a pending one is frozen: no document sync for either.
+    const conn = await pool.getConnection()
+    try { await assertInvoiceWritable(conn, inv.id) } finally { conn.release() }
 
     // Never mirrored means there is no PO to hold documents — a different answer
     // from "synced, nothing there", and the caller should say so.

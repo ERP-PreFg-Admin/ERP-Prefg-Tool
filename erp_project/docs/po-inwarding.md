@@ -337,3 +337,12 @@ The document-shaped view of the same data: one row per supplier invoice, expandi
 | `prisma/add_supplier_invoices.sql`, `add_inward_po_type.sql`, `add_invoice_item_reference_po.sql`, `add_invoice_uniware_po_code.sql`, `add_po_uniware_code.sql`, `add_warehouse_entity_email_type.sql`, `add_entity_email_employee_cc.sql` | The migrations, in the order they were applied |
 | `tests/unit/inward-merge.test.ts`, `recipients.test.ts`, `invoice-filters.test.ts` | The merge rule, the To/CC split, and the filter param/placeholder count |
 | `scripts/_check-invoice-mapping.ts`, `_check-inward-count.ts`, `_check-inward-sequence.ts`, `_check-inward-mail-summary.ts`, `_check-uniware-push.ts`, `_check-uniware-po-pdf.ts`, `_check-backdated-po.ts` | Verification scripts for each part of the flow |
+
+## Reverting an inwarded invoice
+
+A wrongly inwarded invoice is **reverted, never deleted** (`docs/invoice-revert-plan.md`). On the Invoices page, expand the invoice and choose **Request revert**: a dry run shows each procurement PO's received qty before → after (and which will reopen), the inward POs that will be marked reverted, and the Uniware PO. A reason and the typed invoice number submit an `INVOICE_REVERT` approval; someone **other than the requester** approves it on `/approvals`.
+
+- On approval: receipts on procurement POs are reversed with `history_pos` rows, an auto-closed PO reopens to `raised`, inward POs are marked `reverted` (a terminal status, shown as Reverted), and the invoice is stamped with who requested, who approved, when and why. The invoice stays in the list, greyed with a Reverted badge, and drops out of the summary strip, Dispatch History, the Uniware sweeps and the SKU matcher.
+- Blocked when: Uniware already has a GRN on its PO (checked live, at request and again at approve; Uniware unreachable also blocks), a payment state or a verified leg is recorded, or a PO would go below zero.
+- The Uniware PO is **not** cancelled by the ERP — the desk cancels it in Uniware and mails the warehouse to ignore it.
+- The corrected invoice is then inwarded normally under the **same number**: `uq_supplier_invoice` is on `(mfg_id, live_invoice_no)`, which is NULL once reverted.

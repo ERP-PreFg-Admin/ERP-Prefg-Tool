@@ -75,6 +75,11 @@ export const entityLabelSql: Record<string, string> = {
     JOIN master_mfgs m ON m.id = po.mfg_id
     WHERE po.id = ? LIMIT 1
   `,
+  INVOICE_REVERT: `
+    SELECT si.invoice_no AS code, m.name AS name, NULL AS secondary_code, NULL AS secondary_name
+    FROM invoice_mfg si JOIN master_mfgs m ON m.id = si.mfg_id
+    WHERE si.id = ? LIMIT 1
+  `,
   PO_BULK: `
     SELECT u.name AS code, NULL AS name, NULL AS secondary_code, NULL AS secondary_name
     FROM users u WHERE u.id = ? LIMIT 1
@@ -188,6 +193,7 @@ export const approvalsSql = {
       a.module,
       a.entity_id,
       a.raised_on,
+      a.raised_by,
       u.name AS raised_by_name
     FROM approvals a
     JOIN users u ON u.id = a.raised_by
