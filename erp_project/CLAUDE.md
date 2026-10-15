@@ -546,6 +546,7 @@ This eliminates `any` type noise and gives full IntelliSense on `conn.execute`, 
 
 | Rule | Where |
 |---|---|
+| **Unapproved POs are invisible and unmailable** — a stored `draft` (impromptu/special awaiting its PO approval) or `rejected` PO is hidden from PO Tracking (list, count, badges, cards, export) and the mail's open table, and send-mail 409s `po_not_approved`. So the Draft tab means *approved, not yet mailed* | `APPROVED_ONLY` in `lib/queries/purchase-orders.ts`, `selectUnapprovedAmong`, `isUnapprovedPo` |
 | **A draft cannot be split** — split divides an order the manufacturer already has; before the mail goes out there is nothing to divide, change the quantity instead. Covers raised-but-unmailed, not just stored `draft` | `PoDataRow.canSplit` + the 409 in `[id]/split/route.ts`. The UI hiding a button is never the guard — PO ids are guessable integers |
 | **No manual receive on the inwarding desk** — receipts there come from the invoice (Add Invoice), which books quantity, batch and document together | `PoDataRow.canReceive`, gated on `inwardingMode`. Procurement keeps its Receive |
 | **Tabs** — FG tracking leads with `all` then `open`; `open` is a pseudo-status spanning `raised` + `punched` + `partially_received`, expanded by `statusMatchValues()` and never stored. Its badge is summed client-side | `po-types.ts` `TABS` / `INWARD_TABS`, `po-procurement/page.tsx` |

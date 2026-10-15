@@ -148,6 +148,9 @@ const EXCLUDE_INWARD = `AND (? IS NULL OR COALESCE(po.po_type, '') <> 'inward')`
 // badges, the summary cards and the CSV/Excel export all agree by construction.
 const MASTERS_ONLY = `AND NOT ${IS_SPLIT_CHILD}`
 
+// A PO awaiting (or refused) its approval isn't an order yet: hidden from PO Tracking until approved.
+const APPROVED_ONLY = `AND COALESCE(po.status, '') NOT IN ('draft', 'rejected')`
+
 // Per-user entity scope, appended to both shared WHERE fragments so the PO
 // list, the COUNT, the tab badges, the summary cards and the CSV/Excel export
 // are all scoped by one edit. Warehouse compares against `destination`, which
@@ -177,6 +180,7 @@ const FULL_WHERE = `
     AND (? IS NULL OR ent.code       = ?)
     ${EXCLUDE_INWARD}
     ${MASTERS_ONLY}
+    ${APPROVED_ONLY}
     ${SCOPE_WHERE}
 `
 
@@ -194,6 +198,7 @@ const SUMMARY_WHERE = `
     AND (? IS NULL OR ent.code       = ?)
     ${EXCLUDE_INWARD}
     ${MASTERS_ONLY}
+    ${APPROVED_ONLY}
     ${SCOPE_WHERE}
 `
 
@@ -280,6 +285,7 @@ export const purchaseOrdersSql = {
     ${SELECT_COLS}
     ${FROM_JOINS}
     WHERE 1 = 1
+    ${APPROVED_ONLY}
     ${SCOPE_WHERE}
     ORDER BY po.date DESC, po.id DESC
   `,
@@ -980,6 +986,7 @@ export const purchaseOrdersSql = {
     LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
     ${CHILD_AGG_JOIN}
     WHERE po.mfg_id = ?
+      ${APPROVED_ONLY}
       AND ${EFFECTIVE_STATUS_EXPR} NOT IN ('received', 'cancelled')
       AND ${UNALLOCATED_QTY_EXPR} > 0
     ORDER BY po.date DESC, po.id DESC

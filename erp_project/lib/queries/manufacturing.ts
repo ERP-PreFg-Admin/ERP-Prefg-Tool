@@ -243,7 +243,7 @@ export const manufacturingSql = {
         SUM(CASE WHEN reference_po IS NOT NULL AND COALESCE(po_type, '') <> 'inward'
                  THEN 0 ELSE COALESCE(total_amount, 0) END) AS open_value
       FROM purchase_orders
-      WHERE status NOT IN ('received', 'cancelled')
+      WHERE status NOT IN ('received', 'cancelled', 'draft', 'rejected')
       GROUP BY mfg_id
     ) po ON po.mfg_id = m.id
     WHERE d.status = 'active'
