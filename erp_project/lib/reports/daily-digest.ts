@@ -38,7 +38,8 @@ async function loadEmailCounts(from: Date, to: Date) {
   const { events, more } = await filterLogEvents({
     from,
     to,
-    pattern: '{ $.module = "MAILER" && $.mailOutcome = "*" }',
+    // Loggers now stamp `module` with the module key; the MAILER code moved to `code`.
+    pattern: '{ ($.code = "MAILER" || $.module = "MAILER") && $.mailOutcome = "*" }',
     limit: 1000,
   })
 

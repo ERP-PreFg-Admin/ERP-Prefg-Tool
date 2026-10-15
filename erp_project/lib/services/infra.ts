@@ -8,6 +8,7 @@ import { ApiError } from "@/lib/gateway/errors"
 import { resolveAccess } from "@/lib/permissions"
 import { getMetricData, describeAlarms, type MetricSeries, type AlarmState } from "@/lib/aws/cloudwatch"
 import { getInstanceNames } from "@/lib/aws/ec2"
+import { splitBoxPanels, groupAlarms, type Env } from "@/lib/observability/infra-groups"
 import logger from "@/lib/logger"
 
 const PAGE_SLUG = "/observability"
@@ -21,12 +22,16 @@ const RDS_INSTANCE = "mcaff-dwh"
 const PERIOD = 300
 
 export type Panel = { id: string; label: string; unit: string; series: MetricSeries[] }
+export type AlarmGroups = Record<Env | "rds" | "other", AlarmState[]>
 
 export type InfraMetrics =
   | {
       ok: true
-      panels: Panel[]
-      alarms: AlarmState[]
+      /** Box metrics per column; `other` holds series from any instance that is neither box. */
+      boxes: Record<Env | "other", Panel[]>
+      /** RDS panels: one instance holds both schemas, so it belongs to neither column. */
+      shared: Panel[]
+      alarms: AlarmGroups
       alarmsError: string | null
       /** Instance id → Name tag ("erp-app-prod"). Empty when the tag lookup
        *  failed, in which case the page falls back to raw ids. */
@@ -46,19 +51,21 @@ export type InfraMetrics =
 // it publishes under ERP/EC2 with our dimensions, which is an instance
 // reconfiguration, not a code change.
 const PANELS = [
-  { id: "cpu", label: "CPU", unit: "%", search: `Namespace="ERP/EC2" MetricName="cpu_usage_active"` },
-  { id: "mem", label: "Memory", unit: "%", search: `Namespace="ERP/EC2" MetricName="mem_used_percent"` },
-  { id: "disk", label: "Disk", unit: "%", search: `Namespace="ERP/EC2" MetricName="disk_used_percent"` },
+  { id: "cpu", label: "CPU", unit: "%", rds: false, search: `Namespace="ERP/EC2" MetricName="cpu_usage_active"` },
+  { id: "mem", label: "Memory", unit: "%", rds: false, search: `Namespace="ERP/EC2" MetricName="mem_used_percent"` },
+  { id: "disk", label: "Disk", unit: "%", rds: false, search: `Namespace="ERP/EC2" MetricName="disk_used_percent"` },
   {
     id: "rdscpu",
     label: "RDS CPU",
     unit: "%",
+    rds: true,
     search: `{AWS/RDS,DBInstanceIdentifier} MetricName="CPUUtilization" DBInstanceIdentifier="${RDS_INSTANCE}"`,
   },
   {
     id: "rdsconn",
     label: "RDS connections",
     unit: "",
+    rds: true,
     search: `{AWS/RDS,DBInstanceIdentifier} MetricName="DatabaseConnections" DBInstanceIdentifier="${RDS_INSTANCE}"`,
   },
 ] as const
@@ -101,7 +108,7 @@ export async function getInfraMetrics(
   }
 
   try {
-    // One call for all six panels; `id` maps each result set back to its panel.
+    // One call for all five panels; `id` maps each result set back to its panel.
     const results = await getMetricData(
       PANELS.map((p) => ({
         Id: p.id,
@@ -113,14 +120,21 @@ export async function getInfraMetrics(
 
     // A SEARCH returns one series per matching metric, every one tagged with
     // its query Id — so a two-instance fleet yields two series in one panel.
-    const panels: Panel[] = PANELS.map((p) => ({
+    const panel = (p: (typeof PANELS)[number]): Panel => ({
       id: p.id,
       label: p.label,
       unit: p.unit,
       series: results.filter((r) => r.id === p.id),
-    }))
+    })
 
-    return { ok: true, panels, alarms, alarmsError, instanceNames }
+    return {
+      ok: true,
+      boxes: splitBoxPanels(PANELS.filter((p) => !p.rds).map(panel), instanceNames),
+      shared: PANELS.filter((p) => p.rds).map(panel),
+      alarms: groupAlarms(alarms, instanceNames),
+      alarmsError,
+      instanceNames,
+    }
   } catch (err) {
     const error = (err as Error).message
     logger.error({ module: "OBSERVABILITY", message: "GetMetricData failed", error })

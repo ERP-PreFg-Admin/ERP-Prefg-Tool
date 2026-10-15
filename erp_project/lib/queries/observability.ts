@@ -80,4 +80,12 @@ export const observabilitySql = {
     ORDER BY (a.status >= 400) DESC, a.duration_ms DESC
     LIMIT ?
   `,
+
+  /** Params: [from, to] — failing calls per route; the caller folds routes into modules. */
+  errorsByRoute: `
+    SELECT ${route()} AS route, COUNT(*) AS errors
+    FROM activity_log
+    WHERE created_on >= ? AND created_on < ? AND status >= 400
+    GROUP BY route
+  `,
 }

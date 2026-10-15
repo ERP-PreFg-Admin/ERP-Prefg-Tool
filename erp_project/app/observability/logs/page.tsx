@@ -1,4 +1,4 @@
-// /observability > Logs — search the /erp-app/{test,prod} CloudWatch groups.
+// /observability > Logs — search the /erp-app/{test,prod} CloudWatch groups by module, or by user.
 //
 // The filter form is a plain GET form, so this page ships no client JS: the
 // browser turns it into the same ?requestId=&level=&q= URL the Requests tab
@@ -12,9 +12,17 @@ import { Button } from "@/components/ui/button"
 import { SegmentedToggle } from "@/components/ui/segmented-toggle"
 import { count, latencyClass, ms } from "@/components/observability/format"
 import { auth } from "@/lib/auth"
-import { searchLogs, type LogLevel } from "@/lib/services/logs"
+import {
+  getLogGroups,
+  getModuleErrorCounts,
+  listLogActors,
+  searchLogs,
+  type LogLevel,
+} from "@/lib/services/logs"
+import { MODULES, MODULE_LABEL, type ModuleKey } from "@/lib/observability/modules"
 import { IST } from "@/lib/date"
 import { cn } from "@/lib/utils"
+import UserView from "./UserView"
 
 const WINDOWS = [
   { key: "1h", label: "1h", hours: 1 },
@@ -25,6 +33,9 @@ type WindowKey = (typeof WINDOWS)[number]["key"]
 
 const LEVELS: LogLevel[] = ["all", "error", "warn", "info"]
 
+// "other" has no CloudWatch pattern (see cloudWatchModulePattern), so it can't be a filter.
+const FILTER_MODULES = MODULES.filter((m) => m.key !== "other")
+
 const LEVEL_CLASS: Record<string, string> = {
   error: "text-destructive",
   warn: "text-amber-700 dark:text-amber-400",
@@ -33,6 +44,15 @@ const LEVEL_CLASS: Record<string, string> = {
 
 const str = (v: string | string[] | undefined) => (typeof v === "string" ? v : "")
 
+/** Builds a Logs URL, dropping empty params so links stay readable. */
+function logsHref(params: Record<string, string | number | null | undefined>) {
+  const qs = Object.entries(params)
+    .filter(([, v]) => v !== null && v !== undefined && v !== "")
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+    .join("&")
+  return `/observability/logs${qs ? `?${qs}` : ""}`
+}
+
 export default async function ObservabilityLogsPage({
   searchParams,
 }: {
@@ -40,45 +60,157 @@ export default async function ObservabilityLogsPage({
 }) {
   const session = await auth()
   if (!session) redirect("/auth/signin")
+  const viewerId = Number(session.user.id)
+  const roles = session.user.roles ?? []
 
   const sp = await searchParams
+  const view = str(sp.view) === "user" ? "user" : "module"
   const active: WindowKey = WINDOWS.some((w) => w.key === sp.w) ? (sp.w as WindowKey) : "24h"
   const hours = WINDOWS.find((w) => w.key === active)!.hours
+  const userParam = Number(str(sp.user))
+  const user = Number.isInteger(userParam) && userParam > 0 ? userParam : null
+
+  const viewToggle = (group: string) => (
+    <SegmentedToggle
+      options={[
+        { key: "module", label: "By module" },
+        { key: "user", label: "By user" },
+      ]}
+      active={view}
+      getHref={(key) => logsHref({ view: key === "user" ? "user" : null, w: active, group, user })}
+      size="xs"
+    />
+  )
+
+  if (view === "user") {
+    const { group, groups } = await getLogGroups(viewerId, roles, str(sp.group))
+    const errorsOnly = str(sp.errors) === "1"
+    return (
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {viewToggle(group)}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Only steers the request-ID links: activity comes from this deployment's own DB. */}
+            {groups.length > 1 && (
+              <form className="flex items-center gap-2">
+                <input type="hidden" name="view" value="user" />
+                <input type="hidden" name="w" value={active} />
+                {user && <input type="hidden" name="user" value={user} />}
+                {errorsOnly && <input type="hidden" name="errors" value="1" />}
+                <span className="text-xs text-muted-foreground">Log group</span>
+                <select
+                  name="group"
+                  defaultValue={group}
+                  className="h-8 rounded-md border border-input bg-transparent px-2 font-mono text-xs"
+                >
+                  {groups.map((g) => (
+                    <option key={g} value={g}>
+                      {g.replace("/erp-app/", "")}
+                    </option>
+                  ))}
+                </select>
+                <Button type="submit" size="sm" variant="outline">
+                  Apply
+                </Button>
+              </form>
+            )}
+            <SegmentedToggle
+              options={WINDOWS.map((w) => ({ key: w.key, label: w.label }))}
+              active={active}
+              getHref={(key) =>
+                logsHref({ view: "user", w: key, group, user, errors: errorsOnly ? 1 : null })
+              }
+              size="xs"
+            />
+          </div>
+        </div>
+        <UserView
+          viewerId={viewerId}
+          roles={roles}
+          hours={hours}
+          windowKey={active}
+          group={group}
+          selectedUser={user}
+          errorsOnly={errorsOnly}
+        />
+      </div>
+    )
+  }
+
   const requestId = str(sp.requestId).trim()
   const level = (LEVELS.includes(str(sp.level) as LogLevel) ? str(sp.level) : "all") as LogLevel
-  const q = str(sp.q).trim()
+  const q = str(sp.q).trim().slice(0, 200)
+  const mod = FILTER_MODULES.some((m) => m.key === str(sp.module)) ? (str(sp.module) as ModuleKey) : null
 
-  const result = await searchLogs(Number(session.user.id), session.user.roles ?? [], {
-    hours,
-    requestId,
-    level,
+  const [result, errorCounts, actors] = await Promise.all([
+    searchLogs(viewerId, roles, { hours, requestId, level, q, group: str(sp.group), module: mod, user }),
+    getModuleErrorCounts(viewerId, roles, hours),
+    listLogActors(viewerId, roles),
+  ])
+  const nameById = new Map(actors.map((a) => [a.id, a.name]))
+
+  // The filters a link should carry; requestId only where it's meant to survive.
+  const keep = {
+    w: active,
+    group: result.group,
+    level: level !== "all" ? level : null,
     q,
-    group: str(sp.group),
-  })
+    module: mod,
+    user,
+  }
+  const filtered = Boolean(!requestId && (mod || level !== "all" || user || q))
+
+  // Red reads poorly on the active pill, so the selected chip keeps its own colour.
+  const errorChip = (n: number, selected: boolean) =>
+    n > 0 && <span className={cn("ml-1.5 tabular-nums", !selected && "text-destructive")}>{count(n)}</span>
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
-          CloudWatch group <code className="font-mono">{result.group}</code> — Winston&apos;s JSON lines,
-          shipped by the agent.
-        </p>
+        {viewToggle(result.group)}
         <SegmentedToggle
           options={WINDOWS.map((w) => ({ key: w.key, label: w.label }))}
           active={active}
-          getHref={(key) =>
-            `/observability/logs?w=${key}&group=${encodeURIComponent(result.group)}${
-              requestId ? `&requestId=${requestId}` : ""
-            }${level !== "all" ? `&level=${level}` : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}`
-          }
+          getHref={(key) => logsHref({ ...keep, w: key, requestId })}
           size="xs"
         />
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        CloudWatch group <code className="font-mono">{result.group}</code> — Winston&apos;s JSON lines,
+        shipped by the agent.
+      </p>
+
+      <div className="space-y-1">
+        <SegmentedToggle
+          className="flex-wrap"
+          options={[
+            { key: "all", label: <>All{errorChip(errorCounts.total, !mod)}</> },
+            ...FILTER_MODULES.map((m) => ({
+              key: m.key,
+              label: (
+                <>
+                  {m.label}
+                  {errorChip(errorCounts[m.key], mod === m.key)}
+                </>
+              ),
+            })),
+          ]}
+          active={mod ?? "all"}
+          getHref={(key) => logsHref({ ...keep, module: key === "all" ? null : key })}
+          size="xs"
+        />
+        <p className="text-[11px] text-muted-foreground">
+          Red counts are failing calls (4xx/5xx) in this window, from this deployment&apos;s own activity log
+          {errorCounts.other > 0 && <>; {count(errorCounts.other)} more on routes outside every module</>}.
+        </p>
       </div>
 
       {/* A GET form, not a client component — the URL IS the state, which also
           makes a search shareable and back-button-able. */}
       <form className="flex flex-wrap items-end gap-3">
         <input type="hidden" name="w" value={active} />
+        {mod && <input type="hidden" name="module" value={mod} />}
         <label className="flex min-w-0 flex-col gap-1">
           <span className="text-xs text-muted-foreground">Request ID</span>
           <Input name="requestId" defaultValue={requestId} placeholder="uuid from the Requests tab" className="w-72 font-mono text-xs" />
@@ -115,6 +247,23 @@ export default async function ObservabilityLogsPage({
             ))}
           </select>
         </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground">User</span>
+          <select
+            name="user"
+            defaultValue={user ?? ""}
+            className="h-9 max-w-48 rounded-md border border-input bg-transparent px-2 text-xs"
+          >
+            <option value="">all</option>
+            {/* A stale ?user= not in the list still shows, so the select doesn't lie about the filter. */}
+            {user && !nameById.has(user) && <option value={user}>User #{user}</option>}
+            {actors.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="flex min-w-0 flex-col gap-1">
           <span className="text-xs text-muted-foreground">Contains</span>
           <Input name="q" defaultValue={q} placeholder="free text" className="w-56 text-xs" />
@@ -124,10 +273,11 @@ export default async function ObservabilityLogsPage({
         </Button>
       </form>
 
-      {/* Stated rather than left to be discovered: the three filters are not
-          combined, because CloudWatch takes one filter pattern per call. */}
+      {/* Stated rather than left to be discovered: Contains changes meaning once combined. */}
       <p className="text-xs text-muted-foreground">
-        One filter applies at a time, in this order: Request ID, then Level, then Contains.
+        {requestId
+          ? "Request ID is set, so it overrides every other filter."
+          : "Module, level, user and contains all apply together; Request ID overrides them. Contains alone searches the whole line; combined with another filter it matches the message only, case-sensitive."}
         {result.ok && result.events.length > 0 && (
           <>
             {" · "}
@@ -151,7 +301,10 @@ export default async function ObservabilityLogsPage({
           </span>
         </Callout>
       ) : result.events.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No matching log lines in this window.</p>
+        <p className="text-sm text-muted-foreground">
+          No matching log lines in this window.
+          {filtered && " Lines written before module and user stamping was deployed carry neither, so older matches can be missing."}
+        </p>
       ) : (
         <div className="space-y-1">
           {result.truncated && (
@@ -173,6 +326,11 @@ export default async function ObservabilityLogsPage({
                 >
                   {e.level ?? "raw"}
                 </span>
+                {e.module && (
+                  <span className="shrink-0 whitespace-nowrap rounded border border-border px-1.5 py-px font-sans text-[10px] text-muted-foreground">
+                    {MODULE_LABEL[e.module]}
+                  </span>
+                )}
                 <span className="min-w-0 flex-1 truncate text-foreground">{e.message}</span>
                 {/* Pulled up from the JSON rather than left to the expander: on a
                     request line these three are what the message actually means. */}
@@ -180,13 +338,22 @@ export default async function ObservabilityLogsPage({
                   <span className="shrink-0 truncate text-[11px] text-muted-foreground">{e.extra.route}</span>
                 )}
                 {e.extra.ms !== undefined && (
-                  <span className={cn("shrink-0 text-[11px] tabular-nums", latencyClass(Number(e.extra.ms)))}>
+                  <span className={cn("shrink-0 tabular-nums text-[11px]", latencyClass(Number(e.extra.ms)))}>
                     {ms(Number(e.extra.ms))}
                   </span>
                 )}
+                {e.userId !== null && (
+                  <Link
+                    href={logsHref({ view: "user", w: active, group: result.group, user: e.userId })}
+                    title="This person's activity"
+                    className="shrink-0 font-sans text-[11px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+                  >
+                    {(result.own && nameById.get(e.userId)) || `User #${e.userId}`}
+                  </Link>
+                )}
                 {e.requestId && (
                   <Link
-                    href={`/observability/logs?requestId=${e.requestId}&w=${active}`}
+                    href={logsHref({ requestId: e.requestId, w: active, group: result.group })}
                     title={`Show only ${e.requestId}`}
                     className="shrink-0 text-[11px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
                   >

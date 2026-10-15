@@ -3,8 +3,10 @@
 // Client only because useTableSort is — rows arrive aggregated and ordered from
 // the server; this reorders what's on screen.
 
+import { useMemo } from "react"
 import { DataTable, useTableSort, type AnyRow, type ColumnDef } from "@/components/masters/DataTable"
 import { ago, count, latencyClass, ms, pct, rateClass } from "@/components/observability/format"
+import { MODULE_LABEL, moduleForPath } from "@/lib/observability/modules"
 
 /** Verbs get a fixed colour each, so a row's shape is readable before its text:
  *  writes and deletes shouldn't look like reads at a glance. */
@@ -38,6 +40,13 @@ const latency = (key: string, label: string, width: string): ColumnDef => ({
 })
 
 const COLUMNS: ColumnDef[] = [
+  {
+    key: "module",
+    label: "Module",
+    sortAs: "text",
+    width: "150px",
+    className: "text-xs text-muted-foreground",
+  },
   {
     key: "route",
     label: "Route",
@@ -103,7 +112,12 @@ const COLUMNS: ColumnDef[] = [
 ]
 
 export default function RequestsClient({ rows }: { rows: AnyRow[] }) {
-  const { sorted, sortKey, sortDir, toggleSort } = useTableSort(rows, COLUMNS)
+  // Stamped here, not in the service, so sorting reads the same label the cell shows.
+  const withModule = useMemo(
+    () => rows.map((r) => ({ ...r, module: MODULE_LABEL[moduleForPath(String(r.route ?? ""))] })),
+    [rows]
+  )
+  const { sorted, sortKey, sortDir, toggleSort } = useTableSort(withModule, COLUMNS)
 
   return (
     <div className="overflow-x-auto">

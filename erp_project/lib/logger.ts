@@ -1,6 +1,7 @@
 import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
 import chalk from "chalk";
+import { stampLogFields } from "./observability/log-context";
 
 // ── level colors ───────────────────────────────────────────────────────────
 
@@ -28,12 +29,12 @@ interface PrettyLogInfo {
   [key: string]: unknown
 }
 
-const prettyFormat = winston.format.printf(({ timestamp, level, message, requestId, module, deltaMs, stack, ...meta
+const prettyFormat = winston.format.printf(({ timestamp, level, message, requestId, module, code, deltaMs, stack, ...meta
 }: PrettyLogInfo) => {
   const ts    = new Date(timestamp ?? Date.now()).toISOString().substring(11, 23);
   const req   = requestId ? String(requestId).substring(0, 8) : "--------";
   const delta = deltaMs != null ? `+${deltaMs}ms`.padEnd(8) : " ".repeat(8);
-  const mod   = `[${String(module ?? "APP")}]`.padEnd(16);
+  const mod   = `[${String(code ?? module ?? "APP")}]`.padEnd(18);
   const lvl   = level.toUpperCase().padEnd(5);
   const color = LEVEL_COLOR[level] ?? ((s: string) => s);
 
@@ -106,5 +107,11 @@ const logger = winston.createLogger({
     ]),
   ],
 });
+
+// Stamped at call time, not in a format: a format runs when the stream drains, which under
+// backpressure can be inside another request's context.
+const write = logger.write.bind(logger);
+logger.write = ((info: object, ...rest: unknown[]) =>
+  (write as (...a: unknown[]) => boolean)(stampLogFields(info), ...rest)) as typeof logger.write;
 
 export default logger;

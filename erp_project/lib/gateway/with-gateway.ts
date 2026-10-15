@@ -6,6 +6,7 @@ import { execute } from "@/lib/db"
 import { resolveAccessAny, type AccessLevel } from "@/lib/permissions"
 import { activitySql } from "@/lib/queries/activity"
 import { createRequestContext } from "@/lib/request-context"
+import { runWithLogContext } from "@/lib/observability/log-context"
 import logger from "@/lib/logger"
 import { ApiError, toErrorResponse } from "./errors"
 import { acquire , type RateLimitRule } from "./rate-limit"
@@ -82,9 +83,9 @@ export function withGateway<TBody = unknown, TParams = Record<string, string>>(o
   }) => Promise<Response>
     rateLimit? : RateLimitRule
 }) {
-  return async (req: NextRequest, routeCtx?: { params: Promise<Record<string, string>> }) => {
+  type RouteCtx = { params: Promise<Record<string, string>> }
+  const run = async (req: NextRequest, routeCtx: RouteCtx | undefined, ctx: ReturnType<typeof createRequestContext>) => {
     const started = Date.now()
-    const ctx = createRequestContext(req)
 
     try {
       const session = await auth()
@@ -175,5 +176,11 @@ export function withGateway<TBody = unknown, TParams = Record<string, string>>(o
       logActivity(req, ctx, res.status, Date.now() - started)
       return res
     }
+  }
+
+  // ctx is the stored object itself, so setting ctx.userId after auth reaches every later log line.
+  return (req: NextRequest, routeCtx?: RouteCtx) => {
+    const ctx = createRequestContext(req)
+    return runWithLogContext(ctx, () => run(req, routeCtx, ctx))
   }
 }

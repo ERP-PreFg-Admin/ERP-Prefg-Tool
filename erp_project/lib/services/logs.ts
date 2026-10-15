@@ -12,6 +12,16 @@ import {
   type LogEvent,
 } from "@/lib/aws/cloudwatch"
 import logger from "@/lib/logger"
+import { timedQuery } from "@/lib/query-timing"
+import { observabilitySql } from "@/lib/queries/observability"
+import { activitySql } from "@/lib/queries/activity"
+import {
+  MODULES,
+  cloudWatchModulePattern,
+  moduleForCode,
+  moduleForPath,
+  type ModuleKey,
+} from "@/lib/observability/modules"
 
 const PAGE_SLUG = "/observability"
 const LIMIT = 200
@@ -24,6 +34,9 @@ export type ParsedLog = {
   level: string | null
   message: string
   requestId: string | null
+  /** The stamped module key, else derived from `path` or a pre-context code. */
+  module: ModuleKey | null
+  userId: number | null
   /** Everything else on the JSON line, for the expandable detail. */
   extra: Record<string, unknown>
   /** The line verbatim, when it wasn't JSON (a stack trace, a crash). */
@@ -31,19 +44,34 @@ export type ParsedLog = {
 }
 
 export type LogSearch =
-  | { ok: true; events: ParsedLog[]; truncated: boolean; group: string; groups: string[] }
-  | { ok: false; error: string; group: string; groups: string[] }
+  | { ok: true; events: ParsedLog[]; truncated: boolean; group: string; groups: string[]; own: boolean }
+  | { ok: false; error: string; group: string; groups: string[]; own: boolean }
+
+const MODULE_KEYS = new Set<string>(MODULES.map((m) => m.key))
 
 /**
- * Winston writes JSON, so a field match is exact rather than a substring scan —
- * a requestId search can't be fooled by the id appearing inside a message.
- * Free text falls back to CloudWatch's `?term` substring form.
+ * Request ID is exact and overrides the rest; module, level and user AND into one
+ * JSON pattern. Alone, Contains is a whole-line substring; with any other filter it
+ * can only be `$.message = "*text*"` (case-sensitive), since the two forms don't mix.
  */
-function buildPattern(requestId: string, level: LogLevel, q: string): string {
-  if (requestId) return `{ $.requestId = "${requestId.replace(/"/g, "")}" }`
-  if (level !== "all") return `{ $.level = "${level}" }`
-  if (q) return `?"${q.replace(/"/g, "")}"`
-  return ""
+function buildPattern(o: { requestId: string; level: LogLevel; q: string; module: ModuleKey | null; user: number | null }): string {
+  if (o.requestId) return `{ $.requestId = "${o.requestId.replace(/[^0-9A-Za-z-]/g, "")}" }`
+  const q = o.q.replace(/["\\]/g, "")
+  const clauses: string[] = []
+  const mod = o.module ? cloudWatchModulePattern(o.module) : null
+  if (mod) clauses.push(mod)
+  if (o.level !== "all") clauses.push(`($.level = "${o.level}")`)
+  if (o.user) clauses.push(`($.userId = ${o.user})`)
+  if (clauses.length === 0) return q ? `?"${q}"` : ""
+  if (q) clauses.push(`($.message = "*${q}*")`)
+  return `{ ${clauses.join(" && ")} }`
+}
+
+function lineModule(path: unknown, mod: unknown): ModuleKey | null {
+  if (typeof mod === "string" && MODULE_KEYS.has(mod)) return mod as ModuleKey
+  if (typeof path === "string" && path) return moduleForPath(path)
+  if (typeof mod === "string" && mod) return moduleForCode(mod)
+  return null
 }
 
 function parse(e: LogEvent): ParsedLog {
@@ -58,6 +86,8 @@ function parse(e: LogEvent): ParsedLog {
       level: level == null ? null : String(level),
       message: message == null ? "" : String(message),
       requestId: requestId == null ? null : String(requestId),
+      module: lineModule(o.path, o.module),
+      userId: typeof o.userId === "number" ? o.userId : null,
       extra,
       raw: null,
     }
@@ -70,22 +100,22 @@ function parse(e: LogEvent): ParsedLog {
       level: null,
       message: e.message,
       requestId: null,
+      module: null,
+      userId: null,
       extra: {},
       raw: e.message,
     }
   }
 }
 
-export async function searchLogs(
-  userId: number,
-  roles: string[],
-  opts: { hours: number; requestId?: string; level?: LogLevel; q?: string; group?: string }
-): Promise<LogSearch> {
+async function assertAccess(userId: number, roles: string[]) {
   const access = await resolveAccess(userId, roles, PAGE_SLUG)
   if (access === "none") {
     throw new ApiError(403, "forbidden", "You do not have access to observability.")
   }
+}
 
+async function resolveGroup(requested: string | undefined): Promise<{ group: string; groups: string[] }> {
   // Discovered rather than trusted: the requested group must be one that exists
   // under the /erp-app/ prefix, so a crafted ?group= can't read an unrelated
   // group the credentials happen to reach.
@@ -100,11 +130,74 @@ export async function searchLogs(
     })
   }
   const fallback = defaultLogGroup()
-  const group = opts.group && groups.includes(opts.group) ? opts.group : fallback
+  return { group: requested && groups.includes(requested) ? requested : fallback, groups }
+}
+
+/** The environment picker alone, for the By user view, which makes no log scan. */
+export async function getLogGroups(userId: number, roles: string[], requested?: string) {
+  await assertAccess(userId, roles)
+  return resolveGroup(requested)
+}
+
+const sqlTs = (d: Date) => d.toISOString().slice(0, 19).replace("T", " ")
+
+/** Failing calls (status >= 400) per module over the window, from this environment's activity_log. */
+export async function getModuleErrorCounts(
+  userId: number,
+  roles: string[],
+  hours: number
+): Promise<Record<ModuleKey, number> & { total: number }> {
+  await assertAccess(userId, roles)
+  const to = new Date()
+  const from = new Date(to.getTime() - hours * 3_600_000)
+  const rows = await timedQuery<{ route: string; errors: unknown }>(
+    observabilitySql.errorsByRoute, [sqlTs(from), sqlTs(to)], { label: "observability.errorsByRoute" }
+  )
+  const out = Object.fromEntries([...MODULES.map((m) => [m.key, 0]), ["total", 0]]) as Record<ModuleKey, number> & { total: number }
+  for (const r of rows) {
+    // COUNT() can arrive as a string; Number() before adding.
+    const n = Number(r.errors) || 0
+    out[moduleForPath(r.route)] += n
+    out.total += n
+  }
+  return out
+}
+
+/** People with recorded activity — the user filter's options and the id → name map for log lines. */
+export async function listLogActors(userId: number, roles: string[]) {
+  await assertAccess(userId, roles)
+  return timedQuery<{ id: number; name: string; email: string }>(activitySql.selectActors, [], {
+    label: "activity.selectActors",
+  })
+}
+
+export async function searchLogs(
+  userId: number,
+  roles: string[],
+  opts: {
+    hours: number
+    requestId?: string
+    level?: LogLevel
+    q?: string
+    group?: string
+    module?: ModuleKey | null
+    user?: number | null
+  }
+): Promise<LogSearch> {
+  await assertAccess(userId, roles)
+  const { group, groups } = await resolveGroup(opts.group)
+  // User ids differ between schemas, so names resolve only for this deployment's own group.
+  const own = group === defaultLogGroup()
 
   const to = new Date()
   const from = new Date(to.getTime() - opts.hours * 3_600_000)
-  const pattern = buildPattern(opts.requestId ?? "", opts.level ?? "all", opts.q ?? "")
+  const pattern = buildPattern({
+    requestId: opts.requestId ?? "",
+    level: opts.level ?? "all",
+    q: opts.q ?? "",
+    module: opts.module ?? null,
+    user: opts.user ?? null,
+  })
 
   try {
     const { events, more } = await filterLogEvents({ from, to, pattern, limit: LIMIT, logGroup: group })
@@ -118,10 +211,11 @@ export async function searchLogs(
       truncated: more || events.length >= LIMIT,
       group,
       groups,
+      own,
     }
   } catch (err) {
     const error = (err as Error).message
     logger.error({ module: "OBSERVABILITY", message: "FilterLogEvents failed", error, pattern, group })
-    return { ok: false, error, group, groups }
+    return { ok: false, error, group, groups, own }
   }
 }
