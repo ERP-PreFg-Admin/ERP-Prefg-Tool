@@ -72,6 +72,16 @@ export function destinationAllowed(row: DestinationEntityRow): boolean {
   return Number(row.serves) === 1
 }
 
+/** Throws 400 when a new PO targets an inactive (closed) location. Inwarding never calls this. */
+export async function assertDestinationActive(destination: string | null | undefined): Promise<void> {
+  const dest = destination?.trim()
+  if (!dest) return
+  const [w] = await query<{ name: string; status: string | null }>(purchaseOrdersSql.selectWarehouseByName, [dest])
+  if (w && w.status === "inactive") {
+    throw new ApiError(400, "destination_inactive", `${w.name} is inactive and can't take new POs. Pick another destination.`)
+  }
+}
+
 /**
  * Throws 400 when the destination belongs to the other legal entity.
  *
@@ -91,6 +101,7 @@ export async function assertDestinationServesEntity(
 ): Promise<void> {
   const dest = destination?.trim()
   if (!dest) return
+  await assertDestinationActive(dest)
 
   const rows = await query<DestinationEntityRow>(
     purchaseOrdersSql.selectDestinationEntityCheck,

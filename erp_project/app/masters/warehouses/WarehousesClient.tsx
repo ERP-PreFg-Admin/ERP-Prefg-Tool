@@ -320,9 +320,7 @@ export default function WarehousesClient({
                       {row.detail?.ship_to_gstin ?? <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>
-                      {/* The location's status if the pair doesn't exist yet —
-                          otherwise a missing row would read as active. */}
-                      <StatusBadge status={row.detail?.status ?? row.warehouse.status} />
+                      <StatusBadge status={statusOf(row)} />
                     </TableCell>
                     <TableCell className="max-w-48 truncate text-xs text-muted-foreground">
                       {row.detail?.remarks ?? "—"}

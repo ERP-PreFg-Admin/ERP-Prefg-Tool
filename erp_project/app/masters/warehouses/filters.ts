@@ -30,9 +30,10 @@ export type Filters = typeof NO_FILTERS
  *  the filter has to match on it and not on warehouse.type. */
 export const typeOf = (r: Row) => r.detail?.type ?? r.warehouse.type
 
-/** Same reasoning: the badge shows the pair's status, falling back to the
- *  location's when the pair has no row at all. */
-export const statusOf = (r: Row) => r.detail?.status ?? r.warehouse.status
+/** The pair's status, falling back to the location's when the pair has no row.
+ *  A closed (inactive) location overrides its pairs — that is what blocks new POs. */
+export const statusOf = (r: Row) =>
+  r.warehouse.status === "inactive" ? "inactive" : (r.detail?.status ?? r.warehouse.status)
 
 /** The columns free-text search looks at. Mirrors what the table and the detail
  *  panel actually render, so searching for something you can see always hits. */

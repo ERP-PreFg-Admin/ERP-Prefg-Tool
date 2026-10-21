@@ -74,9 +74,8 @@ export function WarehouseDetailPanel({
             <Badge variant={type === "MWH" ? "info" : "secondary"}>
               {type === "MWH" ? "Mother Warehouse" : "Child Warehouse"}
             </Badge>
-            {/* The pair's own status when it exists — the location's would read as
-                active for an entity that isn't live here. */}
-            <StatusBadge status={row?.status ?? warehouse.status} />
+            {/* The pair's own status, unless the whole location is closed. */}
+            <StatusBadge status={warehouse.status === "inactive" ? "inactive" : (row?.status ?? warehouse.status)} />
             {/* But the location's approval state still has to show, or an
                 in_review warehouse reads as active and the disabled Edit dialog
                 comes as a surprise. Only when it differs from the badge above —

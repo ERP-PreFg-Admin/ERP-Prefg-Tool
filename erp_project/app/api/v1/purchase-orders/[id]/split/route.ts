@@ -20,7 +20,7 @@ import { manufacturers as mfgsSql } from "@/lib/queries/manufacturers"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { withGateway } from "@/lib/gateway/with-gateway"
-import { assertPoInScope } from "@/lib/po/po-guard"
+import { assertPoInScope, assertDestinationActive } from "@/lib/po/po-guard"
 import { isDraftPo, splitChildPrice, impliedGstPercent, isSpecialPoType, specialPoPrice } from "@/lib/po/po-rules"
 import { skuGstPercent } from "@/lib/po/po-rate"
 import { ApiError } from "@/lib/gateway/errors"
@@ -90,6 +90,9 @@ export const POST = withGateway({
           : `Split total (${splitTotal}) exceeds remaining qty (${remaining}).`
       )
     }
+
+    // Each child is a new PO, so a closed site can't take one.
+    for (const s of splits) await assertDestinationActive(s.destination)
 
     const userId = Number(session.user.id)
 

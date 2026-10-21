@@ -107,6 +107,8 @@ export type WarehouseOption = {
   name: string
   location: string | null
   zone: string | null
+  /** master_warehouse.status. An inactive site takes no new POs but still inwards open ones. */
+  site_status?: string | null
   type: "CWH" | "MWH"
   /** master_entity.code. NULL = the site has no per-entity row, so it serves both. */
   entity_code: string | null

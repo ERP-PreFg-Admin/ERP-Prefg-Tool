@@ -24,7 +24,7 @@ import SyncUniwareButton from "../SyncUniwareButton"
 import type { MfgOption, PoRow, SkuOption, TabKey, WarehouseOption } from "./po-types"
 import { INWARD_TABS, STATUS_CONFIG, TAB_LABEL, TABS } from "./po-types"
 import {
-  fmtInt, warehouseKey,
+  fmtInt, warehouseKey, raisableWarehouses,
   destFilterValue, destFilterLabel, destFilterSelection, parseDestFilter,
 } from "./po-utils"
 import { PO_BULK_CSV_FIELDS } from "./po-bulk-fields"
@@ -153,6 +153,8 @@ export default function PoProcurementClient({
 
   // ── Gmail-style PO selection → review (grouped by mfg) → send mail ────────
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+
+  const raiseOptions = useMemo(() => raisableWarehouses(warehouseOptions), [warehouseOptions])
 
   // Every row a checkbox can reach: the masters on this page plus the children
   // of any of them. Selection has to survive collapsing a row, so it is keyed on
@@ -576,7 +578,7 @@ export default function PoProcurementClient({
         open={showAddPO}
         onClose={() => setShowAddPO(false)}
         mfgOptions={mfgOptions}
-        warehouseOptions={warehouseOptions}
+        warehouseOptions={raiseOptions}
         onCreated={afterAction}
       />
 
@@ -585,7 +587,7 @@ export default function PoProcurementClient({
         onClose={() => setEditTarget(null)}
         skuOptions={skuOptions}
         mfgOptions={mfgOptions}
-        warehouseOptions={warehouseOptions}
+        warehouseOptions={raiseOptions}
         onCreated={afterAction}
         editData={editTarget ? {
           id:          editTarget.id,
@@ -603,7 +605,7 @@ export default function PoProcurementClient({
       <EditDraftPoDialog
         po={draftEditTarget}
         onClose={() => setDraftEditTarget(null)}
-        warehouseOptions={warehouseOptions}
+        warehouseOptions={raiseOptions}
         onSaved={afterAction}
       />
 
@@ -611,7 +613,7 @@ export default function PoProcurementClient({
         open={splitTarget !== null}
         onClose={() => setSplitTarget(null)}
         po={splitTarget}
-        warehouseOptions={warehouseOptions}
+        warehouseOptions={raiseOptions}
         onSplit={afterAction}
       />
 

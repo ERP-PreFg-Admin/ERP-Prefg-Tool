@@ -27,6 +27,11 @@ export const isImpromptu = (po_no: string) => po_no.startsWith("IMP-")
 
 /* ── Destination dropdown ──────────────────────────────────────────────────── */
 
+/** Sites a new PO may go to: everything but an inactive location. Inwarding keeps the full list. */
+export function raisableWarehouses(options: WarehouseOption[]): WarehouseOption[] {
+  return options.filter((w) => w.site_status !== "inactive")
+}
+
 /**
  * The warehouses a PO for this legal entity can be sent to.
  *

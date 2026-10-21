@@ -627,6 +627,8 @@ export const purchaseOrdersSql = {
   warehouseOptions: `
     SELECT
       w.id, w.code, w.name, w.location, w.zone,
+      -- Inactive sites stay listed for inwarding; only the PO-raising dialogs drop them.
+      w.status          AS site_status,
       COALESCE(dwe.type, w.type) AS type,
       e.code            AS entity_code,
       dwe.facility_code AS facility_code,
