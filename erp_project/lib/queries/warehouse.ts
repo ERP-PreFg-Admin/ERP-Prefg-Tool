@@ -155,6 +155,16 @@ export const warehouse = {
     LIMIT 1
   `,
 
+  /** Every active facility, for the Dispatch History facility filter. */
+  activeFacilities: `
+    SELECT dwe.facility_code, w.name AS wh_name, e.code AS entity_code
+    FROM details_warehouse_entity dwe
+    INNER JOIN master_warehouse w ON w.id = dwe.warehouse_id
+    INNER JOIN master_entity    e ON e.id = dwe.entity_id
+    WHERE dwe.status = 'active' AND dwe.facility_code IS NOT NULL
+    ORDER BY w.name, e.code
+  `,
+
   /**
    * Every active facility's ERP PO-code config, for the review screen.
    *

@@ -49,8 +49,37 @@ export type DispatchLine = {
   mfg_name: string
   sku_code: string
   sku_name: string | null
+  /** master_warehouse.name as typed on the invoice (no FK). */
+  destination: string | null
+  /** NULL when destination × entity billed doesn't resolve to an active facility. */
+  facility_code: string | null
+  entity_code: string | null
   qty: number
   invoices: number
+}
+
+/** One key per facility; an unresolved invoice falls back to its destination. */
+export function facilityKey(l: Pick<DispatchLine, "facility_code" | "destination">): string {
+  return l.facility_code ?? l.destination ?? "—"
+}
+
+export type FacilityOption = { key: string; label: string }
+
+/** Facility filter choices: every active facility, plus any unmapped destination dispatched in the range. */
+export function facilityOptions(master: FacilityOption[], lines: DispatchLine[]): FacilityOption[] {
+  const out = new Map(master.map((f) => [f.key, f]))
+  const extra: FacilityOption[] = []
+  for (const l of lines) {
+    const key = facilityKey(l)
+    if (out.has(key)) continue
+    const f = { key, label: l.facility_code ? `${l.facility_code} — ${l.destination ?? ""}` : `${key} (unmapped)` }
+    out.set(key, f); extra.push(f)
+  }
+  return [...master, ...extra.sort((a, b) => a.label.localeCompare(b.label))]
+}
+
+export function matchesFacility(l: DispatchLine, key: string): boolean {
+  return !key || facilityKey(l) === key
 }
 
 export type MfgOption = { id: number; code: string; name: string }
@@ -108,33 +137,60 @@ export function activePreset(from: string, to: string, at: Date = new Date()): D
   }) ?? null
 }
 
-export type DispatchView = "lines" | "mfg" | "sku"
+export type DispatchView = "lines" | "mfg" | "sku" | "facility"
 export function parseView(v: string | null | undefined): DispatchView {
-  return v === "mfg" || v === "sku" ? v : "lines"
+  return v === "mfg" || v === "sku" || v === "facility" ? v : "lines"
 }
 
 export type DispatchMfgRow = { mfg_id: number; mfg_code: string; mfg_name: string; skus: number; qty: number }
 export type DispatchSkuRow = { sku_code: string; sku_name: string | null; mfgs: number; qty: number }
+export type DispatchFacilityRow = {
+  key: string; facility_code: string | null; destination: string | null; entity_code: string | null
+  mfgs: number; skus: number; qty: number
+}
 
+// Lines are per facility, so a SKU can appear on several: count distinct, never +1 per line.
 export function groupByMfg(lines: DispatchLine[]): DispatchMfgRow[] {
-  const out = new Map<number, DispatchMfgRow>()
+  const out = new Map<number, DispatchMfgRow & { seen: Set<string> }>()
   for (const l of lines) {
-    const r = out.get(l.mfg_id) ?? { mfg_id: l.mfg_id, mfg_code: l.mfg_code, mfg_name: l.mfg_name, skus: 0, qty: 0 }
-    r.skus += 1; r.qty += l.qty
+    const r = out.get(l.mfg_id) ?? { mfg_id: l.mfg_id, mfg_code: l.mfg_code, mfg_name: l.mfg_name, skus: 0, qty: 0, seen: new Set<string>() }
+    r.seen.add(l.sku_code); r.qty += l.qty
     out.set(l.mfg_id, r)
   }
-  return [...out.values()].sort((a, b) => b.qty - a.qty)
+  return [...out.values()]
+    .map(({ seen, ...r }) => ({ ...r, skus: seen.size }))
+    .sort((a, b) => b.qty - a.qty)
 }
 
 export function groupBySku(lines: DispatchLine[]): DispatchSkuRow[] {
-  const out = new Map<string, DispatchSkuRow>()
+  const out = new Map<string, DispatchSkuRow & { seen: Set<number> }>()
   for (const l of lines) {
-    const r = out.get(l.sku_code) ?? { sku_code: l.sku_code, sku_name: l.sku_name, mfgs: 0, qty: 0 }
-    r.mfgs += 1; r.qty += l.qty
+    const r = out.get(l.sku_code) ?? { sku_code: l.sku_code, sku_name: l.sku_name, mfgs: 0, qty: 0, seen: new Set<number>() }
+    r.seen.add(l.mfg_id); r.qty += l.qty
     r.sku_name ??= l.sku_name
     out.set(l.sku_code, r)
   }
-  return [...out.values()].sort((a, b) => b.qty - a.qty)
+  return [...out.values()]
+    .map(({ seen, ...r }) => ({ ...r, mfgs: seen.size }))
+    .sort((a, b) => b.qty - a.qty)
+}
+
+export function groupByFacility(lines: DispatchLine[]): DispatchFacilityRow[] {
+  const out = new Map<string, DispatchFacilityRow & { m: Set<number>; s: Set<string>; e: Set<string> }>()
+  for (const l of lines) {
+    const key = facilityKey(l)
+    const r = out.get(key) ?? {
+      key, facility_code: l.facility_code, destination: l.destination, entity_code: null,
+      mfgs: 0, skus: 0, qty: 0, m: new Set<number>(), s: new Set<string>(), e: new Set<string>(),
+    }
+    r.m.add(l.mfg_id); r.s.add(l.sku_code); r.qty += l.qty
+    if (l.entity_code) r.e.add(l.entity_code)
+    out.set(key, r)
+  }
+  // One facility code can serve both entities at a site, so entity is a list.
+  return [...out.values()]
+    .map(({ m, s, e, ...r }) => ({ ...r, entity_code: e.size ? [...e].sort().join(", ") : null, mfgs: m.size, skus: s.size }))
+    .sort((a, b) => b.qty - a.qty)
 }
 
 export function dispatchStats(lines: DispatchLine[]) {
@@ -142,6 +198,7 @@ export function dispatchStats(lines: DispatchLine[]) {
     qty: lines.reduce((a, l) => a + l.qty, 0),
     skus: new Set(lines.map((l) => l.sku_code)).size,
     mfgs: new Set(lines.map((l) => l.mfg_id)).size,
+    facilities: new Set(lines.map(facilityKey)).size,
     lines: lines.length,
   }
 }

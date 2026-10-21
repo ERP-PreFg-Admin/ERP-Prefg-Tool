@@ -3,8 +3,8 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import {
-  activePreset, buildOpenPoMatrix, dispatchStats, groupByMfg, groupBySku, matchesSku,
-  parseTab, parseView, presetRange,
+  activePreset, buildOpenPoMatrix, dispatchStats, facilityOptions, groupByFacility, groupByMfg, groupBySku,
+  matchesFacility, matchesSku, parseTab, parseView, presetRange,
   type DispatchLine, type OpenPoCell,
 } from "../../app/po-tracking/mfg-overview/overview-model"
 
@@ -64,8 +64,11 @@ test("activePreset recognises a preset range and nothing else", () => {
 })
 
 const line = (o: Partial<DispatchLine>): DispatchLine => ({
-  mfg_id: 1, mfg_code: "M1", mfg_name: "Mfg One", sku_code: "S1", sku_name: "Soap", qty: 0, invoices: 1, ...o,
+  mfg_id: 1, mfg_code: "M1", mfg_name: "Mfg One", sku_code: "S1", sku_name: "Soap",
+  destination: "Gurgaon", facility_code: "GGN_WAREHOUSE", entity_code: "PEP", qty: 0, invoices: 1, ...o,
 })
+
+const GGN_KRE = { facility_code: "HYP_B2B_GGN", entity_code: "KRE" }
 
 test("dispatch regrouping keeps the total, whatever the view", () => {
   const lines = [
@@ -80,7 +83,46 @@ test("dispatch regrouping keeps the total, whatever the view", () => {
   const total = dispatchStats(lines).qty
   assert.equal(byMfg.reduce((a, r) => a + r.qty, 0), total)
   assert.equal(bySku.reduce((a, r) => a + r.qty, 0), total)
-  assert.deepEqual(dispatchStats(lines), { qty: 45, skus: 2, mfgs: 2, lines: 3 })
+  assert.deepEqual(dispatchStats(lines), { qty: 45, skus: 2, mfgs: 2, facilities: 1, lines: 3 })
+})
+
+test("REGRESSION guard: a pair shipped to two facilities counts once in By MFG / By SKU", () => {
+  const lines = [line({ sku_code: "A", qty: 10 }), line({ sku_code: "A", qty: 4, ...GGN_KRE })]
+  assert.deepEqual(groupByMfg(lines).map((r) => [r.skus, r.qty]), [[1, 14]])
+  assert.deepEqual(groupBySku(lines).map((r) => [r.mfgs, r.qty]), [[1, 14]])
+})
+
+test("By Facility: same location under two entities stays two facilities, totals keep", () => {
+  const lines = [
+    line({ mfg_id: 1, sku_code: "A", qty: 10 }),
+    line({ mfg_id: 2, mfg_code: "M2", sku_code: "A", qty: 5 }),
+    line({ mfg_id: 1, sku_code: "B", qty: 30, ...GGN_KRE }),
+  ]
+  const byFac = groupByFacility(lines)
+  assert.deepEqual(byFac.map((r) => [r.key, r.mfgs, r.skus, r.qty]), [["HYP_B2B_GGN", 1, 1, 30], ["GGN_WAREHOUSE", 2, 1, 15]])
+  assert.equal(byFac.reduce((a, r) => a + r.qty, 0), dispatchStats(lines).qty)
+  assert.equal(dispatchStats(lines).facilities, 2)
+})
+
+test("one facility code serving both entities is one row listing both", () => {
+  const kol = { facility_code: "KOL_WAREHOUSE", destination: "Kolkata - New" }
+  const rows = groupByFacility([
+    line({ ...kol, entity_code: "PEP", qty: 3 }),
+    line({ ...kol, entity_code: "KREATIVE", sku_code: "B", qty: 2 }),
+  ])
+  assert.deepEqual(rows.map((r) => [r.key, r.entity_code, r.skus, r.qty]), [["KOL_WAREHOUSE", "KREATIVE, PEP", 2, 5]])
+})
+
+test("an unresolved facility groups by its destination, and the filter matches it", () => {
+  const stray = line({ facility_code: null, entity_code: null, destination: "Gurgoan", qty: 7 })
+  const lines = [line({ qty: 1 }), stray]
+  assert.deepEqual(groupByFacility(lines).map((r) => r.key), ["Gurgoan", "GGN_WAREHOUSE"])
+  const master = [{ key: "GGN_WAREHOUSE", label: "GGN" }, { key: "HYP_B2B_GGN", label: "HYP" }]
+  assert.deepEqual(facilityOptions(master, lines).map((f) => f.key), ["GGN_WAREHOUSE", "HYP_B2B_GGN", "Gurgoan"])
+  assert.deepEqual(facilityOptions(master, []).map((f) => f.key), ["GGN_WAREHOUSE", "HYP_B2B_GGN"], "listed even with no dispatch")
+  assert.ok(matchesFacility(stray, "Gurgoan"))
+  assert.ok(!matchesFacility(stray, "GGN_WAREHOUSE"))
+  assert.ok(matchesFacility(stray, ""), "empty filter means all")
 })
 
 test("unknown tab / view fall back to the defaults", () => {
@@ -88,4 +130,5 @@ test("unknown tab / view fall back to the defaults", () => {
   assert.equal(parseTab("mapping"), "mapping")
   assert.equal(parseView(undefined), "lines")
   assert.equal(parseView("sku"), "sku")
+  assert.equal(parseView("facility"), "facility")
 })

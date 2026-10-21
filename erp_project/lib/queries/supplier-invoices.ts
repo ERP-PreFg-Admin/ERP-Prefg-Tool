@@ -751,18 +751,23 @@ export const supplierInvoicesSql = {
   /** Hand the invoice back to the derived state. Parameters: [invoice_id] */
   deletePayment: `DELETE FROM invoice_payment WHERE invoice_id = ?`,
 
-  /** MFG Overview → Dispatch History: invoiced qty per manufacturer × SKU, by invoice_date.
-   *  Brand scope is per line, since one invoice can carry several brands.
+  /** MFG Overview → Dispatch History: invoiced qty per manufacturer × SKU × facility, by invoice_date.
+   *  Facility = destination × entity billed (PAN); unresolved ones keep their destination with a NULL code.
    *  Params: [from, to, mfgId×2, like×3, ...scopeParams(mfgIds), ...scopeParams(warehouseNames), ...scopeParams(brandIds)] */
   dispatchedBySkuMfg: `
     SELECT si.mfg_id, m.code AS mfg_code, m.name AS mfg_name,
            ii.sku_code, MAX(ms.name) AS sku_name,
+           si.destination, dwe.facility_code, e.code AS entity_code,
            SUM(ii.qty)               AS qty,
            COUNT(DISTINCT si.id)     AS invoices
     FROM invoice_items_mfg ii
     INNER JOIN invoice_mfg si ON si.id = ii.invoice_id
     INNER JOIN master_mfgs m  ON m.id  = si.mfg_id
     LEFT  JOIN master_skus ms ON ms.sku_code = ii.sku_code
+    LEFT  JOIN master_warehouse w ON w.name = si.destination
+    LEFT  JOIN master_entity e ON e.pan = SUBSTRING(si.buyer_gstin, 3, 10)
+    LEFT  JOIN details_warehouse_entity dwe
+           ON dwe.warehouse_id = w.id AND dwe.entity_id = e.id AND dwe.status = 'active'
     WHERE si.invoice_date >= ? AND si.invoice_date <= ?
       AND si.reverted_at IS NULL
       AND (? IS NULL OR si.mfg_id = ?)
@@ -770,7 +775,7 @@ export const supplierInvoicesSql = {
       AND (? IS NULL OR si.mfg_id      IN (?))
       AND (? IS NULL OR si.destination IN (?))
       AND (? IS NULL OR ms.brand_id IS NULL OR ms.brand_id IN (?))
-    GROUP BY si.mfg_id, m.code, m.name, ii.sku_code
+    GROUP BY si.mfg_id, m.code, m.name, ii.sku_code, si.destination, dwe.facility_code, e.code
     ORDER BY m.code, qty DESC
   `,
 }

@@ -1,4 +1,4 @@
-// GET /api/v1/manufacturing/dispatch/export?format=&from=&to=&mfg=&q=&view=lines|mfg|sku
+// GET /api/v1/manufacturing/dispatch/export?format=&from=&to=&mfg=&facility=&q=&view=lines|mfg|sku|facility
 // Dispatch History in whichever view is on screen.
 
 import { withGateway } from "@/lib/gateway/with-gateway"
@@ -7,10 +7,13 @@ import { assertInScope, getUserScope } from "@/lib/scope"
 import { parseIso } from "@/lib/date"
 import { buildExportFilename, exportResponse, type ExportColumn } from "@/lib/export"
 import { getDispatchLines } from "@/lib/services/mfg-overview"
-import { groupByMfg, groupBySku, parseView } from "@/app/po-tracking/mfg-overview/overview-model"
+import {
+  groupByFacility, groupByMfg, groupBySku, matchesFacility, parseView, type DispatchView,
+} from "@/app/po-tracking/mfg-overview/overview-model"
 
-const COLUMNS: Record<"lines" | "mfg" | "sku", ExportColumn[]> = {
+const COLUMNS: Record<DispatchView, ExportColumn[]> = {
   lines: [
+    { key: "facility_code", label: "Facility" }, { key: "destination", label: "Destination" },
     { key: "mfg_code", label: "MFG Code" }, { key: "mfg_name", label: "MFG Name" },
     { key: "sku_code", label: "SKU Code" }, { key: "sku_name", label: "SKU Name" },
     { key: "invoices", label: "Invoices", type: "number" }, { key: "qty", label: "Qty Dispatched", type: "number" },
@@ -22,6 +25,11 @@ const COLUMNS: Record<"lines" | "mfg" | "sku", ExportColumn[]> = {
   sku: [
     { key: "sku_code", label: "SKU Code" }, { key: "sku_name", label: "SKU Name" },
     { key: "mfgs", label: "Manufacturers", type: "number" }, { key: "qty", label: "Qty Dispatched", type: "number" },
+  ],
+  facility: [
+    { key: "facility_code", label: "Facility" }, { key: "destination", label: "Destination" },
+    { key: "entity_code", label: "Entity" }, { key: "mfgs", label: "Manufacturers", type: "number" },
+    { key: "skus", label: "SKUs", type: "number" }, { key: "qty", label: "Qty Dispatched", type: "number" },
   ],
 }
 
@@ -38,8 +46,11 @@ export const GET = withGateway({
 
     const userId = Number(session.user.id)
     if (mfgId != null) assertInScope(await getUserScope(userId), "mfg", mfgId)
-    const lines = await getDispatchLines(userId, { from, to, mfgId, search: sp.get("q") })
-    const rows = view === "mfg" ? groupByMfg(lines) : view === "sku" ? groupBySku(lines) : lines
+    const facility = sp.get("facility") ?? ""
+    const lines = (await getDispatchLines(userId, { from, to, mfgId, search: sp.get("q") }))
+      .filter((l) => matchesFacility(l, facility))
+    const rows = view === "mfg" ? groupByMfg(lines) : view === "sku" ? groupBySku(lines)
+      : view === "facility" ? groupByFacility(lines) : lines
 
     return exportResponse(
       format, buildExportFilename("dispatch", format, { from, to, view }), "Dispatch",

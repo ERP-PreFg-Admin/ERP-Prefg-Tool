@@ -5,6 +5,7 @@ import { timedQuery } from "@/lib/query-timing"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { supplierInvoicesSql } from "@/lib/queries/supplier-invoices"
 import { mfgFacilityMap } from "@/lib/queries/mfg-facility-map"
+import { warehouse } from "@/lib/queries/warehouse"
 import { getViewScope } from "@/lib/brand-view"
 import { inScope, scopeParams, type UserScope } from "@/lib/scope"
 import { isoDate } from "@/lib/date"
@@ -12,7 +13,7 @@ import type { MfgFacilityCell } from "@/types/masters"
 import type { LiveLine, MappingRow } from "@/app/po-tracking/mfg-overview/MfgFacilityMatrix"
 import {
   OLD_PO_DAYS,
-  type DispatchLine, type MfgOption, type OpenPoCell, type OpenPoListRow,
+  type DispatchLine, type FacilityOption, type MfgOption, type OpenPoCell, type OpenPoListRow,
 } from "@/app/po-tracking/mfg-overview/overview-model"
 
 // DECIMAL/SUM come back from mysql2 as strings.
@@ -88,6 +89,9 @@ export async function getDispatchLines(
     mfg_name: String(r.mfg_name),
     sku_code: String(r.sku_code),
     sku_name: (r.sku_name as string | null) ?? null,
+    destination: (r.destination as string | null) ?? null,
+    facility_code: (r.facility_code as string | null) ?? null,
+    entity_code: (r.entity_code as string | null) ?? null,
     qty: n(r.qty),
     invoices: n(r.invoices),
   }))
@@ -102,6 +106,23 @@ export async function getMfgOptions(userId: number): Promise<MfgOption[]> {
   return rows
     .filter((r) => inScope(scope, "mfg", r.id))
     .map((r) => ({ id: n(r.id), code: r.code, name: r.name }))
+}
+
+/** Active facilities at warehouses the viewer may see, for the Dispatch facility filter. */
+export async function getFacilityOptions(userId: number): Promise<FacilityOption[]> {
+  const scope = await getViewScope(userId)
+  const rows = await timedQuery<{ facility_code: string; wh_name: string; entity_code: string }>(
+    warehouse.activeFacilities, [], { label: "mfgOverview.activeFacilities" },
+  )
+  // One Uniware facility can serve both entities at a site (KOL_WAREHOUSE on prod): one option, both entities.
+  const byCode = new Map<string, { wh: string; entities: string[] }>()
+  for (const r of rows) {
+    if (!inScope(scope, "warehouse", r.wh_name)) continue
+    const f = byCode.get(r.facility_code) ?? { wh: r.wh_name, entities: [] }
+    f.entities.push(r.entity_code)
+    byCode.set(r.facility_code, f)
+  }
+  return [...byCode].map(([code, f]) => ({ key: code, label: `${code} — ${f.wh} (${f.entities.join(", ")})` }))
 }
 
 export async function getFacilityMap(userId: number): Promise<{

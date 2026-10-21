@@ -3,7 +3,7 @@ import { resolveAccess } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { parseIso } from "@/lib/date"
 import {
-  getDispatchLines, getFacilityMap, getMfgOptions, getOpenPoCells,
+  getDispatchLines, getFacilityMap, getFacilityOptions, getMfgOptions, getOpenPoCells,
 } from "@/lib/services/mfg-overview"
 import { MfgFacilityMatrix } from "./MfgFacilityMatrix"
 import { MfgOverviewTabs } from "./MfgOverviewTabs"
@@ -36,11 +36,17 @@ export default async function ManufacturingOverviewPage({ searchParams }: { sear
     let to = parseIso(one(sp.to)) ? one(sp.to) : fallback.to
     if (from > to) [from, to] = [to, from]
     const mfgId = Number(one(sp.mfg)) || null
-    const [lines, mfgOptions] = await Promise.all([
+    const [lines, mfgOptions, facilityMaster] = await Promise.all([
       getDispatchLines(userId, { from, to, mfgId }),
       getMfgOptions(userId),
+      getFacilityOptions(userId),
     ])
-    body = <DispatchHistory lines={lines} mfgOptions={mfgOptions} from={from} to={to} mfgId={mfgId} />
+    body = (
+      <DispatchHistory
+        lines={lines} mfgOptions={mfgOptions} facilityMaster={facilityMaster}
+        from={from} to={to} mfgId={mfgId}
+      />
+    )
   } else {
     const { cells, lines, mappings } = await getFacilityMap(userId)
     body = <MfgFacilityMatrix cells={cells} lines={lines} mappings={mappings} canEdit={access === "editor"} />
