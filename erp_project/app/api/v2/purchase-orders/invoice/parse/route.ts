@@ -32,6 +32,8 @@ import { parseInvoice, strategyFor, configFor } from "@/lib/nanonets"
 import { detectFromPdf } from "@/lib/invoice/invoice-detect"
 import { parseLocallyVerbose } from "@/lib/invoice/local"
 import { parseCharges } from "@/lib/invoice/local/charges"
+import { parseCacheKey, freshParse, type CachedParse } from "@/lib/invoice/parse-cache"
+import { getEvent, putEvent } from "@/lib/s3"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { makeEventId, recordRawEvent, recordProcessedEvent, recordFailedEvent } from "@/lib/events"
@@ -72,7 +74,9 @@ export const POST = withGateway({
       const { text, gstins, mfg, sellerGstins } = await detectFromPdf(buffer)
       const strategy = strategyFor(sellerGstins)
       const local = parseLocallyVerbose(text)
-      const source = local.ok ? `local:${local.layout}` : "nanonets"
+      const cacheKey = parseCacheKey(buffer)
+      const cached = local.ok ? null : freshParse(await getEvent(cacheKey).catch(() => null), Date.now())
+      const source = local.ok ? `local:${local.layout}` : cached ? "nanonets:cache" : "nanonets"
       logger.info({
         ...ctx,
         eventId,
@@ -88,7 +92,11 @@ export const POST = withGateway({
 
       const parsed = local.ok
         ? local.parsed
-        : await parseInvoice(buffer, filename, configFor(strategy))
+        : cached ?? await parseInvoice(buffer, filename, configFor(strategy))
+      // Only a Nanonets answer that read something is kept; a failure stays retryable.
+      if (source === "nanonets" && (parsed.line_items.length > 0 || parsed.invoice_number)) {
+        void putEvent(cacheKey, { at: new Date().toISOString(), parsed } satisfies CachedParse)
+      }
 
       // Charges are read off the TEXT LAYER, not off whichever parser answered.
       //

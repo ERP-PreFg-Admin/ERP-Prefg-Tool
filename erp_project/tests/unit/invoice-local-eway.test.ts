@@ -39,6 +39,25 @@ test("a CGST+SGST rate splits the same way", () => {
   assert.deepEqual(rows, [{ name: "By The Blues Perfume body lotion 300 ml", amount: 396477.83, unit: "NOS", qty: 8263 }])
 })
 
+test("a CGST+SGST rate glued to an amount starting with a digit splits at the slab", () => {
+  // Reve, Kain and Ananya: "1-2 digits after +" read 9+91 / 6,41,873.80.
+  const rows = parseEwayGoods(
+    [
+      "3. Goods Details",
+      "33049990 MCaf401 Body Wash 300ml & 33049990 9+916,41,873.80NOS24,000",
+      "33049990 MCaf350 Body Lotion 9+973,515.20NOS1,200",
+      "33049990 MCaf212 Coffee Scrub 9+944,060.40NOS960",
+    ].join("\n")
+  )
+  assert.deepEqual(rows.map((r) => r.amount), [1641873.8, 73515.2, 44060.4])
+  assert.deepEqual(rows.map((r) => r.qty), [24000, 1200, 960])
+})
+
+test("single-rate slabs split off the amount", () => {
+  const rows = parseEwayGoods(["3. Goods Details", "A1 55,000.00NOS10", "B1 128,000.00NOS20", "C1 2812,000.00NOS30"].join("\n"))
+  assert.deepEqual(rows.map((r) => r.amount), [5000, 8000, 12000])
+})
+
 test("a name wrapped over three lines is one row", () => {
   const rows = parseEwayGoods(
     ["3. Goods Details", "33049990 Mcaf407_Caramal Eclairs Coffee Body Scrub 175gm &", "33049990", "1844,294.40NOS640"].join("\n")

@@ -13,10 +13,9 @@ const HEADER = /^HSN\b|^Code\s*\(/i
 
 // The value tail: <rate><amount><unit><qty> run together, e.g.
 // "184,05,690.48NOS6,408", or Kain's CGST+SGST "9+93,96,477.83NOS8,263".
-// ponytail: the rate is taken greedily as 1-2 digits, which splits every real
-// sample correctly. A 5% invoice could mis-split — then the amounts stop
-// pairing and the invoice falls to Nanonets rather than being read wrong.
-const VALUE = /(\d{1,2}(?:\.\d+)?(?:\+\d{1,2}(?:\.\d+)?)?)(\d[\d,]*\.\d{2})([A-Za-z]+)([\d,]+(?:\.\d+)?)\s*$/
+// The rate is read as a real GST slab: "1-2 digits" split "9+916,41,873.80" as 9+91 / 6,41,873.80.
+const RATE = String.raw`20\+20|14\+14|9\+9|6\+6|2\.5\+2\.5|1\.5\+1\.5|40|28|18|12|5|3`
+const VALUE = new RegExp(String.raw`(?<![\d.,+])(${RATE})(\d[\d,]*\.\d{2})([A-Za-z]+)([\d,]+(?:\.\d+)?)\s*$`)
 
 const LEADING_HSN = /^\d{4,8}\s+/
 // Same shape the item table uses, so a repaired row yields the same code.
