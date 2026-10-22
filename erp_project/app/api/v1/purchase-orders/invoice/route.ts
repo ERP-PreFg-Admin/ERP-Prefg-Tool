@@ -28,7 +28,7 @@ import { query } from "@/lib/db"
 import { supplierInvoicesSql, buildInvoiceParams } from "@/lib/queries/supplier-invoices"
 import { getViewScope } from "@/lib/brand-view"
 import { assertSkuCodesInBrandScope } from "@/lib/brand-guard"
-import { withGateway } from "@/lib/gateway/with-gateway"
+import { withGateway, describeZodIssues } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { invoiceInwardSchema } from "@/lib/validation/purchase-orders"
 import { runInwardInvoice, type StepEvent } from "@/lib/invoice/invoice-inward"
@@ -104,7 +104,7 @@ export const POST = withGateway({
 
     const parsed = invoiceInwardSchema.safeParse(parsedPayload)
     if (!parsed.success) {
-      throw new ApiError(400, "validation_error", "Invalid request", parsed.error.flatten())
+      throw new ApiError(400, "validation_error", `Invalid request — ${describeZodIssues(parsed.error)}`, parsed.error.flatten())
     }
     const body = parsed.data
 

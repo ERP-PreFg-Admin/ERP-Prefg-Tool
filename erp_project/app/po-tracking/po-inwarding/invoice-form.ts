@@ -533,34 +533,8 @@ const fmtMoney = (n: number) =>
  * Display only. `toInwardPayload` deliberately does NOT do this — that value is
  * persisted to invoice_items_mfg, and a derived figure there is fabricated money.
  */
-/**
- * The GST rate the goods rows carry, for grossing up a charge that doesn't
- * state its own. Takes the most common rate rather than the first, so one
- * mis-read row doesn't set the rate for the whole invoice.
- */
-export function goodsGstPercent(rows: Row[]): number {
-  const counts = new Map<number, number>()
-  for (const r of rows) {
-    const g = Number(r.gst_percent)
-    if (Number.isFinite(g) && g > 0) counts.set(g, (counts.get(g) ?? 0) + 1)
-  }
-  let best = 0
-  let bestCount = 0
-  for (const [rate, n] of counts) if (n > bestCount) { best = rate; bestCount = n }
-  return best
-}
-
-/**
- * Charges grossed up the same way sumLineItems grosses the goods, so the two
- * can be added and compared against the invoice's own (post-tax) total.
- * Freight is taxed like anything else — Kain's ₹7,000 carries ₹1,260 of GST.
- */
-export function sumCharges(charges: ParsedCharge[], fallbackGst: number): number {
-  return charges.reduce((sum, c) => {
-    const gst = c.gst_percent ?? fallbackGst
-    return sum + c.amount * (1 + (Number(gst) || 0) / 100)
-  }, 0)
-}
+// Shared with the server's total check (invoiceInwardSchema), so the two can't disagree.
+export { goodsGstPercent, sumCharges } from "@/lib/invoice/charge-sum"
 
 /**
  * One row's value including GST.
@@ -633,7 +607,7 @@ export function matchSummary(form: InvoiceForm, rows: Row[], shortages: Shortage
  *
  *  No attachment_key: the PDF is posted alongside this and stored server-side
  *  as step 1 of the commit, so the key doesn't exist yet at this point. */
-export function toInwardPayload(form: InvoiceForm, rows: Row[]) {
+export function toInwardPayload(form: InvoiceForm, rows: Row[], charges: ParsedCharge[] = []) {
   return {
     invoice_no:     form.invoiceNo.trim(),
     invoice_date:   form.invoiceDate || null,
@@ -652,6 +626,8 @@ export function toInwardPayload(form: InvoiceForm, rows: Row[]) {
     ship_to_name:    form.shipToName,
     ship_to_address: form.shipToAddress,
     invoice_total:   form.invoiceTotal === "" ? null : Number(form.invoiceTotal),
+    // Not stored; sent so the server's lines-vs-total check counts freight as the screen does.
+    charges: charges.map((c) => ({ label: c.label, amount: c.amount, gst_percent: c.gst_percent })),
 
     line_items: rows.map((r) => ({
       sku_code:     r.sku_code.trim(),

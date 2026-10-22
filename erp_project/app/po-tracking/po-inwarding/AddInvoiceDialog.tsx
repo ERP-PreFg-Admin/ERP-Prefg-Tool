@@ -325,7 +325,7 @@ export default function AddInvoiceDialog({
       // One request: S3, our rows and the Uniware mirror have to succeed or
       // unwind together, which they can't if the client drives them separately.
       // Its step events arrive as they happen, so each gets its own toast.
-      const outcome = await commitInvoice(file, toInwardPayload(form, rows), (e) => {
+      const outcome = await commitInvoice(file, toInwardPayload(form, rows, charges), (e) => {
         if (e.status === "start") { setSubmitStep(e.step); return }
         if (e.status === "ok")      toast({ title: STEP_LABEL[e.step], description: e.message, variant: "success" })
         if (e.status === "skipped") toast({ title: `${STEP_NOUN[e.step]} skipped`, description: e.message, variant: "info" })

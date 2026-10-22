@@ -51,7 +51,7 @@ function logActivity(
  * so "Invalid request" alone left the user hunting for which field was wrong.
  * `details` still carries the full structure for anything that wants it.
 */
-function describeZodIssues(error: z.ZodError): string {
+export function describeZodIssues(error: z.ZodError): string {
   const lines = [...new Set(error.issues.map((i) => {
     const path = i.path.join(".")
     return path ? `${path}: ${i.message}` : i.message

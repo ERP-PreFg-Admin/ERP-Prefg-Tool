@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { todayIST } from "@/lib/date"
 import { MATCH_TOLERANCE } from "@/lib/invoice/three-way"
+import { goodsGstPercent, sumCharges } from "@/lib/invoice/charge-sum"
 import { poTypeRequiresRemarks } from "@/lib/po/po-rules"
 
 /** CSV rows arrive as raw strings from CsvImportDialog's client-side parse; the
@@ -93,6 +94,12 @@ export const invoiceInwardSchema = z.object({
   ship_to_name:    optionalText(255),
   ship_to_address: optionalText(2000),
   invoice_total:   z.union([z.number(), z.string()]).optional().nullable(),
+  // Freight and the like: not stored, only counted in the lines-vs-total check below.
+  charges: z.array(z.object({
+    label:       z.string().trim().max(100).optional().nullable(),
+    amount:      z.coerce.number().finite(),
+    gst_percent: z.coerce.number().finite().optional().nullable(),
+  })).optional().default([]),
 
   line_items: z
     .array(
@@ -143,10 +150,8 @@ export const invoiceInwardSchema = z.object({
    * the same formula scripts/_check-invoice-reconciliation.ts uses, which runs
    * clean over all 65 live invoices — the 4 it flags are genuinely short.
    *
-   * Charges (freight) are inside the printed total but are not posted, so they
-   * land inside MATCH_TOLERANCE rather than being added back. That is what the
-   * 2% band is absorbing; a manufacturer billing heavy freight would need the
-   * charge total sent up before this could be tightened.
+   * Charges (freight) are added back exactly as the screen does — Kain's freight
+   * is ~25% of a one-line invoice, far outside the 2% band.
    */
   .superRefine((inv, ctx) => {
     const total = Number(inv.invoice_total)
@@ -157,7 +162,7 @@ export const invoiceInwardSchema = z.object({
       if (!Number.isFinite(amount)) return sum
       const gst = Number(li.gst_percent ?? 0)
       return sum + amount * (1 + (Number.isFinite(gst) ? gst : 0) / 100)
-    }, 0)
+    }, 0) + sumCharges(inv.charges, goodsGstPercent(inv.line_items))
 
     const gap = Math.abs(total - accounted)
     if (gap <= total * MATCH_TOLERANCE) return

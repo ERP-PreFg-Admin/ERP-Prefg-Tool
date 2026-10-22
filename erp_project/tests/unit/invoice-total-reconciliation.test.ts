@@ -61,6 +61,20 @@ test("lines exceeding the total are rejected too", () => {
   assert.match(errorsOf(body(118_000, [80_000, 60_000])), /over/)
 })
 
+// KCPL/C2627/1230 shape: one Kain line plus ₹7,000 freight. The screen counted the freight and the
+// server didn't, so every submit came back "Invalid request".
+test("freight sent as a charge is counted, as the screen counts it", () => {
+  const kain = { ...body(31_918, [20_049.6]), charges: [{ label: "Freight", amount: 7_000, gst_percent: null }] }
+  assert.equal(errorsOf(kain), "")
+  assert.match(errorsOf(body(31_918, [20_049.6])), /unaccounted/)
+})
+
+test("a charge with its own GST rate uses it, not the goods rate", () => {
+  // 100,000 @18% + 10,000 @5% = 128,500.
+  const p = { ...body(128_500, [100_000]), charges: [{ label: "Freight", amount: 10_000, gst_percent: 5 }] }
+  assert.equal(errorsOf(p), "")
+})
+
 // The parser often writes the taxable figure into both `amount` and
 // `total_amount`. Reading total_amount as tax-inclusive would understate every
 // line by its GST and reject healthy invoices.
