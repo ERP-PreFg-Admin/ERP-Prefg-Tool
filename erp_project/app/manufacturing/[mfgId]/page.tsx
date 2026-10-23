@@ -204,7 +204,7 @@ async function LineStatusTabContent({ mfgId, brandScope }: { mfgId: number; bran
 async function MiscTabContent({ mfgId }: { mfgId: number }) {
   const [rows, options] = await Promise.all([
     timedQuery<MiscCostLine>(manufacturingSql.selectMiscByMfg, [mfgId], { label: "manufacturing.selectMiscByMfg" }),
-    timedQuery<MfgLineOption>(manufacturingSql.selectMfgLineOptions, [mfgId], { label: "manufacturing.selectMfgLineOptions" }),
+    timedQuery<MfgLineOption>(manufacturingSql.selectMfgSkuOptions, [mfgId], { label: "manufacturing.selectMfgSkuOptions" }),
   ])
   return <MiscCostClient mfgId={mfgId} rows={rows} options={options} />
 }

@@ -28,7 +28,7 @@ const isPercentType = (t: MiscCostType) => t === "rm_loss" || t === "pm_loss"
 
 type FormState = {
   type: MiscCostType
-  recipe_id: string
+  sku_id: string
   cost: string
   effective_from: string
   effective_till: string
@@ -38,7 +38,7 @@ type FormState = {
 
 const EMPTY_FORM: FormState = {
   type: "jw",
-  recipe_id: "",
+  sku_id: "",
   cost: "",
   effective_from: new Date().toISOString().slice(0, 10),
   effective_till: "",
@@ -68,7 +68,7 @@ export default function MiscCostDialog({
       // eslint-disable-next-line react-hooks/set-state-in-effect -- resets form state each time the dialog is opened
       setForm({
         type: editData.type,
-        recipe_id: String(editData.recipe_id),
+        sku_id: String(editData.sku_id),
         cost: editData.cost != null ? String(editData.cost) : "",
         // isoDate, not `?? ""`: mysql2 returns these as Date objects despite
         // MiscCostLine typing them `string | null`, and DateRangePicker's
@@ -89,7 +89,7 @@ export default function MiscCostDialog({
   }
 
   async function handleSubmit() {
-    if (!editData && !form.recipe_id) { toast({ title: "Select a SKU / Recipe.", variant: "error" }); return }
+    if (!editData && !form.sku_id) { toast({ title: "Select a SKU.", variant: "error" }); return }
     if (!form.cost) { toast({ title: isPercent ? "Enter a wastage %." : "Enter a cost.", variant: "error" }); return }
     if (isPercent && (Number(form.cost) < 0 || Number(form.cost) > 100)) { toast({ title: "Wastage % must be between 0 and 100.", variant: "error" }); return }
     if (editData && !form.remarks.trim()) { toast({ title: "Remarks are required.", description: "Say why this cost is changing — approvers see it.", variant: "error" }); return }
@@ -108,7 +108,7 @@ export default function MiscCostDialog({
           }
         : {
             action: "create-misc",
-            recipe_id: Number(form.recipe_id),
+            sku_id: Number(form.sku_id),
             mfg_id: mfgId,
             type: form.type,
             cost: Number(form.cost),
@@ -172,14 +172,14 @@ export default function MiscCostDialog({
 
           {!editData && (
             <div className="grid gap-1.5">
-              <Label htmlFor="mc-bom">SKU / Recipe <span className="text-destructive">*</span></Label>
+              <Label htmlFor="mc-bom">SKU <span className="text-destructive">*</span></Label>
               <FuzzySelect
                 options={options}
-                value={form.recipe_id}
-                onChange={(v) => set("recipe_id", v)}
+                value={form.sku_id}
+                onChange={(v) => set("sku_id", v)}
                 getValue={(o) => String(o.id)}
-                getLabel={(o) => `${o.sku_code ?? "—"} — ${o.sku_name ?? o.bom_code} (${o.bom_code})`}
-                searchKeys={["sku_code", "sku_name", "bom_code"]}
+                getLabel={(o) => `${o.sku_code ?? "—"} — ${o.sku_name ?? ""}`}
+                searchKeys={["sku_code", "sku_name"]}
                 placeholder="Search SKU code or name…"
               />
             </div>
@@ -237,7 +237,7 @@ export default function MiscCostDialog({
 
           <p className="text-[11px] text-muted-foreground">
             {editData
-              ? "This edit goes to the approval queue. The current cost keeps applying until it is approved."
+              ? "This edit goes to the approval queue. The current cost keeps applying until it is approved; a replaced cost is kept in the Archive."
               : "This cost goes to the approval queue and is excluded from costing until approved."}
           </p>
         </div>

@@ -81,6 +81,8 @@ export function miscCostBulkCsvFields(producibleSkus: readonly string[]): Master
         { value: "discontinued", label: "Discontinued" },
       ],
     },
+    // Required only on a row that replaces a live price (the preview flags it then).
+    { key: "remarks", label: "Remarks", placeholder: "Why the price is changing", sample: "" },
   ]
 }
 

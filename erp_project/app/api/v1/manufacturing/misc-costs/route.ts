@@ -29,7 +29,10 @@ import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { approvalsSql } from "@/lib/queries/approvals"
 import { uploadRowsAsCsv, stageBulkUploadApproval } from "@/lib/master-routes/bulk-approval"
 import { getUserScope, assertInScope } from "@/lib/scope"
-import { assertRecipeInBrandScope } from "@/lib/brand-guard"
+import { assertSkuIdInBrandScope } from "@/lib/brand-guard"
+import {
+  planMiscRows, describePlanErrors, updatesMissingRemarks, stagedMiscRow, loadMiscPlanContext, type MiscPlanRow,
+} from "@/lib/costing/misc-plan"
 import { STATUS } from "@/lib/constants"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
@@ -42,23 +45,19 @@ export const POST = withGateway({
     // differently: create in the body, update only by row id (resolve it),
     // bulk in the mfg_id query param.
     const scope = await getUserScope(Number(session.user.id))
+    let editLine: { id: number; sku_id: number; mfg_id: number; type: string; status: string } | undefined
     if (body.action === "create-misc") {
       assertInScope(scope, "mfg", body.mfg_id)
-      // A misc cost is per (recipe, mfg), so it is a write against the recipe's
-      // brand as well as the manufacturer.
-      await assertRecipeInBrandScope(Number(session.user.id), body.recipe_id, scope)
+      // A misc cost is per (SKU, mfg), so it is a write against the SKU's brand as well.
+      await assertSkuIdInBrandScope(Number(session.user.id), body.sku_id, scope)
     } else if (body.action === "update-misc") {
-      const owner = await query<{ mfg_id: number; recipe_id: number }>(manufacturingSql.selectMiscLineById, [body.id])
-      if (owner.length === 0) throw new ApiError(404, "not_found", "Misc. cost line not found")
-      assertInScope(scope, "mfg", owner[0].mfg_id)
-      // `recipe_id`, not `bom_id`: bom_misc kept its pre-rename column name, and
-      // selectMiscLineById aliases `bom_id AS recipe_id` for exactly this reason.
-      // Reading bom_id here would be undefined — and query<T> is an unchecked
-      // cast, so nothing would have flagged it.
-      await assertRecipeInBrandScope(Number(session.user.id), owner[0].recipe_id, scope)
+      editLine = (await query<NonNullable<typeof editLine>>(manufacturingSql.selectMiscLineById, [body.id]))[0]
+      if (!editLine) throw new ApiError(404, "not_found", "Misc. cost line not found")
+      assertInScope(scope, "mfg", editLine.mfg_id)
+      await assertSkuIdInBrandScope(Number(session.user.id), editLine.sku_id, scope)
     } else {
-      // "bulk": the branch below validates this param itself, so only assert a
-      // well-formed value here — a missing one must still return 400, not 403.
+      // "bulk" / "check_duplicates": the branch below validates this param itself, so only
+      // assert a well-formed value here — a missing one must still return 400, not 403.
       const bulkMfgId = Number(req.nextUrl.searchParams.get("mfg_id"))
       if (Number.isFinite(bulkMfgId) && bulkMfgId > 0) assertInScope(scope, "mfg", bulkMfgId)
     }
@@ -66,16 +65,18 @@ export const POST = withGateway({
     const userId = Number(session.user.id)
 
     if (body.action === "create-misc") {
-      const eventId = makeEventId("MFG_MISC_COST", "create", `${body.mfg_id}-${body.recipe_id}-${body.type}`)
+      const eventId = makeEventId("MFG_MISC_COST", "create", `${body.mfg_id}-${body.sku_id}-${body.type}`)
       const logCtx = { ...ctx, eventId, module: "MFG_MISC_COST_CREATE" }
-      logger.info({ ...logCtx, mfgId: body.mfg_id, bomId: body.recipe_id, type: body.type, cost: body.cost, message: "Misc. cost line create submitted for approval" })
-      recordRawEvent("MFG_MISC_COST", eventId, { mfgId: body.mfg_id, bomId: body.recipe_id, type: body.type, cost: body.cost })
+      logger.info({ ...logCtx, mfgId: body.mfg_id, skuId: body.sku_id, type: body.type, cost: body.cost, message: "Misc. cost line create submitted for approval" })
+      recordRawEvent("MFG_MISC_COST", eventId, { mfgId: body.mfg_id, skuId: body.sku_id, type: body.type, cost: body.cost })
 
-      // One LIVE line per (mfg, recipe, type). This used to check in_review only,
-      // which stopped two pending submissions but not a second line added on top
-      // of an already-active one — and the dialog offers every type regardless of
-      // what the SKU already has, so that was a couple of clicks away.
-      const existing = await query<{ id: number; status: string }>(manufacturingSql.selectLiveMiscFor, [body.mfg_id, body.recipe_id, body.type])
+      const makes = await query(manufacturingSql.selectMfgMakesSku, [body.mfg_id, body.sku_id])
+      if (makes.length === 0) {
+        throw new ApiError(400, "validation_error", "This manufacturer has no production line for that SKU.")
+      }
+
+      // One LIVE line per (mfg, SKU, type); uq_bom_misc_live_slot backs this up.
+      const existing = await query<{ id: number; status: string }>(manufacturingSql.selectLiveMiscFor, [body.mfg_id, body.sku_id, body.type, 0])
       if (existing.length > 0) {
         throw new ApiError(409, "conflict", existing[0].status === STATUS.IN_REVIEW
           ? "This cost is already awaiting approval for that SKU."
@@ -88,7 +89,7 @@ export const POST = withGateway({
         // Inserted as in_review, NOT with the submitted status: costing filters
         // status='active', so the row is inert until an approver flips it.
         const [ins] = await conn.execute<ResultSetHeader>(manufacturingSql.insertMisc, [
-          body.recipe_id,
+          body.sku_id,
           body.mfg_id,
           body.type,
           body.cost,
@@ -115,13 +116,13 @@ export const POST = withGateway({
 
         await conn.commit()
         logger.info({ ...logCtx, id: entityId, approvalId: ar.insertId, message: "Misc. cost line awaiting approval" })
-        recordProcessedEvent("MFG_MISC_COST", eventId, { id: entityId, approvalId: ar.insertId, mfgId: body.mfg_id, bomId: body.recipe_id, type: body.type })
+        recordProcessedEvent("MFG_MISC_COST", eventId, { id: entityId, approvalId: ar.insertId, mfgId: body.mfg_id, skuId: body.sku_id, type: body.type })
         return NextResponse.json({ ok: true, id: entityId, approval_id: ar.insertId })
       } catch (err: unknown) {
         await conn.rollback()
         const message = err instanceof Error ? err.message : String(err)
         const stack = err instanceof Error ? err.stack : undefined
-        recordFailedEvent("MFG_MISC_COST", eventId, { mfgId: body.mfg_id, bomId: body.recipe_id, type: body.type }, message)
+        recordFailedEvent("MFG_MISC_COST", eventId, { mfgId: body.mfg_id, skuId: body.sku_id, type: body.type }, message)
         logger.error({ ...logCtx, err: message, stack, message: "Misc. cost line create failed" })
         throw new ApiError(500, "internal", "Database error")
       } finally {
@@ -141,6 +142,17 @@ export const POST = withGateway({
       const pending = await query<{ id: number }>(approvalsSql.hasPending, ["MFG_MISC", body.id])
       if (pending.length > 0) {
         throw new ApiError(409, "conflict", "This cost line already has a pending approval.")
+      }
+      const line = editLine!
+      if (line.status === "archived") {
+        throw new ApiError(409, "conflict", "This is an archived price — a record of what applied before. Edit the live line instead.")
+      }
+      // Reactivating a retired line while another is live would put two in one slot.
+      if (body.status === STATUS.ACTIVE && line.status !== STATUS.ACTIVE) {
+        const other = await query(manufacturingSql.selectLiveMiscFor, [line.mfg_id, line.sku_id, line.type, line.id])
+        if (other.length > 0) {
+          throw new ApiError(409, "conflict", "This SKU already has a live cost of this type — edit that line instead.")
+        }
       }
 
       const conn: PoolConnection = await pool.getConnection()
@@ -196,44 +208,61 @@ export const POST = withGateway({
       }
     }
 
-    // action === "bulk" — CSV import of Job Work / Shrink Wrap / Shipper / Wastage lines,
-    // scoped to one manufacturer (mfg_id query param) rather than one per CSV row.
-    if (body.action === "bulk") {
+    // "bulk" / "check_duplicates" — one manufacturer per file (mfg_id query param).
+    // Both run the same plan the approval handler re-runs, so a bad file is refused at upload.
+    if (body.action === "bulk" || body.action === "check_duplicates") {
       const mfgId = Number(req.nextUrl.searchParams.get("mfg_id"))
       if (!Number.isFinite(mfgId) || mfgId <= 0) {
         throw new ApiError(400, "validation_error", "Missing or invalid mfg_id query param")
       }
-
-      const eventId = makeEventId("MFG_MISC_COST_BULK", "create", String(mfgId))
-      const logCtx = { ...ctx, eventId, module: "MFG_MISC_COST_BULK" }
-      logger.info({ ...logCtx, mfgId, rowCount: body.rows.length, message: "Misc. cost bulk upload staged for approval" })
-      recordRawEvent("MFG_MISC_COST_BULK", eventId, { mfgId, rowCount: body.rows.length })
-
       if (body.rows.length === 0) {
         throw new ApiError(400, "validation_error", "The uploaded file has no rows.")
       }
 
-      // Staged, not inserted. Leaving this path direct would have made the CSV
-      // import a documented bypass of the gate the dialog now goes through.
-      // Row validation moves to mfgMiscBulkHandler, which applies on approval.
+      const { skus, live } = await loadMiscPlanContext((sql, params) => query(sql, params), mfgId)
+      const plan = planMiscRows(body.rows, skus, live)
+
+      if (body.action === "check_duplicates") {
+        return NextResponse.json(previewResponse(plan, body.rows))
+      }
+
+      const eventId = makeEventId("MFG_MISC_COST_BULK", "create", String(mfgId))
+      const logCtx = { ...ctx, eventId, module: "MFG_MISC_COST_BULK" }
+      logger.info({ ...logCtx, mfgId, rowCount: body.rows.length, message: "Misc. cost bulk upload submitted" })
+      recordRawEvent("MFG_MISC_COST_BULK", eventId, { mfgId, rowCount: body.rows.length })
+
+      const problems = [...describePlanErrors(plan), ...updatesMissingRemarks(plan)]
+      if (problems.length > 0) {
+        throw new ApiError(400, "validation_error",
+          `${problems.length} problem${problems.length !== 1 ? "s" : ""} in this file, nothing was submitted — ` +
+          problems.slice(0, 5).join("; ") + (problems.length > 5 ? `; …and ${problems.length - 5} more` : ""),
+          { problems })
+      }
+      const updates = plan.filter((p) => p.kind === "update").length
+      if (updates > 0 && !body.confirm_replace) {
+        throw new ApiError(409, "confirm_replace_required",
+          `${updates} row${updates !== 1 ? "s" : ""} would replace a live price — confirm the replacement to submit.`)
+      }
+      const staged = plan.flatMap((p) => (p.kind === "error" ? [] : [stagedMiscRow(p)]))
+
+      // Staged, not inserted: mfgMiscBulkHandler applies it on approval, re-checking the plan.
       const conn: PoolConnection = await pool.getConnection()
       await conn.beginTransaction()
       try {
-        const { key, filename } = await uploadRowsAsCsv(body.rows, "bulk-uploads/mfg-misc", `mfg_misc_${mfgId}`)
+        const { key, filename } = await uploadRowsAsCsv(staged, "bulk-uploads/mfg-misc", `mfg_misc_${mfgId}`)
         const approvalId = await stageBulkUploadApproval(conn, {
           userId,
           module: "MFG_MISC_BULK",
           s3Key: key,
           filename,
           rowCount: body.rows.length,
-          // The manufacturer, not the uploader: the handler needs it to resolve
-          // each row's sku_code to a recipe_id on approval.
+          // The manufacturer, not the uploader: the handler re-plans against its SKUs and live lines.
           entityId: mfgId,
         })
         await conn.commit()
 
-        logger.info({ ...logCtx, mfgId, approvalId, rowCount: body.rows.length, message: "Misc. cost bulk upload awaiting approval" })
-        recordProcessedEvent("MFG_MISC_COST_BULK", eventId, { mfgId, approvalId, rowCount: body.rows.length })
+        logger.info({ ...logCtx, mfgId, approvalId, rowCount: body.rows.length, updates, message: "Misc. cost bulk upload awaiting approval" })
+        recordProcessedEvent("MFG_MISC_COST_BULK", eventId, { mfgId, approvalId, rowCount: body.rows.length, updates })
         return NextResponse.json({ ok: true, approval_id: approvalId, staged: body.rows.length })
       } catch (err: unknown) {
         await conn.rollback()
@@ -251,3 +280,27 @@ export const POST = withGateway({
     return NextResponse.json({ ok: false, error: "Invalid action" }, { status: 400 })
   },
 })
+
+/** The plan in CsvImportDialog's preview shape: errors as row remarks, price updates as edits with the live values. */
+function previewResponse(plan: MiscPlanRow[], rows: Record<string, unknown>[]) {
+  const duplicates: Record<number, string[]> = {}
+  const editMatches: Record<number, { id: number; code: string; current: Record<string, unknown> }> = {}
+  plan.forEach((p, i) => {
+    if (p.kind === "error") { duplicates[i] = p.reasons; return }
+    if (p.kind !== "update") return
+    const row = rows[i]
+    const cost = Number(p.live.cost ?? 0)
+    editMatches[i] = {
+      id: p.live.id,
+      code: `${p.sku_code} · ${p.type}`,
+      // Echo the row's own spelling where nothing changes, so the dialog lists only real changes.
+      current: {
+        ...row,
+        cost: Math.abs(cost - p.cost) < 0.00005 ? row.cost : String(cost),
+        effective_from: p.live.effective_from ?? "",
+        effective_till: p.live.effective_till ?? "",
+      },
+    }
+  })
+  return { duplicates, editMatches }
+}

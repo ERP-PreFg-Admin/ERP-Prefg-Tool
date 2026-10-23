@@ -121,7 +121,7 @@ export const miscCostStatusSchema = z.enum(["active", "inactive", "discontinued"
 
 export const createMiscCostSchema = z.object({
   action: z.literal("create-misc"),
-  recipe_id: z.coerce.number().int().positive(),
+  sku_id: z.coerce.number().int().positive(),
   mfg_id: z.coerce.number().int().positive(),
   type: miscCostTypeSchema,
   cost: z.coerce.number().nonnegative(),
@@ -142,16 +142,27 @@ export const updateMiscCostSchema = z.object({
   remarks: z.string().trim().min(1, "Remarks are required"),
 })
 
-/** Bulk CSV import — rows arrive as raw strings (from CsvImportDialog's client-side parse); the route resolves sku_code -> recipe_id and coerces cost/status per row. */
+// Loose cells: CsvImportDialog also sends its display-only keys (_edit), which the planner ignores.
+const miscBulkRows = z.array(z.record(z.string(), z.unknown()))
+
+/** Bulk CSV import — planned by lib/costing/misc-plan.ts. A file that replaces live prices needs confirm_replace. */
 export const bulkMiscCostSchema = z.object({
   action: z.literal("bulk"),
-  rows: z.array(z.record(z.string(), z.string())),
+  rows: miscBulkRows,
+  confirm_replace: z.boolean().optional(),
+})
+
+/** Upload preview: the same plan, nothing staged. */
+export const checkMiscCostSchema = z.object({
+  action: z.literal("check_duplicates"),
+  rows: miscBulkRows,
 })
 
 export const miscCostActionSchema = z.discriminatedUnion("action", [
   createMiscCostSchema,
   updateMiscCostSchema,
   bulkMiscCostSchema,
+  checkMiscCostSchema,
 ])
 
 export type CreateMiscCost = z.infer<typeof createMiscCostSchema>

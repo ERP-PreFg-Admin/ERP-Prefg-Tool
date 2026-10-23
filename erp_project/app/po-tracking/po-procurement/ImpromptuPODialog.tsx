@@ -203,8 +203,8 @@ export default function ImpromptuPODialog({
               value={form.sku_code}
               onChange={(v) => set("sku_code", v)}
               getValue={(s) => s.sku_code}
-              getLabel={(s) => `${s.sku_code} — ${s.name}${s.status !== "active" ? ` [${s.status.replace(/_/g, " ")}]` : ""}`}
-              searchKeys={["sku_code", "name"]}
+              getLabel={(s) => `${s.sku_code} — ${s.supply_name?.trim() || s.name}${s.status !== "active" ? ` [${s.status.replace(/_/g, " ")}]` : ""}`}
+              searchKeys={["sku_code", "supply_name", "name"]}
               placeholder="Search SKU code or name…"
             />
             {errors.sku_code && <p className="text-xs text-destructive">{errors.sku_code}</p>}

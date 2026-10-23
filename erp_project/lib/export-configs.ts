@@ -311,7 +311,6 @@ export const MISC_COST_CURRENT_RATES_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "type",           label: "Type",           format: (v) => MISC_COST_TYPE_LABEL[String(v)] ?? String(v) },
   { key: "sku_code",       label: "SKU Code",       type: "text"   },
   { key: "sku_name",       label: "SKU Name",       type: "text"   },
-  { key: "bom_code",       label: "Recipe Code",       type: "text"   },
   {
     // Mixed unit column (currency amount for jw/shrink/shipper, percentage for
     // rm_loss/pm_loss) — left as "text" so both render as the format() string below

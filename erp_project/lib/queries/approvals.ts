@@ -110,13 +110,11 @@ export const entityLabelSql: Record<string, string> = {
     LEFT JOIN master_skus s ON s.id = b.sku_id
     WHERE b.id = ? LIMIT 1
   `,
-  // entity_id is the bom_misc row. `bom_id` is deliberately still spelled that
-  // way — bom_misc is the one table the recipe rename never touched.
+  // entity_id is the bom_misc row, keyed on its SKU.
   MFG_MISC: `
     SELECT s.sku_code AS code, s.name, m.code AS secondary_code, m.name AS secondary_name
     FROM bom_misc bm
-    JOIN master_recipe b ON b.id = bm.bom_id
-    LEFT JOIN master_skus s ON s.id = b.sku_id
+    LEFT JOIN master_skus s ON s.id = bm.sku_id
     JOIN master_mfgs m ON m.id = bm.mfg_id
     WHERE bm.id = ? LIMIT 1
   `,

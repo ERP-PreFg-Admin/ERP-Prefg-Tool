@@ -323,50 +323,49 @@ export const manufacturingSql = {
   // rm_loss/pm_loss hold a wastage PERCENTAGE in the same `cost` column
   // jw/shrink/shipper use for an absolute currency amount.
   //
-  // `bom_misc.bom_id` kept its old name through the recipe rename — it is the
-  // one table that was never renamed. Every one of these SELECTs therefore
-  // aliases it to `recipe_id`, because all the TS row types and every caller
-  // key on `recipe_id`. Do not drop the alias: `timedQuery<T>`/`query<T>` are
-  // unchecked casts, so a bare `bom_id` compiles fine and then reads back
-  // `undefined` at runtime — which silently zeroed JW/Shrink/Shipper/Wastage
-  // on the Agreed Final Costing page and in the PO rate quote.
+  // Keyed on (mfg_id, sku_id, type) since prisma/alter_bom_misc_sku_id.sql; bom_id
+  // is legacy and no longer written. Superseded prices are kept as status='archived' rows.
 
-  /** All JW/Shrink/Shipper/Wastage lines for one manufacturer — the client toggles between types. Params: [mfg_id] */
+  /** All JW/Shrink/Shipper/Wastage lines for one manufacturer, every status — the client splits Active / Archive. Params: [mfg_id] */
   selectMiscByMfg: `
     SELECT
-      bm.id, bm.bom_id AS recipe_id, bm.mfg_id, bm.type, bm.cost,
+      bm.id, bm.sku_id, bm.mfg_id, bm.type, bm.cost,
       bm.effective_from, bm.effective_till, bm.status,
-      b.bom_code, sk.sku_code, sk.name AS sku_name
+      sk.sku_code, sk.name AS sku_name
     FROM bom_misc bm
-    INNER JOIN master_recipe  b  ON b.id  = bm.bom_id
-    LEFT  JOIN master_skus sk ON sk.id = b.sku_id
-    -- Every type, not a hand-listed subset: utility and margin were added to
-    -- bom_misc_type later and the old list silently hid them, so 21 live rows
-    -- priced into costing while the screen that manages them showed nothing.
+    INNER JOIN master_skus sk ON sk.id = bm.sku_id
     WHERE bm.mfg_id = ?
-    ORDER BY sk.sku_code ASC, bm.type ASC
+    ORDER BY sk.sku_code ASC, bm.type ASC, bm.status = 'archived' ASC, bm.effective_from DESC
   `,
 
   /** Current (active) JW/Shrink/Shipper/Wastage lines for one manufacturer, across all types — for the "Download CSV/Excel" export. Params: [mfg_id] */
   selectMiscCurrentRatesByMfg: `
     SELECT
-      bm.type, b.bom_code, sk.sku_code, sk.name AS sku_name,
+      bm.type, sk.sku_code, sk.name AS sku_name,
       bm.cost, bm.effective_from, bm.effective_till, bm.status
     FROM bom_misc bm
-    INNER JOIN master_recipe  b  ON b.id  = bm.bom_id
-    LEFT  JOIN master_skus sk ON sk.id = b.sku_id
+    INNER JOIN master_skus sk ON sk.id = bm.sku_id
     WHERE bm.mfg_id = ? AND bm.status = 'active'
     ORDER BY bm.type ASC, sk.sku_code ASC
   `,
 
-  /** SKU/Recipe options scoped to lines this manufacturer already produces (for the JW/Shrink/Shipper/Wastage "Add" dialog). Params: [mfg_id] */
-  selectMfgLineOptions: `
-    SELECT DISTINCT mbm.recipe_id AS id, b.bom_code, sk.sku_code, sk.name AS sku_name
+  /** SKUs this manufacturer has a production line for — the misc-cost Add dialog and the bulk check. Params: [mfg_id] */
+  selectMfgSkuOptions: `
+    SELECT DISTINCT sk.id, sk.sku_code, sk.name AS sku_name
     FROM master_recipe_mfg mbm
-    INNER JOIN master_recipe  b  ON b.id  = mbm.recipe_id
-    LEFT  JOIN master_skus sk ON sk.id = b.sku_id
+    INNER JOIN master_recipe b  ON b.id  = mbm.recipe_id
+    INNER JOIN master_skus   sk ON sk.id = b.sku_id
     WHERE mbm.mfg_id = ?
     ORDER BY sk.sku_code ASC
+  `,
+
+  /** Live (active / in_review) misc lines for one manufacturer, dates as text — the bulk planner's view. Params: [mfg_id] */
+  selectLiveMiscByMfg: `
+    SELECT id, sku_id, type, status, cost,
+           DATE_FORMAT(effective_from, '%Y-%m-%d') AS effective_from,
+           DATE_FORMAT(effective_till, '%Y-%m-%d') AS effective_till
+    FROM bom_misc
+    WHERE mfg_id = ? AND status IN ('active', 'in_review')
   `,
 
   /**
@@ -387,7 +386,7 @@ export const manufacturingSql = {
   /** SKU + orderable recipes for one manufacturer — feeds the Add PO dialog's
    *  SKU/Recipe picker. Params: [mfg_id] */
   selectOrderableBomsForMfg: `
-    SELECT sk.sku_code, sk.name AS sku_name, b.id AS recipe_id, b.bom_code, b.status AS bom_status,
+    SELECT sk.sku_code, COALESCE(NULLIF(TRIM(sk.supply_name), ''), sk.name) AS sku_name, b.id AS recipe_id, b.bom_code, b.status AS bom_status,
            ent.code AS entity_code
     FROM master_recipe_mfg mbm
     INNER JOIN master_recipe b  ON b.id  = mbm.recipe_id
@@ -404,23 +403,33 @@ export const manufacturingSql = {
     ORDER BY sk.sku_code ASC, (b.status = 'active') DESC, b.bom_code ASC
   `,
 
-  /** Resolve one SKU code to the recipe_id this manufacturer produces it under — for the bulk misc-cost CSV importer. Params: [mfg_id, sku_code] */
-  selectMfgLineBySkuCode: `
-    SELECT DISTINCT mbm.recipe_id AS id
+  /** Does this manufacturer have a production line for this SKU? Params: [mfg_id, sku_id] */
+  selectMfgMakesSku: `
+    SELECT 1 AS ok
     FROM master_recipe_mfg mbm
-    INNER JOIN master_recipe  b  ON b.id  = mbm.recipe_id
-    LEFT  JOIN master_skus sk ON sk.id = b.sku_id
-    WHERE mbm.mfg_id = ? AND sk.sku_code = ?
+    INNER JOIN master_recipe b ON b.id = mbm.recipe_id
+    WHERE mbm.mfg_id = ? AND b.sku_id = ?
     LIMIT 1
   `,
 
   /**
    * Insert a bom_misc cost line.
-   * Params: [recipe_id, mfg_id, type, cost, effective_from, effective_till, status]
+   * Params: [sku_id, mfg_id, type, cost, effective_from, effective_till, status]
    */
   insertMisc: `
-    INSERT INTO bom_misc (bom_id, mfg_id, type, cost, effective_from, effective_till, status)
+    INSERT INTO bom_misc (sku_id, mfg_id, type, cost, effective_from, effective_till, status)
     VALUES (?, ?, ?, ?, ?, ?, ?)
+  `,
+
+  /**
+   * Keep a line's current price as an 'archived' row before it is overwritten.
+   * Its window ends where the new price starts. Params: [new_effective_from, new_effective_from, id]
+   */
+  archiveMiscPrice: `
+    INSERT INTO bom_misc (bom_id, sku_id, mfg_id, type, cost, effective_from, effective_till, status)
+    SELECT bom_id, sku_id, mfg_id, type, cost, effective_from,
+           COALESCE(LEAST(effective_till, ?), ?), 'archived'
+    FROM bom_misc WHERE id = ?
   `,
 
   /**
@@ -435,12 +444,12 @@ export const manufacturingSql = {
 
   /** Fetch a single bom_misc line by id. Params: [id] */
   selectMiscLineById: `
-    SELECT id, bom_id AS recipe_id, mfg_id, type FROM bom_misc WHERE id = ? LIMIT 1
+    SELECT id, sku_id, mfg_id, type, status FROM bom_misc WHERE id = ? LIMIT 1
   `,
 
   /** Full bom_misc row — the approval flow diffs against these fields. Params: [id] */
   selectMiscFullById: `
-    SELECT id, bom_id AS recipe_id, mfg_id, type, cost, effective_from, effective_till, status
+    SELECT id, sku_id, mfg_id, type, cost, effective_from, effective_till, status
     FROM bom_misc WHERE id = ? LIMIT 1
   `,
 
@@ -460,28 +469,13 @@ export const manufacturingSql = {
   `,
 
   /**
-   * Is a misc line for this (mfg, recipe, type) already occupying the slot?
-   *
-   * ONE live line per (mfg, recipe, type). Costing folds these into a map keyed
-   * on recipe_id + type with no ORDER BY, so a second row means whichever one
-   * MySQL happens to return last silently wins. Nothing in the schema enforces
-   * it — bom_misc has no unique index on the triple — so both doors that can
-   * create a line, the create-misc route and mfgMiscBulkHandler, ask this first.
-   *
-   * `active` and `in_review` only: inactive / discontinued / rejected lines
-   * price nothing, so re-adding over one of those is how a cost is legitimately
-   * brought back. Widened from an in_review-only check, which stopped a second
-   * PENDING line and let a second ACTIVE one straight through.
-   *
-   * The bulk handler gets in-file duplicates free: its inserts land in the same
-   * open transaction, so a repeat of the same SKU + type later in the CSV sees
-   * the row the earlier one wrote.
-   *
-   * Params: [mfg_id, recipe_id, type]
+   * Another live (active / in_review) line in this (mfg, SKU, type) slot, other than `id`.
+   * uq_bom_misc_live_slot enforces one; this lets the routes answer 409 instead of a 500.
+   * Params: [mfg_id, sku_id, type, exclude_id (0 for none)]
    */
   selectLiveMiscFor: `
     SELECT id, status FROM bom_misc
-    WHERE mfg_id = ? AND bom_id = ? AND type = ? AND status IN ('active', 'in_review')
+    WHERE mfg_id = ? AND sku_id = ? AND type = ? AND status IN ('active', 'in_review') AND id <> ?
     LIMIT 1
   `,
 
@@ -662,8 +656,12 @@ export const manufacturingSql = {
    * month the data was loaded, so the filter simply deleted JW, shrink, shipper
    * and margin from any older invoice and reported the remainder as the rate.
    */
+  // Misc cost is per SKU; it is fanned out to every recipe of that SKU so callers keep their recipe-keyed maps.
   selectMiscCostsByMfg: `
-    SELECT bom_id AS recipe_id, type, cost FROM bom_misc WHERE mfg_id = ? AND status = 'active'
+    SELECT b.id AS recipe_id, bm.type, bm.cost
+    FROM bom_misc bm
+    INNER JOIN master_recipe b ON b.sku_id = bm.sku_id
+    WHERE bm.mfg_id = ? AND bm.status = 'active'
   `,
 
   /**

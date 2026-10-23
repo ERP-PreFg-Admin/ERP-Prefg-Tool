@@ -41,6 +41,7 @@ export function CsvImportDialog({
   enableDuplicateCheck,
   checkValidRowsOnly,
   requireAllValid,
+  confirmReplace,
 }: {
   /** Singular label, e.g. "SKU". */
   entityLabel: string
@@ -64,6 +65,8 @@ export function CsvImportDialog({
    *  partial upload of just the valid rows. Defaults to false (existing
    *  behavior: valid rows upload, invalid rows are silently excluded). */
   requireAllValid?: boolean
+  /** A file whose edit rows overwrite live values: Upload asks twice, then posts `confirm_replace: true`. */
+  confirmReplace?: { subject: string }
 }) {
   const cols = csvFields(fields)
   const plural = entityLabelPlural ?? `${entityLabel}s`
@@ -85,6 +88,9 @@ export function CsvImportDialog({
   const blockedByInvalid = !!requireAllValid && invalid.length > 0
   const editRows = rows.filter((r) => r._edit)
   const newRows = rows.filter((r) => !r._edit)
+  const [confirmStep, setConfirmStep] = useState<0 | 1 | 2>(0)
+  const replacing = confirmReplace ? valid.filter((r) => r._edit) : []
+  const subjects = (n: number) => `${n} ${confirmReplace?.subject ?? "value"}${n !== 1 ? "s" : ""}`
 
   const requiredKeys = cols.filter((f) => f.required).map((f) => f.key)
   const optionalKeys = cols.filter((f) => !f.required).map((f) => f.key)
@@ -323,7 +329,11 @@ export function CsvImportDialog({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // _info is display-only and an array — a strict rows schema rejects it.
-        body: JSON.stringify({ action: "bulk", rows: valid.map(({ _info, ...r }) => r) }),
+        body: JSON.stringify({
+          action: "bulk",
+          rows: valid.map(({ _info, ...r }) => r),
+          ...(replacing.length > 0 ? { confirm_replace: true } : {}),
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Upload failed")
@@ -632,8 +642,8 @@ export function CsvImportDialog({
               Cancel
             </Button>
             <Button
-              disabled={valid.length === 0 || loading || parsingExcel || blockedByInvalid}
-              onClick={handleUpload}
+              disabled={valid.length === 0 || loading || parsingExcel || blockedByInvalid || (!!confirmReplace && checkingDuplicates)}
+              onClick={() => (replacing.length > 0 ? setConfirmStep(1) : handleUpload())}
             >
               {loading
                 ? "Uploading…"
@@ -642,6 +652,55 @@ export function CsvImportDialog({
                 : valid.length > 0
                 ? `Upload ${valid.length} ${valid.length !== 1 ? plural : entityLabel}`
                 : "Upload"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmStep === 1} onOpenChange={(o) => { if (!o) setConfirmStep(0) }}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{subjects(replacing.length)} will be replaced</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[50vh] overflow-y-auto rounded-lg border border-border">
+            <table className="w-full text-xs">
+              <tbody>
+                {replacing.map((row, i) => (
+                  <tr key={i} className="border-b border-border last:border-0 align-top">
+                    <td className="px-3 py-1.5 font-mono">{row._edit?.code}</td>
+                    <td className="px-3 py-1.5">
+                      {row._edit?.changes.map((c, j) => (
+                        <div key={j}>
+                          <span className="font-medium">{c.label}:</span>{" "}
+                          <span className="line-through text-muted-foreground/60">{c.before}</span> → {c.after}
+                        </div>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmStep(0)}>Cancel</Button>
+            <Button onClick={() => setConfirmStep(2)}>Continue</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmStep === 2} onOpenChange={(o) => { if (!o) setConfirmStep(0) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirm again</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {subjects(replacing.length)} will be replaced once this upload is approved.
+            The current values will be kept in the Archive.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmStep(1)}>Go back</Button>
+            <Button variant="destructive" onClick={() => { setConfirmStep(0); handleUpload() }}>
+              Replace {subjects(replacing.length)}
             </Button>
           </DialogFooter>
         </DialogContent>

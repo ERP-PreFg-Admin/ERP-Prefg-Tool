@@ -40,7 +40,9 @@ model approvals {
 
 model bom_misc {
   id             Int              @id @default(autoincrement())
-  bom_id         Int
+  bom_id         Int?
+  // Keys the line since alter_bom_misc_sku_id.sql; FK fk_bom_misc_sku and the live-slot UNIQUE live in the SQL only.
+  sku_id         Int
   mfg_id         Int
   type           bom_misc_type
   cost           Decimal?         @db.Decimal(12, 4)
@@ -48,11 +50,12 @@ model bom_misc {
   effective_till DateTime?        @db.Date
   last_updated   DateTime?        @default(now()) @db.Timestamp(0)
   status         bom_misc_status? @default(active)
-  bom            master_bom       @relation(fields: [bom_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "bom_misc_ibfk_1")
+  bom            master_bom?      @relation(fields: [bom_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "bom_misc_ibfk_1")
   mfgs           master_mfgs      @relation(fields: [mfg_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "bom_misc_ibfk_2")
 
   @@index([bom_id], map: "bom_id")
   @@index([mfg_id], map: "mfg_id")
+  @@index([mfg_id, sku_id, type], map: "idx_bom_misc_mfg_sku_type")
 }
 
 model purchase_orders {
@@ -1174,6 +1177,7 @@ enum bom_misc_status {
   discontinued
   in_review
   rejected
+  archived
 }
 
 enum purchase_orders_status {

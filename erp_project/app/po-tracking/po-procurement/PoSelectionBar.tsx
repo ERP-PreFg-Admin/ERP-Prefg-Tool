@@ -11,7 +11,7 @@ import { Callout } from "@/components/ui/callout"
 import { useToast } from "@/components/ui/toast"
 import type { BadgeVariant, PoRow } from "./po-types"
 import { STATUS_CONFIG } from "./po-types"
-import { fmtInt } from "./po-utils"
+import { fmtInt, fmtRate } from "./po-utils"
 
 type MfgGroup = { mfg_id: number; mfg_code: string; mfg_name: string; rows: PoRow[] }
 
@@ -110,21 +110,26 @@ function ReviewSendDialog({
                   const status = r.status ?? "draft"
                   const cfg = STATUS_CONFIG[status] ?? { label: status, variant: "secondary" as BadgeVariant }
                   return (
-                    <div key={r.id} className="flex items-center justify-between px-3 py-1.5">
-                      <span>
-                        {r.po_no} — {r.sku_code}
+                    <div key={r.id} className="flex items-center justify-between gap-3 px-3 py-1.5">
+                      <div className="min-w-0">
+                        <div className="truncate">
+                          <span className="font-medium">{r.po_no}</span> — {r.sku_code}
+                        </div>
                         {/* Named here too: this is the last screen before the
                             mail goes out, and a split is the one line whose
                             quantity won't match any order the manufacturer
                             already holds. */}
                         {r.reference_po && (
-                          <span className="ml-1.5 text-[11px] text-violet-600 dark:text-violet-400">
+                          <div className="text-[11px] text-violet-600 dark:text-violet-400 truncate">
                             split of {r.reference_po}
-                          </span>
+                          </div>
                         )}
-                      </span>
-                      <span className="flex items-center gap-2">
-                        <span className="tabular-nums text-muted-foreground">Qty {fmtInt(r.qty)}</span>
+                        <div className="text-[11px] text-muted-foreground truncate">
+                          {r.destination || "No location"} · Rate {fmtRate(r.unit_price)}
+                        </div>
+                      </div>
+                      <span className="flex items-center gap-2 shrink-0">
+                        <span className="tabular-nums text-muted-foreground whitespace-nowrap">Qty {fmtInt(r.qty)}</span>
                         <Badge variant={cfg.variant}>{cfg.label}</Badge>
                       </span>
                     </div>

@@ -614,14 +614,13 @@ export type MiscCostType =
 /** `bom_misc` joined with `master_recipe`/`master_skus`. Used by the JW/Shrink Wrap/Shipper/Wastage tabs. */
 export type MiscCostLine = {
   id: number
-  recipe_id: number
+  sku_id: number
   mfg_id: number
   type: MiscCostType
   cost: number | null
   effective_from: string | null
   effective_till: string | null
   status: string
-  bom_code: string | null
   sku_code: string | null
   sku_name: string | null
 }
@@ -629,7 +628,6 @@ export type MiscCostLine = {
 /** Current (active) bom_misc line across all 4 cost types for one manufacturer — used by the misc-costs CSV/Excel export. */
 export type MiscCostCurrentRateRow = {
   type: MiscCostType
-  bom_code: string | null
   sku_code: string | null
   sku_name: string | null
   cost: string | null
@@ -638,8 +636,8 @@ export type MiscCostCurrentRateRow = {
   status: string
 }
 
-/** SKU/Recipe option scoped to lines a manufacturer already produces — for the JW/Shrink/Shipper "Add" dialog. */
-export type MfgLineOption = { id: number; bom_code: string | null; sku_code: string | null; sku_name: string | null }
+/** A SKU the manufacturer has a production line for — for the misc-cost "Add" dialog. `id` is master_skus.id. */
+export type MfgLineOption = { id: number; sku_code: string | null; sku_name: string | null }
 
 /** `cost_master_rm_mfg` joined with `master_rm`/`master_vendors` for one manufacturer. Used by the RM Vendor tab. */
 export type RmVendorRow = {

@@ -86,7 +86,7 @@ export type PoRow = {
   edit_pending: number | null
 }
 
-export type SkuOption       = { id: number; sku_code: string; name: string; status: string; entity_code: string | null; filling?: number | null }
+export type SkuOption       = { id: number; sku_code: string; name: string; supply_name?: string | null; status: string; entity_code: string | null; filling?: number | null }
 /** `registered_name` is the legal entity from details_mfg — the name a supplier
  *  invoice header prints. matchMfg matches on it ahead of `name`. */
 export type MfgOption       = { id: number; code: string; name: string; registered_name: string | null }

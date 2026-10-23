@@ -151,6 +151,9 @@ const MASTERS_ONLY = `AND NOT ${IS_SPLIT_CHILD}`
 // A PO awaiting (or refused) its approval isn't an order yet: hidden from PO Tracking until approved.
 const APPROVED_ONLY = `AND COALESCE(po.status, '') NOT IN ('draft', 'rejected')`
 
+// The SKU name a PO shows: Supply Name when set, else the Uniware name.
+const PO_SKU_NAME = `COALESCE(NULLIF(TRIM(sk.supply_name), ''), sk.name)`
+
 // Per-user entity scope, appended to both shared WHERE fragments so the PO
 // list, the COUNT, the tab badges, the summary cards and the CSV/Excel export
 // are all scoped by one edit. Warehouse compares against `destination`, which
@@ -169,7 +172,7 @@ const SCOPE_WHERE = `
 // "received" tab can also pull in short-closed POs and the PO Inwarding page's
 // "open" tab can span raised/punched/partially_received — see statusMatchValues().
 const FULL_WHERE = `
-  WHERE (? IS NULL OR po.po_no LIKE ? OR m.code LIKE ? OR m.name LIKE ? OR po.sku_code LIKE ? OR sk.name LIKE ?)
+  WHERE (? IS NULL OR po.po_no LIKE ? OR m.code LIKE ? OR m.name LIKE ? OR po.sku_code LIKE ? OR CONCAT_WS(' ', sk.name, sk.supply_name) LIKE ?)
     AND (? IS NULL OR ${DISPLAY_STATUS_EXPR} IN (?, ?, ?))
     AND (? IS NULL OR m.code         = ?)
     AND (? IS NULL OR po.po_type     = ?)
@@ -188,7 +191,7 @@ const FULL_WHERE = `
 // dateFrom×2, dateTo×2, sku×2, destination×2, destEntity×2, excludeInward]
 // Used by statusCounts and summaryStats which ignore the status filter.
 const SUMMARY_WHERE = `
-  WHERE (? IS NULL OR po.po_no LIKE ? OR m.code LIKE ? OR m.name LIKE ? OR po.sku_code LIKE ? OR sk.name LIKE ?)
+  WHERE (? IS NULL OR po.po_no LIKE ? OR m.code LIKE ? OR m.name LIKE ? OR po.sku_code LIKE ? OR CONCAT_WS(' ', sk.name, sk.supply_name) LIKE ?)
     AND (? IS NULL OR m.code         = ?)
     AND (? IS NULL OR po.po_type     = ?)
     AND (? IS NULL OR po.date       >= ?)
@@ -247,7 +250,7 @@ const SELECT_COLS = `
     ${PENDING_SPLIT_EXPR}        AS pending_split_qty,
     ${RECEIVED_TOTAL_EXPR}       AS received_total,
     m.id   AS mfg_id, m.code AS mfg_code, m.name AS mfg_name,
-    sk.name   AS sku_name, sk.status AS sku_status,
+    ${PO_SKU_NAME} AS sku_name, sk.status AS sku_status,
     ent.code  AS entity_code,
     dwe.facility_code AS dest_facility_code,
     -- What Unicommerce last reported for this PO's mirror. A scalar subquery
@@ -596,7 +599,7 @@ export const purchaseOrdersSql = {
    *  narrows the destination dropdown to that entity's facilities. NULL for an
    *  unattributed SKU or a brand with no entity, which means "don't narrow". */
   skuOptions: `
-    SELECT sk.id, sk.sku_code, sk.name, sk.status, ent.code AS entity_code, sk.filling
+    SELECT sk.id, sk.sku_code, sk.name, sk.supply_name, sk.status, ent.code AS entity_code, sk.filling
     FROM master_skus sk
     LEFT JOIN master_brand  br  ON br.id  = sk.brand_id
     LEFT JOIN master_entity ent ON ent.id = br.entity_id
@@ -980,7 +983,7 @@ export const purchaseOrdersSql = {
    * Parameters: [mfg_id]
    */
   openForReceiveByMfg: `
-    SELECT po.id, po.po_no, po.date, po.sku_code, sk.name AS sku_name, po.reference_po,
+    SELECT po.id, po.po_no, po.date, po.sku_code, ${PO_SKU_NAME} AS sku_name, po.reference_po,
            COALESCE(pb.bom_code, lb.bom_codes) AS bom_code,
            COALESCE(lb.live_bom_count, 0) AS live_bom_count,
            po.qty, COALESCE(po.received_qty, 0) AS received_qty,
@@ -1022,7 +1025,7 @@ export const purchaseOrdersSql = {
    * unallocated drop out — the children carry the balance. Parameters: [mfg_id]
    */
   ongoingByMfg: `
-    SELECT po.id, po.po_no, po.sku_code, sk.name AS sku_name, po.reference_po,
+    SELECT po.id, po.po_no, po.sku_code, ${PO_SKU_NAME} AS sku_name, po.reference_po,
            po.remarks, po.unit_price,
            ${UNALLOCATED_QTY_EXPR} AS qty,
            po.expected_on, ${EFFECTIVE_STATUS_EXPR} AS status
@@ -1055,7 +1058,7 @@ export const purchaseOrdersSql = {
     const placeholders = Array(count).fill("?").join(",")
     return `
       SELECT po.id, po.po_no, po.mfg_id, m.code AS mfg_code, m.name AS mfg_name,
-             po.sku_code, sk.name AS sku_name, po.qty, po.unit_price, po.destination, po.remarks,
+             po.sku_code, ${PO_SKU_NAME} AS sku_name, po.qty, po.unit_price, po.destination, po.remarks,
              -- Cancelling a PO cancels what has NOT arrived, so the mail quotes
              -- qty minus receipts, not the whole order.
              ${RECEIVED_TOTAL_EXPR} AS received_qty,
@@ -1116,7 +1119,7 @@ export const purchaseOrdersSql = {
       -- document exists to name it (lib/pdf/split-po-document.tsx); the ordinary
       -- document ignores it.
       po.reference_po,
-      sk.name            AS sku_name,
+      ${PO_SKU_NAME}     AS sku_name,
       m.code             AS mfg_code,
       m.name             AS mfg_name,
       -- The manufacturing unit that makes this SKU, else the manufacturer's own row.
@@ -1166,7 +1169,7 @@ lowOpenByMfg: `
   SELECT po.sku_code,
          m.code                                            AS mfg_code,
          m.name                                            AS mfg_name,
-         sk.name                                           AS sku_name,
+         ${PO_SKU_NAME}                                    AS sku_name,
          SUM(GREATEST(po.qty - ${RECEIVED_TOTAL_EXPR}, 0)) AS open_qty,
          COUNT(*)                                          AS open_pos,
          MIN(po.expected_on)                               AS earliest_expected,
@@ -1186,7 +1189,7 @@ lowOpenByMfg: `
   WHERE COALESCE(po.po_type, '') <> 'inward'
     AND ${DISPLAY_STATUS_EXPR} IN ('raised', 'punched', 'partially_received')
     ${MASTERS_ONLY}
-  GROUP BY po.sku_code, po.mfg_id, m.code, m.name, sk.name
+  GROUP BY po.sku_code, po.mfg_id, m.code, m.name, sk.name, sk.supply_name
   HAVING open_qty > 0 AND open_qty < ?
   ORDER BY open_qty ASC
 `,
@@ -1196,7 +1199,7 @@ lowOpenByMfg: `
    *  Params: [oldDays, ...scopeParams(mfgIds), ...scopeParams(warehouseNames), ...scopeParams(brandIds)] */
   openQtyBySkuMfg: `
     SELECT po.sku_code,
-           MAX(sk.name)                                      AS sku_name,
+           MAX(${PO_SKU_NAME})                               AS sku_name,
            m.id AS mfg_id, m.code AS mfg_code, m.name AS mfg_name,
            SUM(GREATEST(po.qty - ${RECEIVED_TOTAL_EXPR}, 0)) AS open_qty,
            COUNT(*)                                          AS open_pos,
@@ -1216,7 +1219,7 @@ lowOpenByMfg: `
    *  Params: [mfgId, sku×2, olderThanDays×2, ...scope (6)] — sku / olderThanDays null = any. */
   openPosForSkuMfg: `
     SELECT po.id, po.po_no, po.date, DATEDIFF(${SQL_TODAY_IST}, po.date) AS age_days,
-           po.sku_code, sk.name AS sku_name, m.code AS mfg_code, m.name AS mfg_name,
+           po.sku_code, ${PO_SKU_NAME} AS sku_name, m.code AS mfg_code, m.name AS mfg_name,
            po.qty, ${RECEIVED_TOTAL_EXPR} AS received_total,
            GREATEST(po.qty - ${RECEIVED_TOTAL_EXPR}, 0) AS open_qty,
            ${DISPLAY_STATUS_EXPR} AS status, po.expected_on, po.destination

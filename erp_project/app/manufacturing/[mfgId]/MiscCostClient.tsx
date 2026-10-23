@@ -71,8 +71,7 @@ export default function MiscCostClient({
     if (!q) return inView
     return inView.filter((r) =>
       (r.sku_code ?? "").toLowerCase().includes(q) ||
-      (r.sku_name ?? "").toLowerCase().includes(q) ||
-      (r.bom_code ?? "").toLowerCase().includes(q)
+      (r.sku_name ?? "").toLowerCase().includes(q)
     )
   }, [rows, search, view])
 
@@ -106,6 +105,9 @@ export default function MiscCostClient({
             templateFilename="misc_cost_bulk_template.csv"
             fields={bulkFields}
             onSuccess={() => router.refresh()}
+            enableDuplicateCheck
+            requireAllValid
+            confirmReplace={{ subject: "live price" }}
           />
           <DownloadButton
             endpoint={`/api/v1/manufacturing/${mfgId}/misc-costs/export`}
@@ -118,7 +120,7 @@ export default function MiscCostClient({
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search SKU, Recipe…"
+          placeholder="Search SKU…"
           className="sm:max-w-xs"
         />
         <div className="inline-flex h-9 items-center rounded-lg border border-border p-0.5">
@@ -151,7 +153,6 @@ export default function MiscCostClient({
               <TableHeader>
                 <TableRow>
                   <TableHead>SKU</TableHead>
-                  <TableHead>Recipe Code</TableHead>
                   <TableHead>SKU Name</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead className="text-right">Cost / %</TableHead>
@@ -164,7 +165,7 @@ export default function MiscCostClient({
               <TableBody>
                 {pageRows.length === 0 ? (
                   <TableEmpty
-                    colSpan={9}
+                    colSpan={8}
                     action={
                       search.trim() ? (
                         <Button variant="outline" size="sm" onClick={() => setSearch("")}>
@@ -184,14 +185,13 @@ export default function MiscCostClient({
                     {search.trim()
                       ? "No cost lines match this search."
                       : view === "archive"
-                      ? "Nothing archived — no cost line here has been rejected or retired."
+                      ? "Nothing archived — no cost line here has been replaced, rejected or retired."
                       : "No Job Work, Shrink Wrap, Shipper, Utility, Margin or Wastage % recorded yet."}
                   </TableEmpty>
                 ) : (
                   pageRows.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell className="font-mono">{r.sku_code ?? "—"}</TableCell>
-                      <TableCell className="font-mono">{r.bom_code ?? "—"}</TableCell>
                       <TableCell className="max-w-40 truncate">{r.sku_name ?? "—"}</TableCell>
                       <TableCell>{TYPE_LABEL[r.type]}</TableCell>
                       <TableCell className="text-right tabular-nums">
@@ -219,8 +219,12 @@ export default function MiscCostClient({
                             first. */}
                         <button
                           onClick={() => { if (guard("edit a misc cost")) setDialogTarget(r) }}
-                          disabled={r.status === "in_review"}
-                          title={r.status === "in_review" ? "Awaiting approval — cannot be edited until approved or rejected" : undefined}
+                          disabled={r.status === "in_review" || r.status === "archived"}
+                          title={
+                            r.status === "in_review" ? "Awaiting approval — cannot be edited until approved or rejected"
+                            : r.status === "archived" ? "A replaced price, kept as a record — edit the live line instead"
+                            : undefined
+                          }
                           className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                         >
                           <Pencil className="h-3 w-3" /> Edit

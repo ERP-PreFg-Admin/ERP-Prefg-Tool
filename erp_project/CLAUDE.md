@@ -150,13 +150,14 @@ details_sku.curr_bom_id       details_cost_ext_fixed.bom_detail_id
 users read became "Recipe". Renaming the code needs a matching
 `UPDATE approvals SET module = …` or those rows stop resolving to a handler.
 
-> ⚠️ **`bom_misc` was never renamed** — it still carries its old name *and* its
-> old `bom_id` column, and that is now deliberate. Every SELECT on it must
-> therefore alias `bom_id AS recipe_id`, because all the TS row types and every
-> caller key on `recipe_id`. `query<T>`/`timedQuery<T>` are unchecked casts, so a
-> bare `bom_id` compiles, type-checks, lints — and then reads back `undefined`,
-> which silently zeroed JW/Shrink/Shipper/Wastage on Agreed Final Costing and in
-> the PO rate quote.
+> ⚠️ **`bom_misc` is keyed on `(mfg_id, sku_id, type)`, not the recipe**
+> (`prisma/alter_bom_misc_sku_id.sql`, 2026-10). Its old `bom_id` column is kept,
+> nullable and no longer written. `selectMiscCostsByMfg` fans each SKU's cost out to
+> every recipe of that SKU, so the costing callers keep their recipe-keyed maps and
+> a new recipe version is priced automatically. `uq_bom_misc_live_slot` allows one
+> `active`/`in_review` line per slot. A replaced price is kept as a
+> `status = 'archived'` row in the same table, so **every read must filter status**.
+> Bulk rows are planned by `lib/costing/misc-plan.ts` at preview, submit and approval.
 
 ### `un_code_mfg_sku_wh_map` — the grain is not what the name says
 
@@ -448,7 +449,7 @@ try {
 | `PO_EDIT` | Edit of a Draft PO (raised, unmailed) | `purchase_orders` qty/amounts/expected_on/destination/remarks + one `history_pos` row per field and an `edit_reason` row. Reject leaves the PO untouched |
 | `BOM` | Recipe master (module code stays `BOM`) | `master_recipe` + `details_recipe` (+ `history_recipe` snapshot) |
 | `INVOICE_REVERT` | Soft revert of an inwarded invoice | `invoice_mfg` (stamps `reverted_at` / `reverted_by` / `revert_approved_by` / `revert_approval_id` / `revert_reason`), procurement `purchase_orders.received_qty` reversed + `history_pos`, inward POs → status `reverted` (a terminal value, like `cancelled`). **Nothing is deleted.** The request writes only the approval; the handler re-plans from live rows, refuses self-approval, and runs a live Uniware GRN search. Logic in `lib/invoice/invoice-revert.ts`; see `docs/invoice-revert-plan.md` |
-| `MFG_MISC` | Per-SKU JW / Shrink Wrap / Shipper / Wastage % | `bom_misc`. **New lines are INSERTed straight away as `in_review`** rather than staged — there is no prior row to lock. Safe because every costing query filters `status = 'active'`, so an `in_review` row prices nothing. Approve flips it to the submitted status (default `active`); reject sets `rejected`. |
+| `MFG_MISC` | Per-SKU JW / Shrink Wrap / Shipper / Wastage % | `bom_misc`. **New lines are INSERTed straight away as `in_review`** rather than staged — there is no prior row to lock. Safe because every costing query filters `status = 'active'`, so an `in_review` row prices nothing. Approve flips it to the submitted status (default `active`); reject sets `rejected`. An approved cost change first copies the old price to an `archived` row. |
 | `*_BULK` | One approval per uploaded CSV file | `PO_BULK`, `VENDOR_BULK`, `MFG_BULK`, `RM_BULK`, `PM_BULK`, `RM_VRM_BULK`, `RM_RATE_BULK`, `PM_VRM_BULK`, `PM_RATE_BULK`, `BOM_BULK`, `MFG_MISC_BULK` — the file is staged in S3 and inserted row-by-row in `applyAndArchive` on approval. `entity_id` is the uploader's user id, except `MFG_MISC_BULK` which passes the **manufacturer** (`stageBulkUploadApproval`'s optional `entityId`), since the handler needs it to resolve each row's `sku_code` |
 
 **Bulk uploads split by row kind.** `lib/master-routes/edit-match.ts` matches a CSV row to an existing record by **exact business-code match** (`code`, `rm_code`, `pm_code`); no code ⇒ new record. New-record rows go into the one `*_BULK` approval; rows recognised as edits are submitted **immediately as their own single-entity approval** (`RM_MAT`, `MFG`, …) so they get a real field-level diff and lock the entity to `in_review`.

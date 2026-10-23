@@ -11,7 +11,7 @@ import { useToast } from "@/components/ui/toast"
 import { Select } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import type { PoRow, SplitRow, WarehouseOption } from "./po-types"
-import { fmtInt, num, warehousesForEntity, warehouseLabel, warehouseKey } from "./po-utils"
+import { fmtInt, fmtRate, num, warehousesForEntity, warehouseLabel, warehouseKey } from "./po-utils"
 
 export default function SplitPODialog({
   open, onClose, po, warehouseOptions, onSplit,
@@ -140,6 +140,9 @@ export default function SplitPODialog({
               {/* Total is the ordered quantity and stays that way — the split
                   is recorded on the new POs, not by editing this one. */}
               <div className="mt-3 space-y-1 text-[11px] font-mono text-muted-foreground">
+                <div className="flex justify-between gap-2"><span>SKU</span><span className="text-foreground truncate" title={po.sku_code ?? ""}>{po.sku_code ?? "—"}</span></div>
+                <div className="flex justify-between gap-2"><span>Rate</span><span className="text-foreground">{fmtRate(po.unit_price)}</span></div>
+                <div className="flex justify-between gap-2"><span>Location</span><span className="text-foreground truncate" title={po.destination ?? ""}>{po.destination || "—"}</span></div>
                 <div className="flex justify-between"><span>Ordered</span><span className="text-foreground">{fmtInt(total)}</span></div>
                 <div className="flex justify-between"><span>Received</span><span className="text-foreground">{fmtInt(received)}</span></div>
                 {allocated > 0 && (

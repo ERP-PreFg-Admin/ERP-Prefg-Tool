@@ -10,17 +10,20 @@
 // which is what lets a brand-new cost line be inserted up front and simply
 // flipped to active on approval, instead of being staged somewhere.
 
-import type { RowDataPacket } from "mysql2/promise"
-import { normalizeDateCell } from "@/lib/date"
+import type { PoolConnection, RowDataPacket } from "mysql2/promise"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
-import { miscCostTypeSchema, parseMiscCostTypeCell } from "@/lib/validation/manufacturing"
 import { parseS3Import } from "@/lib/import-s3"
+import { isoDate } from "@/lib/date"
 import { STATUS } from "@/lib/constants"
-import { type ModuleHandler, buildFieldMap, s3KeyOf } from "./types"
+import {
+  planMiscRows, describePlanErrors, updatesMissingRemarks, staleSinceUpload, loadMiscPlanContext as loadWith,
+  type MiscPlanRow,
+} from "@/lib/costing/misc-plan"
+import { type ModuleHandler, buildFieldMap, s3KeyOf, supersededOn } from "./types"
 
 type MiscRow = RowDataPacket & {
   id: number
-  recipe_id: number
+  sku_id: number
   mfg_id: number
   type: string
   cost: string | null
@@ -40,12 +43,21 @@ export const mfgMiscHandler: ModuleHandler = {
     const cur = rows[0]
     if (!cur) throw new Error(`Misc. cost line ${entityId} not found`)
 
+    // An edit that changes the cost keeps the old price as an archived row first.
+    // A create has empty old values on every item and nothing to archive.
+    const isCreate = items.every((i) => !i.old_value)
+    const newFrom = fieldMap.effective_from ?? cur.effective_from
+    if (!isCreate && fieldMap.cost !== undefined && Number(fieldMap.cost) !== Number(cur.cost)) {
+      const till = supersededOn(isoDate(newFrom) || undefined)
+      await conn.execute(manufacturingSql.archiveMiscPrice, [till, till, entityId])
+    }
+
     // A create carries no prior values to write back — the row was inserted with
     // its final figures and only ever needed the status flip. An edit carries
     // the changed fields; anything absent keeps the live value.
     await conn.execute(manufacturingSql.applyMiscEdit, [
       fieldMap.cost !== undefined ? Number(fieldMap.cost) : cur.cost,
-      fieldMap.effective_from ?? cur.effective_from,
+      newFrom,
       fieldMap.effective_till !== undefined ? (fieldMap.effective_till || null) : cur.effective_till,
       entityId,
     ])
@@ -58,8 +70,27 @@ export const mfgMiscHandler: ModuleHandler = {
   },
 }
 
+export const loadMiscPlanContext = (conn: PoolConnection, mfgId: number) =>
+  loadWith(async (sql, params) => (await conn.query<RowDataPacket[]>(sql, params))[0], mfgId)
+
+/** Writes a clean plan: new lines inserted active; a price update archives the live price, then overwrites it in place. */
+export async function applyMiscPlan(conn: PoolConnection, mfgId: number, plan: MiscPlanRow[]) {
+  for (const p of plan) {
+    if (p.kind === "new") {
+      await conn.execute(manufacturingSql.insertMisc, [
+        p.sku_id, mfgId, p.type, p.cost, p.effective_from, p.effective_till, STATUS.ACTIVE,
+      ])
+    } else if (p.kind === "update") {
+      const till = supersededOn(p.effective_from)
+      await conn.execute(manufacturingSql.archiveMiscPrice, [till, till, p.live.id])
+      await conn.execute(manufacturingSql.applyMiscEdit, [p.cost, p.effective_from, p.effective_till, p.live.id])
+    }
+  }
+}
+
 /**
- * MFG_MISC_BULK — the CSV staged in S3 is inserted row-by-row here, on approval.
+ * MFG_MISC_BULK — the CSV staged in S3 is applied here, on approval: new lines inserted,
+ * price updates archived then overwritten.
  *
  * The manufacturer is not per-row: every bom_misc row belongs to one mfg, which
  * the uploading page already knows, so it is stored on the approval as its
@@ -72,72 +103,26 @@ export const mfgMiscBulkHandler: ModuleHandler = {
 
   async applyAndArchive(conn, entityId, items) {
     const rows = await parseS3Import(s3KeyOf(items, "MFG_MISC_BULK"))
-    const skipped: string[] = []
 
-    for (const [i, row] of rows.entries()) {
-      const line = i + 2 // +1 for the header row, +1 for 1-based numbering
-      const skuCode = String(row.sku_code ?? "").trim()
-      // Case-folded — see parseMiscCostTypeCell for why that is load-bearing.
-      const typeParsed = parseMiscCostTypeCell(row.type)
-      const cost = Number(row.cost)
-      const effectiveFrom = normalizeDateCell(row.effective_from)
+    // Re-planned against live data: the upload checked the same rules, but the slot may have moved since.
+    const { skus, live } = await loadMiscPlanContext(conn, entityId)
+    const plan = planMiscRows(rows, skus, live)
+    const skipped = [
+      ...describePlanErrors(plan),
+      ...updatesMissingRemarks(plan),
+      ...plan.flatMap((p, i) => {
+        const stale = staleSinceUpload(p, rows[i])
+        return stale ? [`row ${p.line} (${p.sku_code}): ${stale}`] : []
+      }),
+    ]
 
-      if (!skuCode) { skipped.push(`row ${line}: missing sku_code`); continue }
-      if (!typeParsed.success) {
-        skipped.push(`row ${line} (${skuCode}): type "${row.type ?? ""}" must be one of ${miscCostTypeSchema.options.join(", ")}`)
-        continue
-      }
-      if (!Number.isFinite(cost)) { skipped.push(`row ${line} (${skuCode}): cost "${row.cost ?? ""}" is not a number`); continue }
-      if (!effectiveFrom) { skipped.push(`row ${line} (${skuCode}): missing effective_from`); continue }
+    if (skipped.length === 0) await applyMiscPlan(conn, entityId, plan)
 
-      // Same SKU-code → recipe_id resolution the direct route used, so a CSV
-      // that imported before behaves identically now that it needs approval.
-      const [lineRows] = await conn.execute<(RowDataPacket & { id: number })[]>(
-        manufacturingSql.selectMfgLineBySkuCode, [entityId, skuCode]
-      )
-      const recipeId = lineRows[0]?.id
-      if (!recipeId) {
-        skipped.push(`row ${line}: ${skuCode} has no recipe linked to this manufacturer`)
-        continue
-      }
-
-      // Same one-live-line-per-(mfg, recipe, type) rule the create-misc route
-      // enforces. Catches BOTH a repeat inside this file and a re-upload of a
-      // file already applied — approvals 198 and 199 in prod were the identical
-      // 49 rows, and with no guard that is two active rows for every cost.
-      const [existing] = await conn.execute<(RowDataPacket & { id: number; status: string })[]>(
-        manufacturingSql.selectLiveMiscFor, [entityId, recipeId, typeParsed.data]
-      )
-      if (existing[0]) {
-        skipped.push(
-          `row ${line}: ${skuCode} already has ${existing[0].status === STATUS.IN_REVIEW ? "a pending" : "an active"} ` +
-          `${typeParsed.data} cost — edit that line instead of adding a second one`
-        )
-        continue
-      }
-
-      await conn.execute(manufacturingSql.insertMisc, [
-        recipeId,
-        entityId,
-        typeParsed.data,
-        cost,
-        effectiveFrom,
-        normalizeDateCell(row.effective_till) || null,
-        STATUS.ACTIVE,
-      ])
-    }
-
-    // ALL OR NOTHING, LOUDLY. Every one of the `continue`s above used to be
-    // silent: the approval committed, reported success, and wrote nothing.
-    // These figures feed Total Costing, so a half-applied file is worse than a
-    // refused one — throwing rolls the whole batch back (the route owns the
-    // transaction) and leaves the approval pending, so the file can be fixed
-    // and re-uploaded. The full list reaches the logs via the route's
-    // logger.error; the approver sees the count and the first few reasons.
+    // All or nothing: throwing rolls the batch back (the route owns the transaction) and leaves the approval pending.
     if (skipped.length > 0) {
       const shown = skipped.slice(0, 5).join("; ")
       throw new Error(
-        `${skipped.length} of ${rows.length} rows could not be applied, so none were. ` +
+        `${skipped.length} problem${skipped.length !== 1 ? "s" : ""} in this ${rows.length}-row file, so nothing was applied. ` +
         `Fix the file and upload it again — ${shown}` +
         (skipped.length > 5 ? `; …and ${skipped.length - 5} more` : "")
       )

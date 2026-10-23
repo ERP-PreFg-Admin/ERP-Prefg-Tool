@@ -41,6 +41,8 @@ The DDL must reach an environment **before** the code that SELECTs the column. `
 
 ## Step 5 — PO raising on Supply Name
 
+**Status (2026-10-23):** built, not yet committed. `PO_SKU_NAME` in `lib/queries/purchase-orders.ts` is the one expression. Search uses `CONCAT_WS(' ', sk.name, sk.supply_name) LIKE ?`, so the placeholder count is unchanged. Every changed query was run on dev. Dev has no Supply Names, so only the fallback has been seen so far. A mailed PO's PDF is frozen in S3, so only new POs print the Supply Name. The `supply_name` column is on prod too (applied by Ajay, confirmed 2026-10-23).
+
 The PO never stores the name. Every PDF and mail joins `master_skus` live. So the change is a column swap in the queries, with **nothing to backfill**, and it also applies to already-raised POs the next time their PDF or mail is generated. **Uniware gets only the SKU code**, so its payload doesn't change.
 
 Swap: `sk.name AS sku_name` → `COALESCE(NULLIF(TRIM(sk.supply_name), ''), sk.name) AS sku_name`. A SKU nobody has filled in yet keeps printing its Uniware name rather than a blank.
