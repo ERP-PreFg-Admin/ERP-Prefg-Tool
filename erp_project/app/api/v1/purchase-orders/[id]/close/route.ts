@@ -47,6 +47,7 @@ export const POST = withGateway({
     }
 
     await execute(purchaseOrdersSql.setStatus, ["short_closed", poId])
+    await execute(purchaseOrdersSql.insertPoHistory, [poId, po.po_no, "update", "status", po.status, "short_closed", null, userId])
     logger.info({ ...logCtx, poId, po_no: po.po_no, previousStatus: po.status, message: "PO manually short_closed" })
     recordProcessedEvent("PO_CLOSE", eventId, { poId, poNo: po.po_no, userId })
     return NextResponse.json({ ok: true })

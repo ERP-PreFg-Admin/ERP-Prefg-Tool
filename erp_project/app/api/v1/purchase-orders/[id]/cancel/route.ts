@@ -50,6 +50,7 @@ export const POST = withGateway({
       }
 
       await execute(purchaseOrdersSql.setStatus, ["cancelled", poId])
+      await execute(purchaseOrdersSql.insertPoHistory, [poId, po.po_no, "update", "status", po.status, "cancelled", null, userId])
       logger.info({ ...ctx, eventId, poId, po_no: po.po_no, previousStatus: po.status, message: "PO manually cancelled" })
       recordProcessedEvent("PO_CANCEL", eventId, { poId, poNo: po.po_no, userId })
 

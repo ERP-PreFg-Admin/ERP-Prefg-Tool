@@ -19,7 +19,7 @@ import PoDataRow from "./PoDataRow"
 import { type MenuAction } from "./PoActionMenu"
 import { poTolerance, SortHead, type SortDir } from "./PoTableCells"
 
-// Columns always present: PO No., Manufacturer, PO Date, Exp. Dispatch, SKU,
+// Columns always present: PO No., Manufacturer, PO Date, Exp. Dispatch (Last Updated on FG), SKU,
 // Recipe, PO Qty, Received, Rate, Amount, Destination, Status, Actions.
 //
 // Everything else is conditional and counted in `columnCount` below: the
@@ -225,6 +225,7 @@ export default function PoTable({
     showInvoiceColumns,
     selectedPoId,
     onOpenInwarding,
+    onOpenHistory: setHistoryTarget,
   }
 
   return (
@@ -252,7 +253,10 @@ export default function PoTable({
                   <SortHead colKey="status"       {...sh}>Status</SortHead>
                   <SortHead colKey="mfg_name"     {...sh}>Manufacturer</SortHead>
                   <SortHead colKey="date"         {...sh}>PO Date</SortHead>
-                  <SortHead colKey="expected_on"  {...sh}>Exp. Dispatch</SortHead>
+                  {/* FG shows when the PO last changed and how; the inwarding desk keeps its dispatch date. */}
+                  {inwardingMode
+                    ? <SortHead colKey="expected_on" {...sh}>Exp. Dispatch</SortHead>
+                    : <SortHead colKey="last_updated" {...sh}>Last Updated</SortHead>}
                   <SortHead colKey="sku_code"     {...sh}>SKU</SortHead>
                   <TableHead>Recipe</TableHead>
                   <SortHead colKey="qty"          {...sh} className="text-right">PO Qty</SortHead>

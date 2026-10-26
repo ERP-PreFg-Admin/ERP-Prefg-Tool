@@ -84,6 +84,10 @@ export type PoRow = {
   po_raised_by: number | null
   /** 1 while a PO_EDIT approval is pending: reads Draft + In Review, can't be mailed. */
   edit_pending: number | null
+  /** Inputs to lastPoUpdate (lib/po/po-last-update.ts) — the FG "Last updated" column. */
+  hist_at: string | null
+  hist_kind: string | null
+  approved_at: string | null
 }
 
 export type SkuOption       = { id: number; sku_code: string; name: string; supply_name?: string | null; status: string; entity_code: string | null; filling?: number | null }

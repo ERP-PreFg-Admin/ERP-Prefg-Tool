@@ -18,6 +18,8 @@ import { STATUS_CONFIG } from "./po-types"
 import { fmtDate, fmtInt, fmtMoney, fmtRate, isImpromptu, num } from "./po-utils"
 import { ProgressCell } from "./PoTableCells"
 import { isSpecialPoType, isUnapprovedPo, SPECIAL_PO_LABEL } from "@/lib/po/po-rules"
+import { lastPoUpdate } from "@/lib/po/po-last-update"
+import { formatDateTimeIST } from "@/lib/date"
 import PoActionMenu, { type MenuAction } from "./PoActionMenu"
 import UniwareStatusBadge from "../UniwareStatusBadge"
 
@@ -39,6 +41,7 @@ export default function PoDataRow({
   showInvoiceColumns,
   selectedPoId,
   onOpenInwarding,
+  onOpenHistory,
 }: {
   r: PoRow
   /** Renders as a split child: indented, no split action, muted. */
@@ -61,6 +64,7 @@ export default function PoDataRow({
   showInvoiceColumns: boolean
   selectedPoId: number | null
   onOpenInwarding?: (row: PoRow) => void
+  onOpenHistory?: (row: PoRow) => void
 }) {
   const status = r.status ?? "draft"
   const cfg    = STATUS_CONFIG[status] ?? { label: status, variant: "secondary" as BadgeVariant }
@@ -89,6 +93,7 @@ export default function PoDataRow({
   const editPending = Number(r.edit_pending) === 1
   const unapproved = isUnapprovedPo(r.raw_status)
   const selectDisabled = isSplitMaster || editPending || unapproved
+  const lastUpdate = inwardingMode ? null : lastPoUpdate(r)
 
   return (
     <TableRow
@@ -204,7 +209,31 @@ export default function PoDataRow({
       </TableCell>
 
       <TableCell className="text-xs tabular-nums text-muted-foreground whitespace-nowrap">{fmtDate(r.date)}</TableCell>
-      <TableCell className="text-xs tabular-nums text-muted-foreground whitespace-nowrap">{fmtDate(r.expected_on)}</TableCell>
+      {inwardingMode ? (
+        <TableCell className="text-xs tabular-nums text-muted-foreground whitespace-nowrap">{fmtDate(r.expected_on)}</TableCell>
+      ) : (
+        <TableCell className="whitespace-nowrap">
+          {lastUpdate && onOpenHistory ? (
+            // Opens the same History dialog as the row menu.
+            <button
+              type="button"
+              onClick={() => onOpenHistory(r)}
+              title="View this PO's history"
+              className="group rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <div className="text-xs font-medium underline-offset-2 group-hover:underline">{lastUpdate.label}</div>
+              <div className="text-[11px] tabular-nums text-muted-foreground">{formatDateTimeIST(lastUpdate.at)}</div>
+            </button>
+          ) : lastUpdate ? (
+            <>
+              <div className="text-xs font-medium">{lastUpdate.label}</div>
+              <div className="text-[11px] tabular-nums text-muted-foreground">{formatDateTimeIST(lastUpdate.at)}</div>
+            </>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          )}
+        </TableCell>
+      )}
 
       {/* SKU — status shown as a dot so the column carries both without a badge's width */}
       <TableCell className="whitespace-nowrap">

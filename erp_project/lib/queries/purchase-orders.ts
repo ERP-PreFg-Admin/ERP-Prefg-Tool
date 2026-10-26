@@ -265,6 +265,11 @@ const SELECT_COLS = `
     (SELECT raised_by FROM approvals WHERE module = 'PO' AND entity_id = po.id ORDER BY id DESC LIMIT 1) AS po_raised_by,
     -- An edit awaiting approval: the row reads Draft + In Review and can't be mailed.
     EXISTS (SELECT 1 FROM approvals WHERE module = 'PO_EDIT' AND entity_id = po.id AND status = 'pending') AS edit_pending,
+    -- "Last updated": newest history row and the PO approval; lastPoUpdate (lib/po/po-last-update.ts) picks.
+    (SELECT h.changed_on FROM history_pos h WHERE h.po_id = po.id ORDER BY h.changed_on DESC, h.id DESC LIMIT 1) AS hist_at,
+    (SELECT CONCAT_WS('|', h.action_type, COALESCE(h.field_name, ''), COALESCE(h.new_value, ''))
+       FROM history_pos h WHERE h.po_id = po.id ORDER BY h.changed_on DESC, h.id DESC LIMIT 1) AS hist_kind,
+    (SELECT approved_on FROM approvals WHERE module = 'PO' AND entity_id = po.id AND status = 'approved' ORDER BY id DESC LIMIT 1) AS approved_at,
     (SELECT email FROM details_mfg WHERE mfg_id = m.id LIMIT 1) AS mfg_email
 `
 
@@ -279,6 +284,11 @@ const SAFE_SORT_COLS: Record<string, string> = {
   total_amount: "po.total_amount",
   expected_on:  "po.expected_on",
   status:       `(${DISPLAY_STATUS_EXPR})`,
+  // Same three timestamps lastPoUpdate picks from; GREATEST is NULL if any arg is, hence the floors.
+  last_updated: `GREATEST(
+    COALESCE((SELECT MAX(h.changed_on) FROM history_pos h WHERE h.po_id = po.id), '1000-01-01'),
+    COALESCE((SELECT MAX(a.approved_on) FROM approvals a WHERE a.module = 'PO' AND a.entity_id = po.id AND a.status = 'approved'), '1000-01-01'),
+    COALESCE(po.email_sent_at, '1000-01-01'))`,
 }
 
 export const purchaseOrdersSql = {
