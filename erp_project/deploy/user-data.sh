@@ -117,7 +117,7 @@ cat > /etc/nginx/conf.d/00-erp-limits.conf <<'LIMITSCONF'
 # several MB each, while every text-layer invoice is well under 1m and sailed
 # through. It read as a parser bug because the only suppliers it hit were the
 # ones that need OCR anyway.
-client_max_body_size 10m;
+client_max_body_size 200m;
 
 # Match the parse route's own budget (maxDuration = 300 in
 # app/api/v2/purchase-orders/invoice/parse/route.ts). Nanonets OCR runs 50-70s
