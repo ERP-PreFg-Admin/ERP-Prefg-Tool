@@ -53,7 +53,7 @@ export default function GatepassClient({
 }) {
   const [from, setFrom] = useState(defaultDay)
   const [to, setTo] = useState(defaultDay)
-  const [selected, setSelected] = useState<Set<string>>(new Set([defaultFacility]))
+  const [selected, setSelected] = useState<Set<string>>(new Set(defaultFacility ? [defaultFacility] : []))
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<Record<string, Progress>>({})
   const [rows, setRows] = useState<PackageTypeRow[]>([])

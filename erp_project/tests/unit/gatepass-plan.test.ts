@@ -17,7 +17,7 @@ import {
   packageTypeItems, planFacility, blockers, buildGatepassPayload, gatepassReference, DEFAULT_TYPE,
 } from "../../lib/gatepass/plan"
 import { parseExportRows, summariseRows } from "../../lib/gatepass/summary"
-import { TO_PARTY, toPartyFor, FACILITIES } from "../../lib/gatepass/facilities"
+import { toPartyFor } from "../../lib/gatepass/facilities"
 
 const APR_2026 = new Date("2026-06-01T00:00:00Z")   // FY 2627
 const MAR_2026 = new Date("2026-03-15T00:00:00Z")   // FY 2526
@@ -74,13 +74,6 @@ test("splitting the shapes the live tenant actually carries", () => {
   assert.equal(splitGatepassCode("SR/H/AMD/2526/OUT/GP0014").prefix, "SR/H/AMD/2526/OUT/GP")
   // A code that is all letters has no counter at all.
   assert.equal(splitGatepassCode("NOSEQ").seq, null)
-})
-
-test("every mapped facility is one the page can actually select", () => {
-  for (const f of Object.keys(CITY)) {
-    assert.ok((FACILITIES as readonly string[]).includes(f),
-      `${f} has a city but is not selectable — one of the two lists is wrong`)
-  }
 })
 
 test("no two facilities share a gatepass series", () => {
@@ -205,12 +198,6 @@ test("the party is per facility — one value for all is what broke Ahmedabad", 
     assert.equal(toPartyFor(f), null, `${f} must not borrow another site's party`)
   }
   assert.equal(toPartyFor("NOT_A_FACILITY"), null)
-})
-
-test("every configured party belongs to a selectable facility", () => {
-  for (const f of Object.keys(TO_PARTY)) {
-    assert.ok((FACILITIES as readonly string[]).includes(f), `${f} is not selectable`)
-  }
 })
 
 test("an empty toParty is still refused rather than sent blank", () => {

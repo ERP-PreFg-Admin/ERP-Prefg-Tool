@@ -301,4 +301,16 @@ export const warehouse = {
 
   /** Parameters: [status, id] */
   setStatus: `UPDATE master_warehouse SET status = ? WHERE id = ?`,
+
+  /** GatePass roster: active CWH facilities at active warehouses. Inactive is usually set on the
+   *  warehouse, not the facility row; dwe.type is mostly NULL, so it falls back to the warehouse's. */
+  selectGatepassFacilities: `
+    SELECT DISTINCT dwe.facility_code
+    FROM details_warehouse_entity dwe
+    JOIN master_warehouse w ON w.id = dwe.warehouse_id
+    WHERE dwe.status = 'active' AND w.status = 'active'
+      AND COALESCE(dwe.type, w.type) = 'CWH'
+      AND TRIM(COALESCE(dwe.facility_code, '')) <> ''
+    ORDER BY dwe.facility_code
+  `,
 }

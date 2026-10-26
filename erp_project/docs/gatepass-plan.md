@@ -63,6 +63,11 @@ plainly rather than buried: this list and Warehouse Master can drift, and nothin
 will notice. That is the accepted trade for v1 — a comment on the constant names the
 upgrade path.
 
+> **Superseded 2026-10-26:** the roster is now read from Warehouse Master
+> (`warehouse.selectGatepassFacilities` via `lib/services/gatepass.ts`). It covers active
+> facilities at active warehouses, CWH only. Both routes check the code against it
+> (400 `unknown_facility`). `facilities.ts` keeps only `DEFAULT_FACILITY` and `TO_PARTY`.
+
 ---
 
 ## 2. The business rule — the only part worth a test

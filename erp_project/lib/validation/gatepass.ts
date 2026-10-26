@@ -1,5 +1,4 @@
 import { z } from "zod"
-import { isKnownFacility } from "@/lib/gatepass/facilities"
 import { rangeDays } from "@/lib/gatepass/summary"
 
 /**
@@ -18,19 +17,14 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be YYYY-MM-DD")
 /**
  * One facility's summary over an inclusive IST date range of INVOICE dates.
  *
- * `facility_code` is checked against the roster HERE rather than in the handler:
- * with no DB behind this screen, `lib/gatepass/facilities.ts` is the only thing
- * that defines a valid facility, and without this the route would forward any
- * string a caller invented to Unicommerce under our credentials.
+ * `facility_code` is checked against Warehouse Master by the route (assertGatepassFacility).
  *
  * Dates stay STRINGS all the way down, deliberately not `z.coerce.date()` — a
  * Date would be parsed as UTC and land the IST window 05:30 early, which is the
  * exact mistake istRangeMs exists to prevent.
  */
 export const gatepassSummarySchema = z.object({
-  facility_code: z.string().trim().refine(isKnownFacility, {
-    message: "Unknown facility — see lib/gatepass/facilities.ts",
-  }),
+  facility_code: z.string().trim().min(1, "Pick a facility"),
   from: isoDate,
   to: isoDate,
 }).superRefine((v, ctx) => {
@@ -64,9 +58,7 @@ export type GatepassSummaryInput = z.infer<typeof gatepassSummarySchema>
  * and quantity, and this is the one route where that would print on a document.
  */
 export const gatepassCreateSchema = z.object({
-  facility_code: z.string().trim().refine(isKnownFacility, {
-    message: "Unknown facility — see lib/gatepass/facilities.ts",
-  }),
+  facility_code: z.string().trim().min(1, "Pick a facility"),
   from: isoDate,
   to: isoDate,
   confirm: z.literal(true, { message: "This creates a real gatepass; confirm must be true." }),

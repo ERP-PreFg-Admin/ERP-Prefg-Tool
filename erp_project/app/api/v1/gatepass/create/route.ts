@@ -29,6 +29,7 @@
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { gatepassCreateSchema } from "@/lib/validation/gatepass"
+import { assertGatepassFacility } from "@/lib/services/gatepass"
 import { fetchFacilitySummary } from "@/lib/gatepass/fetch"
 import { createFacilityGatepass, type CreateStep } from "@/lib/gatepass/create"
 import { blockers } from "@/lib/gatepass/plan"
@@ -52,6 +53,7 @@ export const POST = withGateway({
   rateLimit: { limit: 60, windowMs: 10 * 60_000, concurrency: 1, enforceConcurrency: true },
   handler: async ({ body, ctx }) => {
     const { facility_code: facility, from, to } = body
+    await assertGatepassFacility(facility)
 
     const encoder = new TextEncoder()
     const stream = new ReadableStream({

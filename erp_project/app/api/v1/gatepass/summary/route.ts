@@ -30,10 +30,11 @@
 // request — the other nineteen still have to run.
 //
 // ── Nothing is stored ────────────────────────────────────────────────────────
-// No table, no query, not even a read. The export is summarised in memory and
-// dropped. See the header of lib/gatepass/fetch.ts.
+// No table written; the only read is the facility roster check. The export is summarised in
+// memory and dropped. See the header of lib/gatepass/fetch.ts.
 
 import { withGateway } from "@/lib/gateway/with-gateway"
+import { assertGatepassFacility } from "@/lib/services/gatepass"
 import { gatepassSummarySchema } from "@/lib/validation/gatepass"
 import { fetchFacilitySummary, type GatepassStep } from "@/lib/gatepass/fetch"
 import logger from "@/lib/logger"
@@ -44,12 +45,11 @@ export const maxDuration = 300
 export const POST = withGateway({
   schema: gatepassSummarySchema,
   access: { pageSlug: "/gatepass", level: "viewer" },
-  // No `scope`: this route is not addressed by an entity id, and with the DB
-  // deliberately out of the picture a facility code cannot be resolved to a
-  // warehouse name to check it against. /gatepass is gated by page permission
-  // alone — see the ponytail note in lib/gatepass/facilities.ts.
+  // No `scope`: not addressed by an entity id. /gatepass is gated by page permission;
+  // the facility must be an active CWH facility in Warehouse Master.
   handler: async ({ body, ctx }) => {
     const { facility_code: facility, from, to } = body
+    await assertGatepassFacility(facility)
 
     const encoder = new TextEncoder()
     const stream = new ReadableStream({
