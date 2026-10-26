@@ -28,6 +28,7 @@ import { ToggleButton } from "@/components/ui/toggle-button"
 import { Card, CardContent } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Select } from "@/components/ui/select"
+import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { RecordCountHeader } from "@/components/masters/RecordCountHeader"
 import { Label } from "@/components/ui/label"
 import {
@@ -85,7 +86,17 @@ export const statusBadge = (row: AnyRow) => (
   </Badge>
 )
 
-type AddWizardProps = { vendors: Vendor[]; manufacturers: Mfg[]; onSuccess: () => void }
+type CodeOption = { code: string; name: string }
+const CODE_SEARCH_KEYS = ["code", "name"]
+
+// Leading "" option is the "All" choice; codes are deduped so list keys stay unique.
+function codeOptions(list: { code: string; name: string }[], allLabel: string): CodeOption[] {
+  const seen = new Map<string, CodeOption>()
+  for (const r of list) if (r.code && !seen.has(r.code)) seen.set(r.code, { code: r.code, name: r.name })
+  return [{ code: "", name: allLabel }, ...[...seen.values()].sort((a, b) => a.code.localeCompare(b.code))]
+}
+
+type AddWizardProps ={ vendors: Vendor[]; manufacturers: Mfg[]; onSuccess: () => void }
 
 type BulkImportConfig = {
   endpoint: string
@@ -313,6 +324,10 @@ export function MaterialRateTable({
     currentMfgEffectiveFrom,
   ].filter(Boolean).length
 
+  const vendorOptions = useMemo(() => codeOptions(vendors, "All Vendors"), [vendors])
+  const mfgOptions    = useMemo(() => codeOptions(manufacturers, "All Manufacturers"), [manufacturers])
+  const codeLabel = (o: CodeOption) => (o.code ? `${o.code} — ${o.name}` : o.name)
+
   const inputCls = "h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:[color-scheme:dark]"
 
   return (
@@ -435,11 +450,14 @@ export function MaterialRateTable({
 
                   <div className="grid gap-1.5">
                     <Label className="text-xs">Vendor Code</Label>
-                    <input
-                      type="text"
+                    <FuzzySelect
+                      options={vendorOptions}
                       value={localVendorCode}
-                      placeholder="e.g. VEN-001"
-                      onChange={(e) => setLocalVendorCode(e.target.value)}
+                      onChange={setLocalVendorCode}
+                      getLabel={codeLabel}
+                      getValue={(o) => o.code}
+                      searchKeys={CODE_SEARCH_KEYS}
+                      placeholder="All Vendors"
                       className={inputCls}
                     />
                   </div>
@@ -484,11 +502,14 @@ export function MaterialRateTable({
                 <>
                   <div className="grid gap-1.5">
                     <Label className="text-xs">MFG Code</Label>
-                    <input
-                      type="text"
+                    <FuzzySelect
+                      options={mfgOptions}
                       value={localMfgCode}
-                      placeholder="e.g. MFG-001"
-                      onChange={(e) => setLocalMfgCode(e.target.value)}
+                      onChange={setLocalMfgCode}
+                      getLabel={codeLabel}
+                      getValue={(o) => o.code}
+                      searchKeys={CODE_SEARCH_KEYS}
+                      placeholder="All Manufacturers"
                       className={inputCls}
                     />
                   </div>
