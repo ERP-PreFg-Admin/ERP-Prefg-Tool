@@ -9,6 +9,7 @@ export type ModuleKey =
   | "uniware"
   | "jobs"
   | "admin"
+  | "reports"
   | "other"
 
 export type ModuleDef = {
@@ -69,6 +70,12 @@ export const MODULES: readonly ModuleDef[] = [
     label: "Admin",
     paths: ["/api/v1/admin"],
     codes: ["ADMIN_*", "OBSERVABILITY"],
+  },
+  {
+    key: "reports",
+    label: "Reports",
+    paths: ["/api/v1/reports"],
+    codes: [],
   },
   { key: "other", label: "Other", paths: [], codes: [] },
 ]

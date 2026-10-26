@@ -24,12 +24,12 @@ import { SQL_TODAY_IST } from "@/lib/date"
 // po_type 'inward' is carved out: lib/invoice-inward.ts writes reference_po on
 // the inward PO it books against an existing order, which is a receipt record,
 // not a split. Those rows are deliberately untouched by all of this.
-const IS_SPLIT_CHILD = `(po.reference_po IS NOT NULL AND COALESCE(po.po_type, '') <> 'inward')`
+export const IS_SPLIT_CHILD = `(po.reference_po IS NOT NULL AND COALESCE(po.po_type, '') <> 'inward')`
 
 // One row per parent po_no, aggregating its live children. Cancelled children
 // are excluded throughout, which is what makes cancelling a split return its
 // quantity to the master's unallocated pool with no extra bookkeeping.
-const CHILD_AGG_JOIN = `
+export const CHILD_AGG_JOIN = `
   LEFT JOIN (
     SELECT c.reference_po,
            COUNT(*)                         AS child_count,
@@ -49,7 +49,7 @@ const CHILD_AGG_JOIN = `
 const ALLOCATED_QTY_EXPR = `LEAST(COALESCE(ch.split_qty, 0), po.qty)`
 
 // What the master has actually received — its own receipts plus its children's.
-const RECEIVED_TOTAL_EXPR = `(COALESCE(po.received_qty, 0) + COALESCE(ch.child_received_qty, 0))`
+export const RECEIVED_TOTAL_EXPR = `(COALESCE(po.received_qty, 0) + COALESCE(ch.child_received_qty, 0))`
 
 // Allocated but not yet inwarded: the amber part of the progress bar. Netting
 // off child receipts is what makes amber turn green as the splits arrive —
@@ -69,7 +69,7 @@ const UNALLOCATED_QTY_EXPR = `GREATEST(po.qty - ${ALLOCATED_QTY_EXPR} - COALESCE
 // This is the *operational* status: what the PO is doing physically. Goods
 // receipt and the invoice desk key off this one, so a missing notification
 // email can never block booking stock that has actually arrived.
-const EFFECTIVE_STATUS_EXPR = `
+export const EFFECTIVE_STATUS_EXPR = `
   CASE
     WHEN po.status IN ('cancelled', 'short_closed', 'received', 'reverted', 'discarded') THEN po.status
     WHEN po.qty > 0 AND ${RECEIVED_TOTAL_EXPR} >= po.qty THEN 'received'
@@ -122,7 +122,7 @@ const RECIPE_ID_FOR_LINE = `(
 // Inward POs are exempt: they're the invoice desk's record of goods that have
 // already shipped, there is no procurement mail to send for them, and their
 // own notification goes to the receiving warehouse (lib/invoice-inward.ts).
-const DISPLAY_STATUS_EXPR = `
+export const DISPLAY_STATUS_EXPR = `
   CASE
     WHEN (${EFFECTIVE_STATUS_EXPR}) = 'raised'
      AND po.email_sent_at IS NULL
@@ -146,13 +146,13 @@ const EXCLUDE_INWARD = `AND (? IS NULL OR COALESCE(po.po_type, '') <> 'inward')`
 // because there is no caller that wants them loose in the list. One fragment,
 // shared by both WHEREs, so the table, the COUNT behind pagination, the tab
 // badges, the summary cards and the CSV/Excel export all agree by construction.
-const MASTERS_ONLY = `AND NOT ${IS_SPLIT_CHILD}`
+export const MASTERS_ONLY = `AND NOT ${IS_SPLIT_CHILD}`
 
 // A PO awaiting (or refused) its approval isn't an order yet: hidden from PO Tracking until approved.
-const APPROVED_ONLY = `AND COALESCE(po.status, '') NOT IN ('draft', 'rejected')`
+export const APPROVED_ONLY = `AND COALESCE(po.status, '') NOT IN ('draft', 'rejected')`
 
 // The SKU name a PO shows: Supply Name when set, else the Uniware name.
-const PO_SKU_NAME = `COALESCE(NULLIF(TRIM(sk.supply_name), ''), sk.name)`
+export const PO_SKU_NAME = `COALESCE(NULLIF(TRIM(sk.supply_name), ''), sk.name)`
 
 // Per-user entity scope, appended to both shared WHERE fragments so the PO
 // list, the COUNT, the tab badges, the summary cards and the CSV/Excel export
@@ -160,7 +160,7 @@ const PO_SKU_NAME = `COALESCE(NULLIF(TRIM(sk.supply_name), ''), sk.name)`
 // holds master_warehouse.name (there is no FK) — lib/scope.ts resolves ids to
 // names for exactly this reason.
 // Params: scopeParams(mfgIds) then scopeParams(warehouseNames), i.e. 4 values and then brandIds - 6 values.
-const SCOPE_WHERE = `
+export const SCOPE_WHERE = `
     AND (? IS NULL OR po.mfg_id      IN (?))
     AND (? IS NULL OR po.destination IN (?))
     AND (? IS NULL OR sk.brand_id IS NULL OR sk.brand_id IN (?))`

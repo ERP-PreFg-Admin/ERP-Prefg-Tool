@@ -27,6 +27,11 @@ const EXEMPT = new Map<string, string>([
     "app/api/v1/admin/users/[id]/welcome/route.ts",
     "Users are not a scoped entity — the /admin editor gate is the whole rule, as on PATCH /admin/users.",
   ],
+  [
+    "app/api/v1/reports/[reportId]/export/route.ts",
+    "[reportId] names a report, not a record. Access is assertReportAccess (/reports + source page); " +
+      "every row is scoped inside the shared lib/services/reports/* read with getViewScope, as on the page.",
+  ],
 ])
 
 function routeFiles(dir: string): string[] {

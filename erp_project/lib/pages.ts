@@ -48,12 +48,14 @@ export const PAGES: readonly PageEntry[] = [
   { slug: "/gatepass",                       label: "GatePass",          section: "Production" },
   { slug: "/uniware",                        label: "Uniware Explorer",  section: "Production" },
 
+  // Each report also needs its source page (lib/reports/catalog.ts).
+  { slug: "/reports", label: "Reports", section: "Reports" },
+
   // Seeded in scripts/seed-permissions.ts but no pages exist yet.
   { slug: "/inventory",  label: "Inventory",            section: "Planned", nav: false },
   { slug: "/finance",    label: "Finance & Accounting", section: "Planned", nav: false },
   { slug: "/hr-payroll", label: "HR & Payroll",         section: "Planned", nav: false },
   { slug: "/sales-crm",  label: "Sales & CRM",          section: "Planned", nav: false },
-  { slug: "/reports",    label: "Reports & Analytics",  section: "Planned", nav: false },
   { slug: "/settings",   label: "Settings",             section: "Planned", nav: false },
 ] as const
 

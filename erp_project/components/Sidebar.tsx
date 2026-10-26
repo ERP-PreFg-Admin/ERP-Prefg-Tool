@@ -65,6 +65,7 @@ const NAV: NavItem[] = [
     ],
   },
   { label: "GatePass", href: "/gatepass", icon: Truck },
+  { label: "Reports", href: "/reports", icon: BarChart2 },
   // Developer-only, and HIDDEN rather than locked: only 'developer' holds a
   // /uniware row, and everyone else has no business knowing the screen exists.
   // See prisma/add_uniware_explorer_page.sql.
