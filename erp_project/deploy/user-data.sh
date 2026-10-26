@@ -11,6 +11,8 @@ SSM_PARAM_PATH="/erp/prod"
 IMAGE_TAG="latest"
 DOMAIN="erp.mcaffeine.com"
 CERTBOT_EMAIL="ajay.singh@mcaffeine.com"
+# Post-FG's prod CloudFront host; empty = no /postfg route (prod not wired yet).
+POSTFG_ORIGIN=""
 
 echo "== Installing Docker =="
 dnf update -y
@@ -82,6 +84,27 @@ systemctl enable nginx
 pip3 install certbot certbot-nginx
 ln -sf /usr/local/bin/certbot /usr/bin/certbot
 
+# Post-FG report uploads are large, so the 200m limit lives on this route only.
+POSTFG_LOCATION=""
+if [ -n "$POSTFG_ORIGIN" ]; then
+  POSTFG_LOCATION="
+    location /postfg/ {
+        resolver 169.254.169.253 valid=30s ipv6=off;
+        set \$postfg ${POSTFG_ORIGIN};
+        rewrite ^/postfg/(.*)\$ /\$1 break;
+        proxy_pass https://\$postfg;
+        proxy_ssl_server_name on;
+        proxy_ssl_name \$postfg;
+        proxy_set_header Host \$postfg;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        client_max_body_size 200m;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }"
+fi
+
 cat > /etc/nginx/conf.d/erp.conf <<NGINXCONF
 server {
     listen 80;
@@ -90,6 +113,7 @@ server {
     # erp-cron.timer curls 127.0.0.1:3000 directly, so this costs nothing and
     # keeps the route off the internet. The route still checks x-cron-key too.
     location /api/v1/cron { allow 127.0.0.1; deny all; }
+${POSTFG_LOCATION}
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -116,8 +140,8 @@ cat > /etc/nginx/conf.d/00-erp-limits.conf <<'LIMITSCONF'
 # silently 413s the SCANNED invoices (Anuspa, Yasharth) — those are page images
 # several MB each, while every text-layer invoice is well under 1m and sailed
 # through. It read as a parser bug because the only suppliers it hit were the
-# ones that need OCR anyway.
-client_max_body_size 200m;
+# ones that need OCR anyway. Post-FG's 200m is set on its /postfg location only.
+client_max_body_size 10m;
 
 # Match the parse route's own budget (maxDuration = 300 in
 # app/api/v2/purchase-orders/invoice/parse/route.ts). Nanonets OCR runs 50-70s
