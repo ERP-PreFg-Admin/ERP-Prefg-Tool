@@ -1,6 +1,6 @@
 "use client"
 
-import { Ban, FileText, History, PackageCheck, Pencil, XCircle } from "lucide-react"
+import { Ban, FileText, History, PackageCheck, Pencil, Trash2, XCircle } from "lucide-react"
 import { canDirectEditPo, isUnapprovedPo } from "@/lib/po/po-rules"
 import { Fragment, useState } from "react"
 import { useRouter } from "next/navigation"
@@ -14,6 +14,7 @@ import { num } from "./po-utils"
 import PoHistoryDialog from "./PoHistoryDialog"
 import ShortClosePODialog from "./ShortClosePODialog"
 import CancelPODialog from "./CancelPODialog"
+import DiscardPODialog from "./DiscardPODialog"
 import ReceivePODialog from "./ReceivePODialog"
 import PoDataRow from "./PoDataRow"
 import { type MenuAction } from "./PoActionMenu"
@@ -89,6 +90,7 @@ export default function PoTable({
   const router                                  = useRouter()
   const [shortCloseTarget, setShortCloseTarget] = useState<number | null>(null)
   const [cancelTarget, setCancelTarget]         = useState<number | null>(null)
+  const [discardTarget, setDiscardTarget]       = useState<PoRow | null>(null)
   const [receiveTarget, setReceiveTarget]       = useState<PoRow | null>(null)
   const [historyTarget, setHistoryTarget]       = useState<PoRow | null>(null)
   // Multi-open: comparing two splits means having both expanded at once.
@@ -121,7 +123,7 @@ export default function PoTable({
   // page, plus the children of the split ones. A split master is skipped —
   // mailing it means nothing, so ticking it would silently do nothing.
   // An edit awaiting approval, or a PO never approved, can't be mailed either, so select-all skips them too.
-  const mailable = (r: PoRow) => Number(r.edit_pending) !== 1 && !isUnapprovedPo(r.raw_status)
+  const mailable = (r: PoRow) => Number(r.edit_pending) !== 1 && !isUnapprovedPo(r.raw_status) && r.raw_status !== "discarded"
   const pageIds = [
     ...rows.filter((r) => Number(r.child_count) === 0 && mailable(r)).map((r) => r.id),
     ...rows.flatMap((r) => (childrenByParent[r.po_no] ?? []).filter(mailable).map((c) => c.id)),
@@ -145,6 +147,9 @@ export default function PoTable({
     // children can't be cancelled either: they'd point at a voided order.
     const canCancel     = !inwardingMode && ["raised", "punched"].includes(status)
       && receivedQty === 0 && allocatedQty === 0
+    // A Draft the manufacturer never saw is discarded, not cancelled. The route re-checks every rule.
+    const canDiscard    = !inwardingMode && status === "draft" && row.raw_status === "raised"
+      && row.po_type !== "inward" && !row.reference_po && Number(row.child_count) === 0 && receivedQty === 0
 
     // Every Draft row: a stored draft re-submits for approval (its raiser only); a raised
     // PO not yet mailed is edited in place. Same rule the PUT route re-checks.
@@ -208,6 +213,18 @@ export default function PoTable({
         icon:    <XCircle className="h-3.5 w-3.5" />,
         variant: "destructive",
         onClick: () => setCancelTarget(row.id),
+      })
+    }
+
+    if (canDiscard) {
+      const pending = Number(row.edit_pending) === 1
+      actions.push({
+        label:   "Discard Draft",
+        icon:    <Trash2 className="h-3.5 w-3.5" />,
+        variant: "destructive",
+        onClick: () => setDiscardTarget(row),
+        disabled: pending,
+        disabledReason: pending ? "An edit is awaiting approval — approve or reject it first" : undefined,
       })
     }
 
@@ -340,6 +357,12 @@ export default function PoTable({
         open={cancelTarget !== null}
         poId={cancelTarget ?? 0}
         onClose={() => setCancelTarget(null)}
+        onDone={() => router.refresh()}
+      />
+
+      <DiscardPODialog
+        po={discardTarget}
+        onClose={() => setDiscardTarget(null)}
         onDone={() => router.refresh()}
       />
 

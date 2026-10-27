@@ -53,8 +53,8 @@ test("lists keep reverted invoices and say so", () => {
 
 test("a reverted inward PO is terminal, never read back as received or counted as live", () => {
   // Inward POs carry received_qty = qty, so without this the quantity math would call it 'received'.
-  assert.match(flat(purchaseOrdersSql.summaryStats), /IN \('cancelled', 'short_closed', 'received', 'reverted'\) THEN po\.status/)
-  assert.match(flat(purchaseOrdersSql.summaryStats), /NOT IN \('draft', 'cancelled', 'reverted'\)/)
+  assert.match(flat(purchaseOrdersSql.summaryStats), /IN \('cancelled', 'short_closed', 'received', 'reverted', 'discarded'\) THEN po\.status/)
+  assert.match(flat(purchaseOrdersSql.summaryStats), /NOT IN \('draft', 'cancelled', 'reverted', 'discarded'\)/)
 })
 
 test("a revert's received_qty row is not a receipt for 'last receipt' purposes", () => {

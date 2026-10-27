@@ -146,6 +146,10 @@ export const POST = withGateway({
            po.expected_on, childStatus, destination || null, po.po_no, childType, po.recipe_id ?? null, mfg_id, po.sku_code]
         )
         const childId = (childResult as any).insertId
+        // Same manufacturer keeps the parent's plant; another manufacturer stays NULL and takes its mapped unit.
+        if (po.mfg_unit_id && Number(mfg_id) === Number(po.mfg_id)) {
+          await conn.execute(purchaseOrdersSql.setMfgUnit, [po.mfg_unit_id, childId])
+        }
 
         // The only audit trail a split leaves: the parent row itself doesn't
         // change, so without this there would be no record on the PO that part

@@ -24,7 +24,7 @@ const STATUS_OPTIONS = STATUS_KEYS.map((k) => ({ value: k, label: STATUS_CONFIG[
  *
  * Row semantics (see poBulkHandler.applyAndArchive):
  *   po_no blank/unrecognized → CREATE a new PO (mfg_code, sku_code, qty required)
- *   po_no matches an existing PO → UPDATE that PO's status/expected_on/destination/remarks only
+ *   po_no matches an existing PO → UPDATE that PO's status/expected_on/destination/remarks/mfg_unit only
  */
 export const PO_BULK_CSV_FIELDS: MasterField[] = [
   { key: "po_no", label: "PO No.", aliases: ["po no."], placeholder: "Blank = create new PO", sample: "" },
@@ -50,6 +50,13 @@ export const PO_BULK_CSV_FIELDS: MasterField[] = [
     validate: dateCellRemark, parse: parseDateCell,
   },
   { key: "destination", label: "Destination", placeholder: "e.g. Gurgaon", sample: "" },
+  {
+    // Which plant of the manufacturer to raise against (e.g. NG Electro's MBA / MB2). Blank = the SKU's
+    // mapped unit; checked server-side against that manufacturer's units, since codes differ per manufacturer.
+    key: "mfg_unit", label: "Supplier Unit", aliases: ["supplier unit", "mfg unit", "unit"],
+    placeholder: "e.g. MBA (blank = default unit)", sample: "",
+    validate: (raw) => (raw.trim().length <= 10 ? null : `must be a unit code like MBA (got "${raw}")`),
+  },
   {
     key: "status", label: "Status", type: "select", sample: "",
     options: STATUS_OPTIONS,

@@ -20,7 +20,7 @@ const STATUS_LABEL: Record<string, string> = {
   reverted: "Reverted",
 }
 
-const EDIT_FIELDS = new Set(["qty", "expected_on", "destination", "remarks", "edit_reason"])
+const EDIT_FIELDS = new Set(["qty", "expected_on", "destination", "remarks", "mfg_unit", "edit_reason"])
 
 export function historyLabel(kind: string | null | undefined): string {
   const [action, field = "", value = ""] = (kind ?? "").split("|")

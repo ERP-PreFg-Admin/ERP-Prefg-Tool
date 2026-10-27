@@ -5,6 +5,7 @@
 import { classifyRate, rateNote, type AgreedRateInput } from "./po-rate-note"
 import { isSpecialPoType, parseBulkPoType, poTypeRequiresRemarks, isDraftPo, BULK_PO_TYPES } from "./po-rules"
 import { isoDate, normalizeDateCell } from "../date"
+import { resolvePoUnit, type MfgUnitOption } from "./po-unit"
 
 /** The only statuses a CSV may set. Receipt statuses come from receiving. */
 export const BULK_SETTABLE_STATUSES = ["raised", "cancelled", "short_closed"] as const
@@ -16,6 +17,8 @@ export type BulkUpdateTarget = {
   expected_on: string | Date | null
   destination: string | null
   remarks: string | null
+  /** The supplier unit the PO prints now; absent for manufacturers without units. */
+  mfg_unit_code?: string | null
 }
 
 /**
@@ -27,6 +30,7 @@ export type BulkUpdateTarget = {
 export function bulkUpdateBlock(po: BulkUpdateTarget, row: Record<string, string | undefined>): string | null {
   // Its invoice was reverted: history now, not something a CSV may change.
   if (po.status === "reverted") return `${po.po_no} is reverted — its invoice was reverted, so a CSV can't change it`
+  if (po.status === "discarded") return `${po.po_no} was discarded as a draft — a CSV can't bring it back`
   const status = row.status?.trim().toLowerCase() || null
   const statusChange = !!status && status !== po.status
   if (statusChange && !(BULK_SETTABLE_STATUSES as readonly string[]).includes(status!)) {
@@ -37,10 +41,12 @@ export function bulkUpdateBlock(po: BulkUpdateTarget, row: Record<string, string
   const date = normalizeDateCell(row.expected_on)
   const dest = row.destination?.trim()
   const remarks = row.remarks?.trim()
+  const unit = row.mfg_unit?.trim()
   const editsFields =
     (!!date && date !== isoDate(po.expected_on)) ||
     (!!dest && dest.toLowerCase() !== (po.destination ?? "").trim().toLowerCase()) ||
-    (!!remarks && remarks.slice(0, 300) !== (po.remarks ?? "").trim())
+    (!!remarks && remarks.slice(0, 300) !== (po.remarks ?? "").trim()) ||
+    (!!unit && unit.toLowerCase() !== (po.mfg_unit_code ?? "").toLowerCase())
   if (editsFields || (statusChange && status === "raised")) {
     const why = po.email_sent_at ? "has been sent to the manufacturer" : `is ${(po.status ?? "").replace(/_/g, " ")}`
     return `${po.po_no} ${why} — a CSV can only cancel or short-close it now`
@@ -49,12 +55,14 @@ export function bulkUpdateBlock(po: BulkUpdateTarget, row: Record<string, string
 }
 
 /** Server-written columns; any client value under these keys is overwritten. */
-export const STAGED_PRICE_KEYS = ["po_type", "unit_price", "gst_percent", "amount_pre_gst", "total_amount", "costing_note", "priced_at"] as const
+export const STAGED_PRICE_KEYS = ["po_type", "unit_price", "gst_percent", "amount_pre_gst", "total_amount", "costing_note", "priced_at", "mfg_unit_id"] as const
 
 export type BulkFacts = {
   mfgByCode(code: string): Promise<{ id: number; code: string } | null>
   skuExists(skuCode: string): Promise<boolean>
-  poByNo(poNo: string): Promise<(BulkUpdateTarget & { po_type: string | null; sku_code: string | null }) | null>
+  poByNo(poNo: string): Promise<(BulkUpdateTarget & { po_type: string | null; sku_code: string | null; mfg_id: number }) | null>
+  /** The manufacturer's active units and the SKU's mapped default (lib/po/po-unit.ts). */
+  units(mfgId: number, skuCode: string): Promise<{ units: MfgUnitOption[]; defaultUnitId: number | null }>
   /** The warehouse by name (canonical spelling + status), and whether it serves the
    *  SKU's legal entity — the rule single Add PO applies (destinationAllowed). */
   destination(name: string, skuCode: string | null): Promise<{ name: string; active: boolean; allowed: boolean; entity: string | null } | null>
@@ -98,6 +106,15 @@ export async function checkBulkRows(rows: Record<string, string>[], facts: BulkF
     const row = rows[i]
     const out: Record<string, string> = {
       ...row, po_type: "", unit_price: "", gst_percent: "", amount_pre_gst: "", total_amount: "", costing_note: "", priced_at: pricedAt,
+      mfg_unit_id: "",
+    }
+    // Resolves the mfg_unit cell (blank = SKU's mapped unit) and stages the id; flags a bad code.
+    const stageUnit = async (mfgId: number, sku: string) => {
+      const { units, defaultUnitId } = await facts.units(mfgId, sku)
+      const r = resolvePoUnit(units, defaultUnitId, row.mfg_unit)
+      if (!r.ok) { rowFlags.push(r.message); return }
+      out.mfg_unit_id = r.unitId === null ? "" : String(r.unitId)
+      out.mfg_unit = units.find((u) => u.id === r.unitId)?.unit_code ?? ""
     }
     const rowFlags: string[] = []
     const note = (text: string) => { info[i] = [text]; out.costing_note = text }
@@ -123,6 +140,8 @@ export async function checkBulkRows(rows: Record<string, string>[], facts: BulkF
           const name = await checkDestination(dest, existing.sku_code, facts, (m) => rowFlags.push(m))
           if (name) out.destination = name
         }
+        // Blank keeps the PO's unit; bulkUpdateBlock already refused a change on a mailed PO.
+        if (row.mfg_unit?.trim() && existing.sku_code) await stageUnit(existing.mfg_id, existing.sku_code)
         note(`Updates ${poNo} — price unchanged`)
       }
     } else if (!mfgCode || !skuCode || !Number.isFinite(qty) || qty <= 0) {
@@ -144,6 +163,7 @@ export async function checkBulkRows(rows: Record<string, string>[], facts: BulkF
       }
 
       if (mfg && skuKnown) {
+        await stageUnit(mfg.id, skuCode)
         const pairKey = `${mfg.id}|${skuCode.toLowerCase()}|${type}`
         if (isSpecialPoType(type)) {
           const existingPo = await facts.liveSpecialPo(mfg.id, skuCode, type)

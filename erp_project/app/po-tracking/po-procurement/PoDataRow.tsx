@@ -92,7 +92,8 @@ export default function PoDataRow({
   // each with its own quantity and destination. Nor is a PO whose edit awaits approval.
   const editPending = Number(r.edit_pending) === 1
   const unapproved = isUnapprovedPo(r.raw_status)
-  const selectDisabled = isSplitMaster || editPending || unapproved
+  // A discarded draft was never sent and never will be, so there is nothing to mail.
+  const selectDisabled = isSplitMaster || editPending || unapproved || status === "discarded"
   const lastUpdate = inwardingMode ? null : lastPoUpdate(r)
 
   return (
@@ -102,7 +103,7 @@ export default function PoDataRow({
         "transition-colors",
         // A cancelled PO is history, not work: dimmed so the eye skips it, and
         // brought back on hover if it's being read.
-        (status === "cancelled" || status === "reverted") && "opacity-55 hover:opacity-100",
+        (status === "cancelled" || status === "reverted" || status === "discarded") && "opacity-55 hover:opacity-100",
         selectedPoId === r.id && "bg-primary/5",
         // An open master and its children read as one block, in the same violet
         // this table already uses for "part of this order lives elsewhere".
@@ -205,7 +206,9 @@ export default function PoDataRow({
       {/* Manufacturer */}
       <TableCell className="whitespace-nowrap">
         <div className="text-xs font-medium">{r.mfg_name}</div>
-        <div className="text-[11px] text-muted-foreground">{r.mfg_code}</div>
+        <div className="text-[11px] text-muted-foreground">
+          {r.mfg_code}{r.mfg_unit_code && <span title="Supplier unit this PO is raised against"> · {r.mfg_unit_code}</span>}
+        </div>
       </TableCell>
 
       <TableCell className="text-xs tabular-nums text-muted-foreground whitespace-nowrap">{fmtDate(r.date)}</TableCell>

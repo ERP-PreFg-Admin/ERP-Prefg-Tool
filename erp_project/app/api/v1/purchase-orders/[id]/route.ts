@@ -22,6 +22,7 @@ import logger from "@/lib/logger"
 import { todayIST } from "@/lib/date"
 import { poTotal } from "@/lib/po/po-rules"
 import { skuGstPercent } from "@/lib/po/po-rate"
+import { resolvePoUnitOrThrow } from "@/lib/po/po-unit-load"
 
 export const PUT = withGateway({
   paramsSchema: poIdParamSchema,
@@ -41,7 +42,7 @@ export const PUT = withGateway({
   if (current.status !== "draft") return editUnmailedPo(poId, userId, current.sku_code, body)
 
   // total_amount from the body is ignored — recomputed below with the SKU's GST.
-  const { mfg_id, sku_code, qty, unit_price, expected_on, destination, reason } = body
+  const { mfg_id, sku_code, qty, unit_price, expected_on, destination, reason, mfg_unit_id } = body
 
   if (!mfg_id)                  return NextResponse.json({ error: "Manufacturer is required." }, { status: 400 })
   if (!sku_code)                 return NextResponse.json({ error: "SKU is required." }, { status: 400 })
@@ -95,6 +96,10 @@ export const PUT = withGateway({
     return NextResponse.json({ error: "Only the original submitter can re-edit this PO." }, { status: 403 })
   }
 
+  // Re-resolved: the manufacturer or SKU may have changed, and with them which units apply.
+  const unitId = await resolvePoUnitOrThrow((sql, p) => query(sql, p), Number(mfg_id), sku_code,
+    mfg_unit_id === "" || mfg_unit_id == null ? null : Number(mfg_unit_id))
+
   const ctx = { requestId: crypto.randomUUID(), userId, route: `/api/v1/purchase-orders/${poId}` }
   const eventId = makeEventId("PO", "edit", poId)
   const logCtx = { ...ctx, eventId, module: "PO_EDIT" }
@@ -116,10 +121,13 @@ export const PUT = withGateway({
       // which leaves the stamped Recipe describing an order that no longer exists.
       Number(mfg_id), sku_code, poId,
     ])
+    await conn.execute(purchaseOrdersSql.setMfgUnit, [unitId, poId])
 
     // Fetch MFG details for readable diff
     const [mfgRows] = await conn.execute(mfgsSql.selectNameById, [Number(mfg_id)])
     const mfg = (mfgRows as { code: string; name: string }[])[0] ?? { code: String(mfg_id), name: String(mfg_id) }
+    const [unitRows] = await conn.execute(purchaseOrdersSql.selectActiveMfgUnits, [Number(mfg_id)])
+    const unit = (unitRows as { id: number; unit_code: string; gst_number: string | null }[]).find((u) => u.id === unitId)
 
     // Insert new approval record
     const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, "PO", poId, "edit"])
@@ -134,6 +142,7 @@ export const PUT = withGateway({
       ["expected_on",  "", expected_on || ""],
       ["destination",  "", destination || ""],
     ]
+    if (unit) diffItems.push(["supplier_unit", "", `${unit.unit_code}${unit.gst_number ? ` (${unit.gst_number})` : ""}`])
     if (unitPrice != null)  diffItems.push(["unit_price", "", String(unitPrice)])
     if (reason?.trim())     diffItems.push(["reason",     "", reason.trim()])
     for (const [field, oldVal, newVal] of diffItems) {

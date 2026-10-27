@@ -19,6 +19,7 @@ import { poActionSchema } from "@/lib/validation/purchase-orders"
 import { monthIST } from "@/lib/date"
 import { brandCode } from "@/lib/constants"
 import { isSpecialPoType, specialPoPrice, SPECIAL_PO_LABEL } from "@/lib/po/po-rules"
+import { resolvePoUnitOrThrow } from "@/lib/po/po-unit-load"
 
 // GET /api/v1/purchase-orders — list all POs the caller is scoped to, with MFG + SKU details
 export const GET = withGateway({
@@ -107,7 +108,7 @@ export const POST = withGateway({
   }
   // ── end bulk ────────────────────────────────────────────────────────────────
 
-  const { mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, reason, po_type } = body
+  const { mfg_id, sku_code, qty, unit_price, total_amount, expected_on, destination, reason, po_type, mfg_unit_id } = body
 
   // A user can't raise a PO against a manufacturer or into a warehouse they
   // aren't scoped to, even though the dropdowns already exclude both.
@@ -168,6 +169,8 @@ export const POST = withGateway({
     ? specialPoPrice()
     : await makePoRateResolver()(Number(mfg_id), sku_code, Number(qty))
 
+  const unitId = await resolvePoUnitOrThrow((sql, params) => query(sql, params), Number(mfg_id), sku_code, mfg_unit_id)
+
   const eventId = makeEventId("PO", "create")
   recordRawEvent("PO", eventId, { mfg_id, sku_code, qty, unit_price: unitPrice, expected_on, destination, reason, po_type })
 
@@ -182,6 +185,7 @@ export const POST = withGateway({
         Number(mfg_id), sku_code,
       ])
       const poId = (poResult as any).insertId
+      if (unitId !== null) await conn.execute(purchaseOrdersSql.setMfgUnit, [unitId, poId])
       await conn.commit()
       logger.info({ ...ctx, eventId, poId, po_no, message: "Normal PO created" })
       recordProcessedEvent("PO", eventId, { poId, po_no })
@@ -210,9 +214,14 @@ export const POST = withGateway({
       Number(mfg_id), sku_code,
     ])
     const poId = (poResult as any).insertId
+    if (unitId !== null) await conn.execute(purchaseOrdersSql.setMfgUnit, [unitId, poId])
 
     const [mfgRows] = await conn.execute(mfgsSql.selectNameById, [Number(mfg_id)])
     const mfg = (mfgRows as any[])[0] ?? { code: mfg_id, name: mfg_id }
+    const [unitRows] = unitId !== null
+      ? await conn.execute(purchaseOrdersSql.selectActiveMfgUnits, [Number(mfg_id)])
+      : [[]]
+    const unit = (unitRows as { id: number; unit_code: string; gst_number: string | null }[]).find((u) => u.id === unitId)
 
     const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, "PO", poId, "create"])
     const approvalId = (ar as any).insertId
@@ -220,6 +229,7 @@ export const POST = withGateway({
     const diffItems: [string, string, string][] = [
       ["po_no",        "", po_no],
       ["manufacturer", "", `${mfg.code} — ${mfg.name}`],
+      ...(unit ? [["supplier_unit", "", `${unit.unit_code}${unit.gst_number ? ` (${unit.gst_number})` : ""}`] as [string, string, string]] : []),
       ["sku_code",     "", sku_code],
       ["qty",          "", String(qty)],
       ["expected_on",  "", expected_on || ""],

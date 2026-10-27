@@ -1,6 +1,6 @@
 export type PoStatus =
   | "draft" | "raised" | "punched"
-  | "short_closed" | "partially_received" | "received" | "cancelled" | "reverted"
+  | "short_closed" | "partially_received" | "received" | "cancelled" | "reverted" | "discarded"
 
 export type PoRow = {
   id: number
@@ -80,6 +80,9 @@ export type PoRow = {
   mfg_id: number
   mfg_code: string
   mfg_name: string
+  /** The plant the PO was raised against; NULL on older POs and manufacturers without units. */
+  mfg_unit_id: number | null
+  mfg_unit_code: string | null
   mfg_email: string | null
   po_raised_by: number | null
   /** 1 while a PO_EDIT approval is pending: reads Draft + In Review, can't be mailed. */
@@ -160,6 +163,8 @@ export const STATUS_CONFIG: Record<string, { label: string; variant: BadgeVarian
   cancelled:          { label: "Cancelled",           variant: "destructive" },
   // An inward PO whose supplier invoice was reverted — kept for the record.
   reverted:           { label: "Reverted",            variant: "outline" },
+  // A Draft withdrawn before it was mailed. Listed under the Cancelled tab, not a tab of its own.
+  discarded:          { label: "Discarded",           variant: "outline" },
 }
 
 export const STATUS_KEYS = Object.keys(STATUS_CONFIG)
@@ -172,7 +177,7 @@ export const STATUS_KEYS = Object.keys(STATUS_CONFIG)
  */
 // "open" is the same pseudo-status the inwarding desk uses (statusMatchValues in
 // lib/queries/purchase-orders.ts) — everything still awaiting goods, in one tab.
-export const TABS = ["all", "open", ...STATUS_KEYS.filter((k) => k !== "punched")] as const
+export const TABS = ["all", "open", ...STATUS_KEYS.filter((k) => k !== "punched" && k !== "discarded")] as const
 export type TabKey = (typeof TABS)[number]
 
 /* ── Inwarding detail panel ───────────────────────────────────────────────── */
@@ -252,6 +257,8 @@ export type ImpromptuForm = {
   expected_on: string
   destination: string
   reason: string
+  /** Selected manufacturer unit id, "" when none. */
+  mfg_unit_id: string
 }
 
 export type EditData = {
@@ -264,16 +271,19 @@ export type EditData = {
   expected_on: string | null
   destination: string | null
   remarks: string | null
+  mfg_unit_id?: number | null
 }
 
 export const EMPTY_FORM: ImpromptuForm = {
-  sku_code: "", mfg_id: "", recipe_id: "", qty: "", expected_on: "", destination: "", reason: "",
+  sku_code: "", mfg_id: "", recipe_id: "", qty: "", expected_on: "", destination: "", reason: "", mfg_unit_id: "",
 }
 
 /** One recipe a manufacturer produces a SKU under — /api/v1/purchase-orders/mfg-skus. */
 export type RecipeChoice = { recipe_id: number; bom_code: string; status: string | null }
 /** `entity_code` narrows the row's destination dropdown — see warehousesForEntity. */
-export type MfgSkuOption = { sku_code: string; sku_name: string; boms?: RecipeChoice[]; entity_code: string | null }
+export type MfgSkuOption = { sku_code: string; sku_name: string; boms?: RecipeChoice[]; entity_code: string | null; default_unit_id?: number | null }
+/** A manufacturer's plant a PO can be raised against (details_mfg_unit). */
+export type MfgUnitChoice = { id: number; unit_code: string; registered_name: string | null; address: string | null; gst_number: string | null }
 
 export type SplitRow = { destination: string; qty: string }
 

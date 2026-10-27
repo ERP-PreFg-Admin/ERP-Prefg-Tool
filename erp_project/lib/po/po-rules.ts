@@ -35,6 +35,23 @@ export function canDirectEditPo(po: {
   return po.status === "raised" && !po.email_sent_at && po.po_type !== "inward" && !po.reference_po
 }
 
+/** Why this PO can't be discarded, or null. Discard is for a Draft the manufacturer never saw, with nothing booked on it. */
+export function discardBlock(po: {
+  po_no: string; status: string | null; email_sent_at: string | Date | null; po_type: string | null
+  reference_po: string | null; received_qty: string | number; child_count: string | number
+  invoice_lines: string | number; edit_pending: string | number | boolean
+}): string | null {
+  if (po.status === "discarded") return `${po.po_no} is already discarded.`
+  if (po.email_sent_at) return `${po.po_no} has already been mailed to the manufacturer — cancel or short-close it instead.`
+  if (po.status !== "raised") return `${po.po_no} isn't a Draft PO (status '${po.status ?? ""}').`
+  if (po.po_type === "inward") return `${po.po_no} is an inward PO — revert its invoice instead.`
+  if (po.reference_po) return `${po.po_no} is a split of ${po.reference_po} — cancel it instead.`
+  if (Number(po.child_count) > 0) return `${po.po_no} has been split — cancel its splits first.`
+  if (Number(po.received_qty) > 0 || Number(po.invoice_lines) > 0) return `${po.po_no} has goods booked against it — short-close it instead.`
+  if (Number(po.edit_pending)) return `${po.po_no} has an edit awaiting approval — approve or reject it first.`
+  return null
+}
+
 /** Never approved (stored draft or rejected) — not an order yet, so it can't be mailed.
  *  Mirrors purchaseOrdersSql.selectUnapprovedAmong, which send-mail enforces. */
 export function isUnapprovedPo(status: string | null): boolean {

@@ -12,9 +12,9 @@ import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { Select } from "@/components/ui/select"
 import { useToast } from "@/components/ui/toast"
 import { RemarksField, PO_REASON_PRESETS } from "@/components/masters/RemarksField"
-import type { EditData, ImpromptuForm, MfgOption, MfgSkuOption, SkuOption, WarehouseOption } from "./po-types"
+import type { EditData, ImpromptuForm, MfgOption, MfgSkuOption, MfgUnitChoice, SkuOption, WarehouseOption } from "./po-types"
 import { EMPTY_FORM } from "./po-types"
-import { warehousesForEntity, warehouseLabel, warehouseKey } from "./po-utils"
+import { warehousesForEntity, warehouseLabel, warehouseKey, unitLabel } from "./po-utils"
 import { useQuotedRate } from "./useQuotedRate"
 
 export default function ImpromptuPODialog({
@@ -35,6 +35,7 @@ export default function ImpromptuPODialog({
   // Recipes per SKU for the chosen manufacturer — the PO records which one it
   // is for, and only this manufacturer's own production lines are offerable.
   const [mfgSkus, setMfgSkus]       = useState<MfgSkuOption[]>([])
+  const [units, setUnits]           = useState<MfgUnitChoice[]>([])
   const [errors, setErrors]         = useState<Partial<Record<keyof ImpromptuForm, string>>>({})
   const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError]     = useState("")
@@ -61,6 +62,7 @@ export default function ImpromptuPODialog({
         // Prefilled, not blank: remarks are mandatory here, so an empty box
         // meant every re-edit silently overwrote the original reason.
         reason: editData.remarks ?? "",
+        mfg_unit_id: editData.mfg_unit_id ? String(editData.mfg_unit_id) : "",
       })
     } else {
       setForm({ ...EMPTY_FORM, destination: defaultDest })
@@ -75,13 +77,18 @@ export default function ImpromptuPODialog({
     if (!open || !form.mfg_id) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale lines when the dialog closes or the manufacturer is cleared
       setMfgSkus([])
+      setUnits([])
       return
     }
     let cancelled = false
     fetch(`/api/v1/purchase-orders/mfg-skus?mfg_id=${form.mfg_id}`)
       .then((r) => r.json())
-      .then((data: { skus?: MfgSkuOption[] }) => { if (!cancelled) setMfgSkus(data.skus ?? []) })
-      .catch(() => { if (!cancelled) setMfgSkus([]) })
+      .then((data: { skus?: MfgSkuOption[]; units?: MfgUnitChoice[] }) => {
+        if (cancelled) return
+        setMfgSkus(data.skus ?? [])
+        setUnits(data.units ?? [])
+      })
+      .catch(() => { if (!cancelled) { setMfgSkus([]); setUnits([]) } })
     return () => { cancelled = true }
   }, [open, form.mfg_id])
 
@@ -93,6 +100,12 @@ export default function ImpromptuPODialog({
   const selectedBomId = bomChoices.some((b) => String(b.recipe_id) === form.recipe_id)
     ? form.recipe_id
     : bomChoices[0] ? String(bomChoices[0].recipe_id) : ""
+
+  // Same derivation for the unit: a pick from another manufacturer reads back as the SKU's mapped default.
+  const defaultUnitId = mfgSkus.find((s) => s.sku_code === form.sku_code)?.default_unit_id ?? null
+  const selectedUnitId = units.some((u) => String(u.id) === form.mfg_unit_id)
+    ? form.mfg_unit_id
+    : defaultUnitId ? String(defaultUnitId) : ""
 
   // Only the SKU's own legal entity's warehouses — a destination belonging to the
   // other entity has no facility for this PO to inward into.
@@ -122,6 +135,7 @@ export default function ImpromptuPODialog({
     if (form.expected_on && form.expected_on < today)
                                                e.expected_on = "Backdating is not allowed. Select today or a future date."
     if (!form.reason.trim())                   e.reason      = "Remarks are required for Impromptu POs."
+    if (units.length > 0 && !selectedUnitId)   e.mfg_unit_id = "Pick the supplier unit."
     return e
   }
 
@@ -148,6 +162,7 @@ export default function ImpromptuPODialog({
         expected_on:  form.expected_on,
         destination:  selectedDest || undefined,
         reason:       form.reason.trim(),
+        mfg_unit_id:  selectedUnitId ? Number(selectedUnitId) : null,
       }
       const res = isEdit
         ? await fetch(`/api/v1/purchase-orders/${editData!.id}`, {
@@ -252,6 +267,21 @@ export default function ImpromptuPODialog({
             </Select>
             {errors.recipe_id && <p className="text-xs text-destructive">{errors.recipe_id}</p>}
           </div>
+
+          {/* Supplier unit — only for a manufacturer with more than one plant on record. */}
+          {units.length > 0 && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="ipo-unit">Supplier Unit <span className="text-destructive">*</span></Label>
+              <Select id="ipo-unit" value={selectedUnitId} onChange={(e) => set("mfg_unit_id", e.target.value)} className="w-full">
+                <option value="">— Select unit —</option>
+                {units.map((u) => (
+                  <option key={u.id} value={String(u.id)}>{unitLabel(u)}</option>
+                ))}
+              </Select>
+              <p className="text-[11px] text-muted-foreground">Printed as the PO&apos;s supplier address and GSTIN.</p>
+              {errors.mfg_unit_id && <p className="text-xs text-destructive">{errors.mfg_unit_id}</p>}
+            </div>
+          )}
 
           {/* Quantity + Rate */}
           <div className="grid grid-cols-2 gap-4">

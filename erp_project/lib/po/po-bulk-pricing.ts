@@ -8,6 +8,7 @@ import { agreedRatesByMfg, type AgreedRate } from "@/lib/costing/agreed-rates"
 import { skuGstPercent } from "@/lib/po/po-rate"
 import { destinationAllowed, type DestinationEntityRow } from "@/lib/po/po-guard"
 import { checkBulkRows, type BulkCheck, type BulkFacts, type BulkUpdateTarget } from "@/lib/po/po-bulk-check"
+import { loadPoUnitContext } from "@/lib/po/po-unit-load"
 
 export { STAGED_PRICE_KEYS, type BulkCheck } from "@/lib/po/po-bulk-check"
 
@@ -31,8 +32,11 @@ export function dbBulkFacts(): BulkFacts {
       return skus.get(k)!
     },
     async poByNo(poNo) {
-      const [po] = await query<BulkUpdateTarget & { po_type: string | null; sku_code: string | null }>(purchaseOrdersSql.selectByPoNo, [poNo])
+      const [po] = await query<BulkUpdateTarget & { po_type: string | null; sku_code: string | null; mfg_id: number }>(purchaseOrdersSql.selectByPoNo, [poNo])
       return po ?? null
+    },
+    async units(mfgId, skuCode) {
+      return loadPoUnitContext((sql, params) => query(sql, params), mfgId, skuCode)
     },
     async destination(name, skuCode) {
       const [w] = await query<{ name: string; status: string | null }>(purchaseOrdersSql.selectWarehouseByName, [name])

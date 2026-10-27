@@ -13,10 +13,13 @@ import type { PoHistoryRow } from "./po-types"
 const FIELD_LABEL: Record<string, string> = {
   qty: "Qty",
   edit_reason: "Reason",
+  discard_reason: "Discard reason",
   status: "Status",
   expected_on: "Expected Dispatch",
   destination: "Destination",
   remarks: "Remarks",
+  mfg_unit: "Supplier Unit",
+  attachment_key: "PO Document",
   received_qty: "Received Qty",
   split: "Split off",
   revert_reason: "Revert",

@@ -599,6 +599,7 @@ export default function PoProcurementClient({
           expected_on: editTarget.expected_on,
           destination: editTarget.destination,
           remarks:     editTarget.remarks,
+          mfg_unit_id: editTarget.mfg_unit_id,
         } : null}
       />
 

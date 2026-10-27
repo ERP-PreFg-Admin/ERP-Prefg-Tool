@@ -38,7 +38,7 @@ const CHILD_AGG_JOIN = `
     FROM purchase_orders c
     WHERE c.reference_po IS NOT NULL
       AND COALESCE(c.po_type, '') <> 'inward'
-      AND COALESCE(c.status, '')  <> 'cancelled'
+      AND COALESCE(c.status, '')  NOT IN ('cancelled', 'discarded')
     GROUP BY c.reference_po
   ) ch ON ch.reference_po = po.po_no
 `
@@ -62,7 +62,7 @@ const UNALLOCATED_QTY_EXPR = `GREATEST(po.qty - ${ALLOCATED_QTY_EXPR} - COALESCE
 
 // Overrides the stored status with a computed "partially_received" whenever
 // some (but not all) of the ordered qty has come in — terminal/manual states
-// (cancelled, short_closed, received, reverted) always win over the quantity math.
+// (cancelled, short_closed, received, reverted, discarded) always win over the quantity math.
 // Receipts booked on a child count here, so a master that has only ever been
 // received against through its splits still reads as partially received.
 //
@@ -71,7 +71,7 @@ const UNALLOCATED_QTY_EXPR = `GREATEST(po.qty - ${ALLOCATED_QTY_EXPR} - COALESCE
 // email can never block booking stock that has actually arrived.
 const EFFECTIVE_STATUS_EXPR = `
   CASE
-    WHEN po.status IN ('cancelled', 'short_closed', 'received', 'reverted') THEN po.status
+    WHEN po.status IN ('cancelled', 'short_closed', 'received', 'reverted', 'discarded') THEN po.status
     WHEN po.qty > 0 AND ${RECEIVED_TOTAL_EXPR} >= po.qty THEN 'received'
     WHEN ${RECEIVED_TOTAL_EXPR} > 0 AND ${RECEIVED_TOTAL_EXPR} < po.qty THEN 'partially_received'
     ELSE po.status
@@ -250,6 +250,8 @@ const SELECT_COLS = `
     ${PENDING_SPLIT_EXPR}        AS pending_split_qty,
     ${RECEIVED_TOTAL_EXPR}       AS received_total,
     m.id   AS mfg_id, m.code AS mfg_code, m.name AS mfg_name,
+    -- Only a unit recorded on the PO; older POs (NULL) follow the SKU mapping and show none.
+    po.mfg_unit_id, (SELECT u.unit_code FROM details_mfg_unit u WHERE u.id = po.mfg_unit_id) AS mfg_unit_code,
     ${PO_SKU_NAME} AS sku_name, sk.status AS sku_status,
     ent.code  AS entity_code,
     dwe.facility_code AS dest_facility_code,
@@ -399,9 +401,9 @@ export const purchaseOrdersSql = {
       COUNT(*) AS total,
       SUM(CASE WHEN ${DISPLAY_STATUS_EXPR} IN ('raised', 'punched', 'partially_received')
                THEN GREATEST(po.qty - ${RECEIVED_TOTAL_EXPR}, 0) ELSE 0 END) AS open_qty,
-      SUM(CASE WHEN ${DISPLAY_STATUS_EXPR} NOT IN ('draft', 'cancelled', 'reverted')
+      SUM(CASE WHEN ${DISPLAY_STATUS_EXPR} NOT IN ('draft', 'cancelled', 'reverted', 'discarded')
                THEN po.qty ELSE 0 END)                        AS committed_qty,
-      SUM(CASE WHEN ${DISPLAY_STATUS_EXPR} NOT IN ('draft', 'cancelled', 'reverted')
+      SUM(CASE WHEN ${DISPLAY_STATUS_EXPR} NOT IN ('draft', 'cancelled', 'reverted', 'discarded')
                THEN ${RECEIVED_TOTAL_EXPR} ELSE 0 END)        AS received_qty,
       SUM(CASE WHEN ${DISPLAY_STATUS_EXPR} IN ('raised', 'punched', 'partially_received')
                 AND po.expected_on IS NOT NULL AND po.expected_on < CURDATE()
@@ -423,7 +425,7 @@ export const purchaseOrdersSql = {
   selectLiveSpecialPo: `
     SELECT po_no FROM purchase_orders
     WHERE mfg_id = ? AND sku_code = ? AND po_type = ?
-      AND COALESCE(status, '') <> 'cancelled'
+      AND COALESCE(status, '') NOT IN ('cancelled', 'discarded')
       AND reference_po IS NULL
     ORDER BY id LIMIT 1
   `,
@@ -432,7 +434,7 @@ export const purchaseOrdersSql = {
   selectOtherLiveSpecialPo: `
     SELECT po_no FROM purchase_orders
     WHERE mfg_id = ? AND sku_code = ? AND po_type = ?
-      AND COALESCE(status, '') <> 'cancelled'
+      AND COALESCE(status, '') NOT IN ('cancelled', 'discarded')
       AND reference_po IS NULL
       AND id <> ?
     ORDER BY id LIMIT 1
@@ -740,13 +742,41 @@ export const purchaseOrdersSql = {
 
   /** A PO locked for an in-place Draft edit, with what decides whether it still may be. Params: [id] */
   selectForDraftEditLocked: `
-    SELECT po.id, po.po_no, po.sku_code, po.status, po.email_sent_at, po.po_type, po.reference_po,
+    SELECT po.id, po.po_no, po.mfg_id, po.sku_code, po.status, po.email_sent_at, po.po_type, po.reference_po,
            po.qty, COALESCE(po.received_qty, 0) AS received_qty,
            po.unit_price, po.amount_pre_gst, po.total_amount, po.expected_on, po.destination, po.remarks,
            (SELECT s.gst FROM master_skus s WHERE s.sku_code = po.sku_code LIMIT 1) AS sku_gst,
+           -- The unit the PDF would print now: the PO's own, else the SKU mapping.
+           COALESCE(po.mfg_unit_id, (SELECT mus.unit_id FROM map_mfg_unit_sku mus JOIN master_skus s ON s.id = mus.sku_id
+                                     WHERE mus.mfg_id = po.mfg_id AND s.sku_code = po.sku_code LIMIT 1)) AS effective_unit_id,
            (SELECT COUNT(*) FROM purchase_orders c
-             WHERE c.reference_po = po.po_no AND c.status <> 'cancelled') AS child_count
+             WHERE c.reference_po = po.po_no AND c.status NOT IN ('cancelled', 'discarded')) AS child_count
     FROM purchase_orders po WHERE po.id = ? LIMIT 1 FOR UPDATE
+  `,
+
+  /** A PO locked for a discard, with everything canDiscardPo decides on. Params: [id] */
+  selectForDiscardLocked: `
+    SELECT po.id, po.po_no, po.status, po.email_sent_at, po.po_type, po.reference_po,
+           COALESCE(po.received_qty, 0) AS received_qty,
+           (SELECT COUNT(*) FROM purchase_orders c
+             WHERE c.reference_po = po.po_no AND COALESCE(c.po_type, '') <> 'inward'
+               AND c.status NOT IN ('cancelled', 'discarded')) AS child_count,
+           (SELECT COUNT(*) FROM invoice_items_mfg i
+             WHERE i.received_against_po_id = po.id OR i.po_id = po.id) AS invoice_lines,
+           EXISTS (SELECT 1 FROM approvals a
+             WHERE a.module = 'PO_EDIT' AND a.entity_id = po.id AND a.status = 'pending') AS edit_pending
+    FROM purchase_orders po WHERE po.id = ? LIMIT 1 FOR UPDATE
+  `,
+
+  /** Discard a Draft; the WHERE re-asserts it is still unmailed. Params: [id] */
+  setDiscarded: `
+    UPDATE purchase_orders SET status = 'discarded'
+    WHERE id = ? AND status = 'raised' AND email_sent_at IS NULL
+  `,
+
+  /** Which of these POs are discarded — send-mail refuses them. query() expands the array. Params: [ids[]] */
+  selectDiscardedAmong: `
+    SELECT po.po_no FROM purchase_orders po WHERE po.id IN (?) AND po.status = 'discarded' ORDER BY po.po_no
   `,
 
   /** Which of these POs have a PO_EDIT awaiting approval. query() expands the array. Params: [ids[]] */
@@ -780,7 +810,7 @@ export const purchaseOrdersSql = {
    * Parameters: [id]
    */
   selectForSplit: `
-    SELECT id, po_no, mfg_id, sku_code, recipe_id, qty, unit_price, amount_pre_gst, total_amount,
+    SELECT id, po_no, mfg_id, mfg_unit_id, sku_code, recipe_id, qty, unit_price, amount_pre_gst, total_amount,
            received_qty, expected_on, status, reference_po, email_sent_at, po_type
     FROM purchase_orders WHERE id = ? LIMIT 1
   `,
@@ -803,7 +833,7 @@ export const purchaseOrdersSql = {
    */
   childSplitSummary: `
     SELECT
-      COALESCE(SUM(CASE WHEN COALESCE(status, '') <> 'cancelled' THEN qty ELSE 0 END), 0) AS allocated_qty,
+      COALESCE(SUM(CASE WHEN COALESCE(status, '') NOT IN ('cancelled', 'discarded') THEN qty ELSE 0 END), 0) AS allocated_qty,
       (SELECT COUNT(*) FROM purchase_orders
         WHERE reference_po = ? AND COALESCE(po_type, '') <> 'inward')                     AS seq
     FROM purchase_orders
@@ -827,6 +857,29 @@ export const purchaseOrdersSql = {
    * Parameters: [po_no, mfg_id, sku_code, qty, unit_price, amount_pre_gst, total_amount,
    *   expected_on, status, destination, reference_po, po_type, parent_bom_id, mfg_id, sku_code]
    */
+  /** A manufacturer's active units, for the PO's supplier-unit choice. Parameters: [mfg_id] */
+  selectActiveMfgUnits: `
+    SELECT id, unit_code, registered_name, address, gst_number
+    FROM details_mfg_unit WHERE mfg_id = ? AND status = 'active' ORDER BY unit_code
+  `,
+
+  /** The unit a (manufacturer, SKU) maps to — the default choice. Parameters: [mfg_id, sku_code] */
+  selectMappedMfgUnit: `
+    SELECT mus.unit_id FROM map_mfg_unit_sku mus
+    JOIN master_skus sk ON sk.id = mus.sku_id
+    WHERE mus.mfg_id = ? AND sk.sku_code = ? LIMIT 1
+  `,
+
+  /** Every SKU's mapped unit for one manufacturer. Parameters: [mfg_id] */
+  selectMappedMfgUnitsForMfg: `
+    SELECT sk.sku_code, mus.unit_id FROM map_mfg_unit_sku mus
+    JOIN master_skus sk ON sk.id = mus.sku_id
+    WHERE mus.mfg_id = ?
+  `,
+
+  /** Stamped after the insert, in the same transaction. Parameters: [mfg_unit_id, id] */
+  setMfgUnit: `UPDATE purchase_orders SET mfg_unit_id = ? WHERE id = ?`,
+
   insertSplit: `
     INSERT INTO purchase_orders (po_no, mfg_id, date, sku_code, qty, unit_price, amount_pre_gst, total_amount, expected_on, status, destination, reference_po, po_type, recipe_id)
     VALUES (?, ?, ${SQL_TODAY_IST}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, ${RECIPE_ID_FOR_LINE}))
@@ -867,10 +920,14 @@ export const purchaseOrdersSql = {
    * PO it names). Params: [po_no]
    */
   selectByPoNo: `
-    SELECT id, po_no, status, expected_on, destination, remarks, sku_code, recipe_id, po_type,
-           email_sent_at, qty, COALESCE(received_qty, 0) AS received_qty
-    FROM purchase_orders
-    WHERE po_no = ?
+    SELECT po.id, po.po_no, po.mfg_id, po.status, po.expected_on, po.destination, po.remarks, po.sku_code, po.recipe_id, po.po_type,
+           po.email_sent_at, po.qty, COALESCE(po.received_qty, 0) AS received_qty,
+           -- The unit the PO prints now (its own, else the SKU mapping), so a re-uploaded export isn't read as a change.
+           (SELECT u.unit_code FROM details_mfg_unit u WHERE u.id = COALESCE(po.mfg_unit_id,
+              (SELECT mus.unit_id FROM map_mfg_unit_sku mus JOIN master_skus s ON s.id = mus.sku_id
+                WHERE mus.mfg_id = po.mfg_id AND s.sku_code = po.sku_code LIMIT 1))) AS mfg_unit_code
+    FROM purchase_orders po
+    WHERE po.po_no = ?
     LIMIT 1
   `,
 
@@ -1044,7 +1101,7 @@ export const purchaseOrdersSql = {
     ${CHILD_AGG_JOIN}
     WHERE po.mfg_id = ?
       ${APPROVED_ONLY}
-      AND ${EFFECTIVE_STATUS_EXPR} NOT IN ('received', 'cancelled', 'reverted')
+      AND ${EFFECTIVE_STATUS_EXPR} NOT IN ('received', 'cancelled', 'reverted', 'discarded')
       AND ${UNALLOCATED_QTY_EXPR} > 0
       -- Special POs go to their own contacts, never to the manufacturer (sendSpecialPoEmail).
       AND COALESCE(po.po_type, '') NOT IN ('npd', 'tech_transfer', 'cpr')
@@ -1153,7 +1210,8 @@ export const purchaseOrdersSql = {
     INNER JOIN details_mfg      d  ON d.mfg_id      = m.id
     LEFT  JOIN master_skus      sk ON sk.sku_code    = po.sku_code
     LEFT  JOIN map_mfg_unit_sku mus ON mus.mfg_id = po.mfg_id AND mus.sku_id = sk.id
-    LEFT  JOIN details_mfg_unit mu  ON mu.id = mus.unit_id AND mu.status = 'active'
+    -- The PO's own unit wins; the SKU mapping is the default for POs raised before the column.
+    LEFT  JOIN details_mfg_unit mu  ON mu.id = COALESCE(po.mfg_unit_id, mus.unit_id) AND mu.status = 'active'
     LEFT  JOIN master_warehouse wh ON wh.name        = po.destination
     LEFT  JOIN master_brand     br  ON br.id  = sk.brand_id
     LEFT  JOIN master_entity    ent ON ent.id = br.entity_id
@@ -1267,6 +1325,8 @@ lowOpenByMfg: `
 export function statusMatchValues(status: string | null): [unknown, unknown, unknown] {
   if (status === "open")     return ["raised", "punched", "partially_received"]
   if (status === "received") return ["received", "short_closed", "short_closed"]
+  // Discarded drafts live in the Cancelled tab, under their own badge.
+  if (status === "cancelled") return ["cancelled", "discarded", "discarded"]
   return [status, status, status]
 }
 

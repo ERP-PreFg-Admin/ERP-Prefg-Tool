@@ -1,7 +1,7 @@
 "use client"
 
 // Edit a Draft PO (raised, not yet mailed). Submits a PO_EDIT approval; nothing changes
-// until it is approved. SKU, manufacturer and rate stay as raised.
+// until it is approved. SKU, manufacturer and rate stay as raised; the supplier unit can change.
 
 import { useEffect, useMemo, useState } from "react"
 import {
@@ -17,15 +17,15 @@ import { useToast } from "@/components/ui/toast"
 import { RemarksField } from "@/components/masters/RemarksField"
 import { isoDate, todayIST } from "@/lib/date"
 import { impliedGstPercent, isSpecialPoType, poTotal } from "@/lib/po/po-rules"
-import type { PoRow, WarehouseOption } from "./po-types"
-import { fmtInt, fmtRate, num, warehouseKey, warehouseLabel, warehousesForEntity } from "./po-utils"
+import type { MfgSkuOption, MfgUnitChoice, PoRow, WarehouseOption } from "./po-types"
+import { fmtInt, fmtRate, num, unitLabel, warehouseKey, warehouseLabel, warehousesForEntity } from "./po-utils"
 
 // Exact, not fmtMoney's L/Cr shorthand — this is the figure that goes on the PO.
 const rupees = (v: string | number | null) => `₹${num(v).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`
 
-const EDIT_REASON_PRESETS = ["Revised planning qty", "Destination changed", "Dispatch date moved", "Correction"]
+const EDIT_REASON_PRESETS = ["Revised planning qty", "Destination changed", "Dispatch date moved", "Supplier unit changed", "Correction"]
 
-type Form = { qty: string; expected_on: string; destination: string; remarks: string; reason: string }
+type Form = { qty: string; expected_on: string; destination: string; remarks: string; reason: string; mfg_unit: string }
 
 export default function EditDraftPoDialog({
   po, onClose, warehouseOptions, onSaved,
@@ -36,7 +36,10 @@ export default function EditDraftPoDialog({
   onSaved: () => void
 }) {
   const { toast } = useToast()
-  const [form, setForm] = useState<Form>({ qty: "", expected_on: "", destination: "", remarks: "", reason: "" })
+  const [form, setForm] = useState<Form>({ qty: "", expected_on: "", destination: "", remarks: "", reason: "", mfg_unit: "" })
+  // The manufacturer's plants and the unit the PO prints today (its own, else the SKU's mapped one).
+  const [units, setUnits] = useState<MfgUnitChoice[]>([])
+  const [currentUnit, setCurrentUnit] = useState("")
   const [errors, setErrors] = useState<Partial<Record<keyof Form, string>>>({})
   const [apiError, setApiError] = useState("")
   const [submitting, setSubmitting] = useState(false)
@@ -51,9 +54,28 @@ export default function EditDraftPoDialog({
       destination: po.destination ?? "",
       remarks: po.remarks ?? "",
       reason: "",
+      mfg_unit: po.mfg_unit_code ?? "",
     })
     setErrors({})
     setApiError("")
+  }, [po])
+
+  useEffect(() => {
+    if (!po) return
+    let cancelled = false
+    fetch(`/api/v1/purchase-orders/mfg-skus?mfg_id=${po.mfg_id}`)
+      .then((r) => r.json())
+      .then((data: { skus?: MfgSkuOption[]; units?: MfgUnitChoice[] }) => {
+        if (cancelled) return
+        const list = data.units ?? []
+        const mappedId = data.skus?.find((s) => s.sku_code === po.sku_code)?.default_unit_id ?? null
+        const code = po.mfg_unit_code ?? list.find((u) => u.id === mappedId)?.unit_code ?? ""
+        setUnits(list)
+        setCurrentUnit(code)
+        setForm((f) => ({ ...f, mfg_unit: f.mfg_unit || code }))
+      })
+      .catch(() => { if (!cancelled) setUnits([]) })
+    return () => { cancelled = true }
   }, [po])
 
   // Only the SKU's own entity's sites, plus the current destination so opening never clears it.
@@ -97,6 +119,7 @@ export default function EditDraftPoDialog({
           expected_on: form.expected_on || null,
           destination: form.destination || null,
           remarks: form.remarks.trim() || null,
+          mfg_unit: units.length > 0 && form.mfg_unit && form.mfg_unit !== currentUnit ? form.mfg_unit : null,
           reason: form.reason.trim(),
         }),
       })
@@ -172,6 +195,19 @@ export default function EditDraftPoDialog({
                 ))}
               </Select>
             </div>
+
+            {units.length > 0 && (
+              <div className="grid gap-1.5">
+                <Label htmlFor="edpo-unit">Supplier Unit</Label>
+                <Select id="edpo-unit" value={form.mfg_unit} onChange={(e) => set("mfg_unit", e.target.value)} className="w-full">
+                  {!currentUnit && <option value="">— Select unit —</option>}
+                  {units.map((u) => (
+                    <option key={u.id} value={u.unit_code}>{unitLabel(u)}{u.unit_code === currentUnit ? " (current)" : ""}</option>
+                  ))}
+                </Select>
+                <p className="text-[11px] text-muted-foreground">Printed as the PO&apos;s supplier address and GSTIN.</p>
+              </div>
+            )}
 
             <div className="grid gap-1.5">
               <Label htmlFor="edpo-remarks">

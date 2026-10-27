@@ -57,6 +57,13 @@ export const POST = withGateway({
         `${unapproved.map((r) => r.po_no).join(", ")} ${unapproved.length === 1 ? "isn't approved yet — it" : "aren't approved yet — they"} can be mailed once the PO approval goes through.`)
     }
 
+    // A discarded draft was never sent, so there is nothing to tell the manufacturer about it.
+    const discarded = await query<{ po_no: string }>(purchaseOrdersSql.selectDiscardedAmong, [poIds])
+    if (discarded.length > 0) {
+      throw new ApiError(409, "po_discarded",
+        `${discarded.map((r) => r.po_no).join(", ")} ${discarded.length === 1 ? "was" : "were"} discarded before being sent — deselect to mail the rest.`)
+    }
+
     const eventId = makeEventId("PO_SELECTION_EMAIL", "send-batch")
     recordRawEvent("PO_SELECTION_EMAIL", eventId, { poIds })
 

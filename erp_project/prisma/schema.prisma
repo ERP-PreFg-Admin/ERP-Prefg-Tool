@@ -62,6 +62,9 @@ model purchase_orders {
   id             Int                     @id @default(autoincrement())
   po_no          String                  @unique(map: "po_no") @db.VarChar(50)
   mfg_id         Int
+  /// The plant this PO is raised against; NULL falls back to map_mfg_unit_sku.
+  /// See prisma/add_po_mfg_unit_id.sql.
+  mfg_unit_id    Int?
   date           DateTime                @db.Date
   sku_code       String?                 @db.VarChar(50)
   bom_id         Int?
@@ -97,6 +100,7 @@ model purchase_orders {
   email_sent_at  DateTime?               @db.DateTime(0)
   reference_po   String?                 @db.VarChar(50)
   mfgs           master_mfgs             @relation(fields: [mfg_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_ibfk_1")
+  mfg_unit       details_mfg_unit?       @relation(fields: [mfg_unit_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_po_mfg_unit")
   bom            master_bom?             @relation(fields: [bom_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_ibfk_2")
   history_pos    history_pos[]
   invoice_items  supplier_invoice_items[] @relation("InvoiceItemInwardPo")
@@ -104,6 +108,7 @@ model purchase_orders {
 
   @@index([bom_id], map: "bom_id")
   @@index([mfg_id], map: "mfg_id")
+  @@index([mfg_unit_id], map: "idx_po_mfg_unit_id")
   @@index([reference_po], map: "idx_po_reference_po")
   grnItemsUniwares grn_items_uniware[] @relation(map: "fk_grn_item_po")
 }
@@ -473,6 +478,7 @@ model details_mfg_unit {
   created_on       DateTime                @default(now()) @db.DateTime(0)
   master_mfgs      master_mfgs             @relation(fields: [mfg_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_mfg_unit_mfg")
   map_mfg_unit_sku map_mfg_unit_sku[]
+  purchase_orders  purchase_orders[]
 
   @@unique([mfg_id, unit_code], map: "uq_mfg_unit")
 }
@@ -1191,6 +1197,8 @@ enum purchase_orders_status {
   rejected
   /// An inward PO whose invoice was reverted. Terminal. See prisma/add_invoice_revert.sql.
   reverted
+  /// A Draft PO (approved, never mailed) withdrawn before the manufacturer saw it. Terminal. See prisma/add_po_discarded_status.sql.
+  discarded
 }
 
 enum purchase_orders_type {

@@ -132,3 +132,33 @@ test("refuses no-op edits, backdating and a blank reason", async () => {
     await rejects(applyDraftPoEdit(conn, po.id, { qty: 50, reason: "  " }, a.userId), "reason_required")
   })
 })
+
+const unitOf = async (conn: PoolConnection, id: number) =>
+  ((await conn.execute(`SELECT mfg_unit_id FROM purchase_orders WHERE id = ?`, [id]))[0] as { mfg_unit_id: number | null }[])[0].mfg_unit_id
+
+test("changes the supplier unit through approval; refuses another manufacturer's unit", async () => {
+  await withRollback(async (conn) => {
+    const a = await anchors(conn)
+    if (!a) return
+    const [ins] = await conn.execute(
+      `INSERT INTO details_mfg_unit (mfg_id, unit_code, registered_name, address, gst_number) VALUES (?, 'QX1', 'QX1', 'QX1', 'QX1'), (?, 'QX2', 'QX2', 'QX2', 'QX2')`,
+      [a.mfgId, a.mfgId],
+    )
+    const first = (ins as { insertId: number }).insertId
+    const po = await makePo(conn, a, { qty: 100 })
+    await setPo(conn, po.id, "mfg_unit_id = ?", [first])
+
+    // Planning writes nothing; the approval items carry codes, which apply resolves back to an id.
+    const plan = await planDraftPoEdit(conn, po.id, { mfg_unit: "qx2", reason: "Plant moved" })
+    assert.deepEqual(plan.changes, [{ field: "mfg_unit", old: "QX1", new: "QX2" }])
+    assert.equal(await unitOf(conn, po.id), first)
+
+    const edit = draftEditFromItems([{ field_name: "mfg_unit", new_value: "QX2" }, { field_name: "reason", new_value: "Plant moved" }])
+    await applyDraftPoEdit(conn, po.id, edit, a.userId)
+    assert.equal(await unitOf(conn, po.id), first + 1)
+    const hist = await readPoHistory(conn, po.id)
+    assert.ok(hist.some((h) => h.field_name === "mfg_unit" && h.old_value === "QX1" && h.new_value === "QX2"))
+
+    await rejects(planDraftPoEdit(conn, po.id, { mfg_unit: "NOPE", reason: "x" }), "unknown_unit")
+  })
+})

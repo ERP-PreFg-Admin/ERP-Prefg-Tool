@@ -287,6 +287,32 @@ test("a SKU mapped to a manufacturing unit prints that unit; unmapped falls back
   })
 })
 
+test("a PO's own mfg_unit_id wins over the SKU mapping (prisma/add_po_mfg_unit_id.sql)", async () => {
+  await withRollback(async (conn) => {
+    const a = await anchors(conn)
+    if (!a) return
+
+    const unit = async (code: string, gstin: string) => (await conn.execute<ResultSetHeader>(
+      `INSERT INTO details_mfg_unit (mfg_id, unit_code, registered_name, address, gst_number) VALUES (?, ?, ?, ?, ?)`,
+      [a.mfgId, code, `${code} Pvt Ltd`, `${code} Plot`, gstin]
+    ))[0].insertId
+    const mapped = await unit("QAM", "02QAMAPPED00H1ZM")
+    const chosen = await unit("QAC", "02QACHOSEN00H2ZL")
+    await conn.execute(`DELETE FROM map_mfg_unit_sku WHERE mfg_id = ? AND sku_id = (SELECT id FROM master_skus WHERE sku_code = ?)`, [a.mfgId, a.sku])
+    await conn.execute(`INSERT INTO map_mfg_unit_sku (mfg_id, sku_id, unit_id) SELECT ?, id, ? FROM master_skus WHERE sku_code = ?`, [a.mfgId, mapped, a.sku])
+
+    const legacy = await makePo(conn, a, { qty: 10 })
+    assert.equal((await readForEmail(conn, legacy.id))[0].gst_number, "02QAMAPPED00H1ZM", "NULL unit follows the mapping")
+
+    const po = await makePo(conn, a, { qty: 10 })
+    await conn.execute(purchaseOrdersSql.setMfgUnit, [chosen, po.id])
+    const rows = await readForEmail(conn, po.id)
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].gst_number, "02QACHOSEN00H2ZL", "the PO's unit, not the SKU's mapped one")
+    assert.equal(rows[0].location, "QAC Plot")
+  })
+})
+
 /* ── The create-PO destination guard ───────────────────────────────────────────
  * tests/unit/destination-entity.test.ts proves the RULE matches the dropdown's.
  * What only the DB can show is that the query feeding it returns the three facts

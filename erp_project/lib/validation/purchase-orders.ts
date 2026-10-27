@@ -32,6 +32,8 @@ export const poCreateSchema = z
     reason: z.string().trim().max(300, "Remarks must be 300 characters or fewer.").optional().nullable(),
     // npd / tech_transfer / cpr are the special types: price 0, once per (SKU, mfg, type), always approved.
     po_type: z.enum(["normal", "impromptu", "npd", "tech_transfer", "cpr"]).optional().default("impromptu"),
+    // The manufacturer unit (plant) to raise against; blank takes the SKU's mapped unit. See lib/po/po-unit.ts.
+    mfg_unit_id: z.coerce.number().int().positive().optional().nullable(),
   })
   .refine((v) => Number(v.qty) > 0, {
     message: "Quantity must be greater than 0.",

@@ -86,6 +86,8 @@ export default async function PoProcurementPage({
   // "Received" tab also covers short-closed POs (see buildFilterParams' statusMatchValues) —
   // its displayed count needs to include them too. "Short Closed" keeps its own separate count.
   statusCounts.received = (statusCounts.received ?? 0) + (statusCounts.short_closed ?? 0)
+  // Discarded drafts are listed under Cancelled (statusMatchValues), so they count there.
+  statusCounts.cancelled = (statusCounts.cancelled ?? 0) + (statusCounts.discarded ?? 0)
   // "Open" is a pseudo-status (see statusMatchValues) — its badge is the sum of
   // the three real statuses it spans. Set after `all` so it isn't counted twice.
   statusCounts.open =

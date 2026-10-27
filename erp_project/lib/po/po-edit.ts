@@ -7,6 +7,7 @@ import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { ApiError } from "@/lib/gateway/errors"
 import { isoDate, todayIST } from "@/lib/date"
 import { canDirectEditPo, impliedGstPercent, isSpecialPoType, poTotal, specialPoPrice } from "@/lib/po/po-rules"
+import { resolvePoUnit, type MfgUnitOption } from "@/lib/po/po-unit"
 
 /** Omitted fields stay as they are. */
 export type DraftPoEdit = {
@@ -14,10 +15,12 @@ export type DraftPoEdit = {
   expected_on?: string | null
   destination?: string | null
   remarks?: string | null
+  /** Supplier unit code (MBA / MB2); only for a manufacturer with units. */
+  mfg_unit?: string | null
   reason: string
 }
 
-export const DRAFT_EDIT_FIELDS = ["qty", "expected_on", "destination", "remarks"] as const
+export const DRAFT_EDIT_FIELDS = ["qty", "expected_on", "destination", "remarks", "mfg_unit"] as const
 export type DraftPoChange = { field: (typeof DRAFT_EDIT_FIELDS)[number]; old: string; new: string }
 
 export type DraftEditPlan = {
@@ -26,6 +29,8 @@ export type DraftEditPlan = {
   changes: DraftPoChange[]
   qty: number
   next: { expected_on: string; destination: string; remarks: string }
+  /** Set only when the unit changes. */
+  nextUnitId: number | null
   amountPreGst: string | number | null
   totalAmount: string | number | null
 }
@@ -33,6 +38,8 @@ export type DraftEditPlan = {
 type LockedPo = {
   id: number
   po_no: string
+  mfg_id: number
+  effective_unit_id: number | null
   sku_code: string | null
   status: string
   email_sent_at: string | Date | null
@@ -95,6 +102,19 @@ export async function planDraftPoEdit(conn: PoolConnection, poId: number, edit: 
   for (const f of ["expected_on", "destination", "remarks"] as const) {
     if (next[f] !== prev[f]) changes.push({ field: f, old: prev[f], new: next[f] })
   }
+
+  let nextUnitId: number | null = null
+  if (blank(edit.mfg_unit)) {
+    const [unitRows] = await conn.execute(purchaseOrdersSql.selectActiveMfgUnits, [po.mfg_id])
+    const units = unitRows as MfgUnitOption[]
+    const r = resolvePoUnit(units, null, blank(edit.mfg_unit))
+    if (!r.ok) throw new ApiError(400, r.code, r.message)
+    if (r.unitId !== po.effective_unit_id) {
+      const code = (id: number | null) => units.find((u) => u.id === id)?.unit_code ?? ""
+      changes.push({ field: "mfg_unit", old: code(po.effective_unit_id), new: code(r.unitId) })
+      nextUnitId = r.unitId
+    }
+  }
   if (changes.length === 0) throw new ApiError(400, "no_changes", "Nothing changed.")
 
   // Amounts move only with qty, so a date-only edit can't re-round a figure already on the PO.
@@ -108,7 +128,7 @@ export async function planDraftPoEdit(conn: PoolConnection, poId: number, edit: 
     totalAmount = price.totalAmount
   }
 
-  return { po, reason, changes, qty, next, amountPreGst, totalAmount }
+  return { po, reason, changes, qty, next, nextUnitId, amountPreGst, totalAmount }
 }
 
 /** Applies an approved edit: one history_pos row per changed field plus the reason,
@@ -126,6 +146,7 @@ export async function applyDraftPoEdit(
     p.next.expected_on || null, p.next.destination || null, p.next.remarks || null,
     p.po.id,
   ])
+  if (p.nextUnitId !== null) await conn.execute(purchaseOrdersSql.setMfgUnit, [p.nextUnitId, p.po.id])
   for (const c of p.changes) {
     await conn.execute(purchaseOrdersSql.insertPoHistory, [p.po.id, p.po.po_no, "update", c.field, c.old, c.new, null, changedBy])
   }
@@ -140,7 +161,7 @@ export function draftEditFromItems(items: { field_name: string; new_value: strin
   const edit: DraftPoEdit = { reason: get("reason")?.new_value ?? "" }
   const qty = get("qty")
   if (qty) edit.qty = Number(qty.new_value)
-  for (const f of ["expected_on", "destination", "remarks"] as const) {
+  for (const f of ["expected_on", "destination", "remarks", "mfg_unit"] as const) {
     const it = get(f)
     if (it) edit[f] = it.new_value
   }

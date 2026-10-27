@@ -1,5 +1,11 @@
 import { IST } from "@/lib/date"
-import type { WarehouseOption } from "./po-types"
+import type { MfgUnitChoice, WarehouseOption } from "./po-types"
+
+/** "MBA — Plot 51 & 52 — 02AACCN5184H1ZM": enough to tell two plants of one manufacturer apart. */
+export function unitLabel(u: MfgUnitChoice): string {
+  const firstLine = (u.address ?? "").split(/\n|,/)[0]?.trim()
+  return [u.unit_code, firstLine, u.gst_number].filter(Boolean).join(" — ")
+}
 
 export const num = (v: string | number | null | undefined) => Number(v ?? 0) || 0
 

@@ -111,6 +111,12 @@ export async function createBulkPoRow(
   const destination = row.destination?.trim() || null
   const remarks = row.remarks?.trim().slice(0, 300) || null
 
+  // The unit resolved at upload; re-checked so a plant retired since then isn't printed. Blank = SKU mapping.
+  const unitId = row.mfg_unit_id?.trim() ? Number(row.mfg_unit_id) : null
+  if (unitId !== null && !(await unitIsActiveFor(conn, unitId, mfg.id))) {
+    return { skip: `${skuCode}: supplier unit ${row.mfg_unit || unitId} is no longer active at ${mfgCode} — upload the file again` }
+  }
+
   const rawBrand = sku.brand?.trim() || skuCode.split("-")[0]
   const brand = brandCode(rawBrand)
   const year = new Date().getFullYear()
@@ -131,8 +137,14 @@ export async function createBulkPoRow(
     mfg.id, skuCode,
   ])
   const poId = (poResult as ResultSetHeader).insertId
+  if (unitId !== null) await conn.execute(purchaseOrdersSql.setMfgUnit, [unitId, poId])
   await conn.execute(purchaseOrdersSql.insertPoHistory, [poId, newPoNo, "create", null, null, null, s3Key, approverId])
   return { poId, poNo: newPoNo }
+}
+
+async function unitIsActiveFor(conn: PoolConnection, unitId: number, mfgId: number): Promise<boolean> {
+  const [rows] = await conn.execute(purchaseOrdersSql.selectActiveMfgUnits, [mfgId])
+  return (rows as { id: number }[]).some((u) => u.id === unitId)
 }
 
 const VALID_STATUSES = ["draft", "raised", "punched", "short_closed", "partially_received", "received", "cancelled"]
@@ -160,7 +172,7 @@ export const poBulkHandler: ModuleHandler = {
         if (poNo) {
           // ── Update path — status/expected_on/destination only ──────────
           const [existingRows] = await conn.execute(purchaseOrdersSql.selectByPoNo, [poNo])
-          const existing = (existingRows as (BulkUpdateTarget & { id: number })[])[0]
+          const existing = (existingRows as (BulkUpdateTarget & { id: number; mfg_id: number })[])[0]
           if (!existing) { skipped++; skipReasons.push(`${poNo}: PO not found`); continue }
 
           const rawStatus = row.status?.trim().toLowerCase() || null
@@ -182,6 +194,16 @@ export const poBulkHandler: ModuleHandler = {
           if (rawExpectedOn && rawExpectedOn !== existingExpectedOn) changes.push({ field: "expected_on", old: existingExpectedOn ?? "", new: rawExpectedOn })
           if (rawDestination && rawDestination !== existing.destination) changes.push({ field: "destination", old: existing.destination ?? "", new: rawDestination })
           if (rawRemarks && rawRemarks !== existing.remarks) changes.push({ field: "remarks", old: existing.remarks ?? "", new: rawRemarks })
+          // Staged only for a still-unmailed PO; bulkUpdateBlock above re-checked that on this connection.
+          const unitId = row.mfg_unit_id?.trim() ? Number(row.mfg_unit_id) : null
+          const unitCode = row.mfg_unit?.trim() ?? ""
+          const unitChanged = unitId !== null && unitCode.toLowerCase() !== (existing.mfg_unit_code ?? "").toLowerCase()
+          if (unitChanged) {
+            if (!(await unitIsActiveFor(conn, unitId, existing.mfg_id))) {
+              skipped++; skipReasons.push(`${poNo}: supplier unit ${unitCode} is no longer active — upload the file again`); continue
+            }
+            changes.push({ field: "mfg_unit", old: existing.mfg_unit_code ?? "", new: unitCode })
+          }
 
           if (changes.length === 0) { skipped++; skipReasons.push(`${poNo}: no changes`); continue }
 
@@ -192,6 +214,7 @@ export const poBulkHandler: ModuleHandler = {
             rawRemarks ?? existing.remarks,
             existing.id,
           ])
+          if (unitChanged) await conn.execute(purchaseOrdersSql.setMfgUnit, [unitId, existing.id])
           for (const c of changes) {
             await conn.execute(purchaseOrdersSql.insertPoHistory, [existing.id, poNo, "update", c.field, c.old, c.new, s3Key, approverId])
           }

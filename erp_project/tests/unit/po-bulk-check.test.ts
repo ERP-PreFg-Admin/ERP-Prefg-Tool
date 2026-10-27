@@ -35,7 +35,7 @@ function facts(over: {
     async skuExists(sku) { calls.push(`sku:${sku}`); return skus.has(sku.toLowerCase()) },
     async poByNo(poNo) {
       calls.push(`po:${poNo}`)
-      const base = { po_no: poNo, status: "draft", email_sent_at: null, expected_on: null, destination: null, remarks: null, sku_code: "SKU-A" }
+      const base = { po_no: poNo, mfg_id: 1, status: "draft", email_sent_at: null, expected_on: null, destination: null, remarks: null, sku_code: "SKU-A" }
       if (over.poRows && poNo in over.poRows) return { ...base, po_type: null, ...over.poRows[poNo] }
       return poNo in (over.pos ?? {}) ? { ...base, po_type: over.pos![poNo] } : null
     },
@@ -55,6 +55,11 @@ function facts(over: {
       calls.push(`rate:${mfgId}|${sku}`)
       const k = sku.toLowerCase()
       return { agreed: rates[mfgId]?.[k], gstPercent: over.gst && k in over.gst ? over.gst[k] : 18 }
+    },
+    // NGE has two plants; SKU-A maps to MB2 there. ALP has none. Not logged in `calls`.
+    async units(mfgId, sku) {
+      if (mfgId !== 5) return { units: [], defaultUnitId: null }
+      return { units: [{ id: 1, unit_code: "MBA" }, { id: 2, unit_code: "MB2" }], defaultUnitId: sku.toLowerCase() === "sku-a" ? 2 : null }
     },
   }
   return { f, calls }
@@ -375,4 +380,49 @@ test("bulkUpdateBlock: a reverted PO (its invoice was reverted) can't be touched
   assert.equal(bulkUpdateBlock(reverted, { status: "short_closed" }), msg)
   assert.equal(bulkUpdateBlock(reverted, { status: "cancelled" }), msg)
   assert.equal(bulkUpdateBlock(po({ status: "cancelled" }), { status: "cancelled" }), null, "a plain cancelled PO is not blocked")
+})
+
+// ── supplier unit (mfg_unit) ─────────────────────────────────────────────────
+
+const nge = (o: Record<string, string>) => row({ mfg_code: "MFG-NGE", ...o })
+
+test("upload: mfg_unit — blank takes the SKU's mapped unit, a code picks one, case-insensitively", async () => {
+  const r = await run([nge({}), nge({ mfg_unit: "mba" }), nge({ mfg_unit: "MB2" })])
+  assert.deepEqual(r.flags, {})
+  assert.deepEqual(r.staged.map((s) => [s.mfg_unit_id, s.mfg_unit]), [["2", "MB2"], ["1", "MBA"], ["2", "MB2"]])
+})
+
+test("upload: mfg_unit — unknown code, no default, and a unit on a manufacturer without units are flagged", async () => {
+  const r = await run([
+    nge({ mfg_unit: "XYZ" }),
+    nge({ sku_code: "SKU-B" }),
+    row({ mfg_unit: "MBA" }),
+    row({}),
+  ])
+  assert.deepEqual(r.flags, {
+    0: ['"XYZ" is not a unit of this manufacturer (MBA, MB2)'],
+    1: ["Pick the supplier unit (MBA, MB2)"],
+    2: ["This manufacturer has no units to choose from"],
+  })
+  assert.equal(r.staged.length, 1)
+  assert.equal(r.staged[0].mfg_unit_id, "", "a manufacturer without units stages no unit")
+})
+
+test("upload: a client-sent mfg_unit_id is overwritten by the server's resolution", async () => {
+  const r = await run([nge({ mfg_unit: "MBA", mfg_unit_id: "99" })])
+  assert.equal(r.staged[0].mfg_unit_id, "1")
+})
+
+test("upload: an update may change the unit only while the PO is unmailed", async () => {
+  const r = await run(
+    [{ po_no: "P-D", mfg_unit: "MBA" }, { po_no: "P-M", mfg_unit: "MBA" }, { po_no: "P-S", mfg_unit: "mb2" }],
+    { poRows: {
+      "P-D": { status: "raised", email_sent_at: null, mfg_id: 5, mfg_unit_code: "MB2" } as never,
+      "P-M": { status: "raised", email_sent_at: MAILED, mfg_id: 5, mfg_unit_code: "MB2" } as never,
+      "P-S": { status: "raised", email_sent_at: MAILED, mfg_id: 5, mfg_unit_code: "MB2" } as never,
+    } },
+  )
+  assert.deepEqual(r.flags, { 1: ["P-M has been sent to the manufacturer — a CSV can only cancel or short-close it now"] })
+  assert.deepEqual(r.staged.map((s) => [s.po_no, s.mfg_unit_id]), [["P-D", "1"], ["P-S", "2"]],
+    "restating the current unit on a mailed PO (a re-uploaded export) is not a change")
 })

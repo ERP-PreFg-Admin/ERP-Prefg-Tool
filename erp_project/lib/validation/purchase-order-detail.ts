@@ -19,6 +19,10 @@ export const poCancelSchema = z.object({
   reason: z.string().trim().max(1000, "Reason must be 1000 characters or fewer.").optional(),
 })
 
+export const poDiscardSchema = z.object({
+  reason: z.string().trim().min(1, "Give a reason for discarding this PO.").max(500, "Reason must be 500 characters or fewer."),
+})
+
 export const poReceiveSchema = z.object({
   qty: z.coerce.number().positive("Received quantity must be greater than 0."),
 })
@@ -29,6 +33,8 @@ export const poDraftEditSchema = z.object({
   expected_on: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected dispatch must be a date.").nullable().optional(),
   destination: z.string().trim().nullable().optional(),
   remarks: z.string().trim().max(300, "Remarks must be 300 characters or fewer.").nullable().optional(),
+  // Supplier unit code; omitted or blank leaves it unchanged.
+  mfg_unit: z.string().trim().max(10).nullable().optional(),
   reason: z.string().trim().min(1, "Give a reason for the edit."),
 })
 

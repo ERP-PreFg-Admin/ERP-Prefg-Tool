@@ -14,8 +14,8 @@ import { Select } from "@/components/ui/select"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { useToast } from "@/components/ui/toast"
 import { RemarksField, PO_REASON_PRESETS } from "@/components/masters/RemarksField"
-import type { RecipeChoice, MfgOption, MfgSkuOption, WarehouseOption } from "./po-types"
-import { warehousesForEntity, warehouseLabel, warehouseKey } from "./po-utils"
+import type { RecipeChoice, MfgOption, MfgSkuOption, MfgUnitChoice, WarehouseOption } from "./po-types"
+import { warehousesForEntity, warehouseLabel, warehouseKey, unitLabel } from "./po-utils"
 import { useQuotedRate } from "./useQuotedRate"
 import { todayIST } from "@/lib/date"
 import { SPECIAL_PO_TYPES, SPECIAL_PO_LABEL, type SpecialPoType } from "@/lib/po/po-rules"
@@ -38,6 +38,8 @@ type PoLineRowState = {
   entity_code: string | null
   /** NPD / Tech Transfer / CPR, or "" for a normal / impromptu PO. One per PO. */
   special: SpecialPoType | ""
+  /** The manufacturer plant to raise against; "" when the manufacturer has none, or none is mapped. */
+  mfg_unit_id: string
 }
 
 /**
@@ -70,6 +72,7 @@ function makeRow(s: MfgSkuOption, warehouseOptions: WarehouseOption[]): PoLineRo
     // destination is always one the row can actually be sent to.
     destination: defaultDestination(warehousesForEntity(warehouseOptions, s.entity_code)),
     special: "",
+    mfg_unit_id: s.default_unit_id ? String(s.default_unit_id) : "",
   }
 }
 
@@ -77,12 +80,13 @@ function makeRow(s: MfgSkuOption, warehouseOptions: WarehouseOption[]): PoLineRo
 // only; submission re-fetches it fresh right before creating each PO, so a
 // stale/failed display here never blocks the other rows).
 function PoLineRow({
-  row, mfgId, today, warehouseOptions, error, onChange, onRemove,
+  row, mfgId, today, warehouseOptions, units, error, onChange, onRemove,
 }: {
   row: PoLineRowState
   mfgId: string
   today: string
   warehouseOptions: WarehouseOption[]
+  units: MfgUnitChoice[]
   error?: string
   onChange: (field: keyof PoLineRowState, value: string) => void
   onRemove: () => void
@@ -193,6 +197,21 @@ function PoLineRow({
           ))}
         </Select>
       </td>
+      {units.length > 0 && (
+        <td className="px-2 py-1.5 align-top">
+          <Select
+            value={row.mfg_unit_id}
+            onChange={(e) => onChange("mfg_unit_id", e.target.value)}
+            className="w-56 text-xs"
+            title="The manufacturer plant this PO is raised against — printed as the PO's supplier address"
+          >
+            <option value="">— Select unit —</option>
+            {units.map((u) => (
+              <option key={u.id} value={String(u.id)}>{unitLabel(u)}</option>
+            ))}
+          </Select>
+        </td>
+      )}
       <td className="px-2 py-1.5 align-top">
         {error && <p className="text-[11px] text-destructive max-w-32">{error}</p>}
       </td>
@@ -227,6 +246,7 @@ export default function AddPODialog({
   // then filtered out again. The catalog is now search options; a row exists
   // because someone asked for it.
   const [skuOptions, setSkuOptions] = useState<MfgSkuOption[]>([])
+  const [units, setUnits]           = useState<MfgUnitChoice[]>([])
   const [rows, setRows]             = useState<PoLineRowState[]>([])
   const [loadingSkus, setLoadingSkus] = useState(false)
   const [skusError, setSkusError]   = useState("")
@@ -259,7 +279,7 @@ export default function AddPODialog({
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- clears rows when the dialog closes or the manufacturer selection is cleared
-    if (!open || !mfgId) { setSkuOptions([]); setRows([]); return }
+    if (!open || !mfgId) { setSkuOptions([]); setUnits([]); setRows([]); return }
     setLoadingSkus(true)
     setSkusError("")
     setRowErrors({})
@@ -269,7 +289,10 @@ export default function AddPODialog({
     setRows([])
     fetch(`/api/v1/purchase-orders/mfg-skus?mfg_id=${mfgId}`)
       .then((r) => r.json())
-      .then((data: { skus?: MfgSkuOption[] }) => setSkuOptions(data.skus ?? []))
+      .then((data: { skus?: MfgSkuOption[]; units?: MfgUnitChoice[] }) => {
+        setSkuOptions(data.skus ?? [])
+        setUnits(data.units ?? [])
+      })
       .catch(() => setSkusError("Failed to load SKUs for this manufacturer."))
       .finally(() => setLoadingSkus(false))
   }, [open, mfgId])
@@ -314,6 +337,7 @@ export default function AddPODialog({
       else if (!r.recipe_id) errs[r.sku_code] = "No Recipe on this manufacturer's line for this SKU — it can't be ordered."
       else if (!r.expected_on) errs[r.sku_code] = "Expected dispatch date is required."
       else if (r.expected_on < today) errs[r.sku_code] = "Backdating is not allowed."
+      else if (units.length > 0 && !r.mfg_unit_id) errs[r.sku_code] = "Pick the supplier unit."
     }
     if (Object.keys(errs).length > 0) { setRowErrors(errs); return }
 
@@ -351,6 +375,7 @@ export default function AddPODialog({
             expected_on:  r.expected_on,
             destination:  r.destination || undefined,
             reason:       reason.trim() || undefined,
+            mfg_unit_id:  r.mfg_unit_id ? Number(r.mfg_unit_id) : undefined,
           }),
         })
         const data = await res.json()
@@ -494,6 +519,7 @@ export default function AddPODialog({
                     <th className="px-2 py-1.5 text-left">Type</th>
                     <th className="px-2 py-1.5 text-left">Expected Dispatch</th>
                     <th className="px-2 py-1.5 text-left">Destination WH</th>
+                    {units.length > 0 && <th className="px-2 py-1.5 text-left">Supplier Unit</th>}
                     <th className="px-2 py-1.5 text-left"></th>
                     <th className="px-2 py-1.5 text-left"></th>
                   </tr>
@@ -506,6 +532,7 @@ export default function AddPODialog({
                       mfgId={mfgId}
                       today={today}
                       warehouseOptions={warehouseOptions}
+                      units={units}
                       error={rowErrors[r.sku_code]}
                       onChange={(field, value) => setRowField(r.sku_code, field, value)}
                       onRemove={() => setRows((prev) => prev.filter((x) => x.sku_code !== r.sku_code))}
