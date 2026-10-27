@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button"
 import { wastageFraction } from "@/lib/costing/final-costing"
 import type { BreakupLine, CostingBreakup } from "./costing-breakup"
 import { buildBreakupCsv } from "./costing-breakup"
-import { fmtMoney } from "../mfg-utils"
+import { fmtCost, fmtMoney } from "../mfg-utils"
 
 /** No route: the page already holds every breakup, so the file is built here
  *  from what is on screen. Same shape as RecipeDetailPanel's download. */
@@ -81,7 +81,7 @@ function LineRows({ lines, label, total }: { lines: BreakupLine[]; label: string
                 weight and a PM amount is a unit count. Neither is rupees. */}
             <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">{l.amount}</td>
             <td className="px-2 py-1 text-right tabular-nums">{unpriced ? NOT_SET : fmtMoney(l.rate)}</td>
-            <td className="px-2 py-1 text-right tabular-nums font-medium">{fmtMoney(l.cost)}</td>
+            <td className="px-2 py-1 text-right tabular-nums font-medium">{fmtCost(l.cost)}</td>
           </tr>
         )
       })}
@@ -89,7 +89,7 @@ function LineRows({ lines, label, total }: { lines: BreakupLine[]; label: string
         <td colSpan={4} className="px-2 py-1 text-right text-[10px] uppercase tracking-wider text-muted-foreground">
           {label} total
         </td>
-        <td className="px-2 py-1 text-right tabular-nums font-semibold">{fmtMoney(total)}</td>
+        <td className="px-2 py-1 text-right tabular-nums font-semibold">{fmtCost(total)}</td>
       </tr>
     </>
   )
@@ -183,7 +183,7 @@ export default function CostingBreakupPanel(
                     {m.value == null ? NOT_SET
                       : m.type === "rm_loss" || m.type === "pm_loss"
                         ? `${(wastageFraction(m.value) * 100).toFixed(2)}%`
-                        : fmtMoney(m.value)}
+                        : fmtCost(m.value)}
                   </td>
                 </tr>
               ))}

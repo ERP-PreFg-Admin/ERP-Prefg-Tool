@@ -18,7 +18,7 @@ import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 // field. A scenario row is still one, but every cell this file renders comes
 // from the FinalCostingRow half of it, which is what CostingCells takes.
 import type { FinalCostingRow } from "@/types/masters"
-import { fmtMoney } from "../mfg-utils"
+import { fmtCost } from "../mfg-utils"
 
 /**
  * The amber warning that sits before a SKU code when its costing is missing
@@ -164,14 +164,14 @@ export function CostingCells({ row, best }: { row: FinalCostingRow; best: boolea
   const input = "text-right tabular-nums text-muted-foreground"
   return (
     <>
-      <TableCell className={input}>{fmtMoney(row.rm_cost)}</TableCell>
-      <TableCell className={input}>{fmtMoney(row.pm_cost)}</TableCell>
-      <TableCell className={input}>{fmtMoney(row.jw)}</TableCell>
-      <TableCell className={input}>{fmtMoney(row.shrink)}</TableCell>
-      <TableCell className={input}>{fmtMoney(row.shipper)}</TableCell>
-      <TableCell className={input}>{fmtMoney(row.utility)}</TableCell>
-      <TableCell className={input}>{fmtMoney(row.margin)}</TableCell>
-      <TableCell className={input}>{fmtMoney(row.wastage)}</TableCell>
+      <TableCell className={input}>{fmtCost(row.rm_cost)}</TableCell>
+      <TableCell className={input}>{fmtCost(row.pm_cost)}</TableCell>
+      <TableCell className={input}>{fmtCost(row.jw)}</TableCell>
+      <TableCell className={input}>{fmtCost(row.shrink)}</TableCell>
+      <TableCell className={input}>{fmtCost(row.shipper)}</TableCell>
+      <TableCell className={input}>{fmtCost(row.utility)}</TableCell>
+      <TableCell className={input}>{fmtCost(row.margin)}</TableCell>
+      <TableCell className={input}>{fmtCost(row.wastage)}</TableCell>
       <TableCell
         className={
           "text-right tabular-nums font-semibold " +
@@ -179,7 +179,7 @@ export function CostingCells({ row, best }: { row: FinalCostingRow; best: boolea
         }
         title={best ? "Lowest total costing in this scenario" : undefined}
       >
-        {fmtMoney(row.total)}
+        {fmtCost(row.total)}
       </TableCell>
     </>
   )

@@ -13,6 +13,13 @@ export const fmtMoney = (v: string | number | null | undefined) => {
   return `₹${n.toLocaleString("en-IN")}`
 }
 
+/** Per-unit costing figures: always two decimals (₹12.30), never L/Cr. */
+export const fmtCost = (v: string | number | null | undefined) => {
+  const n = num(v)
+  if (n === 0) return "—"
+  return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 export const fmtDate = (d: string | null | undefined) =>
   d ? new Date(d).toLocaleDateString("en-CA", { timeZone: IST }) : "—"
 
