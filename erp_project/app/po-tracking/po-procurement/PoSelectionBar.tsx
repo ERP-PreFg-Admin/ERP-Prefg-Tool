@@ -12,6 +12,7 @@ import { useToast } from "@/components/ui/toast"
 import type { BadgeVariant, PoRow } from "./po-types"
 import { STATUS_CONFIG } from "./po-types"
 import { fmtInt, fmtRate } from "./po-utils"
+import { isSpecialPoType, SPECIAL_PO_LABEL } from "@/lib/po/po-rules"
 
 type MfgGroup = { mfg_id: number; mfg_code: string; mfg_name: string; rows: PoRow[] }
 
@@ -64,7 +65,7 @@ function ReviewSendDialog({
         description: failedResults.length > 0
           ? `Sent to ${sentCount} manufacturer(s). Failed: ${failedResults
               .map((r: any) => {
-                // po_no is set on split legs only, and one manufacturer can have
+                // po_no is set on split and special-PO legs, and one manufacturer can have
                 // several in a batch — naming it is the point of carrying it.
                 const who = r.po_no ? `${r.mfg_name} (${r.po_no})` : r.mfg_name
                 return `${who} — ${r.error ?? "no email on file"}`
@@ -127,6 +128,11 @@ function ReviewSendDialog({
                         <div className="text-[11px] text-muted-foreground truncate">
                           {r.destination || "No location"} · Rate {fmtRate(r.unit_price)}
                         </div>
+                        {isSpecialPoType(r.po_type) && (
+                          <div className="text-[11px] text-sky-700 dark:text-sky-400 truncate">
+                            → {SPECIAL_PO_LABEL[r.po_type]} contacts, not the manufacturer
+                          </div>
+                        )}
                       </div>
                       <span className="flex items-center gap-2 shrink-0">
                         <span className="tabular-nums text-muted-foreground whitespace-nowrap">Qty {fmtInt(r.qty)}</span>

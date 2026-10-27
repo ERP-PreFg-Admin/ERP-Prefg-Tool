@@ -2,8 +2,10 @@ import { NextResponse } from "next/server"
 import { query, execute } from "@/lib/db"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import {
-  sendMfgSelectionEmail, sendSplitPoSummaryEmail, partitionSplits, type SelectedPoLine,
+  sendMfgSelectionEmail, sendSplitPoSummaryEmail, sendSpecialPoEmail, partitionSplits, partitionSpecialPos,
+  type SelectedPoLine,
 } from "@/lib/mail/mailer"
+import { SPECIAL_PO_LABEL } from "@/lib/po/po-rules"
 import { poSendMailSchema } from "@/lib/validation/purchase-orders"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { assertPoInScope } from "@/lib/po/po-guard"
@@ -85,10 +87,28 @@ export const POST = withGateway({
     const results: { mfg_id: number; mfg_name: string; po_no?: string; sent: boolean; error?: string }[] = []
     const sentPoIds: number[] = []
     for (const [mfgId, group] of byMfg) {
+      // NPD / Tech Transfer / CPR go to that type's contacts only — never the manufacturer,
+      // and never a fallback to it: with no contact the PO stays Draft.
+      const { special, regular } = partitionSpecialPos(group.lines)
+      for (const [poType, lines] of special) {
+        const po_no = lines.map((l) => l.po_no).join(", ")
+        const label = SPECIAL_PO_LABEL[poType]
+        try {
+          const sent = await sendSpecialPoEmail(mfgId, poType, lines)
+          results.push(sent
+            ? { mfg_id: mfgId, mfg_name: group.mfg_name, po_no, sent }
+            : { mfg_id: mfgId, mfg_name: group.mfg_name, po_no, sent, error: `No ${label} contact for ${group.mfg_code} — add one under Emails (type ${label} PO).` })
+          if (sent) sentPoIds.push(...lines.map((l) => l.id))
+        } catch (err: unknown) {
+          const error = err instanceof Error ? err.message : String(err)
+          results.push({ mfg_id: mfgId, mfg_name: group.mfg_name, po_no, sent: false, error })
+        }
+      }
+
       // A raised split leaves the consolidated mail entirely and gets its own —
       // see partitionSplits. Each leg is tried and reported separately, so the
       // consolidated one failing can't hold back the splits, or the reverse.
-      const { splits, rest } = partitionSplits(group.lines)
+      const { splits, rest } = partitionSplits(regular)
 
       // Skipped when the selection was nothing but splits: a "PO Update" whose
       // only remaining content is the open snapshot is not an update of anything.

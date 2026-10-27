@@ -1046,6 +1046,8 @@ export const purchaseOrdersSql = {
       ${APPROVED_ONLY}
       AND ${EFFECTIVE_STATUS_EXPR} NOT IN ('received', 'cancelled', 'reverted')
       AND ${UNALLOCATED_QTY_EXPR} > 0
+      -- Special POs go to their own contacts, never to the manufacturer (sendSpecialPoEmail).
+      AND COALESCE(po.po_type, '') NOT IN ('npd', 'tech_transfer', 'cpr')
     ORDER BY po.date DESC, po.id DESC
   `,
 

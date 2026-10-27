@@ -1,4 +1,11 @@
 import { z } from "zod"
+import { SPECIAL_PO_TYPES } from "@/lib/po/po-rules"
+
+const ENTITY_TYPES = ["vendor", "mfg", "warehouse", "employee", "report", ...SPECIAL_PO_TYPES] as const
+
+/** Types whose SELECT has a '*' arm: every warehouse, every manufacturer. */
+const allowsWildcard = (t: string) =>
+  t === "warehouse" || t === "employee" || (SPECIAL_PO_TYPES as readonly string[]).includes(t)
 
 export const entityEmailCreateSchema = z
   .object({
@@ -11,7 +18,9 @@ export const entityEmailCreateSchema = z
     // The route checks that code against the right table.
     // 'report' is a subscriber to a scheduled digest; entity_code names the
     // report ('daily_ops'), and no entity-facing query can reach these rows.
-    entity_type: z.enum(["vendor", "mfg", "warehouse", "employee", "report"]),
+    // 'npd' / 'tech_transfer' / 'cpr' receive that special PO type instead of the
+    // manufacturer; entity_code is a mfg code or '*'.
+    entity_type: z.enum(ENTITY_TYPES),
     entity_code: z.string().trim().min(1),
     /**
      * master_entity.code — which of OUR legal entities these addresses serve.
@@ -49,10 +58,10 @@ export const entityEmailCreateSchema = z
     // wildcard arm in the SELECTs (lib/queries/entity-emails.ts), so accepting it
     // on a vendor or mfg row would store a contact that matches nothing and
     // silently mails no one — the failure this file exists to prevent.
-    (v) => v.entity_code !== "*" || v.entity_type === "warehouse" || v.entity_type === "employee",
+    (v) => v.entity_code !== "*" || allowsWildcard(v.entity_type),
     {
       path: ["entity_code"],
-      message: "'All' is only available for warehouse and employee contacts.",
+      message: "'All' is only available for warehouse, employee and special-PO contacts.",
     }
   )
 
@@ -66,7 +75,7 @@ export const entityEmailCreateSchema = z
 export const entityEmailUpdateSchema = z
   .object({
     id: z.coerce.number().int().positive(),
-    entity_type: z.enum(["vendor", "mfg", "warehouse", "employee", "report"]),
+    entity_type: z.enum(ENTITY_TYPES),
     entity_code: z.string().trim().min(1),
     legal_entity_code: z.string().trim().optional(),
     email: z.string().trim().email("Enter a valid email address, e.g. name@example.com"),
@@ -81,9 +90,9 @@ export const entityEmailUpdateSchema = z
     message: "A legal entity can only be set on warehouse contacts.",
   })
   .refine(
-    (v) => v.entity_code !== "*" || v.entity_type === "warehouse" || v.entity_type === "employee",
+    (v) => v.entity_code !== "*" || allowsWildcard(v.entity_type),
     {
       path: ["entity_code"],
-      message: "'All' is only available for warehouse and employee contacts.",
+      message: "'All' is only available for warehouse, employee and special-PO contacts.",
     }
   )

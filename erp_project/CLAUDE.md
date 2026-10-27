@@ -568,7 +568,7 @@ This eliminates `any` type noise and gives full IntelliSense on `conn.execute`, 
 | `lib/queries/auth.ts` | Authentication — sessions, session history |
 | `lib/queries/daily-digest.ts` | Day-scoped counts for the 23:59 IST ops digest. Every query takes a **UTC** `[from, to)` from `istDayWindowUtc` — `purchase_orders.date` is the exception (already an IST DATE) and so is absent here |
 | `lib/queries/recipe.ts` | Recipe master — `master_recipe`, `details_recipe`, `artifacts_recipe` (was `bom.ts`) |
-| `lib/queries/entity-emails.ts` | Mail recipients per vendor / mfg / **warehouse** / **employee**, each row a `to` or a `cc`. An employee row is anyone worth looping in — ours or an outside party (3PL, CHA), so the address is typed, never picked from `users`. Its `entity_code` is the warehouse name or mfg code it hangs off, or `'*'` for **every** manufacturer including future ones |
+| `lib/queries/entity-emails.ts` | Mail recipients per vendor / mfg / **warehouse** / **employee**, each row a `to` or a `cc`. An employee row is anyone worth looping in — ours or an outside party (3PL, CHA), so the address is typed, never picked from `users`. Its `entity_code` is the warehouse name or mfg code it hangs off, or `'*'` for **every** manufacturer including future ones. Types `npd` / `tech_transfer` / `cpr` (mfg code or `'*'`) receive those special POs **instead of** the manufacturer — `sendSpecialPoEmail`, with no fallback; `ongoingByMfg` hides them from the mfg's open table |
 | `lib/queries/entity-scope.ts` | `user_entity_scope` + the admin picker's entity lists |
 | `lib/queries/history.ts` | Generic per-module audit trail — `history_masters_edits` |
 | `lib/queries/manufacturers.ts` | Manufacturer master — master_mfgs + details_mfg |

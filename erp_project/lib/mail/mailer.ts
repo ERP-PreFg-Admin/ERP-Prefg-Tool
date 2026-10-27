@@ -20,6 +20,7 @@ import { buildMultiSheetXlsx, type ExportColumn } from "@/lib/export"
 import { assertAttachmentsWithinLimit } from "@/lib/mail/mail-limits"
 import { renderWelcomeMail } from "@/lib/mail/welcome-mail"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
+import { isSpecialPoType, SPECIAL_PO_LABEL, type SpecialPoType } from "@/lib/po/po-rules"
 import logger from "@/lib/logger"
 import crypto from "crypto"
 
@@ -107,6 +108,7 @@ function mailerCtx() {
 export const MAIL_FLOW = {
   PO_SELECTION: "po_selection",
   PO_SPLIT: "po_split",
+  PO_SPECIAL: "po_special",
   INWARD_INVOICE: "inward_invoice",
   OPS_DIGEST: "ops_digest",
   LOW_OPEN_PO: "low_open_po",
@@ -268,7 +270,7 @@ export async function fetchPoData(poId: number): Promise<PoEmailData | null> {
  * warehouse's name, which is what purchase_orders.destination stores.
  */
 export async function resolveRecipients(
-  entityType: "mfg" | "vendor" | "warehouse" | "report",
+  entityType: "mfg" | "vendor" | "warehouse" | "report" | SpecialPoType,
   entityCode: string,
   primaryEmail: string | null = null,
   /**
@@ -292,6 +294,8 @@ export async function resolveRecipients(
       ? await query<RecipientRow>(entityEmails.selectForMfg, [entityCode, entityCode])
       : entityType === "report"
       ? await query<RecipientRow>(entityEmails.selectReportRecipients, [entityCode])
+      : isSpecialPoType(entityType)
+      ? await query<RecipientRow>(entityEmails.selectForSpecialPo, [entityType, entityCode])
       : await query<RecipientRow>(entityEmails.selectByEntity, [entityType, entityCode])
 
   // Addresses SES has hard-bounced or that complained. Read per call rather than
@@ -397,6 +401,21 @@ export function partitionSplits(lines: SelectedPoLine[]): {
 } {
   const isSplit = (l: SelectedPoLine) => l.status === "raised" && !!l.reference_po
   return { splits: lines.filter(isSplit), rest: lines.filter((l) => !isSplit(l)) }
+}
+
+/** NPD / Tech Transfer / CPR lines, splits included, never reach the manufacturer:
+ *  they leave the selection by type, before partitionSplits sees it. */
+export function partitionSpecialPos(lines: SelectedPoLine[]): {
+  special: Map<SpecialPoType, SelectedPoLine[]>
+  regular: SelectedPoLine[]
+} {
+  const special = new Map<SpecialPoType, SelectedPoLine[]>()
+  const regular: SelectedPoLine[] = []
+  for (const l of lines) {
+    if (isSpecialPoType(l.po_type)) special.set(l.po_type, [...(special.get(l.po_type) ?? []), l])
+    else regular.push(l)
+  }
+  return { special, regular }
 }
 
 /**
@@ -760,6 +779,109 @@ export async function sendSplitPoSummaryEmail(mfgId: number, lines: SelectedPoLi
   recordProcessedEvent("PO_SPLIT_EMAIL", eventId, {
     mfgId, mfg_name: mfg.name, mfg_email: allRecipients, poNos,
   })
+  return true
+}
+
+/**
+ * One manufacturer's NPD / Tech Transfer / CPR POs, mailed to that type's contacts
+ * (entity_type = po_type) and never to the manufacturer. No open-book section.
+ * Returns false when the type has no contact for this manufacturer; throws on a send failure.
+ */
+export async function sendSpecialPoEmail(
+  mfgId: number, poType: SpecialPoType, lines: SelectedPoLine[]
+): Promise<boolean> {
+  const ctx = mailerCtx()
+  const label = SPECIAL_PO_LABEL[poType]
+  const poNos = lines.map((l) => l.po_no)
+  const [mfg] = await query<{ code: string; name: string }>(
+    `SELECT code, name FROM master_mfgs WHERE id = ? LIMIT 1`, [mfgId]
+  )
+  if (!mfg) {
+    logger.warn({ ...ctx, mfgId, poType, poNos, message: "sendSpecialPoEmail: manufacturer not found" })
+    return false
+  }
+
+  // No primary email: details_mfg.email is the manufacturer's, and these POs must not reach it.
+  const { to, cc, dropped } = await resolveRecipients(poType, mfg.code)
+  if (to.length === 0 && cc.length === 0) {
+    logger.warn({
+      ...ctx, mfgId, poType, poNos,
+      suppressed: dropped.length > 0 ? dropped.join(", ") : undefined,
+      message: dropped.length > 0
+        ? `sendSpecialPoEmail: every ${label} contact is suppressed, skipping`
+        : `sendSpecialPoEmail: no ${label} contact for this manufacturer, skipping`,
+    })
+    return false
+  }
+
+  const { splits, rest } = partitionSplits(lines)
+  const raisedLines = rest.filter((l) => l.status === "raised")
+  const cancelledLines = rest
+    .filter((l) => l.status === "cancelled")
+    .map((l) => ({ ...l, qty: Math.max(Number(l.qty) - Number(l.received_qty ?? 0), 0) }))
+
+  const attachments: { filename: string; content: Buffer }[] = []
+  for (const line of lines) {
+    if (line.status === "cancelled") continue
+    try {
+      const isSplit = splits.includes(line)
+      const doc = await poDocument(line, isSplit ? generateSplitPoPdf : generatePoPdf, ctx)
+      if (doc) attachments.push(doc)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      logger.error({ ...ctx, poId: line.id, po_no: line.po_no, error: message, message: `${label} PO PDF generation failed — sending without this attachment` })
+    }
+  }
+
+  const xlsxBuffer = await buildMultiSheetXlsx([
+    { name: "Raised",    columns: PO_SHEET_COLUMNS, rows: toSheetRows([...raisedLines, ...splits]) },
+    { name: "Cancelled", columns: PO_SHEET_COLUMNS, rows: toSheetRows(cancelledLines) },
+  ])
+  attachments.push({ filename: `${label.replace(/\s+/g, "-")}-POs-${mfg.code}.xlsx`, content: Buffer.from(xlsxBuffer) })
+  assertAttachmentsWithinLimit(attachments, `${label} PO email for ${mfg.code}`)
+
+  const date = new Date()
+  const formatted = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+  const allRecipients = [...to, ...cc].join(", ")
+  const eventId = makeEventId("PO_SPECIAL_EMAIL", "send", mfgId)
+  recordRawEvent("PO_SPECIAL_EMAIL", eventId, { mfgId, poType, mfg_name: mfg.name, recipients: allRecipients, poNos })
+
+  let sesMessageId: string | undefined
+  try {
+    const info = await getTransporter().sendMail({
+      ...sesOptions,
+      from: fromHeader,
+      to: to.join(", "),
+      ...(cc.length ? { cc: cc.join(", ") } : {}),
+      subject: `${label} PO — ${mfg.name} - ${formatted}`,
+      html: `
+        <div style="font-family:sans-serif;max-width:620px;margin:auto;color:#111">
+          <h2 style="margin-bottom:4px">${escapeHtml(label)} POs: ${escapeHtml(mfg.name)}</h2>
+          <p style="color:#555;margin-top:0">These ${escapeHtml(label)} purchase orders are sent to you, not to the manufacturer${attachments.length > 1 ? " (PO copies attached; full details in the attached Excel)" : " (full details in the attached Excel)"}.</p>
+          ${poSection(`Newly Raised ${escapeHtml(label)} Purchase Orders`, raisedLines)}
+          ${poSection("Split Purchase Orders (parts of earlier orders)", splits)}
+          ${poSection(`Cancelled ${escapeHtml(label)} Purchase Orders`, cancelledLines, "Cancelled Qty")}
+          <p style="font-size:12px;color:#888;margin-top:20px">
+            This is an auto-generated email from the mcaffeine ERP system.
+          </p>
+        </div>
+      `,
+      attachments,
+    })
+    sesMessageId = info?.messageId
+  } catch (sendErr: unknown) {
+    const message = sendErr instanceof Error ? sendErr.message : String(sendErr)
+    logger.error({ ...ctx, ...mailOutcome("failed", MAIL_FLOW.PO_SPECIAL, { recipients: to.length + cc.length }), eventId, poType, poNos, err: message, message: `${label} PO email send failed` })
+    recordFailedEvent("PO_SPECIAL_EMAIL", eventId, { mfgId, poType, mfg_name: mfg.name, poNos }, message)
+    throw sendErr
+  }
+
+  logger.info({
+    ...ctx, ...mailOutcome("sent", MAIL_FLOW.PO_SPECIAL, { recipients: to.length + cc.length, sesMessageId }),
+    eventId, mfgId, poType, mfg_name: mfg.name, recipients: allRecipients, poNos,
+    message: `${label} PO email sent successfully`,
+  })
+  recordProcessedEvent("PO_SPECIAL_EMAIL", eventId, { mfgId, poType, mfg_name: mfg.name, recipients: allRecipients, poNos })
   return true
 }
 

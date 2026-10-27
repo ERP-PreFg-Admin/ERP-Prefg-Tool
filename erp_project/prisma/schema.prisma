@@ -1225,6 +1225,11 @@ enum entity_emails_entity_type {
   /// ('daily_ops'). Its own type so selectForMfg / selectByWarehouseForEntity
   /// can never reach it — see prisma/add_entity_email_report_type.sql.
   report
+  /// Special-PO contacts, named after po_type; entity_code is a mfg code or '*'.
+  /// These POs go here instead of to the manufacturer (add_entity_email_special_po_types.sql).
+  npd
+  tech_transfer
+  cpr
 }
 
 enum entity_emails_recipient_type {

@@ -23,6 +23,9 @@ import AddEntityEmailDialog from "./AddEntityEmailDialog"
 
 type EntityOption = { id: number; code: string; name: string }
 
+// Special-PO types are stored as their po_type; the rest read fine capitalised.
+const TYPE_LABEL: Record<string, string> = { npd: "NPD PO", tech_transfer: "Tech Transfer PO", cpr: "CPR PO" }
+
 type EntityEmailRow = {
   id: number
   entity_type: string
@@ -91,6 +94,9 @@ export default function EntityEmailsClient({
           <option value="warehouse">Warehouse</option>
           <option value="employee">Employee</option>
           <option value="report">Report</option>
+          <option value="npd">NPD PO</option>
+          <option value="tech_transfer">Tech Transfer PO</option>
+          <option value="cpr">CPR PO</option>
         </Select>
         <MasterToolbarActions>
           <Button
@@ -144,7 +150,7 @@ export default function EntityEmailsClient({
                     // record someone may need to find and reactivate.
                     className={r.status === "inactive" ? "opacity-55 hover:opacity-100 transition-opacity" : undefined}
                   >
-                    <TableCell className="capitalize">{r.entity_type}</TableCell>
+                    <TableCell className="capitalize">{TYPE_LABEL[r.entity_type] ?? r.entity_type}</TableCell>
                     <TableCell className="font-mono">
                       {/* '*' is a real stored value, not missing data — one row
                           standing in for every entity of its kind. What it stands

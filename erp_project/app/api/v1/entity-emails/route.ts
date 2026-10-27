@@ -17,6 +17,7 @@ import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { entityEmailCreateSchema, entityEmailUpdateSchema } from "@/lib/validation/entity-emails"
 import { REPORT_CODES } from "@/lib/constants"
+import { isSpecialPoType } from "@/lib/po/po-rules"
 
 /** entity_code on a 'report' row names a report, and has no FK. */
 function assertKnownReport(entityType: string, entityCode: string): void {
@@ -24,6 +25,13 @@ function assertKnownReport(entityType: string, entityCode: string): void {
   if (!(REPORT_CODES as readonly string[]).includes(entityCode)) {
     throw new ApiError(400, "unknown_report", `'${entityCode}' is not a known report.`)
   }
+}
+
+/** A special-PO contact hangs off a manufacturer code, or '*' for all of them. */
+async function assertKnownSpecialPoMfg(entityType: string, entityCode: string): Promise<void> {
+  if (!isSpecialPoType(entityType) || entityCode === "*") return
+  const mfg = await query<{ id: number }>(entityEmails.mfgExistsByCode, [entityCode])
+  if (mfg.length === 0) throw new ApiError(400, "unknown_entity", `Unknown manufacturer '${entityCode}'.`)
 }
 
 export const POST = withGateway({
@@ -69,6 +77,7 @@ export const POST = withGateway({
 
     // A report row names a report, not an entity — same no-FK reasoning.
     assertKnownReport(body.entity_type, body.entity_code)
+    await assertKnownSpecialPoMfg(body.entity_type, body.entity_code)
 
     // One address per entity. uq_entity_email enforces it (see
     // prisma/add_entity_email_unique.sql) — this pre-check exists to say WHICH
@@ -152,6 +161,7 @@ export const PATCH = withGateway({
 
     // A report row names a report, not an entity — same no-FK reasoning.
     assertKnownReport(body.entity_type, body.entity_code)
+    await assertKnownSpecialPoMfg(body.entity_type, body.entity_code)
 
     if (body.entity_type === "warehouse" && body.entity_code !== "*") {
       const wh = await query<{ id: number }>(entityEmails.warehouseExistsByName, [body.entity_code])

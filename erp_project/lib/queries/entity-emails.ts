@@ -113,6 +113,14 @@ export const entityEmails = {
       AND status = 'active'
   `,
 
+  /** Who gets a special PO (npd / tech_transfer / cpr) instead of the manufacturer:
+   *  that type's rows for this mfg code, plus its '*' rows. Params: [po_type, mfg_code] */
+  selectForSpecialPo: `
+    SELECT email, recipient_type FROM entity_emails
+    WHERE status = 'active' AND entity_type = ?
+      AND (entity_code = ? OR entity_code = '*')
+  `,
+
   /** The legal entities, for the entity-email form's selector. */
   legalEntityOptions: `
     SELECT code, legal_name FROM master_entity WHERE status = 'active' ORDER BY code ASC

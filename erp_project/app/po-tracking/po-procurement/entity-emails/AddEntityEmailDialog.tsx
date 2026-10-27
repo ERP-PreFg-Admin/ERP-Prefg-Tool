@@ -11,7 +11,10 @@ import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
 import { apiErrorMessage } from "@/lib/api-error-message"
 
-type EntityType = "vendor" | "mfg" | "warehouse" | "employee" | "report"
+type EntityType = "vendor" | "mfg" | "warehouse" | "employee" | "report" | SpecialType
+type SpecialType = "npd" | "tech_transfer" | "cpr"
+const SPECIAL_TYPES: SpecialType[] = ["npd", "tech_transfer", "cpr"]
+const isSpecialType = (t: string): t is SpecialType => (SPECIAL_TYPES as string[]).includes(t)
 type EntityOption = { id: number; code: string; name: string }
 /**
  * What an employee row hangs off. "all_mfgs" is stored as entity_code '*'.
@@ -34,6 +37,9 @@ const TYPE_LABEL: Record<EntityType, string> = {
   warehouse: "Warehouse",
   employee: "Employee",
   report: "Report",
+  npd: "Manufacturer",
+  tech_transfer: "Manufacturer",
+  cpr: "Manufacturer",
 }
 
 /** Reports a person can subscribe to, stored in entity_code. 'report' is its
@@ -147,6 +153,8 @@ export default function AddEntityEmailDialog({
     entityType === "vendor" ? vendorOptions
     : entityType === "warehouse" ? [ALL_WAREHOUSES_OPTION, ...warehouseOptions]
     : entityType === "report" ? REPORTS.map((r, i) => ({ id: -100 - i, ...r }))
+    : isSpecialType(entityType)
+    ? [{ id: -2, code: ALL_MFGS, name: "every manufacturer, including ones added later" }, ...mfgOptions]
     : mfgOptions
 
   function updateRow(i: number, patch: Partial<EmailRow>) {
@@ -258,6 +266,9 @@ export default function AddEntityEmailDialog({
                 <option value="warehouse">Warehouse</option>
                 <option value="employee">Employee / other person</option>
                 <option value="report">Report subscriber</option>
+                <option value="npd">NPD PO contact</option>
+                <option value="tech_transfer">Tech Transfer PO contact</option>
+                <option value="cpr">CPR PO contact</option>
               </Select>
             </div>
 
@@ -325,6 +336,14 @@ export default function AddEntityEmailDialog({
               Receives the scheduled report and nothing else — a report subscriber is never
               copied on PO, split or inward-invoice mail. Use <strong>Cc</strong> for people
               who should see it without being the named recipient.
+            </p>
+          )}
+
+          {isSpecialType(entityType) && (
+            <p className="text-xs text-muted-foreground">
+              Receives this manufacturer&apos;s {entityType === "npd" ? "NPD" : entityType === "cpr" ? "CPR" : "Tech Transfer"} POs
+              instead of the manufacturer — these POs are never mailed to the manufacturer&apos;s own contacts.
+              With no contact on file, such a PO cannot be mailed.
             </p>
           )}
 
