@@ -7,8 +7,7 @@
 
 import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
-import { timedQuery } from "@/lib/query-timing"
-import { usersSql, type AdminUser } from "@/lib/queries/users"
+import { getAdminUsers } from "@/lib/services/admin"
 import UsersClient from "./UsersClient"
 
 export default async function AdminUsersPage() {
@@ -17,7 +16,7 @@ export default async function AdminUsersPage() {
 
   // Roles come from lib/roles.ts, not the DB — the old derived list let a typo
   // in the dialog invent a permanent role.
-  const users = await timedQuery<AdminUser>(usersSql.selectAll, [], { label: "users.selectAll" })
+  const users = await getAdminUsers()
 
   return <UsersClient users={users} canEdit={access === "editor"} />
 }

@@ -1,7 +1,10 @@
-// Reads behind /approvals: every pending approval with its diff items and entity label.
+// Reads behind /approvals and /approvals/history: approvals with their diff items and entity label.
 
 import { query } from "@/lib/db"
 import { timedQuery } from "@/lib/query-timing"
+import { paginate } from "@/lib/pagination"
+import { getActiveRmMaterialOptions, getActivePmMaterialOptions, getActiveSkuList } from "@/lib/cached-reference-data"
+import { buildMaterialMap } from "@/app/approvals/material-map"
 import { approvalsSql, entityLabelSql } from "@/lib/queries/approvals"
 import { historySql } from "@/lib/queries/history"
 import type { Approval, ApprovalItem } from "@/app/approvals/approvals-types"
@@ -31,4 +34,50 @@ export async function getPendingApprovals(): Promise<Approval[]> {
       entity_secondary_name: label?.secondary_name ?? null,
     }
   }))
+}
+
+type HistoryRow = Pick<Approval, "id" | "module" | "entity_id" | "raised_on" | "raised_by_name" | "status" | "remarks" | "approved_on" | "approved_by_name">
+
+/** Resolved (approved/rejected) approvals for /approvals/history, one page at a time. */
+export async function getApprovalHistory(f: { page: number; size: number; offset: number; module: string | null; status: string | null }) {
+  const start = performance.now()
+  console.log(`[AUDIT] Approval History load - page=${f.page}, size=${f.size}, module=${f.module ?? "all"}, status=${f.status ?? "all"}`)
+
+  const [result, rmRows, pmRows, skuRows] = await Promise.all([
+    paginate<HistoryRow>(
+      approvalsSql.listHistory,
+      [f.module, f.module, f.status, f.status, f.size, f.offset],
+      approvalsSql.countHistory,
+      [f.module, f.module, f.status, f.status],
+      f.page,
+      f.size
+    ),
+    getActiveRmMaterialOptions(),
+    getActivePmMaterialOptions(),
+    // Resolves a gift kit's component lines to SKU codes on the approval card.
+    getActiveSkuList(),
+  ])
+
+  const approvals: Approval[] = await Promise.all(
+    result.rows.map(async (a) => {
+      const [items, labelRows] = await Promise.all([
+        timedQuery<ApprovalItem>(approvalsSql.getItems, [a.id], { label: "getItems" }),
+        entityLabelSql[a.module]
+          ? query<EntityLabel>(entityLabelSql[a.module], [a.entity_id])
+          : Promise.resolve([] as EntityLabel[]),
+      ])
+      const label = labelRows[0]
+      return {
+        ...a,
+        items,
+        entity_code:           label?.code           ?? null,
+        entity_name:           label?.name           ?? null,
+        entity_secondary_code: label?.secondary_code ?? null,
+        entity_secondary_name: label?.secondary_name ?? null,
+      }
+    })
+  )
+
+  console.log(`[AUDIT] Approval History complete: ${(performance.now() - start).toFixed(2)}ms | ${approvals.length}/${result.total} rows`)
+  return { approvals, total: result.total, page: result.page, pageSize: result.pageSize, materialMap: buildMaterialMap(rmRows, pmRows, skuRows) }
 }

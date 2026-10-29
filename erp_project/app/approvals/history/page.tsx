@@ -4,12 +4,8 @@
 
 import { auth } from "@/lib/auth"
 import { redirect } from "next/navigation"
-import { query } from "@/lib/db"
-import { paginate, parsePaginationParams } from "@/lib/pagination"
-import { timedQuery } from "@/lib/query-timing"
-import { approvalsSql, entityLabelSql } from "@/lib/queries/approvals"
-import { getActiveRmMaterialOptions, getActivePmMaterialOptions, getActiveSkuList } from "@/lib/cached-reference-data"
-import { buildMaterialMap } from "../material-map"
+import { parsePaginationParams } from "@/lib/pagination"
+import { getApprovalHistory } from "@/lib/services/approvals"
 import ApprovalHistoryClient from "./ApprovalHistoryClient"
 
 export const dynamic = "force-dynamic"
@@ -27,55 +23,17 @@ export default async function ApprovalHistoryPage({
   const moduleFilter = String(sp.module ?? "") || null
   const statusFilter = String(sp.status ?? "") || null
 
-  const pageStart = performance.now()
-  console.log(`[AUDIT] Approval History load - page=${page}, size=${size}, module=${moduleFilter ?? "all"}, status=${statusFilter ?? "all"}`)
-
-  const [result, rmRows, pmRows, skuRows] = await Promise.all([
-    paginate<any>(
-      approvalsSql.listHistory,
-      [moduleFilter, moduleFilter, statusFilter, statusFilter, size, offset],
-      approvalsSql.countHistory,
-      [moduleFilter, moduleFilter, statusFilter, statusFilter],
-      page,
-      size
-    ),
-    getActiveRmMaterialOptions(),
-    getActivePmMaterialOptions(),
-    // Resolves a gift kit's component lines to SKU codes on the approval card.
-    getActiveSkuList(),
-  ])
-
-  const approvals = await Promise.all(
-    result.rows.map(async (a) => {
-      const [items, labelRows] = await Promise.all([
-        timedQuery<any>(approvalsSql.getItems, [a.id], { label: "getItems" }),
-        entityLabelSql[a.module]
-          ? query<any>(entityLabelSql[a.module], [a.entity_id])
-          : Promise.resolve([]),
-      ])
-      const label = labelRows[0] ?? {}
-      return {
-        ...a,
-        items,
-        entity_code: label.code ?? null,
-        entity_name: label.name ?? null,
-        entity_secondary_code: label.secondary_code ?? null,
-        entity_secondary_name: label.secondary_name ?? null,
-      }
-    })
-  )
-
-  console.log(`[AUDIT] Approval History complete: ${(performance.now() - pageStart).toFixed(2)}ms | ${approvals.length}/${result.total} rows`)
+  const h = await getApprovalHistory({ page, size, offset, module: moduleFilter, status: statusFilter })
 
   return (
     <ApprovalHistoryClient
-      approvals={approvals}
-      total={result.total}
-      page={result.page}
-      pageSize={result.pageSize}
+      approvals={h.approvals}
+      total={h.total}
+      page={h.page}
+      pageSize={h.pageSize}
       currentModule={moduleFilter ?? ""}
       currentStatus={statusFilter ?? ""}
-      materialMap={buildMaterialMap(rmRows, pmRows, skuRows)}
+      materialMap={h.materialMap}
     />
   )
 }

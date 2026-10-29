@@ -19,9 +19,7 @@
 import { redirect } from "next/navigation"
 import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
-import { timedQuery } from "@/lib/query-timing"
-import { usersSql, type AdminUser } from "@/lib/queries/users"
-import { permissions as permissionsSql } from "@/lib/queries/permissions"
+import { getAdminPosture } from "@/lib/services/admin"
 import { ROLES, isKnownRole } from "@/lib/roles"
 import { cn } from "@/lib/utils"
 import { splitRoles } from "./authority"
@@ -67,12 +65,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const access = await resolveAccess(parseInt(session.user.id), session.user.roles, "/admin")
   if (access === "none") redirect("/auth/unauthorized")
 
-  const [users, rolePermissions] = await Promise.all([
-    timedQuery<AdminUser>(usersSql.selectAll, [], { label: "users.selectAll (posture)" }),
-    timedQuery<{ role: string; page_slug: string; access_level: string }>(
-      permissionsSql.selectPagePermissions, [], { label: "permissions.selectPagePermissions (posture)" }
-    ),
-  ])
+  const { users, rolePermissions } = await getAdminPosture()
 
   const active = users.filter((u) => u.status === "active").length
   const roleless = users.filter((u) => splitRoles(u.roles).length === 0).length

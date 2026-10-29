@@ -11,9 +11,8 @@
  * Access is guarded in app/admin/layout.tsx.
  */
 
-import { timedQuery } from "@/lib/query-timing"
 import { parsePaginationParams } from "@/lib/pagination"
-import { activitySql } from "@/lib/queries/activity"
+import { getActivityPage } from "@/lib/services/admin"
 import ActivityClient from "./ActivityClient"
 
 export type ActivityRow = {
@@ -43,20 +42,13 @@ export default async function AdminActivityPage({
   const q = sp.q ? String(sp.q).trim() : ""
   const like = q ? `%${q}%` : null
 
-  // Each `? IS NULL OR col = ?` pair needs the value twice — see activitySql.
-  const filterParams = [userId, userId, from, from, to, to, method, method, like, like]
-
-  const [rows, countRows, actors] = await Promise.all([
-    timedQuery<ActivityRow>(activitySql.selectPaginated, [...filterParams, size, offset], { label: "activity.selectPaginated" }),
-    timedQuery<{ total: number }>(activitySql.countFiltered, filterParams, { label: "activity.countFiltered" }),
-    timedQuery<{ id: number; name: string; email: string }>(activitySql.selectActors, [], { label: "activity.selectActors" }),
-  ])
+  const { rows, total, actors } = await getActivityPage({ userId, method, from, to, like, size, offset })
 
   return (
     <ActivityClient
       rows={rows}
       actors={actors}
-      total={Number(countRows[0]?.total ?? 0)}
+      total={total}
       page={page}
       pageSize={size}
       filters={{

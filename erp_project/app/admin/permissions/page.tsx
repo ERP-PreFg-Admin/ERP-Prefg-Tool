@@ -11,9 +11,7 @@
 
 import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
-import { timedQuery } from "@/lib/query-timing"
-import { permissions as permissionsSql } from "@/lib/queries/permissions"
-import { usersSql, type AdminUser } from "@/lib/queries/users"
+import { getPermissionsPage } from "@/lib/services/admin"
 import PermissionsClient from "./PermissionsClient"
 
 export type RolePermission = { role: string; page_slug: string; access_level: string }
@@ -32,17 +30,7 @@ export default async function AdminPermissionsPage({
 
   // The role list is declared in lib/roles.ts, not derived from the DB — see
   // that file's header for why the old union-of-two-tables approach went away.
-  // allOverrides feeds the roster's per-user resolution — it is the same table
-  // as `overrides` below, unfiltered. A couple of dozen rows, so one read beats
-  // a query per user.
-  const [rolePermissions, users, allOverrides] = await Promise.all([
-    timedQuery<RolePermission>(permissionsSql.selectPagePermissions, [], { label: "permissions.selectPagePermissions" }),
-    timedQuery<AdminUser>(usersSql.selectAll, [], { label: "users.selectAll" }),
-    timedQuery<UserOverride>(permissionsSql.selectUserPagePermissions, [], { label: "permissions.selectUserPagePermissions" }),
-  ])
-  const overrides = selectedUserId
-    ? allOverrides.filter((o) => o.user_id === selectedUserId)
-    : []
+  const { rolePermissions, users, allOverrides, overrides } = await getPermissionsPage(selectedUserId)
 
   return (
     <PermissionsClient
