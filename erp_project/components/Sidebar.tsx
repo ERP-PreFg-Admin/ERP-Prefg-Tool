@@ -5,10 +5,10 @@ import Link from "next/link"
 import Image from "next/image"
 import { usePathname } from "next/navigation"
 import {
-  LayoutDashboard, Database, Factory, CalendarDays,
-  Activity, DollarSign, CheckSquare, BarChart2,
+  LayoutDashboard, Database, Factory,
+  Activity, CheckSquare, BarChart2,
   Settings, ChevronLeft, ChevronRight, ChevronDown, LogOut,
-  Package, Truck, FlaskConical, Box, Lock, Sun, Moon, Bug, ExternalLink, Boxes , Gauge
+  Truck, Lock, Sun, Moon, Bug, ExternalLink, Boxes, Gauge
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/components/ThemeProvider"
@@ -118,6 +118,7 @@ export default function Sidebar({ user, mfgs = [], access, version }: SidebarPro
   // another on the client. Same reasoning as ThemeProvider.
   useEffect(() => {
     const stored = Number(localStorage.getItem(WIDTH_KEY))
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore after mount; reading it during render would mismatch hydration
     if (stored >= WIDTH_MIN && stored <= WIDTH_MAX) setWidth(stored)
   }, [])
 

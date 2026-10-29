@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useState } from "react"
 import { Plus, AlertCircle, ChevronRight, ChevronLeft } from "lucide-react"
 import { Tabs } from "radix-ui"
 import { Button } from "@/components/ui/button"
@@ -62,12 +62,13 @@ export function AddMfgDialog({ onSuccess }: { onSuccess?: () => void }) {
   const [loading, setLoading]         = useState(false)
   const [error, setError]             = useState("")
 
-  // Unique folder prefix per dialog session so concurrent opens don't collide in S3
-  const sessionFolder = useRef("")
+  // Unique folder prefix per dialog session so concurrent opens don't collide in S3.
+  // State, not a ref: the Documents step renders it.
+  const [sessionFolder, setSessionFolder] = useState("")
 
   function openDialog() {
     if (!guard("add a manufacturer")) return
-    sessionFolder.current = `manufacturers/tmp/${crypto.randomUUID()}`
+    setSessionFolder(`manufacturers/tmp/${crypto.randomUUID()}`)
     setStep("details")
     setForm({})
     setPendingFiles(EMPTY_DOCS)
@@ -98,7 +99,7 @@ export function AddMfgDialog({ onSuccess }: { onSuccess?: () => void }) {
         if (!file) continue
         const fd = new FormData()
         fd.append("file",   file)
-        fd.append("folder", sessionFolder.current)
+        fd.append("folder", sessionFolder)
         fd.append("field",  tab.field)
         const up = await fetch("/api/v1/upload", { method: "POST", body: fd })
         const upData = await up.json()
@@ -200,7 +201,7 @@ export function AddMfgDialog({ onSuccess }: { onSuccess?: () => void }) {
                   <Tabs.Content key={tab.key} value={tab.key}>
                     <FileUpload
                       currentKey={null}
-                      folder={sessionFolder.current}
+                      folder={sessionFolder}
                       field={tab.field}
                       label={tab.label}
                       accept="document"

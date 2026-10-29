@@ -21,10 +21,10 @@ export const GET = withGateway({
   access: { pageSlug: "/approvals", level: "viewer" },
   handler: async ({ req, ctx }) => {
     const sp = req.nextUrl.searchParams
-    const module = sp.get("module")
+    const moduleCode = sp.get("module")
     const entityId = Number(sp.get("entity_id"))
 
-    if (!module || !entityLabelSql[module]) {
+    if (!moduleCode || !entityLabelSql[moduleCode]) {
       throw new ApiError(400, "invalid_module", "Unknown or missing module.")
     }
     if (!Number.isFinite(entityId) || entityId <= 0) {
@@ -35,7 +35,7 @@ export const GET = withGateway({
 
     try {
       let rows: any[]
-      if (module === "BOM") {
+      if (moduleCode === "BOM") {
         // RM/PM version independently, so a SKU can accumulate many
         // master_recipe rows (one per version) over time. Resolve the clicked
         // Recipe's sku_id, then pull every version's approval for that SKU so
@@ -48,17 +48,17 @@ export const GET = withGateway({
           const bomIds = bomRows.map((r) => r.recipe_id)
           rows = bomIds.length > 0 ? await query<any>(approvalsSql.listHistoryForBomIds, [bomIds]) : []
         } else {
-          rows = await query<any>(approvalsSql.listHistoryForEntity, [module, entityId])
+          rows = await query<any>(approvalsSql.listHistoryForEntity, [moduleCode, entityId])
         }
       } else {
-        rows = await query<any>(approvalsSql.listHistoryForEntity, [module, entityId])
+        rows = await query<any>(approvalsSql.listHistoryForEntity, [moduleCode, entityId])
       }
 
       // Recipe's approval_items reference RM/PM by bare mtrl_id (see
       // RecipeLineDiffTable.tsx) — resolve a materialMap the same way the
       // pending-approvals and /approvals/history pages do, so this dialog
       // shows material names/codes instead of falling back to "#123".
-      const materialMap = module === "BOM"
+      const materialMap = moduleCode === "BOM"
         ? buildMaterialMap(...await Promise.all([
             getActiveRmMaterialOptions(), getActivePmMaterialOptions(), getActiveSkuList(),
           ]))
@@ -73,11 +73,11 @@ export const GET = withGateway({
           const rowEntityId = a.entity_id
           const [items, labelRows, remarksRows] = await Promise.all([
             query<any>(approvalsSql.getItems, [a.id]),
-            query<any>(entityLabelSql[module], [rowEntityId]),
+            query<any>(entityLabelSql[moduleCode], [rowEntityId]),
             // Only the currently-pending row (if any) can be reliably matched
             // to a history_masters_edits row — see selectPendingRemarks.
             a.status === "pending"
-              ? query<{ remarks: string | null }>(historySql.selectPendingRemarks, [module, rowEntityId])
+              ? query<{ remarks: string | null }>(historySql.selectPendingRemarks, [moduleCode, rowEntityId])
               : Promise.resolve([]),
           ])
           const label = labelRows[0] ?? {}
