@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { ApiError } from "@/lib/gateway/errors"
 import { query, pool } from "@/lib/db"
 import { rawMaterials } from "@/lib/queries/raw-materials"
-import { parseS3Import } from "@/lib/import-s3"
+import { parseS3Import, type ImportRow } from "@/lib/import-s3"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { insertApprovalWithItems, applyVendorRateApproval, applyMfgRateApproval, toRmParams, findFuzzyMakeMatch, fuzzyMakeSuggestion } from "@/lib/master-routes/material-utils"
@@ -11,8 +11,25 @@ import { fetchEditMatchCandidates, findBestEditMatch, type EditCandidate } from 
 import { findNameCollision, collisionMessage, sameNameMakes, type MaterialRow } from "@/lib/masters/material-duplicates"
 import { roundToWholeNumber, roundToTwoDecimals } from "@/lib/numeric"
 import { todayIST, monthIST } from "@/lib/date"
+import type { ResultSetHeader } from "mysql2/promise"
+import type { RmAction } from "@/lib/validation/raw-materials"
 
-function toRmVendorRateParams(rmId: number, r: any, today: string): any[] {
+type Body<A extends RmAction["action"]> = Extract<RmAction, { action: A }>
+type Numericish = string | number
+/** One vendor or manufacturer rate line, as the wizards and create send it (rmRateFields). */
+type RateLine = {
+  vendor_id?: Numericish; vendor_code?: string; mfg_id?: Numericish; mfg_code?: string
+  curr_rate?: Numericish; moq?: Numericish; rate_uom?: string; effective_from?: string
+  approved_vendor_id?: Numericish; approved_vendor_code?: string; remarks?: string
+}
+type RmInput = { rm_code?: string; name?: string; make?: string; type?: string; uom?: string; hsn_code?: string; inci_name?: string }
+type ExistingRate = { id: number; status: string; curr_rate: unknown; moq?: unknown; uom: unknown; effective_from: unknown; mfg_id?: unknown }
+type SqlParam = string | number | null
+
+const insertId = (r: unknown) => (r as ResultSetHeader).insertId
+const errMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+
+function toRmVendorRateParams(rmId: number, r: RateLine, today: string): SqlParam[] {
   return [
     rmId, r.vendor_id ? Number(r.vendor_id) : null,
     r.vendor_code?.trim() || null,
@@ -24,7 +41,7 @@ function toRmVendorRateParams(rmId: number, r: any, today: string): any[] {
   ]
 }
 
-function toRmMfgRateParams(rmId: number, m: any, today: string): any[] {
+function toRmMfgRateParams(rmId: number, m: RateLine, today: string): SqlParam[] {
   return [
     rmId, m.mfg_id ? Number(m.mfg_id) : null,
     m.mfg_code?.trim() || null,
@@ -36,22 +53,23 @@ function toRmMfgRateParams(rmId: number, m: any, today: string): any[] {
   ]
 }
 
-export async function rmCreate(body: any, userId: number, ctx: object): Promise<NextResponse> {
+export async function rmCreate(body: Body<"create">, userId: number, ctx: object): Promise<NextResponse> {
   if (!body.name?.trim()) return NextResponse.json({ error: "name is required" }, { status: 400 })
+  const name = body.name
 
   const today = todayIST()
   const logCtx = { ...ctx, eventId: makeEventId("RM_MAT", "create"), module: "RM_Create" }
-  logger.info({ ...logCtx, name: body.name.trim(), message: "RM Create Started" })
-  recordRawEvent("RM_MAT", logCtx.eventId, { name: body.name.trim() })
+  logger.info({ ...logCtx, name: name.trim(), message: "RM Create Started" })
+  recordRawEvent("RM_MAT", logCtx.eventId, { name: name.trim() })
 
   const conn = await pool.getConnection()
   await conn.beginTransaction()
   try {
-    const [rmResult] = await conn.execute(rawMaterials.insert, await toRmParams(conn, body))
-    const rmId = (rmResult as any).insertId
+    const [rmResult] = await conn.execute(rawMaterials.insert, await toRmParams(conn, { ...body, name }))
+    const rmId = insertId(rmResult)
 
     await insertApprovalWithItems(conn, userId, "RM_MAT", rmId, [
-      ["name", body.name.trim()],
+      ["name", name.trim()],
       ["make", body.make?.trim() || ""],
       ["type", body.type?.trim() || ""],
       ["uom", body.uom?.trim() || ""],
@@ -61,7 +79,7 @@ export async function rmCreate(body: any, userId: number, ctx: object): Promise<
 
     if (body.vendor_code?.trim()) {
       const [vResult] = await conn.execute(rawMaterials.insertVendorRate, toRmVendorRateParams(rmId, body, today))
-      const vrmId = (vResult as any).insertId
+      const vrmId = insertId(vResult)
       await insertApprovalWithItems(conn, userId, "RM_VRM", vrmId, [
         ["curr_rate", body.curr_rate ? String(body.curr_rate) : ""],
         ["moq", body.moq ? String(body.moq) : ""],
@@ -70,7 +88,7 @@ export async function rmCreate(body: any, userId: number, ctx: object): Promise<
       ])
     } else if (body.mfg_code?.trim()) {
       const [mResult] = await conn.execute(rawMaterials.insertMfgRate, toRmMfgRateParams(rmId, body, today))
-      const mrmId = (mResult as any).insertId
+      const mrmId = insertId(mResult)
       await insertApprovalWithItems(conn, userId, "RM_RATE", mrmId, [
         ["curr_rate", body.curr_rate ? String(body.curr_rate) : ""],
         ["uom", body.rate_uom?.trim() || ""],
@@ -82,22 +100,22 @@ export async function rmCreate(body: any, userId: number, ctx: object): Promise<
     recordProcessedEvent("RM_MAT", logCtx.eventId, { id: rmId })
     logger.info({ ...logCtx, rmId, message: "RM created in review" })
     return NextResponse.json({ id: rmId })
-  } catch (err: any) {
+  } catch (err) {
     await conn.rollback()
     // A refusal the caller can act on (an empty or fully-skipped file) is not
     // a server fault — let the gateway serialise it as the 4xx it already is.
     if (err instanceof ApiError) throw err
-    recordFailedEvent("RM_MAT", logCtx.eventId, { name: body.name.trim() }, err.message)
-    logger.error({ ...logCtx, error: err.message, message: "Raw material create error" })
-    if (err.code === "ER_DUP_ENTRY")
+    recordFailedEvent("RM_MAT", logCtx.eventId, { name: name.trim() }, errMessage(err))
+    logger.error({ ...logCtx, error: errMessage(err), message: "Raw material create error" })
+    if ((err as { code?: string }).code === "ER_DUP_ENTRY")
       return NextResponse.json({ error: `RM code "${body.rm_code?.trim()}" already exists` }, { status: 409 })
-    return NextResponse.json({ error: "Database error: " + err.message }, { status: 500 })
+    return NextResponse.json({ error: "Database error: " + errMessage(err) }, { status: 500 })
   } finally {
     conn.release()
   }
 }
 
-export async function rmCheckDuplicate(body: any, ctx: object): Promise<NextResponse> {
+export async function rmCheckDuplicate(body: Body<"check-RM">, ctx: object): Promise<NextResponse> {
   const { name, make, inci_name } = body
   if (!inci_name?.trim() || !name?.trim() || !make)
     return NextResponse.json({ error: "name, make, inci_name are required" }, { status: 400 })
@@ -106,14 +124,16 @@ export async function rmCheckDuplicate(body: any, ctx: object): Promise<NextResp
       name.trim(), make?.trim() || "", inci_name?.trim() || "",
     ])
     return NextResponse.json({ exists: rows.length > 0 })
-  } catch (err: any) {
-    logger.error({ ...ctx, error: err.message, message: "Raw material check error" })
+  } catch (err) {
+    logger.error({ ...ctx, error: errMessage(err), message: "Raw material check error" })
     return NextResponse.json({ error: "Database error" }, { status: 500 })
   }
 }
 
-export async function rmCheckVendor(body: any, ctx: object): Promise<NextResponse> {
-  const { name, make, inci_name, vendor_id, moq } = body
+export async function rmCheckVendor(body: Body<"check-vendor">, ctx: object): Promise<NextResponse> {
+  // moq is not in the schema's declared fields; passthrough carries it as unknown.
+  const { name, make, inci_name, vendor_id } = body
+  const moq = body.moq as Numericish | undefined
   if (!name?.trim() || !vendor_id || !moq)
     return NextResponse.json({ error: "name, vendor_id and moq are required" }, { status: 400 })
   try {
@@ -121,15 +141,15 @@ export async function rmCheckVendor(body: any, ctx: object): Promise<NextRespons
       name.trim(), make?.trim() || "", inci_name?.trim() || "",
     ])
     if (rms.length === 0) return NextResponse.json({ exists: false })
-    const rates = await query<any>(rawMaterials.checkVendorRate, [rms[0].id, Number(vendor_id), Number(moq)])
+    const rates = await query<ExistingRate>(rawMaterials.checkVendorRate, [rms[0].id, Number(vendor_id), Number(moq)])
     if (rates.length === 0) return NextResponse.json({ exists: false })
     const r = rates[0]
     return NextResponse.json({
       exists: true,
       existing: { curr_rate: r.curr_rate, moq: r.moq, uom: r.uom, effective_from: r.effective_from },
     })
-  } catch (err: any) {
-    logger.error({ ...ctx, error: err.message, message: "Vendor rate check error" })
+  } catch (err) {
+    logger.error({ ...ctx, error: errMessage(err), message: "Vendor rate check error" })
     return NextResponse.json({ error: "Database error" }, { status: 500 })
   }
 }
@@ -139,24 +159,24 @@ export async function rmCheckVendor(body: any, ctx: object): Promise<NextRespons
 // happens on the Material Master page.
 export async function rmGetMaterials(ctx: object): Promise<NextResponse> {
   try {
-    const rows = await query<any>(rawMaterials.selectActiveFull)
+    const rows = await query<Record<string, unknown>>(rawMaterials.selectActiveFull)
     return NextResponse.json({ materials: rows })
-  } catch (err: any) {
-    logger.error({ ...ctx, error: err.message, message: "RM get-materials error" })
+  } catch (err) {
+    logger.error({ ...ctx, error: errMessage(err), message: "RM get-materials error" })
     return NextResponse.json({ error: "Database error" }, { status: 500 })
   }
 }
 
 // Single-row "did you mean?" check used by the Add-material wizard when the
 // user types a brand-new make instead of picking one from FuzzySelect.
-export async function rmCheckMakeFuzzy(body: any, ctx: object): Promise<NextResponse> {
+export async function rmCheckMakeFuzzy(body: Body<"check-make-fuzzy">, ctx: object): Promise<NextResponse> {
   const { name, type, make } = body
   if (!name?.trim() || !make?.trim()) return NextResponse.json({ suggestion: null })
   try {
     const suggestion = await findFuzzyMakeMatch(name, type, make)
     return NextResponse.json({ suggestion })
-  } catch (err: any) {
-    logger.error({ ...ctx, error: err.message, message: "RM fuzzy make check error" })
+  } catch (err) {
+    logger.error({ ...ctx, error: errMessage(err), message: "RM fuzzy make check error" })
     return NextResponse.json({ suggestion: null })
   }
 }
@@ -166,7 +186,7 @@ export async function rmCheckMakeFuzzy(body: any, ctx: object): Promise<NextResp
 // flags rows whose rm_code matches an existing record as edits (requiring
 // remarks) rather than blocking duplicates — mirrors manufacturers/route.ts's
 // check_duplicates action.
-export async function rmCheckDuplicatesBulk(body: any, ctx: object): Promise<NextResponse> {
+export async function rmCheckDuplicatesBulk(body: Body<"check_duplicates">, ctx: object): Promise<NextResponse> {
   const { rows } = body
   const duplicates: Record<number, string[]> = {}
   const editMatches: Record<number, { id: number; code: string; current: EditCandidate }> = {}
@@ -186,7 +206,7 @@ export async function rmCheckDuplicatesBulk(body: any, ctx: object): Promise<Nex
     // `seen` grows as we go, so two rows INSIDE the same file that normalise
     // alike flag each other — the file is as likely a source of the duplicate
     // as the table is.
-    const existing: MaterialRow[] = (await query<any>(rawMaterials.selectAll))
+    const existing: MaterialRow[] = (await query<{ id: number; rm_code: string; name: string; make: string | null }>(rawMaterials.selectAll))
       .map((r) => ({ id: r.id, code: r.rm_code, name: r.name, make: r.make }))
     const seen: MaterialRow[] = [...existing]
 
@@ -215,31 +235,33 @@ export async function rmCheckDuplicatesBulk(body: any, ctx: object): Promise<Nex
       if (suggestion) duplicates[i] = [`Make "${make}" is close to existing "${suggestion}" for this material — did you mean "${suggestion}"?`]
     }
     return NextResponse.json({ duplicates, editMatches })
-  } catch (err: any) {
-    logger.error({ ...ctx, error: err.message, message: "RM bulk duplicate check error" })
+  } catch (err) {
+    logger.error({ ...ctx, error: errMessage(err), message: "RM bulk duplicate check error" })
     return NextResponse.json({ error: "Database error" }, { status: 500 })
   }
 }
 
-export async function rmCreateFull(body: any, userId: number, ctx: object): Promise<NextResponse> {
-  const { rm } = body
-  const vendorList = Array.isArray(body.vendors) ? body.vendors : []
-  const mfgList = Array.isArray(body.manufacturers) ? body.manufacturers : []
+export async function rmCreateFull(body: Body<"create-full">, userId: number, ctx: object): Promise<NextResponse> {
+  // The schema keeps these loose (looseRecord/looseArray); these are the fields read below.
+  const rm = body.rm as RmInput | undefined
+  const vendorList = (Array.isArray(body.vendors) ? body.vendors : []) as RateLine[]
+  const mfgList = (Array.isArray(body.manufacturers) ? body.manufacturers : []) as RateLine[]
   if (!rm?.name?.trim()) return NextResponse.json({ error: "name is required" }, { status: 400 })
+  const name = rm.name
 
   const today = todayIST()
   const logCtx = { ...ctx, eventId: makeEventId("RM_FULL", "create-full"), module: "RM_CreateFull" }
-  logger.info({ ...logCtx, name: rm.name.trim(), vendors: vendorList.length, mfgs: mfgList.length, message: "RM Create-Full Started" })
-  recordRawEvent("RM_FULL", logCtx.eventId, { name: rm.name.trim(), vendorCount: vendorList.length, mfgCount: mfgList.length })
+  logger.info({ ...logCtx, name: name.trim(), vendors: vendorList.length, mfgs: mfgList.length, message: "RM Create-Full Started" })
+  recordRawEvent("RM_FULL", logCtx.eventId, { name: name.trim(), vendorCount: vendorList.length, mfgCount: mfgList.length })
 
   const conn = await pool.getConnection()
   await conn.beginTransaction()
   try {
-    const [rmResult] = await conn.execute(rawMaterials.insert, await toRmParams(conn, rm))
-    const rmId = (rmResult as any).insertId
+    const [rmResult] = await conn.execute(rawMaterials.insert, await toRmParams(conn, { ...rm, name }))
+    const rmId = insertId(rmResult)
 
     await insertApprovalWithItems(conn, userId, "RM_MAT", rmId, [
-      ["name", rm.name.trim()],
+      ["name", name.trim()],
       ["make", rm.make?.trim() || ""],
       ["type", rm.type?.trim() || ""],
       ["uom", rm.uom?.trim() || ""],
@@ -250,12 +272,12 @@ export async function rmCreateFull(body: any, userId: number, ctx: object): Prom
     for (const v of vendorList) {
       const vendorId = v.vendor_id ? Number(v.vendor_id) : null
       const [existingRows] = await conn.execute(rawMaterials.checkVendorRate, [rmId, vendorId, v.moq ? Number(v.moq) : null])
-      const existing = (existingRows as any[])[0]
+      const existing = (existingRows as ExistingRate[])[0]
       if (existing) {
         await applyVendorRateApproval(conn, userId, "RM_VRM", existing, v, today, rawMaterials.setVendorRateStatus)
       } else {
         const [vResult] = await conn.execute(rawMaterials.insertVendorRate, toRmVendorRateParams(rmId, v, today))
-        const vrmId = (vResult as any).insertId
+        const vrmId = insertId(vResult)
         await insertApprovalWithItems(conn, userId, "RM_VRM", vrmId, [
           ["curr_rate", v.curr_rate ? String(v.curr_rate) : ""],
           ["moq", v.moq ? String(v.moq) : ""],
@@ -268,12 +290,12 @@ export async function rmCreateFull(body: any, userId: number, ctx: object): Prom
     for (const m of mfgList) {
       const mfgId = m.mfg_id ? Number(m.mfg_id) : null
       const [existingRows] = await conn.execute(rawMaterials.checkMfgRate, [rmId, mfgId])
-      const existing = (existingRows as any[])[0]
+      const existing = (existingRows as ExistingRate[])[0]
       if (existing) {
         await applyMfgRateApproval(conn, userId, "RM_RATE", existing, m, today, rawMaterials.setRateStatus)
       } else {
         const [mResult] = await conn.execute(rawMaterials.insertMfgRate, toRmMfgRateParams(rmId, m, today))
-        const mrmId = (mResult as any).insertId
+        const mrmId = insertId(mResult)
         await insertApprovalWithItems(conn, userId, "RM_RATE", mrmId, [
           ["curr_rate", m.curr_rate ? String(m.curr_rate) : ""],
           ["uom", m.rate_uom?.trim() || ""],
@@ -286,24 +308,24 @@ export async function rmCreateFull(body: any, userId: number, ctx: object): Prom
     recordProcessedEvent("RM_FULL", logCtx.eventId, { id: rmId })
     logger.info({ ...logCtx, rmId, message: "RM created full in review" })
     return NextResponse.json({ id: rmId })
-  } catch (err: any) {
+  } catch (err) {
     await conn.rollback()
     // A refusal the caller can act on (an empty or fully-skipped file) is not
     // a server fault — let the gateway serialise it as the 4xx it already is.
     if (err instanceof ApiError) throw err
-    recordFailedEvent("RM_FULL", logCtx.eventId, { name: rm.name.trim() }, err.message)
-    logger.error({ ...logCtx, error: err.message, message: "Raw material create-full error" })
-    return NextResponse.json({ error: "Database error: " + err.message }, { status: 500 })
+    recordFailedEvent("RM_FULL", logCtx.eventId, { name: name.trim() }, errMessage(err))
+    logger.error({ ...logCtx, error: errMessage(err), message: "Raw material create-full error" })
+    return NextResponse.json({ error: "Database error: " + errMessage(err) }, { status: 500 })
   } finally {
     conn.release()
   }
 }
 
-export async function rmAddRates(body: any, userId: number, ctx: object): Promise<NextResponse> {
+export async function rmAddRates(body: Body<"add-rates">, userId: number, ctx: object): Promise<NextResponse> {
   const { rm_id, name, make, inci_name } = body
   if (!rm_id && !name?.trim()) return NextResponse.json({ error: "rm_id or name is required" }, { status: 400 })
-  const vendorList = Array.isArray(body.vendors) ? body.vendors : []
-  const mfgList = Array.isArray(body.manufacturers) ? body.manufacturers : []
+  const vendorList = (Array.isArray(body.vendors) ? body.vendors : []) as RateLine[]
+  const mfgList = (Array.isArray(body.manufacturers) ? body.manufacturers : []) as RateLine[]
   if (vendorList.length === 0 && mfgList.length === 0)
     return NextResponse.json({ error: "Provide at least one vendor rate or manufacturer" }, { status: 400 })
 
@@ -311,8 +333,8 @@ export async function rmAddRates(body: any, userId: number, ctx: object): Promis
   // on cost_master_{rm,pm}_{ven,mfg}. Without this the row reaches MySQL and comes
   // back as a 500 "Column 'vendor_id' cannot be null" — a user input problem
   // reported as a server fault.
-  const noVendor = vendorList.filter((v: { vendor_id?: unknown }) => !v?.vendor_id).length
-  const noMfg    = mfgList.filter((m: { mfg_id?: unknown }) => !m?.mfg_id).length
+  const noVendor = vendorList.filter((v) => !v?.vendor_id).length
+  const noMfg    = mfgList.filter((m) => !m?.mfg_id).length
   if (noVendor > 0 || noMfg > 0) {
     throw new ApiError(400, "counterparty_required",
       [noVendor > 0 ? `${noVendor} vendor rate line(s) have no vendor_id` : null,
@@ -330,7 +352,7 @@ export async function rmAddRates(body: any, userId: number, ctx: object): Promis
       rmId = Number(rm_id)
     } else {
       const rms = await query<{ id: number }>(rawMaterials.checkDuplicate, [
-        name.trim(), make?.trim() || "", inci_name?.trim() || "",
+        (name ?? "").trim(), make?.trim() || "", inci_name?.trim() || "",
       ])
       if (rms.length === 0) return NextResponse.json({ error: "Material not found" }, { status: 404 })
       rmId = rms[0].id
@@ -343,12 +365,12 @@ export async function rmAddRates(body: any, userId: number, ctx: object): Promis
       for (const v of vendorList) {
         const vendorId = v.vendor_id ? Number(v.vendor_id) : null
         const [existingRows] = await conn.execute(rawMaterials.checkVendorRate, [rmId, vendorId, v.moq ? Number(v.moq) : null])
-        const existing = (existingRows as any[])[0]
+        const existing = (existingRows as ExistingRate[])[0]
         if (existing) {
           await applyVendorRateApproval(conn, userId, "RM_VRM", existing, v, today, rawMaterials.setVendorRateStatus)
         } else {
           const [vResult] = await conn.execute(rawMaterials.insertVendorRate, toRmVendorRateParams(rmId, v, today))
-          const vrmId = (vResult as any).insertId
+          const vrmId = insertId(vResult)
           await insertApprovalWithItems(conn, userId, "RM_VRM", vrmId, [
             ["curr_rate", v.curr_rate ? String(v.curr_rate) : ""],
             ["moq", v.moq ? String(v.moq) : ""],
@@ -361,12 +383,12 @@ export async function rmAddRates(body: any, userId: number, ctx: object): Promis
       for (const m of mfgList) {
         const mfgId = m.mfg_id ? Number(m.mfg_id) : null
         const [existingRows] = await conn.execute(rawMaterials.checkMfgRate, [rmId, mfgId])
-        const existing = (existingRows as any[])[0]
+        const existing = (existingRows as ExistingRate[])[0]
         if (existing) {
           await applyMfgRateApproval(conn, userId, "RM_RATE", existing, m, today, rawMaterials.setRateStatus)
         } else {
           const [mResult] = await conn.execute(rawMaterials.insertMfgRate, toRmMfgRateParams(rmId, m, today))
-          const mrmId = (mResult as any).insertId
+          const mrmId = insertId(mResult)
           await insertApprovalWithItems(conn, userId, "RM_RATE", mrmId, [
             ["curr_rate", m.curr_rate ? String(m.curr_rate) : ""],
             ["uom", m.rate_uom?.trim() || ""],
@@ -379,19 +401,19 @@ export async function rmAddRates(body: any, userId: number, ctx: object): Promis
       recordProcessedEvent("RM_RATES", logCtx.eventId, { rmId })
       logger.info({ ...logCtx, rmId, message: "RM rates added in review" })
       return NextResponse.json({ rmId })
-    } catch (err: any) {
+    } catch (err) {
       await conn.rollback()
       // A refusal the caller can act on (an empty or fully-skipped file) is not
       // a server fault — let the gateway serialise it as the 4xx it already is.
       if (err instanceof ApiError) throw err
-      recordFailedEvent("RM_RATES", logCtx.eventId, { name: name.trim() }, err.message)
-      logger.error({ ...logCtx, error: err.message, message: "Raw material add-rates transaction error" })
-      return NextResponse.json({ error: "Database error: " + err.message }, { status: 500 })
+      recordFailedEvent("RM_RATES", logCtx.eventId, { name: name?.trim() }, errMessage(err))
+      logger.error({ ...logCtx, error: errMessage(err), message: "Raw material add-rates transaction error" })
+      return NextResponse.json({ error: "Database error: " + errMessage(err) }, { status: 500 })
     } finally {
       conn.release()
     }
-  } catch (err: any) {
-    logger.error({ ...ctx, error: err.message, message: "Raw material add-rates lookup error" })
+  } catch (err) {
+    logger.error({ ...ctx, error: errMessage(err), message: "Raw material add-rates lookup error" })
     return NextResponse.json({ error: "Database error" }, { status: 500 })
   }
 }
@@ -401,7 +423,7 @@ export async function rmAddRates(body: any, userId: number, ctx: object): Promis
 // approves it, see the RM_BULK handler in lib/approvals/module-handlers.ts);
 // rows recognized as an edit of an existing rm_code are submitted immediately
 // as their own real RM_MAT approval — see stageRmBulkRows for why.
-export async function rmBulk(body: any, userId: number, ctx: object): Promise<NextResponse> {
+export async function rmBulk(body: Body<"bulk">, userId: number, ctx: object): Promise<NextResponse> {
   const { rows } = body
   if (!Array.isArray(rows) || rows.length === 0)
     return NextResponse.json({ error: "No rows provided" }, { status: 400 })
@@ -416,7 +438,7 @@ export async function rmBulk(body: any, userId: number, ctx: object): Promise<Ne
   try {
     const yyyymm = monthIST()
     await conn.beginTransaction()
-    const result = await stageRmBulkRows(conn, rows, userId, `imports/raw-materials/${yyyymm}`)
+    const result = await stageRmBulkRows(conn, rows as Record<string, string>[], userId, `imports/raw-materials/${yyyymm}`)
     staged = result.staged
     skipped = result.skipped
 
@@ -428,14 +450,14 @@ export async function rmBulk(body: any, userId: number, ctx: object): Promise<Ne
     recordProcessedEvent("RM_BULK", logCtx.eventId, { staged, skipped, approvalId: result.approvalId })
     logger.info({ ...logCtx, approvalId: result.approvalId, staged, skipped, message: "RM bulk upload staged for approval" })
     return NextResponse.json({ ok: true, approval_id: result.approvalId, staged, skipped, total: rows.length })
-  } catch (err: any) {
+  } catch (err) {
     await conn.rollback()
     // A refusal the caller can act on (an empty or fully-skipped file) is not
     // a server fault — let the gateway serialise it as the 4xx it already is.
     if (err instanceof ApiError) throw err
-    recordFailedEvent("RM_BULK", logCtx.eventId, { rowCount: rows.length }, err.message)
-    logger.error({ ...logCtx, error: err.message, message: "Raw material bulk upload error" })
-    return NextResponse.json({ error: "Bulk upload failed: " + err.message }, { status: 500 })
+    recordFailedEvent("RM_BULK", logCtx.eventId, { rowCount: rows.length }, errMessage(err))
+    logger.error({ ...logCtx, error: errMessage(err), message: "Raw material bulk upload error" })
+    return NextResponse.json({ error: "Bulk upload failed: " + errMessage(err) }, { status: 500 })
   } finally {
     conn.release()
   }
@@ -443,7 +465,7 @@ export async function rmBulk(body: any, userId: number, ctx: object): Promise<Ne
 
 // Same staging behaviour as rmBulk above — the file is already in S3, so we
 // just parse it and run it through the same stageRmBulkRows split.
-export async function rmS3Bulk(body: any, userId: number, ctx: object): Promise<NextResponse> {
+export async function rmS3Bulk(body: Body<"bulk_from_s3">, userId: number, ctx: object): Promise<NextResponse> {
   const { key } = body
   if (!key?.trim()) return NextResponse.json({ error: "key is required" }, { status: 400 })
 
@@ -451,13 +473,13 @@ export async function rmS3Bulk(body: any, userId: number, ctx: object): Promise<
   logger.info({ ...logCtx, s3Key: key, message: "RM bulk upload (S3) started" })
   recordRawEvent("RM_S3BULK", logCtx.eventId, { s3Key: key, rowCount: null })
 
-  let rawRows: any[]
+  let rawRows: ImportRow[]
   try {
     rawRows = await parseS3Import(key)
-  } catch (err: any) {
-    recordFailedEvent("RM_S3BULK", logCtx.eventId, { s3Key: key }, err.message)
-    logger.error({ ...logCtx, s3Key: key, error: err.message, message: "RM S3 bulk: failed to parse file" })
-    return NextResponse.json({ error: "Failed to parse file: " + err.message }, { status: 400 })
+  } catch (err) {
+    recordFailedEvent("RM_S3BULK", logCtx.eventId, { s3Key: key }, errMessage(err))
+    logger.error({ ...logCtx, s3Key: key, error: errMessage(err), message: "RM S3 bulk: failed to parse file" })
+    return NextResponse.json({ error: "Failed to parse file: " + errMessage(err) }, { status: 400 })
   }
 
   if (rawRows.length === 0) {
@@ -484,14 +506,14 @@ export async function rmS3Bulk(body: any, userId: number, ctx: object): Promise<
     recordProcessedEvent("RM_S3BULK", logCtx.eventId, { s3Key: key, staged, skipped, approvalId: result.approvalId })
     logger.info({ ...logCtx, approvalId: result.approvalId, staged, skipped, message: "RM bulk upload (S3) staged for approval" })
     return NextResponse.json({ ok: true, approval_id: result.approvalId, staged, skipped, total: rawRows.length })
-  } catch (err: any) {
+  } catch (err) {
     await conn.rollback()
     // A refusal the caller can act on (an empty or fully-skipped file) is not
     // a server fault — let the gateway serialise it as the 4xx it already is.
     if (err instanceof ApiError) throw err
-    recordFailedEvent("RM_S3BULK", logCtx.eventId, { s3Key: key }, err.message)
-    logger.error({ ...logCtx, error: err.message, message: "Raw material bulk upload (S3) error" })
-    return NextResponse.json({ error: "Import failed: " + err.message }, { status: 500 })
+    recordFailedEvent("RM_S3BULK", logCtx.eventId, { s3Key: key }, errMessage(err))
+    logger.error({ ...logCtx, error: errMessage(err), message: "Raw material bulk upload (S3) error" })
+    return NextResponse.json({ error: "Import failed: " + errMessage(err) }, { status: 500 })
   } finally {
     conn.release()
   }
