@@ -5,6 +5,7 @@ import { type ModuleHandler, buildFieldMap, approvedStatus } from "./types"
 import { applyApprovedColumns, type ColumnTarget } from "./apply-columns"
 import { bulkHandler } from "./bulk-envelope"
 import { insertHistoryEntry, resolvePendingHistoryEntry } from "@/lib/master-routes/history-utils"
+import { matchSkuBrand, type BrandRow } from "@/lib/masters/sku-brand"
 
 /** Everything an approved SKU edit may write. filling/mrp are numeric columns —
  *  a cleared field arrives as "" and applyApprovedColumns writes NULL. */
@@ -34,6 +35,13 @@ export const skuHandler: ModuleHandler = {
     await applyApprovedColumns(conn, SKU_TARGET, fieldMap, entityId, {
       status: approvedStatus(fieldMap.status),
     })
+    // brand_id follows the brand text; re-checked here since brands can change between submit and approve.
+    if ("brand" in fieldMap) {
+      const [brands] = await conn.execute(skuSql.selectBrands)
+      const m = matchSkuBrand(brands as BrandRow[], fieldMap.brand)
+      if (!m.ok) throw new Error(m.message)
+      await conn.execute(skuSql.setBrandId, [m.brandId, entityId])
+    }
   },
 }
 

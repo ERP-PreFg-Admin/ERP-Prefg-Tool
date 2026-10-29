@@ -69,13 +69,19 @@ const BRANDS : Record<string , {code: string , entity : string}> = {
     code: "MCAFF",
     entity: "PEP",
   },
+  // The brand's own spelling since 2026-10-28 (matches the DWH); "fein" stays for older rows.
+  fien: {
+    code: "MCAFF",
+    entity: "PEP",
+  },
   hyphen: {
     code:"HYP" , 
     entity: "KREATIVE"
   }
 }
 
-const brandKey = (brand: string) => brand.toLowerCase().replace(/[^a-z0-9]/g , "")
+// Same normalisation as master_brand.brand_key (prisma/add_master_brand.sql).
+export const brandKey = (brand: string) => brand.toLowerCase().replace(/[^a-z0-9]/g , "")
 /**
  * Short code used as the PO number prefix.
  * Unmapped brands retain their upper-cased name for PO stability.
@@ -99,9 +105,9 @@ export function brandCode(raw:string):string {
  * upper-cased name for a brand nobody has mapped, so "Some New Brand" used to
  * land in a PO number verbatim, spaces and all.
  *
- * Two brands CAN share an initial — prod already has Fein and its typo Fien,
- * both F. That is safe: the sequence is counted with lastSeqByPrefix against the
- * prefix itself, so they share one series rather than colliding on a number.
+ * Two brands CAN share an initial. That is safe: the sequence is counted with
+ * lastSeqByPrefix against the prefix itself, so they share one series rather
+ * than colliding on a number.
  */
 export function brandInitial(raw: string): string {
   const letters = brandCode(raw).replace(/[^A-Z0-9]/gi, "")

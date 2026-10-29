@@ -27,6 +27,7 @@
 import 'dotenv/config'
 import { pool } from "../lib/db"
 import { DB_NAME_SKU } from "../lib/env"
+import { skus } from "../lib/queries/skus"
 
 async function main() {
   const dwh = `\`${DB_NAME_SKU}\`.All_Product_Name_MRP_Mapping`
@@ -85,6 +86,16 @@ async function main() {
     `)
     const skuResult = skuResultRaw as { affectedRows: number }
     console.log(`master_skus affected rows: ${skuResult.affectedRows} (MySQL counts an update as 2)`)
+
+    // brand_id drives facility, letterhead and brand scope; the upsert above only writes the text.
+    const [brandRaw] = await conn.query(skus.syncBrandIds)
+    console.log(`brand_id re-linked on ${(brandRaw as { affectedRows: number }).affectedRows} SKU(s)`)
+    const [unmatched] = await conn.query(skus.selectUnmatchedBrands)
+    const bad = unmatched as { sku_code: string; brand: string | null; brand_id: number | null }[]
+    if (bad.length) {
+      console.warn(`${bad.length} SKU(s) have a brand matching no master_brand row — fix them in the DWH or SKU master:`)
+      for (const r of bad) console.warn(`  ${r.sku_code}  brand=${JSON.stringify(r.brand)}  brand_id=${r.brand_id ?? "NULL"}`)
+    }
 
     const [detailsResultRaw] = await conn.query(`
       INSERT INTO details_sku (sku_id, sku_type, mrp, hsn_code)

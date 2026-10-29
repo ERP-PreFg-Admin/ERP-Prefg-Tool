@@ -296,11 +296,35 @@ export const skus = {
   // ============ INSERT QUERIES ============
 
   /** Insert a new SKU row.
-   *  Parameters: [sku_code, name, brand, category, status, created_by]
+   *  Parameters: [sku_code, name, brand, brand_id, category, status, created_by]
    */
   insertSku: `
-    INSERT INTO master_skus (sku_code, name, brand, category, status, created_by)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO master_skus (sku_code, name, brand, brand_id, category, status, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `,
+
+  /** Every brand a SKU may name; matched with matchSkuBrand (lib/masters/sku-brand.ts). */
+  selectBrands: `SELECT id, brand_key, name FROM master_brand`,
+
+  /** Parameters: [brand_id, id] */
+  setBrandId: `UPDATE master_skus SET brand_id = ? WHERE id = ?`,
+
+  /** Re-derives brand_id from the brand text for every SKU whose text names a brand.
+   *  A text matching no brand leaves brand_id as it was; selectUnmatchedBrands reports those. */
+  syncBrandIds: `
+    UPDATE master_skus s
+    JOIN master_brand b ON b.brand_key = LOWER(REGEXP_REPLACE(s.brand, '[^a-zA-Z0-9]', ''))
+    SET s.brand_id = b.id
+    WHERE NOT (s.brand_id <=> b.id)
+  `,
+
+  /** SKUs whose brand text is blank or names no master_brand row. */
+  selectUnmatchedBrands: `
+    SELECT s.id, s.sku_code, s.brand, s.brand_id
+    FROM master_skus s
+    LEFT JOIN master_brand b ON b.brand_key = LOWER(REGEXP_REPLACE(s.brand, '[^a-zA-Z0-9]', ''))
+    WHERE b.id IS NULL
+    ORDER BY s.sku_code
   `,
 
   // ── Approval-flow helpers ────────────────────────────────────────────────

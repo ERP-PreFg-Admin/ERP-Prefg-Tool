@@ -11,6 +11,22 @@ import logger from "@/lib/logger"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { skuActionSchema } from "@/lib/validation/skus"
+import { matchSkuBrand, type BrandRow } from "@/lib/masters/sku-brand"
+
+const loadBrands = () => query<BrandRow>(skuSql.selectBrands, [])
+
+/** Resolves every row's brand before any insert, so one bad brand refuses the file instead of half-loading it. */
+function brandIdsOrThrow(brands: BrandRow[], rows: { sku_code: string; brand: unknown }[]): number[] {
+  const bad: string[] = []
+  const ids = rows.map((r, i) => {
+    const m = matchSkuBrand(brands, typeof r.brand === "string" ? r.brand : null)
+    if (m.ok) return m.brandId
+    bad.push(`Row ${i + 1} (${r.sku_code}): ${m.message}`)
+    return 0
+  })
+  if (bad.length) throw new ApiError(400, "unknown_brand", bad.slice(0, 20).join("\n"), { rows: bad })
+  return ids
+}
 
 export const POST = withGateway({
   schema: skuActionSchema,
@@ -28,12 +44,15 @@ export const POST = withGateway({
       const logCtx = { ...ctx, eventId, module: "SKU_CREATE" }
       logger.info({ ...logCtx, sku_code, name, message: "SKU create started" })
       recordRawEvent("SKU", eventId, { sku_code, name, brand, category, status })
+      const brandMatch = matchSkuBrand(await loadBrands(), brand)
+      if (!brandMatch.ok) throw new ApiError(400, brandMatch.code, brandMatch.message)
 
       try {
         const result = await execute(skuSql.insertSku, [
           sku_code,
           name,
-          brand?.trim() || null,
+          brand!.trim(),
+          brandMatch.brandId,
           category?.trim() || null,
           status || "active",
           userId,
@@ -62,6 +81,8 @@ export const POST = withGateway({
       const logCtx = { ...ctx, eventId, module: "SKU_BULK" }
       logger.info({ ...logCtx, rowCount: rows.length, message: "SKU bulk insert started" })
       recordRawEvent("SKU_BULK", eventId, { source: "csv", rowCount: rows.length })
+      const usable = rows.filter((row) => row.sku_code?.trim?.() && row.name?.trim?.())
+      const brandIds = brandIdsOrThrow(await loadBrands(), usable.map((r) => ({ sku_code: String(r.sku_code).trim(), brand: r.brand })))
 
       const conn = await pool.getConnection()
       await conn.beginTransaction()
@@ -69,13 +90,13 @@ export const POST = withGateway({
       let skipped = 0
 
       try {
-        for (const row of rows) {
-          if (!row.sku_code?.trim?.() || !row.name?.trim?.()) continue
+        for (const [i, row] of usable.entries()) {
           try {
             await conn.execute(skuSql.insertSku, [
               row.sku_code.trim(),
               row.name.trim(),
-              row.brand?.trim() || null,
+              row.brand.trim(),
+              brandIds[i],
               row.category?.trim() || null,
               row.status || "active",
               userId,
@@ -116,6 +137,10 @@ export const POST = withGateway({
       // The list hides other brands' SKUs, but `id` is a guessable integer and
       // this path never looked at the brand until now.
       await assertSkuIdInBrandScope(userId, id)
+      if (body.brand !== undefined) {
+        const m = matchSkuBrand(await loadBrands(), body.brand)
+        if (!m.ok) throw new ApiError(400, m.code, m.message)
+      }
 
       const pending = await query(approvalsSql.hasPending, ["SKU", id])
       if (pending.length > 0) {
@@ -239,6 +264,8 @@ export const POST = withGateway({
 
       logger.info({ ...logCtx, s3Key: key, rowCount: rawRows.length, message: "SKU S3 bulk import started" })
       recordRawEvent("SKU_BULK", eventId, { source: "s3", s3Key: key, rowCount: rawRows.length })
+      const usable = rawRows.filter((row) => row["sku_code"]?.trim() && row["name"]?.trim())
+      const brandIds = brandIdsOrThrow(await loadBrands(), usable.map((r) => ({ sku_code: r["sku_code"].trim(), brand: r["brand"] })))
 
       const conn = await pool.getConnection()
       await conn.beginTransaction()
@@ -246,15 +273,15 @@ export const POST = withGateway({
       let skipped = 0
 
       try {
-        for (const row of rawRows) {
-          const sku_code = row["sku_code"]?.trim()
-          const name = row["name"]?.trim()
-          if (!sku_code || !name) continue
+        for (const [i, row] of usable.entries()) {
+          const sku_code = row["sku_code"].trim()
+          const name = row["name"].trim()
           try {
             await conn.execute(skuSql.insertSku, [
               sku_code,
               name,
-              row["brand"]?.trim() || null,
+              row["brand"].trim(),
+              brandIds[i],
               row["category"]?.trim() || null,
               row["status"]?.trim() || "active",
               userId,

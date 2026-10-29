@@ -22,6 +22,9 @@ test("brandCode returns the established prefixes", () => {
   // sequence rather than starting a FEIN- series of their own. The four
   // existing FEIN-PO-* rows predate that decision and are left as they are.
   assert.equal(brandCode("Fein"), "MCAFF")
+  // Renamed Fein -> Fien on 2026-10-28; the PO series must not change with the spelling.
+  assert.equal(brandCode("Fien"), "MCAFF")
+  assert.equal(brandCode("FIEN"), "MCAFF")
 })
 
 test("brandCode normalises casing and punctuation to one key", () => {
@@ -44,6 +47,7 @@ test("entityForBrand resolves the selling legal entity", () => {
   // master_entity.code.
   assert.equal(entityForBrand("mCaffeine"), "PEP")
   assert.equal(entityForBrand("Fein"), "PEP")
+  assert.equal(entityForBrand("Fien"), "PEP")
   assert.equal(entityForBrand("Hyphen"), "KREATIVE")
 })
 
@@ -65,16 +69,14 @@ test("brandInitial is one letter, from the mapped code where there is one", () =
   assert.equal(brandInitial("MCAFFEINE"), "M")
   assert.equal(brandInitial("m-caffeine"), "M")
   assert.equal(brandInitial("Hyphen"), "H")
-  // Follows brandCode, which now maps Fein to MCAFF.
+  // Follows brandCode, which maps both spellings of Fien to MCAFF.
   assert.equal(brandInitial("Fein"), "M")
+  assert.equal(brandInitial("Fien"), "M")
 })
 
 test("an unmapped brand falls back to its own first letter, never its full name", () => {
   assert.equal(brandInitial("DND"), "D")
   assert.equal(brandInitial("Some New Brand"), "S")
-  // the prod typo of Fein — shares F, which is safe because lastSeqByPrefix
-  // scopes the sequence to the prefix, so the two share one series
-  assert.equal(brandInitial("Fien"), "F")
 })
 
 test("brandInitial always yields exactly one usable character", () => {
