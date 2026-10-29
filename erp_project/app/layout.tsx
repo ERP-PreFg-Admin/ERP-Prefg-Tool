@@ -5,15 +5,14 @@ import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth";
 import { resolveAccess, type AccessLevel } from "@/lib/permissions";
 import { NAV_SLUGS } from "@/lib/pages";
-import { getUserScope, scopeParams, UNRESTRICTED } from "@/lib/scope"
+import { getUserScope, UNRESTRICTED } from "@/lib/scope"
 import { getBrandView, getSelectableBrands } from "@/lib/brand-view"
 import { APP_ENV } from "@/lib/env"
 import { buildAge, type BuildInfo } from "@/lib/build-info"
 import { BrandViewSwitcher } from "@/components/BrandViewSwitcher";
 import ClientLayout from "@/components/ClientLayout";
 import { ThemeProvider } from "@/components/ThemeProvider";
-import { timedQuery } from "@/lib/query-timing";
-import { manufacturingSql } from "@/lib/queries/manufacturing";
+import { getNavMfgs } from "@/lib/services/manufacturing";
 
 // Every sidebar destination that should be individually lockable. Masters
 // pages and manufacturers each get their own slug (see lib/permissions.ts'
@@ -66,9 +65,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const brandOptions = session ? await getSelectableBrands(Number(session.user.id)) : []
   const brandView = session ? await getBrandView(Number(session.user.id)) : null
 
-  const mfgs = session
-    ? await timedQuery<{ id: number; name: string }>(manufacturingSql.selectActiveForNav, scopeParams(scope.mfgIds), { label: "manufacturing.selectActiveForNav" })
-    : [];
+  const mfgs = session ? await getNavMfgs(scope.mfgIds) : [];
 
   // Resolve access for every sidebar destination up front (server-side, one
   // pass) so the sidebar can lock items the user can't reach instead of

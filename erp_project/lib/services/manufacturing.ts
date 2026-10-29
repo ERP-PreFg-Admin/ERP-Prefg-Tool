@@ -1,13 +1,12 @@
 // Reads behind /manufacturing and the MFG Cost Manager tabs (/manufacturing/[mfgId]).
 // Only the fetches live here; the costing maths stays in the page, which aligns rows by position.
-import { query } from "@/lib/db"
 import { timedQuery } from "@/lib/query-timing"
 import { manufacturingSql } from "@/lib/queries/manufacturing"
 import { manufacturers as manufacturersSql } from "@/lib/queries/manufacturers"
 import { bom as recipeSql } from "@/lib/queries/recipe"
 import { rawMaterials } from "@/lib/queries/raw-materials"
 import { packingMaterials } from "@/lib/queries/packing-materials"
-import { getUserScope, scopeParams } from "@/lib/scope"
+import { getUserScope, scopeParams, type UserScope } from "@/lib/scope"
 import type { MfgLine, MfgLineOption, MfgMonthlyPoRow, MiscCostLine, MiscCostType } from "@/types/masters"
 
 /** manufacturingSql.selectBomLineDetailByMfg — the recost inputs plus the
@@ -42,12 +41,18 @@ export type MinMaxRateRow = {
 }
 type MiscCostRow = { recipe_id: number; type: MiscCostType; cost: string }
 
+/** The sidebar's MFG Cost Manager list: active manufacturers in the user's mfg scope.
+ *  Out-of-scope ones are absent, not locked — a lock icon would still disclose the name. */
+export async function getNavMfgs(mfgIds: UserScope["mfgIds"]): Promise<{ id: number; name: string }[]> {
+  return timedQuery<{ id: number; name: string }>(manufacturingSql.selectActiveForNav, scopeParams(mfgIds), { label: "manufacturing.selectActiveForNav" })
+}
+
 /** First manufacturer in sidebar order that the user may see, or null. */
 export async function getFirstNavMfgId(userId: number): Promise<number | null> {
   // Scoped, so the root route forwards to a manufacturer the user may actually
   // see — it used to send everyone to whichever mfg sorted first.
   const scope = await getUserScope(userId)
-  const rows = await query<{ id: number; name: string }>(manufacturingSql.selectActiveForNav, scopeParams(scope.mfgIds))
+  const rows = await getNavMfgs(scope.mfgIds)
   return rows[0]?.id ?? null
 }
 
