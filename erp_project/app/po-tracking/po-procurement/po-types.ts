@@ -285,7 +285,7 @@ export type MfgSkuOption = { sku_code: string; sku_name: string; boms?: RecipeCh
 /** A manufacturer's plant a PO can be raised against (details_mfg_unit). */
 export type MfgUnitChoice = { id: number; unit_code: string; registered_name: string | null; address: string | null; gst_number: string | null }
 
-export type SplitRow = { destination: string; qty: string }
+export type SplitRow = { destination: string; qty: string; mfg_unit_id: string }
 
 /** Where a history_pos row came from — derived in selectPoHistoryByPoId. */
 export type PoHistorySource = "bulk_csv" | "invoice" | "invoice_receipt" | "receipt" | "split" | "draft_edit" | "invoice_revert" | "other"

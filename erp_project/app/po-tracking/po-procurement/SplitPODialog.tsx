@@ -10,8 +10,10 @@ import { Input } from "@/components/ui/input"
 import { useToast } from "@/components/ui/toast"
 import { Select } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import type { PoRow, SplitRow, WarehouseOption } from "./po-types"
-import { fmtInt, fmtRate, num, warehousesForEntity, warehouseLabel, warehouseKey } from "./po-utils"
+import type { MfgSkuOption, MfgUnitChoice, PoRow, SplitRow, WarehouseOption } from "./po-types"
+import { fmtInt, fmtRate, num, unitLabel, warehousesForEntity, warehouseLabel, warehouseKey } from "./po-utils"
+
+const blankRow = (unit = ""): SplitRow => ({ destination: "", qty: "", mfg_unit_id: unit })
 
 export default function SplitPODialog({
   open, onClose, po, warehouseOptions, onSplit,
@@ -22,9 +24,11 @@ export default function SplitPODialog({
   warehouseOptions: WarehouseOption[]
   onSplit: () => void
 }) {
-  const [rows, setRows]             = useState<SplitRow[]>([
-    { destination: "", qty: "" },
-  ])
+  const [rows, setRows]             = useState<SplitRow[]>([blankRow()])
+  // The manufacturer's plants; empty means no unit to pick, as on Add PO.
+  const [units, setUnits]           = useState<MfgUnitChoice[]>([])
+  const [defaultUnit, setDefaultUnit] = useState("")
+  const [loadingUnits, setLoadingUnits] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError]     = useState("")
   const { toast } = useToast()
@@ -41,11 +45,34 @@ export default function SplitPODialog({
   useEffect(() => {
     if (open && po) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the split form each time the dialog is opened
-      setRows([
-        { destination: "", qty: "" },
-      ])
+      setRows([blankRow()])
+      setUnits([])
+      setDefaultUnit("")
       setApiError("")
     }
+  }, [open, po])
+
+  // Lines start on the parent's unit, else the SKU's mapped one.
+  useEffect(() => {
+    if (!open || !po) return
+    let live = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag for the units fetch below
+    setLoadingUnits(true)
+    fetch(`/api/v1/purchase-orders/mfg-skus?mfg_id=${po.mfg_id}`)
+      .then((r) => r.json())
+      .then((data: { skus?: MfgSkuOption[]; units?: MfgUnitChoice[] }) => {
+        if (!live) return
+        const list = data.units ?? []
+        const mapped = data.skus?.find((s) => s.sku_code.toLowerCase() === (po.sku_code ?? "").toLowerCase())?.default_unit_id
+        const pick = [po.mfg_unit_id, mapped].find((id) => id != null && list.some((u) => u.id === id))
+        const unit = pick != null ? String(pick) : ""
+        setUnits(list)
+        setDefaultUnit(unit)
+        setRows((prev) => prev.map((r) => (r.mfg_unit_id ? r : { ...r, mfg_unit_id: unit })))
+      })
+      .catch(() => { if (live) setUnits([]) })
+      .finally(() => { if (live) setLoadingUnits(false) })
+    return () => { live = false }
   }, [open, po])
 
   if (!po) return null
@@ -68,7 +95,7 @@ export default function SplitPODialog({
     setApiError("")
   }
 
-  const addRow    = () => setRows((p) => [...p, { destination: "", qty: "" }])
+  const addRow    = () => setRows((p) => [...p, blankRow(defaultUnit)])
   const removeRow = (i: number) => {
     if (rows.length <= 1) return
     setRows((p) => p.filter((_, idx) => idx !== i))
@@ -84,13 +111,20 @@ export default function SplitPODialog({
       setApiError(`Total (${splitTotal}) exceeds remaining qty (${remaining}).`)
       return
     }
+    if (units.length > 0 && rows.some((r) => !r.mfg_unit_id)) {
+      setApiError("Pick the supplier unit on every line.")
+      return
+    }
     setSubmitting(true)
     try {
       const res = await fetch(`/api/v1/purchase-orders/${po.id}/split`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          splits: rows.map((r) => ({ mfg_id: po.mfg_id, destination: r.destination, qty: Number(r.qty) })),
+          splits: rows.map((r) => ({
+            mfg_id: po.mfg_id, destination: r.destination, qty: Number(r.qty),
+            mfg_unit_id: units.length > 0 && r.mfg_unit_id ? Number(r.mfg_unit_id) : null,
+          })),
         }),
       })
       const data = await res.json()
@@ -142,6 +176,9 @@ export default function SplitPODialog({
               <div className="mt-3 space-y-1 text-[11px] font-mono text-muted-foreground">
                 <div className="flex justify-between gap-2"><span>SKU</span><span className="text-foreground truncate" title={po.sku_code ?? ""}>{po.sku_code ?? "—"}</span></div>
                 <div className="flex justify-between gap-2"><span>Rate</span><span className="text-foreground">{fmtRate(po.unit_price)}</span></div>
+                {po.mfg_unit_code && (
+                  <div className="flex justify-between gap-2"><span>Unit</span><span className="text-foreground">{po.mfg_unit_code}</span></div>
+                )}
                 <div className="flex justify-between gap-2"><span>Location</span><span className="text-foreground truncate" title={po.destination ?? ""}>{po.destination || "—"}</span></div>
                 <div className="flex justify-between"><span>Ordered</span><span className="text-foreground">{fmtInt(total)}</span></div>
                 <div className="flex justify-between"><span>Received</span><span className="text-foreground">{fmtInt(received)}</span></div>
@@ -182,13 +219,13 @@ export default function SplitPODialog({
               <span className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">Routing lines</span>
               <div className="space-y-2 pt-1">
                 {rows.map((row, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <div className="w-9 shrink-0 text-center leading-none">
+                  <div key={i} className="flex items-start gap-2">
+                    <div className="w-9 shrink-0 pt-2 text-center leading-none">
                       <div className="font-mono text-xs font-semibold">{String(i + 1).padStart(2, "0")}</div>
                       <div className="font-mono text-[9px] text-muted-foreground">S{String(i + 1).padStart(3, "0")}</div>
                     </div>
                     {/* Select's flex item is its wrapper div, so the shrink rule goes here */}
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 space-y-1.5">
                       <Select
                         value={row.destination}
                         onChange={(e) => setRow(i, "destination", e.target.value)}
@@ -201,6 +238,20 @@ export default function SplitPODialog({
                           </option>
                         ))}
                       </Select>
+                      {units.length > 0 && (
+                        <Select
+                          value={row.mfg_unit_id}
+                          onChange={(e) => setRow(i, "mfg_unit_id", e.target.value)}
+                          className="w-full truncate text-xs"
+                          title="The manufacturer plant this split PO is raised against — printed as its supplier address"
+                          aria-label="Supplier unit"
+                        >
+                          <option value="">— Supplier unit —</option>
+                          {units.map((u) => (
+                            <option key={u.id} value={String(u.id)}>{unitLabel(u)}</option>
+                          ))}
+                        </Select>
+                      )}
                     </div>
                     <Input
                       type="number" min={1} placeholder="Qty"
@@ -210,7 +261,7 @@ export default function SplitPODialog({
                     {rows.length > 1 && (
                       <button
                         onClick={() => removeRow(i)}
-                        className="shrink-0 text-muted-foreground hover:text-destructive transition-colors p-1"
+                        className="shrink-0 mt-1 text-muted-foreground hover:text-destructive transition-colors p-1"
                         aria-label="Remove row"
                       >
                         <X className="h-4 w-4" />
@@ -239,7 +290,7 @@ export default function SplitPODialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
-          <Button onClick={handleSplit} disabled={submitting || overLimit}>
+          <Button onClick={handleSplit} disabled={submitting || overLimit || loadingUnits}>
             {submitting ? "Splitting…" : `Confirm Split (${rows.length} PO${rows.length > 1 ? "s" : ""})`}
           </Button>
         </DialogFooter>

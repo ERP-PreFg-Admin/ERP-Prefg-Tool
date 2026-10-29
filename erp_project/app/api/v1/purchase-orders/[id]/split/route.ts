@@ -24,6 +24,8 @@ import { assertPoInScope, assertDestinationActive } from "@/lib/po/po-guard"
 import { isDraftPo, splitChildPrice, impliedGstPercent, isSpecialPoType, specialPoPrice } from "@/lib/po/po-rules"
 import { skuGstPercent } from "@/lib/po/po-rate"
 import { ApiError } from "@/lib/gateway/errors"
+import { loadPoUnitContext } from "@/lib/po/po-unit-load"
+import { resolvePoUnit } from "@/lib/po/po-unit"
 import { poIdParamSchema, poSplitSchema } from "@/lib/validation/purchase-order-detail"
 
 // Drafts are absent on purpose: a split divides an order the manufacturer
@@ -95,6 +97,21 @@ export const POST = withGateway({
     for (const s of splits) await assertDestinationActive(s.destination)
 
     const userId = Number(session.user.id)
+    const uniqueMfgIds = [...new Set(splits.map((s) => s.mfg_id))]
+
+    // Each child's plant: the line's pick, else the parent's (same manufacturer), else the SKU's mapping.
+    const unitCtx = new Map<number, Awaited<ReturnType<typeof loadPoUnitContext>>>()
+    for (const mfgId of uniqueMfgIds) {
+      unitCtx.set(mfgId, await loadPoUnitContext((sql, p) => query(sql, p), mfgId, po.sku_code))
+    }
+    const childUnits = splits.map((s) => {
+      const { units, defaultUnitId } = unitCtx.get(s.mfg_id)!
+      const inherited = Number(s.mfg_id) === Number(po.mfg_id) && units.some((u) => u.id === Number(po.mfg_unit_id))
+        ? Number(po.mfg_unit_id) : null
+      const r = resolvePoUnit(units, defaultUnitId, s.mfg_unit_id ?? inherited)
+      if (!r.ok) throw new ApiError(400, r.code, r.message)
+      return { id: r.unitId, code: units.find((u) => u.id === r.unitId)?.unit_code ?? null }
+    })
 
     const eventId = makeEventId("PO_SPLIT", "split", poId)
     const logCtx = { ...ctx, eventId, module: "PO_SPLIT" }
@@ -102,7 +119,6 @@ export const POST = withGateway({
     recordRawEvent("PO_SPLIT", eventId, { parentPoId: poId, parentPoNo: po.po_no, splits })
 
     // Pre-fetch all unique manufacturer names needed for approval diffs
-    const uniqueMfgIds = [...new Set(splits.map((s) => s.mfg_id))]
     const mfgMap: Record<number, { code: string; name: string }> = {}
     for (const mfgId of uniqueMfgIds) {
       const rows = await query<any>(mfgsSql.selectNameById, [mfgId])
@@ -146,16 +162,14 @@ export const POST = withGateway({
            po.expected_on, childStatus, destination || null, po.po_no, childType, po.recipe_id ?? null, mfg_id, po.sku_code]
         )
         const childId = (childResult as any).insertId
-        // Same manufacturer keeps the parent's plant; another manufacturer stays NULL and takes its mapped unit.
-        if (po.mfg_unit_id && Number(mfg_id) === Number(po.mfg_id)) {
-          await conn.execute(purchaseOrdersSql.setMfgUnit, [po.mfg_unit_id, childId])
-        }
+        const unit = childUnits[i]
+        if (unit.id !== null) await conn.execute(purchaseOrdersSql.setMfgUnit, [unit.id, childId])
 
         // The only audit trail a split leaves: the parent row itself doesn't
         // change, so without this there would be no record on the PO that part
         // of it was handed off, and to which order.
         await conn.execute(purchaseOrdersSql.insertPoHistory, [
-          poId, po.po_no, "update", "split", "", `${childPoNo} — ${qty}`, null, userId,
+          poId, po.po_no, "update", "split", "", `${childPoNo} — ${qty}${unit.code ? ` · ${unit.code}` : ""}`, null, userId,
         ])
 
         // If parent was draft, each child needs its own approval record

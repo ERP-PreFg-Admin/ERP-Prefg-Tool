@@ -68,6 +68,34 @@ Steps 2–5 ship together as one deploy. Step 1 must reach prod first, because t
 - **Invoice-inward POs:** these record goods already received, so the unit stays NULL, unchanged.
 - **PO Tracking:** the unit code shows under the manufacturer name in the existing column (no new column), and it's added to the PO export.
 
+### Split: choose the unit per routing line (added 2026-10-29, built on dev 2026-10-29, uncommitted)
+
+**Today:** a child silently takes the parent's unit, or stays NULL and follows the mapping. Nobody can send part of an NG order to the other plant.
+
+**Change:** each routing line gets a "Supplier unit" select, the same one Add PO uses.
+
+**Dialog (`SplitPODialog.tsx`):**
+- On open it fetches `/api/v1/purchase-orders/mfg-skus?mfg_id=<parent mfg>` for `units`. No new endpoint is needed.
+- The select appears only when the manufacturer has active units.
+- Each line is pre-filled with the parent's `mfg_unit_id`, or else the SKU's `default_unit_id`.
+- A blank pick blocks Confirm with "Pick the supplier unit."
+
+**Schema:** `poSplitRowSchema` gains an optional `mfg_unit_id`.
+
+**Route (`[id]/split/route.ts`):**
+- Before the transaction, it resolves each line with `resolvePoUnitOrThrow`, choosing the line's pick, else the parent's unit, else the mapping. A wrong unit gives 400 `unknown_unit` and nothing is written.
+- It stamps the result with the existing `setMfgUnit`, replacing the inherit-only branch.
+- The `history_pos` split row names the unit code, e.g. `-S001 — 500 · MB2`.
+
+**Behaviour change:** a child is now always stamped with a concrete unit, where before a child of a NULL-unit parent stayed NULL. That is the intent: the child records which plant was ordered from.
+
+**Not touched:** manufacturers with no units, which show no select and send nothing. Also untouched are split pricing, numbering and the "a draft can't be split" rule.
+
+**Verify:**
+- Dev: split an NG Electro PO into one MBA line and one MB2 line, then Review PDF on each child.
+- Dev: split a non-NG PO and confirm there's no select.
+- `tsc --incremental false`, `lint:changed` and `npm test`.
+
 ### Units master (out of scope, noted)
 Units are still edited by SQL only (`prisma/add_mfg_units.sql`). A Units tab on the Manufacturer master is the natural next step, but it isn't needed for this change.
 
