@@ -131,7 +131,8 @@ export async function listDocuments(cap:DocCapability): Promise<UniwareDocument[
     const res = await fetch(`${cap.docsHost}${DOCS_LIST_PATH}?${docsQuery(cap)}` , {
         signal:AbortSignal.timeout(TIMEOUT_MS)
     })
-    const data = await res.json().catch(() => null)
+    const data = await res.json().catch(() => undefined)
+    if(data === null) return []
     if(!Array.isArray(data)){
         throw new Error(`Uniware docuemnt list for ${cap.identifier} was not an array`)
     }
