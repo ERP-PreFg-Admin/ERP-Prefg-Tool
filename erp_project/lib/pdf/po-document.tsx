@@ -55,6 +55,7 @@ export type PoEmailData = {
   total_amount: number | null
   mfg_name: string
   mfg_code: string
+  mfg_unit_code?: string | null
   registered_name: string | null
   gst_number: string | null
   location: string | null

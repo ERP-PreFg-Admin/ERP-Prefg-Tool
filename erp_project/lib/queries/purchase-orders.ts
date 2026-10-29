@@ -1191,6 +1191,7 @@ export const purchaseOrdersSql = {
       ${PO_SKU_NAME}     AS sku_name,
       m.code             AS mfg_code,
       m.name             AS mfg_name,
+      mu.unit_code       AS mfg_unit_code,
       -- The manufacturing unit that makes this SKU, else the manufacturer's own row.
       COALESCE(mu.registered_name, d.registered_name) AS registered_name,
       COALESCE(mu.gst_number, d.gst_number)           AS gst_number,

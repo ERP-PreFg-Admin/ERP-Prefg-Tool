@@ -110,6 +110,20 @@ test("the split summary lists every split with its address and totals the qty", 
   assert.equal(html.includes("Mumbai<br>Mumbai"), false, "fallback name/location must not repeat")
   assert.equal(html.includes("Split From"), false)
   assert.ok(/Total<\/td>\s*<td[^>]*>2,000<\/td>/.test(html), "totals row should sum Split Qty")
+  assert.equal(html.includes("Supplier Unit"), false, "no units, no column")
+})
+
+test("splitSummarySection: one SKU split across two units names each plant", () => {
+  const html = splitSummarySection([
+    { po_no: "NG-001-S001", sku_code: "SKU-A", sku_name: "Face Wash", qty: 500, ship_to_name: "GGN MW", ship_to_lines: [],
+      unit_code: "MBA", unit_gstin: "02AACCN5184H1ZM" },
+    { po_no: "NG-001-S002", sku_code: "SKU-A", sku_name: "Face Wash", qty: 300, ship_to_name: "GGN MW", ship_to_lines: [],
+      unit_code: "MB2", unit_gstin: "02AACCN5184H2ZL" },
+  ])
+  assert.ok(html.includes("Supplier Unit"))
+  assert.ok(html.includes("MBA") && html.includes("02AACCN5184H1ZM"))
+  assert.ok(html.includes("MB2") && html.includes("02AACCN5184H2ZL"))
+  assert.ok(html.includes(`colspan="5">Total`), "total spans the extra column")
 })
 
 test("open section is dropped only for impromptu lines", () => {

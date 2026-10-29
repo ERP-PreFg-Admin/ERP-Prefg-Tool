@@ -252,6 +252,7 @@ export async function fetchPoData(poId: number): Promise<PoEmailData | null> {
     total_amount:    po.total_amount  ? Number(po.total_amount) : null,
     mfg_name:        po.mfg_name,
     mfg_code:        po.mfg_code,
+    mfg_unit_code:   po.mfg_unit_code ?? null,
     registered_name: po.registered_name,
     gst_number:      po.gst_number,
     location:        po.location,
@@ -632,6 +633,8 @@ export async function sendMfgSelectionEmail(
 export type SplitSummaryRow = {
   po_no: string; sku_code: string | null; sku_name: string | null
   qty: number; ship_to_name: string | null; ship_to_lines: string[]
+  /** The plant each split goes to; one SKU can be split across both units. */
+  unit_code?: string | null; unit_gstin?: string | null
 }
 
 /** The split summary table, ending in a Total row over Split Qty. */
@@ -639,6 +642,11 @@ export function splitSummarySection(rows: SplitSummaryRow[]): string {
   if (rows.length === 0) return ""
   const head = "padding:5px 10px;font-weight:600"
   const total = rows.reduce((s, r) => s + Number(r.qty), 0)
+  // Only manufacturers with units get the column, so other mails are unchanged.
+  const withUnit = rows.some((r) => r.unit_code)
+  const unitCell = (r: SplitSummaryRow) => withUnit
+    ? `<td style="${CELL}">${r.unit_code ? escapeHtml(r.unit_code) : "—"}${r.unit_gstin ? `<br><span style="font-size:11px;color:#555">${escapeHtml(r.unit_gstin)}</span>` : ""}</td>`
+    : ""
   const body = rows
     .map((r) => {
       // Deduped: the no-entity fallback is warehouse name + location, often the same word.
@@ -648,6 +656,7 @@ export function splitSummarySection(rows: SplitSummaryRow[]): string {
         <tr>
           <td style="${CELL}">${r.sku_code ? escapeHtml(r.sku_code) : "—"}</td>
           <td style="${CELL}">${r.sku_name ? escapeHtml(r.sku_name) : "—"}</td>
+          ${unitCell(r)}
           <td style="${CELL};font-size:11px;color:#333">${dest || "—"}</td>
           <td style="${CELL}">${escapeHtml(r.po_no)}</td>
           <td style="${CELL};text-align:right">${Number(r.qty).toLocaleString("en-IN")}</td>
@@ -659,13 +668,14 @@ export function splitSummarySection(rows: SplitSummaryRow[]): string {
       <tr style="background:#f5f5f5">
         <td style="${head}">SKU Code</td>
         <td style="${head}">SKU Name</td>
+        ${withUnit ? `<td style="${head}">Supplier Unit</td>` : ""}
         <td style="${head}">Destination</td>
         <td style="${head}">New PO Code</td>
         <td style="${head};text-align:right">Split Qty</td>
       </tr>
       ${body}
       <tr style="background:#f5f5f5">
-        <td style="${head}" colspan="4">Total</td>
+        <td style="${head}" colspan="${withUnit ? 5 : 4}">Total</td>
         <td style="${head};text-align:right">${total.toLocaleString("en-IN")}</td>
       </tr>
     </table>`
@@ -713,6 +723,8 @@ export async function sendSplitPoSummaryEmail(mfgId: number, lines: SelectedPoLi
       po_no: line.po_no, sku_code: line.sku_code, sku_name: line.sku_name, qty: Number(line.qty),
       ship_to_name: data?.ship_to.name ?? line.destination ?? null,
       ship_to_lines: data?.ship_to.address_lines ?? [],
+      unit_code: data?.mfg_unit_code ?? null,
+      unit_gstin: data?.mfg_unit_code ? data.gst_number : null,
     })
     try {
       const doc = await poDocument(line, generateSplitPoPdf, ctx)

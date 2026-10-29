@@ -37,6 +37,8 @@ export type PoEmailRow = {
   total_amount: number | string | null
   mfg_name: string
   mfg_code: string
+  /** The plant the PO is raised against (its own unit, else the SKU's mapped one). */
+  mfg_unit_code?: string | null
   registered_name: string | null
   gst_number: string | null
   location: string | null
