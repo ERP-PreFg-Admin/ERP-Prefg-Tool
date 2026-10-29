@@ -7,13 +7,7 @@ import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { parsePaginationParams } from "@/lib/pagination"
-import { timedQuery } from "@/lib/query-timing"
-import { purchaseOrdersSql, buildFilterParams, buildStatusCountParams, inwardTabFilters } from "@/lib/queries/purchase-orders"
-import { getPoDropdownOptions } from "@/lib/cached-reference-data"
-import { filterByScope } from "@/lib/scope"
-import { getViewScope } from "@/lib/brand-view"
-import { fetchChildrenByParent } from "@/lib/po/po-children"
-import type { PoRow } from "../po-procurement/po-types"
+import { getPoInwardingPage } from "@/lib/services/po-tracking"
 import PoProcurementClient from "../po-procurement/PoProcurementClient"
 
 export const dynamic = "force-dynamic"
@@ -48,65 +42,10 @@ export default async function PoInwardingPage({
   // stores only the shared site name. See destFilterValue in po-utils.ts.
   const destEntity      = String(sp.destEntity ?? "")
 
-  // "all" is an explicit opt-out of the default open-only filter, so it has to
-  // travel in the URL as a value rather than as an absent param.
-  //
-  // "inward" is not a status at all — it selects on po_type, so that every PO
-  // an invoice raised is reachable in one click. An invoice books those in
-  // already complete, which would otherwise hide them from the default tab.
-  // Shared with the CSV export, which has to read the tabs the same way.
-  const { status, poType: poTypeParam } = inwardTabFilters(statusFilter, poType)
-
-  const scope = await getViewScope(userId)
-  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poTypeParam, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, false, scope, destEntity || null)
-  const statusCountParams = buildStatusCountParams(search || null, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, false, scope, destEntity || null)
-
-  const pageStart = performance.now()
-  console.log(`[AUDIT] PO Inwarding load - page=${page}, size=${size}, search=${search || "none"}, status=${status ?? "all"}, sortBy=${sortBy}, sortDir=${sortDir}`)
-
-  const [rows, countRows, statusCountRows, inwardCountRows, summaryRows, dropdownOptions] = await Promise.all([
-    timedQuery<PoRow>(purchaseOrdersSql.buildSelectPaginated(sortBy, sortDir), [...filterParams, size, offset], { label: "selectPaginated" }),
-    timedQuery<{ total: number }>(purchaseOrdersSql.countPaginated, filterParams, { label: "countPaginated" }),
-    timedQuery<{ status: string; cnt: number }>(purchaseOrdersSql.statusCounts, statusCountParams, { label: "statusCounts" }),
-    timedQuery<{ cnt: number }>(purchaseOrdersSql.inwardCount, statusCountParams, { label: "inwardCount" }),
-    timedQuery<any>(purchaseOrdersSql.summaryStats, statusCountParams, { label: "summaryStats" }),
-    getPoDropdownOptions(),
-  ])
-  // Post-filtered, not filtered in the query: getPoDropdownOptions is an
-  // unstable_cache with no user component in its key.
-  const { skus } = dropdownOptions
-  const mfgs = filterByScope(dropdownOptions.mfgs, "id", scope.mfgIds)
-  const warehouses = filterByScope(dropdownOptions.warehouses, "name", scope.warehouseNames)
-
-  const total = Number(countRows[0]?.total ?? 0)
-  console.log(`[AUDIT] PO Inwarding complete: ${(performance.now() - pageStart).toFixed(2)}ms | ${rows.length}/${total} rows`)
-
-  // Masters only, same as procurement — the splits goods actually arrive
-  // against hang off their parent row here too.
-  const childrenByParent = await fetchChildrenByParent(rows)
-
-  const statusCounts: Record<string, number> = {}
-  for (const r of statusCountRows) statusCounts[r.status] = Number(r.cnt)
-  statusCounts.all = Object.values(statusCounts).reduce((sum, n) => sum + n, 0)
-  // Tab counts mirror what the query actually matches: "open" spans every PO
-  // still awaiting goods, "received" also covers short-closed POs.
-  statusCounts.open =
-    (statusCounts.raised ?? 0) + (statusCounts.punched ?? 0) + (statusCounts.partially_received ?? 0)
-  statusCounts.received = (statusCounts.received ?? 0) + (statusCounts.short_closed ?? 0)
-  // Counted separately: "inward" spans every status, so it isn't a slice of the
-  // group-by above and must not be added into statusCounts.all either.
-  statusCounts.inward = Number(inwardCountRows[0]?.cnt ?? 0)
-
-  const s = summaryRows[0] ?? {}
-  const summary = {
-    total:        Number(s.total         ?? 0),
-    openQty:      Number(s.open_qty      ?? 0),
-    committedQty: Number(s.committed_qty ?? 0),
-    receivedQty:  Number(s.received_qty  ?? 0),
-    overdueQty:   Number(s.overdue_qty   ?? 0),
-    overduePos:   Number(s.overdue_pos   ?? 0),
-    draftPos:     Number(s.draft_pos     ?? 0),
-  }
+  const data = await getPoInwardingPage(userId, {
+    page, size, offset, search, status: statusFilter, sortBy, sortDir, mfgCode, poType,
+    dateFrom, dateTo, sku: skuFilter, destination: destFilter, destEntity,
+  })
 
   return (
     <div className="p-6">
@@ -118,9 +57,9 @@ export default async function PoInwardingPage({
       </div>
       <PoProcurementClient
         mode="inwarding"
-        rows={rows}
-        childrenByParent={childrenByParent}
-        total={total}
+        rows={data.rows}
+        childrenByParent={data.childrenByParent}
+        total={data.total}
         page={page}
         pageSize={size}
         currentSearch={search}
@@ -134,11 +73,11 @@ export default async function PoInwardingPage({
         currentSku={skuFilter}
         currentDestination={destFilter}
         currentDestEntity={destEntity}
-        statusCounts={statusCounts}
-        summary={summary}
-        skuOptions={skus}
-        mfgOptions={mfgs}
-        warehouseOptions={warehouses}
+        statusCounts={data.statusCounts}
+        summary={data.summary}
+        skuOptions={data.skuOptions}
+        mfgOptions={data.mfgOptions}
+        warehouseOptions={data.warehouseOptions}
         sessionUserId={userId}
       />
     </div>

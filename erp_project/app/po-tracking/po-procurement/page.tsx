@@ -2,13 +2,7 @@ import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { parsePaginationParams } from "@/lib/pagination"
-import { timedQuery } from "@/lib/query-timing"
-import { purchaseOrdersSql, buildFilterParams, buildStatusCountParams } from "@/lib/queries/purchase-orders"
-import { getPoDropdownOptions } from "@/lib/cached-reference-data"
-import { filterByScope } from "@/lib/scope"
-import { getViewScope } from "@/lib/brand-view"
-import { fetchChildrenByParent } from "@/lib/po/po-children"
-import type { PoRow } from "./po-types"
+import { getPoProcurementPage } from "@/lib/services/po-tracking"
 import PoProcurementClient from "./PoProcurementClient"
 
 export const dynamic = "force-dynamic"
@@ -41,68 +35,10 @@ export default async function PoProcurementPage({
   // stores only the shared site name. See destFilterValue in po-utils.ts.
   const destEntity      = String(sp.destEntity ?? "")
 
-  const status = statusFilter || null
-
-  // Inward POs are excluded outright here: they're raised by the invoice desk
-  // against goods already received, so they're not procurement's to track and
-  // they distort every tab count and summary card on this page. PO Inwarding is
-  // where they live.
-  const scope = await getViewScope(userId)
-  // Argument order is dateFrom, dateTo, sku — matching the signature and the
-  // buildStatusCountParams call below. It read (sku, dateFrom, dateTo) until
-  // 2026-08-20, so those three filters were cross-wired: a SKU was applied as
-  // dateFrom, dateFrom as dateTo, dateTo as sku. All three are `string | null`,
-  // so nothing type-checked it, and the tab counts stayed right while the rows
-  // went wrong — which is the symptom to look for if this ever regresses.
-  const filterParams      = buildFilterParams(search || null, status, mfgCode || null, poType  || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, true, scope, destEntity || null)
-  const statusCountParams = buildStatusCountParams(search || null, mfgCode || null, poType || null, dateFrom || null, dateTo || null, skuFilter || null, destFilter || null, true, scope, destEntity || null)
-
-  const pageStart = performance.now()
-  console.log(`[AUDIT] PO Procurement load - page=${page}, size=${size}, search=${search || "none"}, status=${status ?? "all"}, sortBy=${sortBy}, sortDir=${sortDir}`)
-
-  const [rows, countRows, statusCountRows, summaryRows, dropdownOptions] = await Promise.all([
-    timedQuery<PoRow>(purchaseOrdersSql.buildSelectPaginated(sortBy, sortDir), [...filterParams, size, offset], { label: "selectPaginated" }),
-    timedQuery<{ total: number }>(purchaseOrdersSql.countPaginated, filterParams, { label: "countPaginated" }),
-    timedQuery<{ status: string; cnt: number }>(purchaseOrdersSql.statusCounts, statusCountParams, { label: "statusCounts" }),
-    timedQuery<any>(purchaseOrdersSql.summaryStats, statusCountParams, { label: "summaryStats" }),
-    getPoDropdownOptions(),
-  ])
-  // getPoDropdownOptions is an unstable_cache keyed without any user component,
-  // so it can't filter internally — post-filter here instead of losing the cache.
-  const { skus } = dropdownOptions
-  const mfgs = filterByScope(dropdownOptions.mfgs, "id", scope.mfgIds)
-  const warehouses = filterByScope(dropdownOptions.warehouses, "name", scope.warehouseNames)
-
-  const total = Number(countRows[0]?.total ?? 0)
-  console.log(`[AUDIT] PO Procurement complete: ${(performance.now() - pageStart).toFixed(2)}ms | ${rows.length}/${total} rows`)
-
-  // The list is masters only; their split children come back in one extra
-  // round trip, keyed by parent po_no for the expandable section under each row.
-  const childrenByParent = await fetchChildrenByParent(rows)
-
-  const statusCounts: Record<string, number> = {}
-  for (const r of statusCountRows) statusCounts[r.status] = Number(r.cnt)
-  statusCounts.all = Object.values(statusCounts).reduce((sum, n) => sum + n, 0)
-  // "Received" tab also covers short-closed POs (see buildFilterParams' statusMatchValues) —
-  // its displayed count needs to include them too. "Short Closed" keeps its own separate count.
-  statusCounts.received = (statusCounts.received ?? 0) + (statusCounts.short_closed ?? 0)
-  // Discarded drafts are listed under Cancelled (statusMatchValues), so they count there.
-  statusCounts.cancelled = (statusCounts.cancelled ?? 0) + (statusCounts.discarded ?? 0)
-  // "Open" is a pseudo-status (see statusMatchValues) — its badge is the sum of
-  // the three real statuses it spans. Set after `all` so it isn't counted twice.
-  statusCounts.open =
-    (statusCounts.raised ?? 0) + (statusCounts.punched ?? 0) + (statusCounts.partially_received ?? 0)
-
-  const s = summaryRows[0] ?? {}
-  const summary = {
-    total:        Number(s.total         ?? 0),
-    openQty:      Number(s.open_qty      ?? 0),
-    committedQty: Number(s.committed_qty ?? 0),
-    receivedQty:  Number(s.received_qty  ?? 0),
-    overdueQty:   Number(s.overdue_qty   ?? 0),
-    overduePos:   Number(s.overdue_pos   ?? 0),
-    draftPos:     Number(s.draft_pos     ?? 0),
-  }
+  const data = await getPoProcurementPage(userId, {
+    page, size, offset, search, status: statusFilter, sortBy, sortDir, mfgCode, poType,
+    dateFrom, dateTo, sku: skuFilter, destination: destFilter, destEntity,
+  })
 
   return (
     <div className="p-6">
@@ -113,9 +49,9 @@ export default async function PoProcurementPage({
         </p>
       </div>
       <PoProcurementClient
-        rows={rows}
-        childrenByParent={childrenByParent}
-        total={total}
+        rows={data.rows}
+        childrenByParent={data.childrenByParent}
+        total={data.total}
         page={page}
         pageSize={size}
         currentSearch={search}
@@ -129,11 +65,11 @@ export default async function PoProcurementPage({
         currentSku={skuFilter}
         currentDestination={destFilter}
         currentDestEntity={destEntity}
-        statusCounts={statusCounts}
-        summary={summary}
-        skuOptions={skus}
-        mfgOptions={mfgs}
-        warehouseOptions={warehouses}
+        statusCounts={data.statusCounts}
+        summary={data.summary}
+        skuOptions={data.skuOptions}
+        mfgOptions={data.mfgOptions}
+        warehouseOptions={data.warehouseOptions}
         sessionUserId={userId}
       />
     </div>
