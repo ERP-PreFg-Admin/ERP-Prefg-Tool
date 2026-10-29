@@ -11,10 +11,7 @@ import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { parsePaginationParams } from "@/lib/pagination"
-import { timedQuery } from "@/lib/query-timing"
-import { bom } from "@/lib/queries/recipe"
-import { fuzzyRank } from "@/lib/fuzzy-search"
-import type { RecipeHistoryListItem } from "@/types/masters"
+import { getRecipeHistoryPage } from "@/lib/services/masters/recipe"
 import RecipeHistoryClient from "./RecipeHistoryClient"
 
 export default async function RecipeHistoryPage({
@@ -31,30 +28,8 @@ export default async function RecipeHistoryPage({
   const sp     = await searchParams
   const { page, size, offset } = parsePaginationParams(sp)
   const search = String(sp.search ?? "")
-  const like   = search ? `%${search}%` : null
 
-  const pageStart = performance.now()
-  console.log(`[AUDIT] Recipe History load - page=${page}, size=${size}, search=${search || "none"}`)
-
-  let rows: RecipeHistoryListItem[]
-  let total: number
-
-  if (search) {
-    const allMatching = await timedQuery<RecipeHistoryListItem>(
-      bom.selectAllFilteredHistoryGrouped, [null, null, null], { label: "selectAllFilteredHistoryGrouped" }
-    )
-    const ranked = fuzzyRank(allMatching, search, ["bom_code", "sku_code"])
-    total = ranked.length
-    rows = ranked.slice(offset, offset + size)
-  } else {
-    const [dbRows, countRows] = await Promise.all([
-      timedQuery<RecipeHistoryListItem>(bom.selectHistoryPaginatedGrouped, [like, like, like, size, offset], { label: "selectHistoryPaginatedGrouped" }),
-      timedQuery<{ total: number }>(bom.countHistoryGrouped, [like, like, like], { label: "countHistoryGrouped" }),
-    ])
-    rows = dbRows
-    total = Number(countRows[0]?.total ?? 0)
-  }
-  console.log(`[AUDIT] Recipe History complete: ${(performance.now() - pageStart).toFixed(2)}ms | ${rows.length}/${total} rows`)
+  const { rows, total } = await getRecipeHistoryPage({ page, size, offset, search })
 
   return (
     <div className="p-6">

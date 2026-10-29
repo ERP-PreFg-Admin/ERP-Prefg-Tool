@@ -1,31 +1,15 @@
 /**
  * SERVER component for /masters/skus.
  *
- * Reads ?page, ?size, ?search, ?status from URL searchParams and runs a
- * DB-level LIMIT/OFFSET query so only the requested slice is fetched.
- *
- * The inline SQL that previously lived here has been extracted to
- * lib/queries/skus.ts to follow the same pattern as every other master module.
+ * Reads ?page, ?size, ?search, ?status from URL searchParams; the slice, its
+ * costing gaps and the filter lists come from lib/services/masters/skus.ts.
  */
 
 import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { parsePaginationParams } from "@/lib/pagination"
-import { timedQuery } from "@/lib/query-timing"
-import { query } from "@/lib/db"
-import { scopeParams } from "@/lib/scope"
-import { getViewScope } from "@/lib/brand-view"
-import { skus as skuSql } from "@/lib/queries/skus"
-import { bom as recipeSql } from "@/lib/queries/recipe"
-import {
-  getSkuDistinctBrands,
-  getSkuDistinctSkuTypes,
-  getSkuDistinctCategories,
-  getSkuDistinctSubcategories,
-} from "@/lib/cached-reference-data"
-import { fuzzyRank } from "@/lib/fuzzy-search"
-import type { Sku, CostingGap } from "@/types/masters"
+import { getSkusPage } from "@/lib/services/masters/skus"
 import SkusClient from "./SkusClient"
 
 export default async function SkusPage({
@@ -40,12 +24,6 @@ export default async function SkusPage({
   const access = await resolveAccess(userId, session.user.roles, "/masters/skus")
   if (access === "none") redirect("/auth/unauthorized")
 
-  // Brand scope. This page was previously unscoped — page access alone decided
-  // what you saw. scopeParams(brandIds) is [null, [0]] for an unrestricted user,
-  // so the predicate short-circuits and results are unchanged for everyone who
-  // holds no brand grant.
-  const scope = await getViewScope(userId)
-
   // ── Read URL params ────────────────────────────────────────────────────────
   const sp              = await searchParams
   const { page, size, offset } = parsePaginationParams(sp)
@@ -57,77 +35,11 @@ export default async function SkusPage({
   const subcategoryFilter = String(sp.subcategory ?? "")
   const bomFilter       = String(sp.bom ?? "")
 
-  const like        = search          ? `%${search}%`     : null
-  const status      = statusFilter    ? statusFilter       : null
-  const brand       = brandFilter     ? brandFilter        : null
-  const skuType     = skuTypeFilter   ? skuTypeFilter      : null
-  const category    = categoryFilter  ? categoryFilter     : null
-  const subcategory = subcategoryFilter ? subcategoryFilter : null
-  // Any non-null value activates the "AND ... IS NULL" branch — the value
-  // itself is never compared, so 1 is just a truthy placeholder.
-  const missingBom  = bomFilter === "missing" ? 1 : null
-
-  // ── DB query (paginated) ───────────────────────────────────────────────────
-  // Param order: [like×4, status×2, brand×2, sku_type×2, category×2, subcategory×2, missingBom, LIMIT, OFFSET] (data) / same minus LIMIT/OFFSET (count)
-  const pageStart = performance.now()
-  console.log(`[AUDIT] SKUs load - page=${page}, size=${size}, search=${search || "none"}, status=${status || "all"}, brand=${brand || "all"}`)
-
-  let rows: Sku[]
-  let total: number
-
-  const [brands, skuTypes, categories, subcategories] = await Promise.all([
-    getSkuDistinctBrands(),
-    getSkuDistinctSkuTypes(),
-    getSkuDistinctCategories(),
-    getSkuDistinctSubcategories(),
-  ])
-
-  if (search) {
-    // Fuzzy path: fetch every SKU matching the status/brand/etc filters, rank by typo-tolerant
-    // relevance against the search term, then slice the requested page in memory.
-    const allMatching = await timedQuery<Sku>(
-      skuSql.selectAllFiltered,
-      // brand scope sits immediately after the four `like`s, matching where the
-      // predicate was inserted in the WHERE clause — these arrays are positional.
-      [null, null, null, null, ...scopeParams(scope.brandIds), status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory, missingBom],
-      { label: "selectAllFiltered" }
-    )
-    const ranked = fuzzyRank(allMatching, search, ["sku_code", "name", "supply_name", "brand"])
-    total = ranked.length
-    rows = ranked.slice(offset, offset + size)
-  } else {
-    const [dbRows, countRows] = await Promise.all([
-      timedQuery<Sku>(
-        skuSql.selectPaginated,
-        [like, like, like, like, ...scopeParams(scope.brandIds), status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory, missingBom, size, offset],
-        { label: "selectPaginated" }
-      ),
-      timedQuery<{ total: number }>(
-        skuSql.countAll,
-        [like, like, like, like, ...scopeParams(scope.brandIds), status, status, brand, brand, skuType, skuType, category, category, subcategory, subcategory, missingBom],
-        { label: "countAll" }
-      ),
-    ])
-    rows = dbRows
-    total = Number(countRows[0]?.total ?? 0)
-  }
-
-  // ── Costing gaps (same reasons the Agreed Final Costing tab shows) ─────────
-  // Only for the SKUs on this page, so the cost is one aggregate per page load.
-  const skuIds = rows.map((r) => r.id)
-  const costingGaps = skuIds.length
-    ? await timedQuery<CostingGap>(skuSql.selectCostingGapsBySkuIds, [skuIds], { label: "selectCostingGapsBySkuIds" })
-    : []
-
-  // ── Resolve active_bom_id -> bom_code for the SKUs on this page ────────────
-  const bomIds = [...new Set(rows.map((r) => r.active_bom_id).filter((id): id is number => id != null))]
-  if (bomIds.length > 0) {
-    const bomRows = await query<{ id: number; bom_code: string }>(recipeSql.selectBomCodesByIds, [bomIds])
-    const bomCodeById = new Map(bomRows.map((b) => [b.id, b.bom_code]))
-    rows = rows.map((r) => ({ ...r, bom_code: r.active_bom_id != null ? bomCodeById.get(r.active_bom_id) ?? null : null }))
-  }
-
-  console.log(`[AUDIT] SKUs complete: ${(performance.now() - pageStart).toFixed(2)}ms | ${rows.length}/${total} rows`)
+  const { rows, total, costingGaps, brands, skuTypes, categories, subcategories } = await getSkusPage(userId, {
+    page, size, offset, search,
+    status: statusFilter, brand: brandFilter, skuType: skuTypeFilter,
+    category: categoryFilter, subcategory: subcategoryFilter, bom: bomFilter,
+  })
 
   return (
     <div className="p-6">
@@ -148,10 +60,10 @@ export default async function SkusPage({
         currentCategory={categoryFilter}
         currentSubcategory={subcategoryFilter}
         currentBom={bomFilter}
-        brands={brands.map((b) => b.brand)}
-        skuTypes={skuTypes.map((t) => t.sku_type)}
-        categories={categories.map((c) => c.category)}
-        subcategories={subcategories.map((s) => s.subcategory)}
+        brands={brands}
+        skuTypes={skuTypes}
+        categories={categories}
+        subcategories={subcategories}
       />
     </div>
   )

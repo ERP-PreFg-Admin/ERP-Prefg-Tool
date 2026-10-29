@@ -2,19 +2,15 @@
 /**
  * SERVER component for /masters/manufacturers.
  *
- * Reads ?page, ?size, ?search from URL searchParams and runs a
- * DB-level LIMIT/OFFSET query so only the requested slice is fetched.
+ * Reads ?page, ?size, ?search from URL searchParams; the slice comes from
+ * lib/services/masters/manufacturers.ts.
  */
 
 import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
-import { getUserScope } from "@/lib/scope"
 import { redirect } from "next/navigation"
 import { parsePaginationParams } from "@/lib/pagination"
-import { timedQuery } from "@/lib/query-timing"
-import { manufacturers } from "@/lib/queries/manufacturers"
-import { fuzzyRank } from "@/lib/fuzzy-search"
-import type { Mfg } from "@/types/masters"
+import { getManufacturersPage } from "@/lib/services/masters/manufacturers"
 import ManufacturersClient from "./ManufacturersClient"
 
 export default async function ManufacturersPage({
@@ -34,30 +30,7 @@ export default async function ManufacturersPage({
   const { page, size, offset } = parsePaginationParams(sp)
   const search = String(sp.search ?? "")
   const statusFilter = String(sp.status ?? "")
-  const status = statusFilter || null
-  const scope  = await getUserScope(userId)
-  const fp     = manufacturers.filterParams(search || null, scope, status)
-
-  const pageStart = performance.now()
-  console.log(`[AUDIT] Manufacturers load - page=${page}, size=${size}, search=${search || "none"}`)
-
-  let rows: Mfg[]
-  let total: number
-
-  if (search) {
-    const allMatching = await timedQuery<Mfg>(manufacturers.selectAllFiltered, manufacturers.filterParams(null, scope, status), { label: "selectAllFiltered" })
-    const ranked = fuzzyRank(allMatching, search, ["code", "name"])
-    total = ranked.length
-    rows = ranked.slice(offset, offset + size)
-  } else {
-    const [dbRows, countRows] = await Promise.all([
-      timedQuery<Mfg>(manufacturers.selectPaginated, [...fp, size, offset], { label: "selectPaginated" }),
-      timedQuery<{ total: number }>(manufacturers.countAll, fp, { label: "countAll" }),
-    ])
-    rows = dbRows
-    total = Number(countRows[0]?.total ?? 0)
-  }
-  console.log(`[AUDIT] Manufacturers complete: ${(performance.now() - pageStart).toFixed(2)}ms | ${rows.length}/${total} rows`)
+  const { rows, total } = await getManufacturersPage(userId, { page, size, offset, search, status: statusFilter })
 
   return (
     <div className="p-6">

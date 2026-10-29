@@ -13,9 +13,7 @@
 import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
 import { redirect } from "next/navigation"
-import { timedQuery } from "@/lib/query-timing"
-import { warehouse as warehouseSql } from "@/lib/queries/warehouse"
-import type { Warehouse, WarehouseEntity, Entity } from "@/types/masters"
+import { getWarehousesPage } from "@/lib/services/masters/warehouses"
 import WarehousesClient from "./WarehousesClient"
 
 export default async function WarehousesPage() {
@@ -25,19 +23,7 @@ export default async function WarehousesPage() {
   const access = await resolveAccess(userId, session.user.roles, "/masters/warehouses")
   if (access === "none") redirect("/auth/unauthorized")
 
-  const rows = await timedQuery<Warehouse>(warehouseSql.selectAll, [], { label: "warehouses.selectAll" })
-  const entities = await timedQuery<Entity>(warehouseSql.entityOptions, [], { label: "warehouses.entityOptions" })
-
-  // Second query rather than a join: two child rows per location would either
-  // duplicate every location row or need GROUP_CONCAT, which stops being
-  // parseable once addresses are in it. Skipped entirely when there are no rows.
-  const entityRows = rows.length
-    ? await timedQuery<WarehouseEntity>(
-        warehouseSql.selectEntityRowsByWarehouseIds,
-        [rows.map((r) => r.id)],
-        { label: "warehouses.selectEntityRows" }
-      )
-    : []
+  const { rows, entityRows, entities } = await getWarehousesPage()
 
   return (
     <div className="p-6">

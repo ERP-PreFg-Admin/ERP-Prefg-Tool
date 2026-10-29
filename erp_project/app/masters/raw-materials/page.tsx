@@ -5,25 +5,16 @@
  *   1. Auth + permission guard (unchanged).
  *   2. Determine which view is active (?view=vendor|manufacturer).
  *   3. Read pagination + filter params (?page, ?size, ?search, ?status).
- *   4. Run a DB-level LIMIT/OFFSET query for the ACTIVE view only.
- *   5. Fetch the full vendor/mfg lists for the Add-wizard dropdowns (selectAll —
- *      these are small reference sets, not paginated).
- *   6. Hand the paginated slice + metadata to the appropriate client component.
+ *   4. Fetch the ACTIVE view's slice plus the Add-wizard vendor/mfg lists via
+ *      lib/services/masters/raw-materials.ts.
+ *   5. Hand the paginated slice + metadata to the appropriate client component.
  */
 
 import { auth } from "@/lib/auth"
 import { resolveAccess } from "@/lib/permissions"
-import { getUserScope, filterByScope } from "@/lib/scope"
 import { redirect } from "next/navigation"
 import { parsePaginationParams } from "@/lib/pagination"
-import { timedQuery } from "@/lib/query-timing"
-import { rawMaterials } from "@/lib/queries/raw-materials"
-import { fuzzyRank } from "@/lib/fuzzy-search"
-import {
-  getVendorReferenceList, getManufacturerReferenceList,
-  getRmDistinctMakes, getRmDistinctTypes,
-} from "@/lib/cached-reference-data"
-import type { RM, RMByMfg } from "@/types/masters"
+import { getRawMaterialsPage } from "@/lib/services/masters/raw-materials"
 import { SegmentedToggle } from "@/components/ui/segmented-toggle"
 import VendorRawMaterialsClient from "./VendorRawMaterialsClient"
 import ManufacturerRawMaterialsClient from "./ManufacturerRawMaterialsClient"
@@ -39,8 +30,6 @@ export default async function RawMaterialsPage({
   const userId = parseInt(session.user.id)
   const access = await resolveAccess(userId, session.user.roles, "/masters/raw-materials")
   if (access === "none") redirect("/auth/unauthorized")
-
-  const scope = await getUserScope(userId)
 
   // ── Read URL params ────────────────────────────────────────────────────────
   const sp     = await searchParams
@@ -59,132 +48,49 @@ export default async function RawMaterialsPage({
   const mfgRateMaxFilter    = String(sp.mfg_rate_max       ?? "")
   const mfgEffFromFilter    = String(sp.mfg_effective_from ?? "")
 
-  const status = statusFilter ? statusFilter  : null
+  const data = await getRawMaterialsPage(userId, {
+    isMfg, page, size, offset, search, status: statusFilter, make: makeFilter, type: typeFilter,
+    vendorCode: vendorCodeFilter, rateMin: rateMinFilter, rateMax: rateMaxFilter, effectiveFrom: effectiveFromFilter,
+    mfgCode: mfgCodeFilter, mfgRateMin: mfgRateMinFilter, mfgRateMax: mfgRateMaxFilter, mfgEffFrom: mfgEffFromFilter,
+  })
 
-  const pageStart = performance.now()
-  console.log(`[AUDIT] Raw Materials load - view=${isMfg ? "mfg" : "vendor"}, page=${page}, size=${size}, search=${search || "none"}, status=${status || "all"}`)
-
-  // ── Parallel fetch: reference lists + paginated view data ─────────────────
-  // vendorList and mfgList are fetched in full for the Add wizard dropdowns.
-  // Cached (see lib/cached-reference-data.ts) — these barely change request to request.
-  const [allVendors, allMfgs] = await Promise.all([
-    getVendorReferenceList(),
-    getManufacturerReferenceList(),
-  ])
-  // Both lists are process-wide unstable_cache entries keyed without a user,
-  // so they are post-filtered rather than filtered in the query — otherwise
-  // the Add-rates wizard would offer entities the user can't see.
-  const vendorList = filterByScope(allVendors, "vendor_id", scope.vendorIds)
-  const mfgList = filterByScope(allMfgs, "id", scope.mfgIds)
-
-  let body: React.ReactNode
-
-  if (isMfg) {
-    // Manufacturer view — query rm_mrm × rm with all active filters
-    const mfp = rawMaterials.mfgFilterParams(
-      search || null, statusFilter || null, typeFilter || null,
-      mfgCodeFilter || null, mfgRateMinFilter || null, mfgRateMaxFilter || null, mfgEffFromFilter || null, scope
-    )
-    // The list queries carry the approved-vendor rate subquery, whose scope
-    // params bind ahead of the filters. countMfg does not — see mfgListParams.
-    const mlp = rawMaterials.mfgListParams(
-      search || null, statusFilter || null, typeFilter || null,
-      mfgCodeFilter || null, mfgRateMinFilter || null, mfgRateMaxFilter || null, mfgEffFromFilter || null, scope
-    )
-    let rows: RMByMfg[]
-    let total: number
-    const typeRows = await getRmDistinctTypes()
-
-    if (search) {
-      const noSearchMfp = rawMaterials.mfgListParams(
-        null, statusFilter || null, typeFilter || null,
-        mfgCodeFilter || null, mfgRateMinFilter || null, mfgRateMaxFilter || null, mfgEffFromFilter || null, scope
-      )
-      const allMatching = await timedQuery<RMByMfg>(rawMaterials.selectMfgAllFiltered, noSearchMfp, { label: "selectMfgAllFiltered" })
-      const ranked = fuzzyRank(allMatching, search, ["rm_code", "name"])
-      total = ranked.length
-      rows = ranked.slice(offset, offset + size)
-    } else {
-      const [dbRows, countRows] = await Promise.all([
-        timedQuery<RMByMfg>(rawMaterials.selectMfgPaginated, [...mlp, size, offset], { label: "selectMfgPaginated" }),
-        timedQuery<{ total: number }>(rawMaterials.countMfg, mfp, { label: "countMfg" }),
-      ])
-      rows = dbRows
-      total = Number(countRows[0]?.total ?? 0)
-    }
-    const types = typeRows.map((r) => r.type)
-    body = (
-      <ManufacturerRawMaterialsClient
-        rows={rows}
-        vendors={vendorList}
-        manufacturers={mfgList}
-        total={total}
-        page={page}
-        pageSize={size}
-        currentSearch={search}
-        currentStatus={statusFilter}
-        currentType={typeFilter}
-        types={types}
-        currentMfgCode={mfgCodeFilter}
-        currentMfgRateMin={mfgRateMinFilter}
-        currentMfgRateMax={mfgRateMaxFilter}
-        currentMfgEffectiveFrom={mfgEffFromFilter}
-      />
-    )
-  } else {
-    // Vendor view (default) — query rm_vrm × rm with all active filters
-    const vfp = rawMaterials.vendorFilterParams(
-      search || null, statusFilter || null, makeFilter || null, typeFilter || null,
-      vendorCodeFilter || null, rateMinFilter || null, rateMaxFilter || null,
-      effectiveFromFilter || null, scope
-    )
-    let rows: RM[]
-    let total: number
-    const [makeRows, typeRows] = await Promise.all([getRmDistinctMakes(), getRmDistinctTypes()])
-
-    if (search) {
-      const noSearchVfp = rawMaterials.vendorFilterParams(
-        null, statusFilter || null, makeFilter || null, typeFilter || null,
-        vendorCodeFilter || null, rateMinFilter || null, rateMaxFilter || null,
-        effectiveFromFilter || null, scope
-      )
-      const allMatching = await timedQuery<RM>(rawMaterials.selectVendorAllFiltered, noSearchVfp, { label: "selectVendorAllFiltered" })
-      const ranked = fuzzyRank(allMatching, search, ["rm_code", "name"])
-      total = ranked.length
-      rows = ranked.slice(offset, offset + size)
-    } else {
-      const [dbRows, countRows] = await Promise.all([
-        timedQuery<RM>(rawMaterials.selectVendorPaginated, [...vfp, size, offset], { label: "selectVendorPaginated" }),
-        timedQuery<{ total: number }>(rawMaterials.countVendor, vfp, { label: "countVendor" }),
-      ])
-      rows = dbRows
-      total = Number(countRows[0]?.total ?? 0)
-    }
-    const makes = makeRows.map((r) => r.make)
-    const types = typeRows.map((r) => r.type)
-    body = (
-      <VendorRawMaterialsClient
-        rows={rows}
-        vendors={vendorList}
-        manufacturers={mfgList}
-        total={total}
-        page={page}
-        pageSize={size}
-        currentSearch={search}
-        currentStatus={statusFilter}
-        currentMake={makeFilter}
-        makes={makes}
-        currentType={typeFilter}
-        types={types}
-        currentVendorCode={vendorCodeFilter}
-        currentRateMin={rateMinFilter}
-        currentRateMax={rateMaxFilter}
-        currentEffectiveFrom={effectiveFromFilter}
-      />
-    )
-  }
-
-  console.log(`[AUDIT] Raw Materials complete: ${(performance.now() - pageStart).toFixed(2)}ms`)
+  const body = data.view === "mfg" ? (
+    <ManufacturerRawMaterialsClient
+      rows={data.rows}
+      vendors={data.vendorList}
+      manufacturers={data.mfgList}
+      total={data.total}
+      page={page}
+      pageSize={size}
+      currentSearch={search}
+      currentStatus={statusFilter}
+      currentType={typeFilter}
+      types={data.types}
+      currentMfgCode={mfgCodeFilter}
+      currentMfgRateMin={mfgRateMinFilter}
+      currentMfgRateMax={mfgRateMaxFilter}
+      currentMfgEffectiveFrom={mfgEffFromFilter}
+    />
+  ) : (
+    <VendorRawMaterialsClient
+      rows={data.rows}
+      vendors={data.vendorList}
+      manufacturers={data.mfgList}
+      total={data.total}
+      page={page}
+      pageSize={size}
+      currentSearch={search}
+      currentStatus={statusFilter}
+      currentMake={makeFilter}
+      makes={data.makes}
+      currentType={typeFilter}
+      types={data.types}
+      currentVendorCode={vendorCodeFilter}
+      currentRateMin={rateMinFilter}
+      currentRateMax={rateMaxFilter}
+      currentEffectiveFrom={effectiveFromFilter}
+    />
+  )
 
   return (
     <div className="p-6">
