@@ -12,7 +12,7 @@ import { assertPoInScope } from "@/lib/po/po-guard"
 import { ApiError } from "@/lib/gateway/errors"
 import { poIdParamSchema } from "@/lib/validation/purchase-order-detail"
 import logger from "@/lib/logger"
-import { recordProcessedEvent, recordFailedEvent , makeEventId, recordRawEvent } from "@/lib/events"
+import { recordProcessedEvent , makeEventId, recordRawEvent } from "@/lib/events"
 
 export const GET = withGateway({
   paramsSchema: poIdParamSchema,
