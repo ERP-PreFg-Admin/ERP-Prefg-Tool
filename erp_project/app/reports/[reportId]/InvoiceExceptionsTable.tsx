@@ -14,6 +14,7 @@ import { fmtInt, fmtMoney } from "@/app/po-tracking/po-procurement/po-utils"
 import type { LegState, MatchBadge } from "@/lib/invoice/three-way"
 import type { InvoiceExceptionRow } from "@/lib/services/reports/invoice-checks"
 import InvoiceFilterBar, { type InvoiceFilterValues } from "./InvoiceFilterBar"
+import TotalsLine from "./TotalsLine"
 
 type Data = {
   today: string
@@ -76,14 +77,17 @@ export default function InvoiceExceptionsTable({ data, filters, badge, page, pag
         </Callout>
       )}
 
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Variance" value={fmtInt(data.counts.variance)} sub="Numbers disagree past 2%, or rejects at the dock" warn={data.counts.variance > 0} />
-        <Stat label="Unmatched" value={fmtInt(data.counts.unmatched)} sub="PO or invoice lines missing" />
-        <Stat label="No GRN yet" value={fmtInt(data.counts.invoice_matched)}
-          sub={data.oldestSync ? `Oldest GRN sync ${data.oldestSync} · ${fmtInt(data.neverSynced)} never synced` : `${fmtInt(data.neverSynced)} never synced`} />
-        <Stat label="Rejected value (this filter)" value={fmtMoney(data.rejectedValue)}
-          sub={`${fmtInt(data.counts.fully_matched)} fully matched · ${fmtInt(data.counts.awaiting_verification)} awaiting sign-off`} />
-      </div>
+      <TotalsLine items={[
+        { label: "variance", value: fmtInt(data.counts.variance), tone: data.counts.variance > 0 ? "bad" : undefined,
+          title: "Numbers disagree past 2%, or rejects at the dock" },
+        { label: "unmatched", value: fmtInt(data.counts.unmatched), title: "PO or invoice lines missing" },
+        { label: "no GRN yet", value: fmtInt(data.counts.invoice_matched),
+          title: data.oldestSync ? `Oldest GRN sync ${data.oldestSync}` : undefined },
+        { label: "never synced", value: fmtInt(data.neverSynced), tone: data.neverSynced > 0 ? "warn" : undefined },
+        { label: "fully matched", value: fmtInt(data.counts.fully_matched), tone: "good" },
+        { label: "awaiting sign-off", value: fmtInt(data.counts.awaiting_verification) },
+        { label: "rejected value", value: fmtMoney(data.rejectedValue) },
+      ]} />
 
       <Card>
         <RecordCountHeader total={data.total} matching={filters.search ?? undefined} />
@@ -146,17 +150,5 @@ export default function InvoiceExceptionsTable({ data, filters, badge, page, pag
       </Card>
       <PaginationBar total={data.total} page={page} pageSize={pageSize} />
     </>
-  )
-}
-
-function Stat({ label, value, sub, warn }: { label: string; value: string; sub?: string; warn?: boolean }) {
-  return (
-    <Card>
-      <CardContent className="p-3">
-        <div className="text-xs text-muted-foreground">{label}</div>
-        <div className={cn("text-lg font-semibold tabular-nums", warn && "text-destructive")}>{value}</div>
-        {sub && <div className="text-[11px] text-muted-foreground">{sub}</div>}
-      </CardContent>
-    </Card>
   )
 }

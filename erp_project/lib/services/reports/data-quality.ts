@@ -3,6 +3,7 @@
 
 import { timedQuery } from "@/lib/query-timing"
 import { getViewScope } from "@/lib/brand-view"
+import type { UserScope } from "@/lib/scope"
 import { resolveAccess } from "@/lib/permissions"
 import { dqSql, buildDqParams } from "@/lib/queries/reports"
 import { DQ_CHECK_IDS, DQ_CHECKS, DQ_ROW_LIMIT, type DqCheckId } from "@/lib/reports/dq-checks"
@@ -10,13 +11,15 @@ import { DQ_CHECK_IDS, DQ_CHECKS, DQ_ROW_LIMIT, type DqCheckId } from "@/lib/rep
 export type DqRow = { ref: string; label: string; sub: string; detail: string }
 
 /** `rowLimit` lets the export take every row of the open check instead of the page's 200. */
-export async function getDataQuality(userId: number, roles: string[], openId: string | null, rowLimit = DQ_ROW_LIMIT) {
+export async function getDataQuality(
+  userId: number, roles: string[], openId: string | null, rowLimit = DQ_ROW_LIMIT, scopeOverride?: UserScope,
+) {
   const slugs = [...new Set(DQ_CHECK_IDS.map((id) => DQ_CHECKS[id].sourcePageSlug))]
   const access = await Promise.all(slugs.map((s) => resolveAccess(userId, roles, s)))
   const allowed = new Set(slugs.filter((_, i) => access[i] !== "none"))
   const visible = DQ_CHECK_IDS.filter((id) => allowed.has(DQ_CHECKS[id].sourcePageSlug))
 
-  const scope = await getViewScope(userId)
+  const scope = scopeOverride ?? await getViewScope(userId)
   const counts = await Promise.all(visible.map((id) =>
     timedQuery<{ total: number | string }>(dqSql[id].count, buildDqParams(id, scope), { label: `reports.dq.${id}.count` })
       .then((r) => Number(r[0]?.total ?? 0))))

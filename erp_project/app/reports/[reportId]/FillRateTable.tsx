@@ -5,6 +5,8 @@ import Link from "next/link"
 import { Card, CardContent } from "@/components/ui/card"
 import { Select } from "@/components/ui/select"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
+import { DateRangePicker } from "@/components/ui/date-picker"
+import { lastDayOfMonth, monthBounds } from "@/lib/reports/month-range"
 import { SegmentedToggle } from "@/components/ui/segmented-toggle"
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
 import { SortableTableHead, StaticTableHead, type SortDir } from "@/components/ui/sortable-table-head"
@@ -16,6 +18,7 @@ import { useUrlFilters } from "@/lib/useUrlFilters"
 import { SPECIAL_PO_LABEL, type SpecialPoType } from "@/lib/po/po-rules"
 import { cn } from "@/lib/utils"
 import { fmtInt } from "@/app/po-tracking/po-procurement/po-utils"
+import TotalsLine from "./TotalsLine"
 import type { FillRow, FillView } from "@/lib/reports/fill-rate"
 
 const PO_TYPES = ["normal", "impromptu", "npd", "tech_transfer", "cpr"]
@@ -36,10 +39,7 @@ const SORT_VALUE: Record<SortKey, (r: FillRow) => string | number | null> = {
   on_time: (r) => r.on_time_pct,
 }
 
-function lastDay(month: string): string {
-  const [y, m] = month.split("-").map(Number)
-  return `${month}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`
-}
+const lastDay = lastDayOfMonth
 
 export default function FillRateTable({ rows, total, view, fromMonth, toMonth, mfgCode, poType, mfgs }: {
   rows: FillRow[]
@@ -108,13 +108,12 @@ export default function FillRateTable({ rows, total, view, fromMonth, toMonth, m
         onApply={() => { navigate(draft); panel.close() }}
         onClear={() => { const c = { from: "", to: "", mfg: "", po_type: "" }; setDraft({ ...c, from: fromMonth, to: toMonth }); navigate(c); panel.close() }}
       >
-        <FilterField label="From month">
-          <input type="month" value={draft.from} max={draft.to} onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))}
-            className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm dark:[color-scheme:dark]" />
-        </FilterField>
-        <FilterField label="To month">
-          <input type="month" value={draft.to} min={draft.from} onChange={(e) => setDraft((d) => ({ ...d, to: e.target.value }))}
-            className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm dark:[color-scheme:dark]" />
+        <FilterField label="PO date (whole months)">
+          <DateRangePicker
+            {...monthBounds(draft.from, draft.to)}
+            onChange={(f, t) => setDraft((d) => ({ ...d, from: f.slice(0, 7), to: t.slice(0, 7) }))}
+            placeholder="Last 6 months"
+          />
         </FilterField>
         <FilterField label="Manufacturer">
           <FuzzySelect
@@ -135,13 +134,17 @@ export default function FillRateTable({ rows, total, view, fromMonth, toMonth, m
         </FilterField>
       </FilterPanel>
 
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Fill rate" value={pct(total.fill_pct)} sub={`${fmtInt(total.received)} of ${fmtInt(total.ordered)} received`} />
-        <Stat label="Still open" value={fmtInt(total.still_open)} sub={`${fmtInt(total.pos)} POs in range`} />
-        <Stat label="Closed short" value={fmtInt(total.closed_short)} sub="Short-closed or closed within tolerance" />
-        <Stat label="Median lead time" value={days(total.lead_median)}
-          sub={`p90 ${days(total.lead_p90)} · on time ${pct(total.on_time_pct)} · ${fmtInt(total.lead_n)} POs measured`} />
-      </div>
+      <TotalsLine items={[
+        { label: "fill", value: pct(total.fill_pct), title: `${fmtInt(total.received)} of ${fmtInt(total.ordered)} received`,
+          tone: total.fill_pct == null ? undefined : total.fill_pct >= 95 ? "good" : total.fill_pct >= 70 ? "warn" : "bad" },
+        { label: "POs", value: fmtInt(total.pos) },
+        { label: "still open", value: fmtInt(total.still_open) },
+        { label: "closed short", value: fmtInt(total.closed_short), title: "Short-closed or closed within tolerance" },
+        { label: "median lead", value: days(total.lead_median) },
+        { label: "p90", value: days(total.lead_p90) },
+        { label: "on time", value: pct(total.on_time_pct) },
+        { label: "POs measured", value: fmtInt(total.lead_n) },
+      ]} />
 
       <Card>
         <RecordCountHeader total={rows.length} />
@@ -209,14 +212,3 @@ function fillTone(v: number | null): string {
   return "text-destructive"
 }
 
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <Card>
-      <CardContent className="p-3">
-        <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="text-lg font-semibold tabular-nums">{value}</div>
-        {sub && <div className="text-[11px] text-muted-foreground">{sub}</div>}
-      </CardContent>
-    </Card>
-  )
-}

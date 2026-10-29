@@ -1495,3 +1495,15 @@ model grn_items_uniware {
   @@index([sku_code], map: "idx_grn_item_sku")
   @@index([po_id], map: "idx_grn_item_po")
 }
+
+/// Nightly report metrics for trends (prisma/add_report_snapshots.sql). mfg_code '' = all manufacturers.
+model report_snapshots {
+  day        DateTime @db.Date
+  metric     String   @db.VarChar(64)
+  mfg_code   String   @default("") @db.VarChar(50)
+  value      Decimal? @db.Decimal(18, 3)
+  created_at DateTime @default(now()) @db.DateTime(0)
+
+  @@id([day, metric, mfg_code])
+  @@index([metric, day], map: "idx_snap_metric_day")
+}

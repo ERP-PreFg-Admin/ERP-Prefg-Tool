@@ -7,6 +7,11 @@ import OpenPoBookReport from "./OpenPoBookReport"
 import FillRateReport from "./FillRateReport"
 import InvoiceChecksReport from "./InvoiceChecksReport"
 import DataQualityReport from "./DataQualityReport"
+import TraceabilityReport from "./TraceabilityReport"
+import TraceReport from "./TraceReport"
+import ExceptionsReport from "./ExceptionsReport"
+import TrendsReport from "./TrendsReport"
+import ScorecardReport from "./ScorecardReport"
 
 type SP = Record<string, string | string[] | undefined>
 
@@ -41,6 +46,19 @@ export default async function ReportPage({ params, searchParams }: {
     case "data-quality":
       return <DataQualityReport userId={parseInt(session.user.id)} roles={session.user.roles} report={report}
         check={typeof sp.check === "string" ? sp.check : null} />
+    case "exceptions":
+      return <ExceptionsReport userId={parseInt(session.user.id)} roles={session.user.roles} report={report}
+        sp={sp} page={page} size={size} offset={offset} />
+    case "scorecard":
+      return <ScorecardReport userId={parseInt(session.user.id)} roles={session.user.roles} report={report} sp={sp} />
+    case "trends":
+      return <TrendsReport userId={parseInt(session.user.id)} report={report} sp={sp} />
+    case "traceability":
+      return <TraceabilityReport userId={parseInt(session.user.id)} roles={session.user.roles} report={report}
+        sp={sp} page={page} size={size} offset={offset} />
+    case "trace":
+      return <TraceReport userId={parseInt(session.user.id)} roles={session.user.roles} report={report}
+        q={typeof sp.q === "string" ? sp.q : null} />
     default:
       notFound()
   }

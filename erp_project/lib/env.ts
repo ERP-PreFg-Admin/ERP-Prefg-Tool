@@ -115,6 +115,11 @@ export const UNIWARE_CLIENT_ID = process.env.UNIWARE_CLIENT_ID ?? "my-trusted-cl
 // PO the sandbox does hold lives in TEST_FACILITY.
 export const UNIWARE_SANDBOX_FACILITY = "TEST_FACILITY"
 export const UNIWARE_SANDBOX_VENDOR   = "Test_Vendor"
+/** Nightly traceability CSVs to S3 (lib/reports/trace-extract.ts). Off unless set to "1", so a deploy alone never starts it. */
+export const TRACE_EXTRACT_ENABLED = process.env.TRACE_EXTRACT_ENABLED === "1"
+/** Nightly report_snapshots rows (lib/reports/snapshots.ts). Off unless "1"; the table must exist first. */
+export const REPORT_SNAPSHOTS_ENABLED = process.env.REPORT_SNAPSHOTS_ENABLED === "1"
+
 /** True on every environment except APP_ENV=prod — the same test/prod split the
  *  DB name uses above, because NODE_ENV can't tell the containers apart. */
 export const UNIWARE_SANDBOX = APP_ENV !== "prod"

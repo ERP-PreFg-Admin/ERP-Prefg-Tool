@@ -3,6 +3,7 @@
 
 import { timedQuery } from "@/lib/query-timing"
 import { getViewScope } from "@/lib/brand-view"
+import type { UserScope } from "@/lib/scope"
 import { isoDate, todayIST } from "@/lib/date"
 import { reportsSql, buildInvoiceParams, type InvoiceFilters } from "@/lib/queries/reports"
 import { ageDays, reportToday } from "@/lib/reports/definitions"
@@ -45,8 +46,8 @@ export async function getInvoiceExceptions(userId: number, f: InvoiceFilters & {
   badge: MatchBadge | "exceptions" | "all"
   limit: number
   offset: number
-}) {
-  const scope = await getViewScope(userId)
+}, scopeOverride?: UserScope) {
+  const scope = scopeOverride ?? await getViewScope(userId)
   const today = reportToday()
   const raw = await timedQuery<Record<string, unknown>>(
     reportsSql.invoiceMatchRows, [...buildInvoiceParams(f, scope), INVOICE_SCAN_CAP + 1], { label: "reports.invoiceMatchRows" },
@@ -128,8 +129,11 @@ export type RateLineRow = {
   value_at_risk: number
 }
 
-export async function getRateVariance(userId: number, f: InvoiceFilters & { minAbsPct: number | null; limit: number; offset: number }) {
-  const scope = await getViewScope(userId)
+/** `scopeOverride` lets callers outside a request (scripts, cron) pass the scope the cookie would give. */
+export async function getRateVariance(
+  userId: number, f: InvoiceFilters & { minAbsPct: number | null; limit: number; offset: number }, scopeOverride?: UserScope,
+) {
+  const scope = scopeOverride ?? await getViewScope(userId)
   const params = buildInvoiceParams(f, scope)
   const pct = [f.minAbsPct, f.minAbsPct]
   const [rows, totals, excluded] = await Promise.all([

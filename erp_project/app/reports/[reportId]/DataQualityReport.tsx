@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { ChevronLeft, CheckCircle2, AlertTriangle } from "lucide-react"
+import { CheckCircle2, AlertTriangle } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
 import { StaticTableHead } from "@/components/ui/sortable-table-head"
@@ -8,6 +8,7 @@ import { getDataQuality } from "@/lib/services/reports/data-quality"
 import { DQ_CHECKS, DQ_ROW_LIMIT } from "@/lib/reports/dq-checks"
 import type { ReportEntry } from "@/lib/reports/catalog"
 import { DownloadButton } from "@/components/masters/DownloadButton"
+import ReportShell from "./ReportShell"
 
 // DQ-01: one card per check; opening a card (?check=) lists its rows with a link to fix each.
 export default async function DataQualityReport({ userId, roles, report, check }: {
@@ -21,22 +22,11 @@ export default async function DataQualityReport({ userId, roles, report, check }
   const openCount = data.checks.find((c) => c.id === data.open)?.count ?? 0
 
   return (
-    <>
-      <Link href="/reports" className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-        <ChevronLeft className="h-3.5 w-3.5" /> Reports
-      </Link>
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{report.name}</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            {report.question} Counts are live and limited to what you can see.
-            {data.hiddenCount > 0 && ` ${data.hiddenCount} check(s) are hidden because they read pages you don't have access to.`}
-            {" "}Download gives every row of the open check, or the counts when none is open.
-          </p>
-        </div>
-        <DownloadButton endpoint={`/api/v1/reports/${report.id}/export`} label={openCheck ? openCheck.title : report.name} />
-      </div>
-
+    <ReportShell
+      report={report}
+      freshness={[data.hiddenCount > 0 ? `${data.hiddenCount} check(s) hidden: pages you can't open` : null]}
+      actions={<DownloadButton endpoint={`/api/v1/reports/${report.id}/export`} label={openCheck ? openCheck.title : report.name} />}
+    >
       <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         {data.checks.map(({ id, count }) => {
           const c = DQ_CHECKS[id]
@@ -104,6 +94,6 @@ export default async function DataQualityReport({ userId, roles, report, check }
           </CardContent>
         </Card>
       )}
-    </>
+    </ReportShell>
   )
 }

@@ -19,6 +19,7 @@ import { useUrlFilters } from "@/lib/useUrlFilters"
 import { SPECIAL_PO_LABEL, type SpecialPoType } from "@/lib/po/po-rules"
 import { cn } from "@/lib/utils"
 import { fmtInt, fmtMoney, fmtRate } from "@/app/po-tracking/po-procurement/po-utils"
+import TotalsLine from "./TotalsLine"
 import type { OpenPoRow, OpenPoTotals } from "@/lib/services/reports/open-po"
 
 type Filters = {
@@ -116,21 +117,17 @@ export default function OpenPoBookTable({ rows, totals, filters, sort, dir, page
       </FilterPanel>
 
       {/* Totals cover the whole filter, not just this page. */}
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Open POs" value={fmtInt(totals.total)} />
-        <Stat label="Open qty" value={fmtInt(totals.open_qty)} />
-        <Stat
-          label="Open value (pre-GST)"
-          value={fmtMoney(totals.open_value_pre_gst)}
-          sub={`${fmtMoney(totals.open_value_incl_gst)} incl. GST · priced POs only`}
-        />
-        <Stat
-          label="Overdue POs"
-          value={fmtInt(totals.overdue_pos)}
-          sub={`${fmtInt(totals.unpriced_pos)} unpriced · ${fmtInt(totals.special_pos)} special, not in value`}
-          warn={totals.overdue_pos > 0}
-        />
-      </div>
+      <TotalsLine
+        items={[
+          { label: "open POs", value: fmtInt(totals.total) },
+          { label: "open qty", value: fmtInt(totals.open_qty) },
+          { label: "open value pre-GST", value: fmtMoney(totals.open_value_pre_gst), title: `${fmtMoney(totals.open_value_incl_gst)} incl. GST` },
+          { label: "overdue", value: fmtInt(totals.overdue_pos), tone: totals.overdue_pos > 0 ? "warn" : undefined },
+          { label: "unpriced", value: fmtInt(totals.unpriced_pos) },
+          { label: "special", value: fmtInt(totals.special_pos) },
+        ]}
+        note="Value covers priced POs only; unpriced and special POs are counted, never valued."
+      />
 
       <Card>
         <RecordCountHeader
@@ -229,14 +226,3 @@ function PriceClassBadge({ cls }: { cls: OpenPoRow["price_class"] }) {
     : <Badge variant="warning" className="px-1.5 py-0 text-[10px]" title="No rate on this PO, so it carries no value">Unpriced</Badge>
 }
 
-function Stat({ label, value, sub, warn }: { label: string; value: string; sub?: string; warn?: boolean }) {
-  return (
-    <Card>
-      <CardContent className="p-3">
-        <div className="text-xs text-muted-foreground">{label}</div>
-        <div className={cn("text-lg font-semibold tabular-nums", warn && "text-destructive")}>{value}</div>
-        {sub && <div className="text-[11px] text-muted-foreground">{sub}</div>}
-      </CardContent>
-    </Card>
-  )
-}

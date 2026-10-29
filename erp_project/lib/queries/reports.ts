@@ -172,7 +172,7 @@ const DQ_PO_LIVE = `
   WHERE COALESCE(po.po_type, '') <> 'inward'
     ${MASTERS_ONLY}
     ${APPROVED_ONLY}
-    AND (${DISPLAY_STATUS_EXPR}) NOT IN ('cancelled', 'reverted')
+    AND (${DISPLAY_STATUS_EXPR}) NOT IN ('cancelled', 'reverted', 'discarded')
 `
 const DQ_PO_SELECT = `po.po_no AS ref, CONCAT(m.code, ' · ', COALESCE(po.sku_code, '—')) AS label,
   DATE_FORMAT(po.date, '%Y-%m-%d') AS sub`
@@ -368,7 +368,7 @@ export const reportsSql = {
     WHERE COALESCE(po.po_type, '') <> 'inward'
       ${MASTERS_ONLY}
       ${APPROVED_ONLY}
-      AND (${DISPLAY_STATUS_EXPR}) NOT IN ('draft', 'cancelled', 'reverted')
+      AND (${DISPLAY_STATUS_EXPR}) NOT IN ('draft', 'cancelled', 'reverted', 'discarded')
       AND po.date >= ? AND po.date <= ?
       AND (? IS NULL OR m.code     = ?)
       AND (? IS NULL OR po.po_type = ?)

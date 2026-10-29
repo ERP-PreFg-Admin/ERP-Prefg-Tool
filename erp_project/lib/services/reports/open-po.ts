@@ -3,7 +3,7 @@
 
 import { timedQuery } from "@/lib/query-timing"
 import { getViewScope } from "@/lib/brand-view"
-import { filterByScope } from "@/lib/scope"
+import { filterByScope, type UserScope } from "@/lib/scope"
 import { getPoDropdownOptions } from "@/lib/cached-reference-data"
 import { isoDate } from "@/lib/date"
 import { reportsSql, buildOpenPoParams, OPEN_PO_SORTS, type OpenPoFilters } from "@/lib/queries/reports"
@@ -57,8 +57,9 @@ export type OpenPoQuery = Omit<OpenPoFilters, "overdueBefore"> & {
 const num = (v: unknown): number => (v == null ? 0 : Number(v))
 const numOrNull = (v: unknown): number | null => (v == null ? null : Number(v))
 
-export async function getOpenPoBook(userId: number, q: OpenPoQuery) {
-  const scope = await getViewScope(userId)
+/** `scopeOverride`: callers outside a request (the nightly snapshot) pass the scope the cookie would give. */
+export async function getOpenPoBook(userId: number, q: OpenPoQuery, scopeOverride?: UserScope) {
+  const scope = scopeOverride ?? await getViewScope(userId)
   const today = reportToday()
   const params = buildOpenPoParams({ ...q, overdueBefore: q.overdueOnly ? today : null }, scope)
   const sort = q.sort in OPEN_PO_SORTS ? q.sort : "expected_on"

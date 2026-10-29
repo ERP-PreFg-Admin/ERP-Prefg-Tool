@@ -1,12 +1,16 @@
-import Link from "next/link"
-import { ChevronLeft } from "lucide-react"
 import { getOpenPoBook, getOpenPoFilterOptions } from "@/lib/services/reports/open-po"
 import type { ReportEntry } from "@/lib/reports/catalog"
 import { parseOpenPoQuery } from "@/lib/reports/params"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import OpenPoBookTable from "./OpenPoBookTable"
+import ReportShell from "./ReportShell"
 
 type SP = Record<string, string | string[] | undefined>
+
+const FILTERS = {
+  search: "Search", mfg: "Manufacturer", dest: "Destination", po_type: "PO type", price: "Price",
+  overdue: "Overdue only", from: "PO date from", to: "PO date to",
+}
 
 // PO-01 server shell: reads the URL filters, runs the shared service, hands rows to the table.
 export default async function OpenPoBookReport({ userId, report, sp, page, size, offset }: {
@@ -25,17 +29,12 @@ export default async function OpenPoBookReport({ userId, report, sp, page, size,
   ])
 
   return (
-    <>
-      <Link href="/reports" className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-        <ChevronLeft className="h-3.5 w-3.5" /> Reports
-      </Link>
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{report.name}</h1>
-          <p className="text-muted-foreground text-sm mt-1">{report.question} Live data · today is {data.today} (IST).</p>
-        </div>
-        <DownloadButton endpoint={`/api/v1/reports/${report.id}/export`} label={report.name} />
-      </div>
+    <ReportShell
+      report={report}
+      freshness={[`overdue measured against ${data.today}`]}
+      filterLabels={FILTERS}
+      actions={<DownloadButton endpoint={`/api/v1/reports/${report.id}/export`} label={report.name} />}
+    >
       <OpenPoBookTable
         rows={data.rows}
         totals={data.totals}
@@ -47,6 +46,6 @@ export default async function OpenPoBookReport({ userId, report, sp, page, size,
         mfgs={options.mfgs}
         destinations={options.destinations}
       />
-    </>
+    </ReportShell>
   )
 }

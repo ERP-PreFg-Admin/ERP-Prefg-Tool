@@ -92,6 +92,18 @@ export const DQ_ROWS_EXPORT: ExportColumn[] = [
   { key: "detail", label: "Detail" },
 ]
 
+export const EXCEPTIONS_EXPORT: ExportColumn[] = [
+  { key: "label", label: "Problem" },
+  { key: "type", label: "Type" },
+  { key: "ref", label: "Record" },
+  { key: "mfg_code", label: "Mfg Code" },
+  { key: "value", label: "At Stake", type: "number" },
+  { key: "value_unit", label: "Unit", format: (v) => (v === "inr" ? "₹" : String(v ?? "")) },
+  { key: "age_days", label: "Age (days)", type: "number" },
+  { key: "detail", label: "Detail" },
+  { key: "source", label: "Source" },
+]
+
 export const DQ_COUNTS_EXPORT: ExportColumn[] = [
   { key: "title", label: "Check" },
   { key: "count", label: "Count", type: "number" },

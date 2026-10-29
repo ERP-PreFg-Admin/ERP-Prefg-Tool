@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 import { fmtInt, fmtMoney, fmtRate } from "@/app/po-tracking/po-procurement/po-utils"
 import type { RateLineRow } from "@/lib/services/reports/invoice-checks"
 import InvoiceFilterBar, { type InvoiceFilterValues } from "./InvoiceFilterBar"
+import TotalsLine from "./TotalsLine"
 
 type Data = {
   total: number
@@ -53,14 +54,17 @@ export default function RateVarianceTable({ data, filters, minAbsPct, page, page
         }}
       />
 
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Billed above PO rate" value={fmtMoney(data.overValue)} sub={`${fmtInt(data.overLines)} lines`} warn={data.overValue > 0} />
-        <Stat label="Billed below PO rate" value={fmtMoney(Math.abs(data.underValue))} sub={`${fmtInt(data.underLines)} lines`} />
-        <Stat label="Lines shown" value={fmtInt(data.total)}
-          sub={minAbsPct == null ? "Every line with a priced PO" : `Differing by ${minAbsPct}% or more`} />
-        <Stat label="Lines not comparable" value={fmtInt(excluded)}
-          sub={`${fmtInt(data.excludedUnpriced)} unpriced/special PO · ${fmtInt(data.excludedNoPo)} no PO · ${fmtInt(data.excludedPoMissing)} PO not found`} />
-      </div>
+      <TotalsLine
+        items={[
+          { label: `above PO rate · ${fmtInt(data.overLines)} lines`, value: fmtMoney(data.overValue), tone: data.overValue > 0 ? "bad" : undefined },
+          { label: `below PO rate · ${fmtInt(data.underLines)} lines`, value: fmtMoney(Math.abs(data.underValue)) },
+          { label: "lines shown", value: fmtInt(data.total),
+            title: minAbsPct == null ? "Every line with a priced PO" : `Differing by ${minAbsPct}% or more` },
+          { label: "not comparable", value: fmtInt(excluded),
+            title: `${fmtInt(data.excludedUnpriced)} unpriced/special PO · ${fmtInt(data.excludedNoPo)} no PO · ${fmtInt(data.excludedPoMissing)} PO not found` },
+        ]}
+        note={minAbsPct == null ? undefined : `Lines differing by ${minAbsPct}% or more.`}
+      />
 
       <Card>
         <RecordCountHeader total={data.total} matching={filters.search ?? undefined} />
@@ -116,17 +120,5 @@ export default function RateVarianceTable({ data, filters, minAbsPct, page, page
       </Card>
       <PaginationBar total={data.total} page={page} pageSize={pageSize} />
     </>
-  )
-}
-
-function Stat({ label, value, sub, warn }: { label: string; value: string; sub?: string; warn?: boolean }) {
-  return (
-    <Card>
-      <CardContent className="p-3">
-        <div className="text-xs text-muted-foreground">{label}</div>
-        <div className={cn("text-lg font-semibold tabular-nums", warn && "text-destructive")}>{value}</div>
-        {sub && <div className="text-[11px] text-muted-foreground">{sub}</div>}
-      </CardContent>
-    </Card>
   )
 }

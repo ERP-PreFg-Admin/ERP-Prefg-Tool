@@ -17,8 +17,15 @@ import { getInvoiceExceptions, getRateVariance, INVOICE_SCAN_CAP } from "@/lib/s
 import { getDataQuality } from "@/lib/services/reports/data-quality"
 import { parseFillRateQuery, parseInvoiceQuery, parseOpenPoQuery } from "@/lib/reports/params"
 import { DQ_CHECKS } from "@/lib/reports/dq-checks"
+import { getViewScope } from "@/lib/brand-view"
+import { getExceptions } from "@/lib/services/reports/exceptions"
+import { filterExceptions, parseExceptionFilter } from "@/lib/reports/exception-types"
+import { allowedTraceTabs } from "@/lib/services/reports/trace"
+import { datasetRows, exportColumns, traceWorkbook } from "@/lib/services/reports/trace/export"
+import { parseTraceQuery } from "@/lib/reports/trace/params"
+import { TRACE_DATASETS } from "@/lib/reports/trace/contracts"
 import {
-  DQ_COUNTS_EXPORT, DQ_ROWS_EXPORT, FILL_RATE_EXPORT, INVOICE_EXCEPTIONS_EXPORT, OPEN_PO_EXPORT, RATE_VARIANCE_EXPORT,
+  DQ_COUNTS_EXPORT, DQ_ROWS_EXPORT, EXCEPTIONS_EXPORT, FILL_RATE_EXPORT, INVOICE_EXCEPTIONS_EXPORT, OPEN_PO_EXPORT, RATE_VARIANCE_EXPORT,
 } from "@/lib/reports/export-columns"
 
 const ROW_LIMIT = 50_000
@@ -31,6 +38,11 @@ const tooMany = (n: number) =>
 
 async function buildSheet(reportId: string, userId: number, roles: string[], sp: Record<string, string>): Promise<Sheet> {
   switch (reportId) {
+    case "exceptions": {
+      const data = await getExceptions(userId, roles, { mfgCode: sp.mfg || null, type: null })
+      const rows = filterExceptions(data.rows, parseExceptionFilter(sp))
+      return { base: "exceptions", sheet: "Exception inbox", columns: EXCEPTIONS_EXPORT, rows }
+    }
     case "open-po-book": {
       const { filters, sort, dir } = parseOpenPoQuery(sp)
       const data = await getOpenPoBook(userId, { ...filters, sort, dir, limit: ROW_LIMIT, offset: 0 })
@@ -71,6 +83,29 @@ async function buildSheet(reportId: string, userId: number, roles: string[], sp:
   }
 }
 
+// Traceability: one dataset (CSV headers = contract keys, Excel = labels) or tab=workbook for every allowed dataset.
+async function traceExport(userId: number, roles: string[], sp: Record<string, string>, format: "csv" | "xlsx", ctx: Record<string, unknown>) {
+  const [tabs, scope] = await Promise.all([allowedTraceTabs(userId, roles), getViewScope(userId)])
+  const q = parseTraceQuery(sp)
+  const name = (base: string, ext: string) => buildExportFilename(base, ext, { mfg: sp.mfg ?? null, po: sp.po ?? null, inv: sp.inv ?? null })
+
+  if (sp.tab === "workbook") {
+    const buf = await traceWorkbook(scope, q, tabs)
+    logger.info({ ...ctx, userId, reportId: "traceability", tabs, message: "Traceability workbook served" })
+    return new Response(buf, {
+      headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="${name("traceability", "xlsx")}"`,
+      },
+    })
+  }
+  if (!tabs.includes(q.tab)) throw new ApiError(403, "report_forbidden", "This dataset needs FG PO Tracking access.")
+  const rows = await datasetRows(scope, q.tab, q)
+  logger.info({ ...ctx, userId, reportId: "traceability", tab: q.tab, format, rowCount: rows.length, message: "Traceability export served" })
+  const ds = TRACE_DATASETS[q.tab]
+  return exportResponse(format, name(ds.file, format), ds.name.slice(0, 31), exportColumns(q.tab, format === "csv" ? "key" : "label"), rows)
+}
+
 export const GET = withGateway({
   access: { pageSlug: "/reports", level: "viewer" },
   handler: async ({ req, params, session, ctx }) => {
@@ -82,6 +117,7 @@ export const GET = withGateway({
 
     const sp = Object.fromEntries(req.nextUrl.searchParams.entries())
     const format = sp.format === "xlsx" ? "xlsx" : "csv"
+    if (report.id === "traceability") return traceExport(userId, roles, sp, format, ctx)
     const out = await buildSheet(report.id, userId, roles, sp)
 
     const filename = buildExportFilename(out.base, format, { tab: sp.tab ?? null, mfg: sp.mfg ?? null, search: sp.search ?? null })
