@@ -1,6 +1,6 @@
 // API route for Manufacturers → table `mfgs`.
 //
-// Called by ManufacturersClient's AddRecordDialog / CsvImportDialog
+// Called by ManufacturersClient's AddMfgDialog / CsvImportDialog
 // (endpoint="/api/v1/masters/manufacturers"). On success the client refreshes the
 // page, re-running ManufacturersPage's SELECT.
 //

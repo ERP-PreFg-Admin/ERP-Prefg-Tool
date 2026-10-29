@@ -107,7 +107,7 @@ sequenceDiagram
 | `app/generated/prisma/` | **Auto-generated** Prisma Client — do not edit; do not import in application code |
 | `components/` | Shared React components |
 | `components/ui/` | shadcn/ui component primitives (Button, Input, Dialog, Table, Badge, Tabs, Callout, Stepper, SegmentedToggle, SortableTableHead, ToggleButton, IconActionButton, …) |
-| `components/masters/` | Reusable masters UI: AddRecordDialog, CsvImportDialog, MasterToolbar, SearchInput, FormField, ApprovalBanners, RateHistoryDialog, MaterialComparisonDialog, EntityHistoryDialog, RecordCountHeader, TruncatedCell, ManagedFuzzyField |
+| `components/masters/` | Reusable masters UI: CsvImportDialog, MasterToolbar, SearchInput, FormField, ApprovalBanners, RateHistoryDialog, MaterialComparisonDialog, EntityHistoryDialog, RecordCountHeader, TruncatedCell, ManagedFuzzyField |
 | `lib/` | Core server-side utilities |
 | `lib/db.ts` | mysql2 connection pool singleton with `query()` and `execute()` helpers |
 | `lib/auth.ts` | NextAuth configuration, callbacks, and session management |

@@ -1,6 +1,6 @@
 // Shared field schema that drives BOTH the Add form and the CSV importer for
 // every master-data page. Declare a list of MasterField once per entity and
-// pass it to <AddRecordDialog> and <CsvImportDialog>.
+// pass it to <CsvImportDialog>.
 
 import { parseCsvRows, normalizeCell, isBlankRow, normalizeHeader, describeCsvShape, isCommentCell } from "@/lib/csv"
 

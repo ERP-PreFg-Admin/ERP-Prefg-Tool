@@ -203,21 +203,6 @@ export const manufacturingSql = {
     ORDER BY sk.name ASC
   `,
 
-  /** Same as selectMonthlyPoSummaryByMfg but across every manufacturer at once — for the MFG Overview cards' mini table. Params: scopeParams(mfgIds) */
-  selectMonthlyPoSummaryAllMfgs: `
-    SELECT
-      po.mfg_id, po.sku_code, sk.name AS sku_name,
-      SUM(po.qty) AS po_qty,
-      SUM(COALESCE(po.received_qty, 0)) AS received_qty
-    FROM purchase_orders po
-    LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
-    WHERE po.status NOT IN ('draft', 'cancelled', 'rejected', 'reverted', 'discarded')
-      AND YEAR(po.date) = YEAR(${SQL_TODAY_IST}) AND MONTH(po.date) = MONTH(${SQL_TODAY_IST})
-      AND (? IS NULL OR po.mfg_id IN (?))
-    GROUP BY po.mfg_id, po.sku_code, sk.name
-    ORDER BY sk.name ASC
-  `,
-
   /**
    * One row per active manufacturer with aggregated production + PO stats.
    * Production-share / fill-rate percentages are derived in application code

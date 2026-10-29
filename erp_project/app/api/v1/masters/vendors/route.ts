@@ -1,6 +1,6 @@
 // API route for Vendors → table `vendors`.
 //
-// Called by VendorsClient's AddRecordDialog / CsvImportDialog
+// Called by VendorsClient's AddVendorDialog / CsvImportDialog
 // (endpoint="/api/v1/masters/vendors"). On success the client refreshes the page.
 //
 // A vendor lives across TWO tables, linked only by id (no DB foreign key):
