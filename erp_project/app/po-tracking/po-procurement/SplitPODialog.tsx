@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Plus, Scissors, X } from "lucide-react"
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
@@ -31,6 +31,7 @@ export default function SplitPODialog({
   const [loadingUnits, setLoadingUnits] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError]     = useState("")
+  const linesRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
 
   // A split is still a PO for the parent's SKU, so it inherits the parent's legal
@@ -95,7 +96,11 @@ export default function SplitPODialog({
     setApiError("")
   }
 
-  const addRow    = () => setRows((p) => [...p, blankRow(defaultUnit)])
+  const addRow    = () => {
+    setRows((p) => [...p, blankRow(defaultUnit)])
+    // Bring the new line into view once it has rendered.
+    requestAnimationFrame(() => linesRef.current?.scrollTo({ top: linesRef.current.scrollHeight, behavior: "smooth" }))
+  }
   const removeRow = (i: number) => {
     if (rows.length <= 1) return
     setRows((p) => p.filter((_, idx) => idx !== i))
@@ -147,7 +152,7 @@ export default function SplitPODialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o && !submitting) onClose() }}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 font-heading tracking-tight">
             <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-muted-foreground/40 shrink-0">
@@ -217,7 +222,8 @@ export default function SplitPODialog({
             {/* Routing lines */}
             <div className="flex-1 p-4 space-y-2 min-w-0">
               <span className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">Routing lines</span>
-              <div className="space-y-2 pt-1">
+              {/* Only the lines scroll, so the stub, totals and footer stay in view. */}
+              <div ref={linesRef} className="max-h-[45vh] space-y-2 overflow-y-auto pt-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {rows.map((row, i) => (
                   <div key={i} className="flex items-start gap-2">
                     <div className="w-9 shrink-0 pt-2 text-center leading-none">
