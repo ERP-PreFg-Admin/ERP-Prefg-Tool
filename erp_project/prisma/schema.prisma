@@ -162,6 +162,9 @@ model supplier_invoices {
   ship_to_address String?                  @db.Text
   destination     String?                  @db.VarChar(100)
   invoice_total   Decimal?                 @db.Decimal(14, 4)
+  /// Invoice charges (freight etc.) summed, pre GST, and their GST. prisma/add_invoice_freight.sql.
+  freight_amount  Decimal?                 @db.Decimal(14, 4)
+  freight_tax     Decimal?                 @db.Decimal(14, 4)
   attachment_key  String?                  @db.Text
   /// Code Uniware assigned when this invoice was mirrored — its own series, and
   /// the reference quoted to the manufacturer.

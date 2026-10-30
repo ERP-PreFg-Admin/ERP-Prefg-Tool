@@ -8,6 +8,7 @@ import { ToggleButton } from "@/components/ui/toggle-button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
+import { MultiSelect } from "@/components/ui/multi-select"
 import { DateRangePicker } from "@/components/ui/date-picker"
 import { SearchInput } from "@/components/masters/SearchInput"
 import { DownloadButton } from "@/components/masters/DownloadButton"
@@ -16,6 +17,14 @@ import SyncUniwareButton from "../SyncUniwareButton"
 import SyncDocumentsButton from "../SyncDocumentsButton"
 import InvoiceGroupTable from "./InvoiceGroupTable"
 import ThreeWaySummary from "./ThreeWaySummary"
+
+const UNIWARE_STATUS_OPTIONS = [
+  ["CANCELLED", "Cancelled"],
+  ["CREATED", "Created"],
+  ["APPROVED", "Approved"],
+  ["COMPLETE", "Complete"],
+  ["none", "Not synced"],
+] as const
 
 export default function InvoicesClient({
   mfgOptions,
@@ -38,6 +47,8 @@ export default function InvoicesClient({
   const [destination, setDestination] = useState("")
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
+  const [enteredFrom, setEnteredFrom] = useState("")
+  const [enteredTo, setEnteredTo] = useState("")
   // Uniware's verdict on the mirrored PO. Server-side, unlike `match`, so it
   // filters the whole result set rather than the page — a cancelled invoice
   // three pages back is exactly what someone opening this filter is after.
@@ -53,6 +64,8 @@ export default function InvoicesClient({
   const [draftDestination, setDraftDestination] = useState("")
   const [draftDateFrom, setDraftDateFrom] = useState("")
   const [draftDateTo, setDraftDateTo] = useState("")
+  const [draftEnteredFrom, setDraftEnteredFrom] = useState("")
+  const [draftEnteredTo, setDraftEnteredTo] = useState("")
   const [draftUniwareStatus, setDraftUniwareStatus] = useState("")
   const [draftMatch, setDraftMatch] = useState<"" | MatchBadge>("")
 
@@ -61,14 +74,14 @@ export default function InvoicesClient({
   // until the next filter change.
   const [reloadKey, setReloadKey] = useState(0)
 
-  const activeFilters = [mfgCode, destination, dateFrom, dateTo, uniwareStatus, match]
+  const activeFilters = [mfgCode, destination, dateFrom, dateTo, enteredFrom, enteredTo, uniwareStatus, match]
   const activeFilterCount = activeFilters.filter(Boolean).length
 
   // Built as a query string, not an object: the table takes it as a prop and
   // refetches when it changes, and a string compares by value — an object would
   // be a new identity every render and refetch forever.
   const filterQuery = new URLSearchParams(
-    Object.entries({ mfgCode, destination, dateFrom, dateTo, uniwareStatus }).filter(([, v]) => v)
+    Object.entries({ mfgCode, destination, dateFrom, dateTo, enteredFrom, enteredTo, uniwareStatus }).filter(([, v]) => v)
   ).toString()
 
   /** Seed the drafts from what is applied, so opening the panel shows reality. */
@@ -77,6 +90,8 @@ export default function InvoicesClient({
     setDraftDestination(destination)
     setDraftDateFrom(dateFrom)
     setDraftDateTo(dateTo)
+    setDraftEnteredFrom(enteredFrom)
+    setDraftEnteredTo(enteredTo)
     setDraftUniwareStatus(uniwareStatus)
     setDraftMatch(match)
     setShowFilters((v) => !v)
@@ -87,6 +102,8 @@ export default function InvoicesClient({
     setDestination(draftDestination)
     setDateFrom(draftDateFrom)
     setDateTo(draftDateTo)
+    setEnteredFrom(draftEnteredFrom)
+    setEnteredTo(draftEnteredTo)
     setUniwareStatus(draftUniwareStatus)
     setMatch(draftMatch)
     setShowFilters(false)
@@ -98,12 +115,16 @@ export default function InvoicesClient({
     setDestination("")
     setDateFrom("")
     setDateTo("")
+    setEnteredFrom("")
+    setEnteredTo("")
     setUniwareStatus("")
     setMatch("")
     setDraftMfgCode("")
     setDraftDestination("")
     setDraftDateFrom("")
     setDraftDateTo("")
+    setDraftEnteredFrom("")
+    setDraftEnteredTo("")
     setDraftUniwareStatus("")
     setDraftMatch("")
   }
@@ -142,6 +163,8 @@ export default function InvoicesClient({
                 ...(destination ? { destination } : {}),
                 ...(dateFrom    ? { dateFrom }    : {}),
                 ...(dateTo      ? { dateTo }      : {}),
+                ...(enteredFrom ? { enteredFrom } : {}),
+                ...(enteredTo   ? { enteredTo }   : {}),
               }}
               onDone={() => setReloadKey((k) => k + 1)}
             />
@@ -216,23 +239,31 @@ export default function InvoicesClient({
                   />
                 </div>
                 <div className="grid gap-1.5">
+                  {/* When it was inwarded into the ERP, as IST days. */}
+                  <Label className="text-xs">Entered Date Range</Label>
+                  <DateRangePicker
+                    from={draftEnteredFrom}
+                    to={draftEnteredTo}
+                    onChange={(f, t) => {
+                      setDraftEnteredFrom(f)
+                      setDraftEnteredTo(t)
+                    }}
+                    className="h-9 text-sm"
+                  />
+                </div>
+                <div className="grid gap-1.5">
                   {/* Uniware status, not a local derivation: a PO the warehouse
                       cancelled there is the one case where our own record still
                       reads healthy, so it has to come from what Uniware last
                       told us. */}
+                  {/* Any number of statuses; none picked = all. Comma-joined into one param. */}
                   <Label className="text-xs">Uniware Status</Label>
-                  <Select
-                    value={draftUniwareStatus}
-                    onChange={(e) => setDraftUniwareStatus(e.target.value)}
-                    className="w-full"
-                  >
-                    <option value="">All Uniware Statuses</option>
-                    <option value="CANCELLED">Cancelled</option>
-                    <option value="CREATED">Created</option>
-                    <option value="APPROVED">Approved</option>
-                    <option value="COMPLETE">Complete</option>
-                    <option value="none">Not synced</option>
-                  </Select>
+                  <MultiSelect
+                    options={UNIWARE_STATUS_OPTIONS}
+                    value={draftUniwareStatus.split(",").filter(Boolean)}
+                    onChange={(next) => setDraftUniwareStatus(next.join(","))}
+                    placeholder="All Uniware Statuses"
+                  />
                 </div>
                 <div className="grid gap-1.5">
                   <Label className="text-xs">Match State</Label>

@@ -36,6 +36,8 @@ export type SyncFilter = {
   destination?: string
   dateFrom?: string
   dateTo?: string
+  enteredFrom?: string
+  enteredTo?: string
 }
 
 export default function SyncUniwareButton(

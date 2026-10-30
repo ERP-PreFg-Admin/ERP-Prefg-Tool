@@ -90,12 +90,15 @@ const INVOICE_WHERE = `
     AND (? IS NULL OR si.destination  = ?)
     AND (? IS NULL OR si.invoice_date >= ?)
     AND (? IS NULL OR si.invoice_date <= ?)
-    -- Uniware's own verdict on the mirrored PO. 'none' is the never-synced
-    -- case: uniware_status IS NULL covers both "no mirror" and "not asked yet",
-    -- which is what the filter's own label says.
+    -- Entered date as IST days; created_at is UTC. Range form keeps the index usable.
+    AND (? IS NULL OR si.created_at >= CONVERT_TZ(?, '+05:30', '+00:00'))
+    AND (? IS NULL OR si.created_at <  CONVERT_TZ(DATE_ADD(?, INTERVAL 1 DAY), '+05:30', '+00:00'))
+    -- Uniware's own verdict on the mirrored PO, any of several. 'none' is the
+    -- never-synced case: uniware_status IS NULL covers both "no mirror" and "not
+    -- asked yet", which is what the filter's own label says.
     AND (? IS NULL
-         OR (? = 'none' AND si.uniware_status IS NULL)
-         OR si.uniware_status = ?)
+         OR (? = 1 AND si.uniware_status IS NULL)
+         OR si.uniware_status IN (?))
 `
 
 // The list itself, shared by the paginated view and the export so the two can
@@ -103,6 +106,10 @@ const INVOICE_WHERE = `
 const INVOICE_LIST_BODY = `
   SELECT si.id, si.invoice_no, si.invoice_date, si.currency, si.destination,
          si.invoice_total, si.eway_bill_no, si.vehicle_no,
+         si.freight_amount,
+         CASE WHEN si.freight_amount IS NULL THEN NULL
+              ELSE si.freight_amount + COALESCE(si.freight_tax, 0) END AS freight_with_gst,
+         COALESCE(SUM(sii.amount), 0) AS goods_value,
          si.attachment_key, si.uniware_po_code,
          si.uniware_status, si.uniware_synced_at, si.created_at,
          m.code AS mfg_code, m.name AS mfg_name,
@@ -243,15 +250,15 @@ export const supplierInvoicesSql = {
    * Parameters: [mfg_id, invoice_no, invoice_date, currency, eway_bill_no,
    *   vehicle_no, po_ref, seller_gstin, buyer_gstin, bill_to_name,
    *   bill_to_address, bill_to_state, ship_to_name, ship_to_address,
-   *   destination, invoice_total, attachment_key, created_by]
+   *   destination, invoice_total, freight_amount, freight_tax, attachment_key, created_by]
    */
   insertHeader: `
     INSERT INTO invoice_mfg
       (mfg_id, invoice_no, invoice_date, currency, eway_bill_no, vehicle_no,
        po_ref, seller_gstin, buyer_gstin, bill_to_name, bill_to_address,
        bill_to_state, ship_to_name, ship_to_address, destination,
-       invoice_total, attachment_key, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       invoice_total, freight_amount, freight_tax, attachment_key, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   /**
@@ -403,7 +410,7 @@ export const supplierInvoicesSql = {
   /**
    * Invoice history list, newest first.
    *
-   * Parameters: buildInvoiceParams(...) (15), then limit, offset.
+   * Parameters: buildInvoiceParams(...) (19), then limit, offset.
    */
   listInvoices: `
     ${INVOICE_LIST_BODY}
@@ -413,7 +420,7 @@ export const supplierInvoicesSql = {
   /**
    * Same list, unpaginated — the export must return every invoice the filtered
    * view would page through, not just the page on screen.
-   * Parameters: buildInvoiceParams(...) (15)
+   * Parameters: buildInvoiceParams(...) (19)
    */
   listInvoicesForExport: INVOICE_LIST_BODY,
   /**
@@ -443,14 +450,20 @@ export const supplierInvoicesSql = {
    * invoice header — the sheet finance actually reconciles against. Both PO
    * numbers ride along: the inward PO the line raised, and the order it
    * settled.
-   * Parameters: buildInvoiceParams(...) (15)
+   * Parameters: buildInvoiceParams(...) (19)
    */
   listInvoiceItemsForExport: `
-     SELECT si.invoice_no, si.invoice_date, si.destination,
+     SELECT si.id AS invoice_id, si.mfg_id,
+           DATE_FORMAT(si.invoice_date, '%Y-%m-%d') AS invoice_date_iso,
+           si.invoice_no, si.invoice_date, si.destination,
            w.code AS destination_code,
            e.code AS entity_code, e.legal_name AS entity_name,
            si.uniware_po_code,
            si.invoice_total, si.eway_bill_no, si.vehicle_no,
+           si.freight_amount,
+           CASE WHEN si.freight_amount IS NULL THEN NULL
+                ELSE si.freight_amount + COALESCE(si.freight_tax, 0) END AS freight_with_gst,
+           (SELECT COALESCE(SUM(g.amount), 0) FROM invoice_items_mfg g WHERE g.invoice_id = si.id) AS goods_value,
            u.name AS created_by_name, si.created_at, si.reverted_at,
            m.code AS mfg_code, m.name AS mfg_name,
            sii.line_no, sii.sku_code, sii.parsed_sku_code, sii.sku_name,
@@ -478,7 +491,7 @@ export const supplierInvoicesSql = {
   /**
    * Total invoices, for the pager. Must carry the SAME predicates as
    * listInvoices or the total counts rows the list can't show.
-   * Parameters: buildInvoiceParams(...) (15)
+   * Parameters: buildInvoiceParams(...) (19)
    */
   countInvoices: `
     SELECT COUNT(*) AS total
@@ -488,7 +501,7 @@ export const supplierInvoicesSql = {
   `,
 
   /** Reverted invoices the same filter matches, for the strip's "N reverted not counted".
-   *  Parameters: buildInvoiceParams(...) (15) */
+   *  Parameters: buildInvoiceParams(...) (19) */
   countRevertedInvoices: `
     SELECT COUNT(*) AS reverted_count
     FROM invoice_mfg si
@@ -633,7 +646,7 @@ export const supplierInvoicesSql = {
    * Capped at 5,000 rows. 55 invoices exist today, so the cap is a guard rather
    * than a limit — but the strip says so when it bites rather than quietly
    * summarising part of the set.
-   * Parameters: buildInvoiceParams(...) (15), then the cap
+   * Parameters: buildInvoiceParams(...) (19), then the cap
    */
   selectMatchFields: `
     SELECT si.id, si.invoice_total,
@@ -789,8 +802,16 @@ export type InvoiceFilters = {
   destination?: string | null
   dateFrom?: string | null
   dateTo?: string | null
-  /** invoice_mfg.uniware_status, or 'none' for never synced. */
+  /** invoice_mfg.created_at, as IST YYYY-MM-DD days (inclusive). */
+  enteredFrom?: string | null
+  enteredTo?: string | null
+  /** invoice_mfg.uniware_status values, comma-separated; 'none' = never synced. */
   uniwareStatus?: string | null
+}
+
+/** "CANCELLED,none" → ["CANCELLED", "none"]; empty or unset → []. */
+export function parseUniwareStatuses(v: string | null | undefined): string[] {
+  return [...new Set((v ?? "").split(",").map((s) => s.trim()).filter(Boolean))]
 }
 
 /**
@@ -805,6 +826,8 @@ export function buildInvoiceParams(
 ): unknown[] {
   const like = search ? `%${search}%` : null
   const [brandFlag, brandIds] = scopeParams(scope.brandIds)
+  const statuses = parseUniwareStatuses(f.uniwareStatus)
+  const realStatuses = statuses.filter((s) => s !== "none")
   return [
     like, like, like,                    // search ×3 (IS NULL check + two LIKEs)
     ...scopeParams(scope.mfgIds),        // ×2
@@ -820,7 +843,12 @@ export function buildInvoiceParams(
     f.destination || null, f.destination || null,
     f.dateFrom    || null, f.dateFrom    || null,
     f.dateTo      || null, f.dateTo      || null,
-    // Read three times: the IS NULL guard, the 'none' test, and the equality.
-    f.uniwareStatus || null, f.uniwareStatus || null, f.uniwareStatus || null,
+    f.enteredFrom || null, f.enteredFrom || null,
+    f.enteredTo   || null, f.enteredTo   || null,
+    // The IS NULL guard, the 'none' flag, and the real statuses ([''] when only
+    // 'none' is picked, since IN () is a syntax error and '' matches no status).
+    statuses.length ? 1 : null,
+    statuses.includes("none") ? 1 : 0,
+    realStatuses.length ? realStatuses : [""],
   ]
 }

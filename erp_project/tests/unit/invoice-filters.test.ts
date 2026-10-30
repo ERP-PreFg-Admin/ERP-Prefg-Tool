@@ -25,26 +25,35 @@ test("listInvoices takes the same params plus limit and offset", () => {
 test("an unset filter is NULL, so the `? IS NULL` arm switches it off", () => {
   // Empty strings come off a cleared <select>; they must not match a code of "".
   const params = buildInvoiceParams(null, UNRESTRICTED, { mfgCode: "", dateFrom: "" })
-  assert.ok(params.slice(-11).every((p) => p === null))
+  // mfg, destination, invoice dates, entered dates (2 each), then the status guard.
+  assert.ok(params.slice(-15, -3).every((p) => p === null))
+  assert.equal(params.at(-3), null)
 })
 
 // Uniware's own verdict, and the only filter that surfaces an invoice whose PO
 // the warehouse cancelled there — our own record still reads healthy.
-test("the uniware status filter contributes three params, all of them the value", () => {
+test("the uniware status filter contributes three params: guard, 'none' flag, status list", () => {
   const params = buildInvoiceParams(null, UNRESTRICTED, { uniwareStatus: "CANCELLED" })
-  // The IS NULL guard, the 'none' test, and the equality — all read the same cell.
-  assert.deepEqual(params.slice(-3), ["CANCELLED", "CANCELLED", "CANCELLED"])
+  assert.deepEqual(params.slice(-3), [1, 0, ["CANCELLED"]])
 })
 
-test("a cleared uniware status filter is NULL, not the empty string", () => {
+test("several statuses travel as one IN list", () => {
+  const params = buildInvoiceParams(null, UNRESTRICTED, { uniwareStatus: "CANCELLED, CREATED,CANCELLED" })
+  assert.deepEqual(params.slice(-3), [1, 0, ["CANCELLED", "CREATED"]])
+})
+
+test("a cleared uniware status filter switches the clause off", () => {
   const params = buildInvoiceParams(null, UNRESTRICTED, { uniwareStatus: "" })
-  assert.deepEqual(params.slice(-3), [null, null, null])
+  // [""] keeps IN (?) valid SQL; the NULL guard means it is never consulted.
+  assert.deepEqual(params.slice(-3), [null, 0, [""]])
 })
 
 // 'none' is never-synced. It has to reach the NULL arm rather than compare
 // equal to a status literally called "none".
-test("'none' selects the never-synced invoices", () => {
-  assert.match(supplierInvoicesSql.countInvoices, /'none' AND si\.uniware_status IS NULL/)
+test("'none' sets the never-synced flag and stays out of the IN list", () => {
+  assert.match(supplierInvoicesSql.countInvoices, /\? = 1 AND si\.uniware_status IS NULL/)
+  assert.deepEqual(buildInvoiceParams(null, UNRESTRICTED, { uniwareStatus: "none" }).slice(-3), [1, 1, [""]])
+  assert.deepEqual(buildInvoiceParams(null, UNRESTRICTED, { uniwareStatus: "none,COMPLETE" }).slice(-3), [1, 1, ["COMPLETE"]])
 })
 
 // Every query taking these params must stay in step, not just the two above.

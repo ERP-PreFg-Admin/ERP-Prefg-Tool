@@ -10,7 +10,7 @@
 // Query params:
 //   format — "csv" (default) | "xlsx"
 //   search — same predicate the list uses (invoice_no / manufacturer name)
-//   mfgCode, destination, dateFrom, dateTo — the list's filters, so the file
+//   mfgCode, destination, dateFrom, dateTo, enteredFrom, enteredTo — the list's filters, so the file
 //     matches what's on screen rather than everything the search alone matches
 
 import { NextResponse } from "next/server"
@@ -20,6 +20,7 @@ import { getUserScope } from "@/lib/scope"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { buildCsv, buildMultiSheetXlsx, buildExportFilename } from "@/lib/export"
 import { INVOICE_EXPORT_COLUMNS, INVOICE_LINE_EXPORT_COLUMNS } from "@/lib/export-configs"
+import { applyCnDn } from "@/lib/invoice/export-cndn"
 import logger from "@/lib/logger"
 
 export const GET = withGateway({
@@ -37,6 +38,9 @@ export const GET = withGateway({
       destination: sp.get("destination")?.trim() || null,
       dateFrom:    sp.get("dateFrom")?.trim()    || null,
       dateTo:      sp.get("dateTo")?.trim()      || null,
+      enteredFrom: sp.get("enteredFrom")?.trim() || null,
+      enteredTo:   sp.get("enteredTo")?.trim()   || null,
+      uniwareStatus: sp.get("uniwareStatus")?.trim() || null,
     })
 
     try {
@@ -47,6 +51,8 @@ export const GET = withGateway({
           query<Record<string, unknown>>(supplierInvoicesSql.listInvoicesForExport, params),
           query<Record<string, unknown>>(supplierInvoicesSql.listInvoiceItemsForExport, params),
         ])
+        const cnDnByInvoice = await applyCnDn(lines as Parameters<typeof applyCnDn>[0])
+        for (const inv of invoices) inv.cn_dn = cnDnByInvoice.get(Number(inv.id)) ?? null
         logger.info({ ...ctx, invoices: invoices.length, lines: lines.length, message: "Invoice export served (xlsx)" })
 
         const buffer = await buildMultiSheetXlsx([
@@ -63,6 +69,7 @@ export const GET = withGateway({
       }
 
     const lines = await query<Record<string, unknown>>(supplierInvoicesSql.listInvoiceItemsForExport, params)
+    await applyCnDn(lines as Parameters<typeof applyCnDn>[0])
     logger.info({ ...ctx, lines: lines.length, message: "Invoice export served (csv)" })
 
     const csv = buildCsv(INVOICE_LINE_EXPORT_COLUMNS, lines)

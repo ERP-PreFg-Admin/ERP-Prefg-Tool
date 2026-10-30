@@ -62,6 +62,8 @@ export const GET = withGateway({
       destination: sp.get("destination")?.trim() || null,
       dateFrom:    sp.get("dateFrom")?.trim()    || null,
       dateTo:      sp.get("dateTo")?.trim()      || null,
+      enteredFrom: sp.get("enteredFrom")?.trim() || null,
+      enteredTo:   sp.get("enteredTo")?.trim()   || null,
       uniwareStatus: sp.get("uniwareStatus")?.trim() || null,
     })
 

@@ -65,6 +65,8 @@ const syncFilterSchema = z.object({
   destination: z.string().trim().max(100).nullish(),
   dateFrom:    z.string().trim().max(20).nullish(),
   dateTo:      z.string().trim().max(20).nullish(),
+  enteredFrom: z.string().trim().max(20).nullish(),
+  enteredTo:   z.string().trim().max(20).nullish(),
 })
 
 // ponytail: a flat cap rather than a cursor or a job queue. At one request per PO
@@ -117,6 +119,8 @@ export const POST = withGateway({
         destination: body.destination ?? null,
         dateFrom:    body.dateFrom    ?? null,
         dateTo:      body.dateTo      ?? null,
+        enteredFrom: body.enteredFrom ?? null,
+        enteredTo:   body.enteredTo   ?? null,
       })
       rows = await query<Row>(supplierInvoicesSql.selectForStatusSyncByFilter, [...params, MAX_PER_RUN + 1])
     } else {

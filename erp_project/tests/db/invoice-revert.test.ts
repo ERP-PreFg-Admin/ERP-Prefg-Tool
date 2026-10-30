@@ -80,7 +80,7 @@ test("the same invoice number can be inwarded again only once the old one is rev
     if (!s) return t.skip("needs a mfg, a SKU and two users")
     const { a, b, inv } = s
     const insertAgain = () => conn.execute(supplierInvoicesSql.insertHeader, [
-      a.mfgId, inv.invoiceNo, null, "INR", null, null, null, null, null, null, null, null, null, null, null, null, null, a.userId,
+      a.mfgId, inv.invoiceNo, null, "INR", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, a.userId,
     ])
     await assert.rejects(insertAgain, code("ER_DUP_ENTRY"), "live number is still taken")
 

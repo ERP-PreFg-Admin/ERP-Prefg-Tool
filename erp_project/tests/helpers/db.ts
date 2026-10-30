@@ -288,7 +288,7 @@ export async function makeInvoice(
   const invoiceNo = input.invoice_no ?? testPoNo("TEST-INV")
   const [h] = await conn.execute<ResultSetHeader>(supplierInvoicesSql.insertHeader, [
     a.mfgId, invoiceNo, null, "INR", null, null, null, null, null, null, null, null, null, null,
-    null, null, null, a.userId,
+    null, null, null, null, null, a.userId,
   ])
   const invoiceId = h.insertId
   if (input.uniware_po_code) await conn.execute(supplierInvoicesSql.setUniwarePoCode, [input.uniware_po_code, invoiceId])

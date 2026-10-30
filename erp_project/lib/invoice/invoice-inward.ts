@@ -41,6 +41,7 @@ import { skus as skusSql } from "@/lib/queries/skus"
 import { receivePo } from "@/lib/po/po-receive"
 import { mergeInwardLinesBySku, type InwardLine } from "@/lib/invoice/invoice-merge"
 import { describeMailStep } from "@/lib/invoice/invoice-mail-step"
+import { chargeTotals, goodsGstPercent } from "@/lib/invoice/charge-sum"
 import { createPurchaseOrder, INWARD_PO_VALIDITY_DAYS, punchPlusDays, uniwareEnabled, uniwareVendorCode } from "@/lib/uniware"
 import { pushInvoicePdfToUniware, docSyncFacilityAllowed } from "@/lib/uniware/document-sync"
 import { UniwareSessionStale } from "@/lib/uniware/web-session"
@@ -143,13 +144,14 @@ export async function writeInvoiceAndPos(
   // Header first: uq_supplier_invoice (mfg_id, invoice_no) rejects a
   // re-submission, and it has to fire before any receipt is credited or the
   // duplicate would inflate received_qty on its way to the error.
+  const freight = chargeTotals(body.charges ?? [], goodsGstPercent(line_items))
   const [invRes] = await conn.execute(supplierInvoicesSql.insertHeader, [
     Number(mfg_id), invoice_no, invoice_date?.trim() || null,
     body.currency, body.eway_bill_no, body.vehicle_no, body.po_ref,
     body.seller_gstin, body.buyer_gstin,
     body.bill_to_name, body.bill_to_address, body.bill_to_state,
     body.ship_to_name, body.ship_to_address,
-    destination, numOrNull(body.invoice_total), attachmentKey, userId,
+    destination, numOrNull(body.invoice_total), freight?.amount ?? null, freight?.tax ?? null, attachmentKey, userId,
   ])
   const invoiceId = (invRes as { insertId: number }).insertId
 
