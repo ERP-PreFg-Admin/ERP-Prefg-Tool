@@ -13,6 +13,7 @@ import { BrandViewSwitcher } from "@/components/BrandViewSwitcher";
 import ClientLayout from "@/components/ClientLayout";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { getNavMfgs } from "@/lib/services/manufacturing";
+import WhatsNewDialog from "@/components/WhatsNewDialog";
 
 // Every sidebar destination that should be individually lockable. Masters
 // pages and manufacturers each get their own slug (see lib/permissions.ts'
@@ -66,7 +67,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const brandView = session ? await getBrandView(Number(session.user.id)) : null
 
   const mfgs = session ? await getNavMfgs(scope.mfgIds) : [];
-
   // Resolve access for every sidebar destination up front (server-side, one
   // pass) so the sidebar can lock items the user can't reach instead of
   // showing a dead link that bounces to /auth/unauthorized after a click.
@@ -124,6 +124,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           build={build}
           topBarRight={<BrandViewSwitcher brands={brandOptions} active={brandView} />}
         >{children}</ClientLayout>
+          {session && <WhatsNewDialog />}
         </ThemeProvider>
       </body>
     </html>
