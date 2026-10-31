@@ -38,7 +38,7 @@ import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { supplierInvoicesSql } from "@/lib/queries/supplier-invoices"
 import { manufacturers as manufacturersSql } from "@/lib/queries/manufacturers"
 import { skus as skusSql } from "@/lib/queries/skus"
-import { receivePo } from "@/lib/po/po-receive"
+import { receivePo, type ReceiveResult } from "@/lib/po/po-receive"
 import { mergeInwardLinesBySku, type InwardLine } from "@/lib/invoice/invoice-merge"
 import { describeMailStep } from "@/lib/invoice/invoice-mail-step"
 import { chargeTotals, goodsGstPercent } from "@/lib/invoice/charge-sum"
@@ -174,6 +174,15 @@ export async function writeInvoiceAndPos(
     return `${brand}-INW-${yyyymm}-${String(seq).padStart(3, "0")}`
   }
 
+  // One receipt per PO for the whole invoice: per-line receipts let an early batch auto-close the PO and refuse the rest.
+  const receiptTotal = new Map<number, number>()
+  for (const item of line_items) {
+    if (item.reference_po_id == null) continue
+    const id = Number(item.reference_po_id)
+    receiptTotal.set(id, (receiptTotal.get(id) ?? 0) + Number(item.qty))
+  }
+  const receipts = new Map<number, ReceiveResult>()
+
   for (const item of line_items) {
     const qty = Number(item.qty)
     const unitPrice = numOrNull(item.unit_price)
@@ -185,7 +194,11 @@ export async function writeInvoiceAndPos(
       // Credit the existing order first — the inward POs are written after the
       // loop, once every line's SKU is known and repeats can be merged.
       const refPoId = Number(item.reference_po_id)
-      const r = await receivePo(conn, refPoId, qty, userId)
+      let r = receipts.get(refPoId)
+      if (!r) {
+        r = await receivePo(conn, refPoId, receiptTotal.get(refPoId)!, userId)
+        receipts.set(refPoId, r)
+      }
       receivedOut.push({ id: refPoId, po_no: r.po_no, qty, status: r.status })
 
       staged.push({
