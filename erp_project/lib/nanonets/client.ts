@@ -161,7 +161,9 @@ async function assertQuota() : Promise<void> {
 export async function parseInvoice(
   buffer: Buffer,
   filename: string,
-  config?: ExtractionConfig
+  config?: ExtractionConfig,
+  /** Receives Nanonets' reply untouched and the config sent, for the .raw.json record. */
+  onRaw?: (raw: { response: unknown; sent_config: ExtractionConfig }) => void
 ): Promise<ParsedInvoice> {
   if (!NANONET_API_KEY) throw new Error("NANONET_API_KEY is not configured")
   await assertQuota()
@@ -194,6 +196,7 @@ export async function parseInvoice(
   })
 
   const res = await extract.json()
+  onRaw?.({ response: res, sent_config: extraction_config })
   const content = res?.result?.content
   if (!content || typeof content !== "object") {
     throw new Error("Nanonets returned no extractable content for this document")

@@ -32,7 +32,7 @@ import { parseInvoice, strategyFor, configFor } from "@/lib/nanonets"
 import { detectFromPdf } from "@/lib/invoice/invoice-detect"
 import { parseLocallyVerbose } from "@/lib/invoice/local"
 import { parseCharges } from "@/lib/invoice/local/charges"
-import { parseCacheKey, freshParse, type CachedParse } from "@/lib/invoice/parse-cache"
+import { parseCacheKey, rawParseKey, freshParse, type CachedParse, type RawParse } from "@/lib/invoice/parse-cache"
 import { getEvent, putEvent } from "@/lib/s3"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
@@ -74,7 +74,7 @@ export const POST = withGateway({
       const { text, gstins, mfg, sellerGstins } = await detectFromPdf(buffer)
       const strategy = strategyFor(sellerGstins)
       const local = parseLocallyVerbose(text)
-      const cacheKey = parseCacheKey(buffer)
+      const cacheKey = parseCacheKey(buffer, { filename, mfgCode: mfg?.code })
       const cached = local.ok ? null : freshParse(await getEvent(cacheKey).catch(() => null), Date.now())
       const source = local.ok ? `local:${local.layout}` : cached ? "nanonets:cache" : "nanonets"
       logger.info({
@@ -92,7 +92,13 @@ export const POST = withGateway({
 
       const parsed = local.ok
         ? local.parsed
-        : cached ?? await parseInvoice(buffer, filename, configFor(strategy))
+        : cached ?? await parseInvoice(buffer, filename, configFor(strategy), ({ response, sent_config }) => {
+            // Nanonets' untouched reply, kept as the record of what it actually said.
+            void putEvent(rawParseKey(cacheKey), {
+              at: new Date().toISOString(), filename, mfg: mfg?.code ?? null, strategy: strategy?.label ?? "base",
+              hash: cacheKey.slice(-17, -5), sent_config, response,
+            } satisfies RawParse)
+          })
       // Only a Nanonets answer that read something is kept; a failure stays retryable.
       if (source === "nanonets" && (parsed.line_items.length > 0 || parsed.invoice_number)) {
         void putEvent(cacheKey, { at: new Date().toISOString(), parsed } satisfies CachedParse)
