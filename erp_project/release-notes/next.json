@@ -1,0 +1,45 @@
+{
+  "from": "v0.1.26",
+  "items": [
+    {
+      "kind": "new",
+      "area": "Invoices",
+      "text": "Freight, rates and CN/DN in the export; entered-date and multi-status filters"
+    },
+    {
+      "kind": "new",
+      "area": "Email",
+      "text": "Show each split's supplier unit in the split PO mail"
+    },
+    {
+      "kind": "new",
+      "area": "PO Tracking",
+      "text": "Choose the supplier unit per line when splitting a PO"
+    },
+    {
+      "kind": "new",
+      "area": "Reports",
+      "text": "Reports phase 2 - traceability, exceptions, scorecard, trends and nightly snapshots"
+    },
+    {
+      "kind": "new",
+      "area": "SKU Master",
+      "text": "Keep brand_id in step with the DWH brand text; rename Fein to Fien"
+    },
+    {
+      "kind": "new",
+      "area": "Reports",
+      "text": "Reports tab with four Phase 1 reports and export"
+    },
+    {
+      "kind": "new",
+      "area": "PO Tracking",
+      "text": "Discard unmailed drafts and raise POs against a supplier unit"
+    },
+    {
+      "kind": "fixed",
+      "area": "Costing",
+      "text": "Show agreed final costing figures to 2 decimals"
+    }
+  ]
+}

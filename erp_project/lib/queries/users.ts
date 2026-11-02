@@ -62,6 +62,10 @@ export const usersSql = {
   /** Params: [id] */
   markWelcomeSent: `UPDATE users SET welcome_sent_at = NOW() WHERE id = ?`,
 
+  /** The release whose "What's new" popup this user dismissed. Parameters: [id] / [version, id] */
+  selectWhatsNewSeen: `SELECT whats_new_seen FROM users WHERE id = ? LIMIT 1`,
+  setWhatsNewSeen: `UPDATE users SET whats_new_seen = ? WHERE id = ?`,
+
   /** Params: [name, email, status] */
   insertUser: `INSERT INTO users (name, email, status) VALUES (?, ?, ?)`,
 

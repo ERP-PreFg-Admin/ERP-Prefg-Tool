@@ -68,7 +68,8 @@ export const MODULES: readonly ModuleDef[] = [
   {
     key: "admin",
     label: "Admin",
-    paths: ["/api/v1/admin"],
+    // /me is the signed-in user's own settings (the What's new dismissal).
+    paths: ["/api/v1/admin", "/api/v1/me"],
     codes: ["ADMIN_*", "OBSERVABILITY"],
   },
   {

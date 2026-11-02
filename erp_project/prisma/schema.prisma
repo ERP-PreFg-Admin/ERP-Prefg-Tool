@@ -368,6 +368,8 @@ model users {
   created_at                             DateTime?                 @default(now()) @db.Timestamp(0)
   /// When the welcome mail last went. See prisma/add_users_welcome_sent_at.sql.
   welcome_sent_at                        DateTime?                 @db.DateTime(0)
+  /// Release whose "What's new" popup the user dismissed. See prisma/add_users_whats_new_seen.sql.
+  whats_new_seen                         String?                   @db.VarChar(20)
   google_id                              String?                   @db.VarChar(255)
   approvals_approvals_raised_byTousers   approvals[]               @relation("approvals_raised_byTousers")
   approvals_approvals_approved_byTousers approvals[]               @relation("approvals_approved_byTousers")
