@@ -8,6 +8,7 @@ import {
   type SkuMatch, type SkuMatchContext, type WarehouseMatchBy,
 } from "@/lib/invoice/invoice-mapping"
 import { MATCH_TOLERANCE } from "@/lib/invoice/three-way"
+import { qtyAmountMismatches, describeQtyAmountMismatch } from "@/lib/invoice/qty-amount-check"
 import type { OpenPoOption, ParsedCharge, ParsedInvoice } from "@/types/invoice"
 import type { MfgOption, WarehouseOption } from "../po-procurement/po-types"
 
@@ -483,6 +484,9 @@ export function collectProblems(
       out.push(`Qty ${roundTo(qty, 3)} exceeds the ${Number(po.remaining)} outstanding on ${po.po_no}. Re-match to fix.`)
     }
   }
+
+  // Per SKU, quantity must agree with the amount at its rate — catches an item total read onto one batch.
+  for (const m of qtyAmountMismatches(rows)) out.push(describeQtyAmountMismatch(m))
 
   // The lines must account for the invoice's own printed total.
   //

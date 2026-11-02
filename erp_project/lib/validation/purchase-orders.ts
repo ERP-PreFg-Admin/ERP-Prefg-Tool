@@ -2,6 +2,7 @@ import { z } from "zod"
 import { todayIST } from "@/lib/date"
 import { MATCH_TOLERANCE } from "@/lib/invoice/three-way"
 import { goodsGstPercent, sumCharges } from "@/lib/invoice/charge-sum"
+import { qtyAmountMismatches, describeQtyAmountMismatch } from "@/lib/invoice/qty-amount-check"
 import { poTypeRequiresRemarks } from "@/lib/po/po-rules"
 
 /** CSV rows arrive as raw strings from CsvImportDialog's client-side parse; the
@@ -156,6 +157,11 @@ export const invoiceInwardSchema = z.object({
    * is ~25% of a one-line invoice, far outside the 2% band.
    */
   .superRefine((inv, ctx) => {
+    // Same check the review screen blocks on; an item total read onto one batch (RP/L/26-27/1557).
+    for (const m of qtyAmountMismatches(inv.line_items)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["line_items"], message: describeQtyAmountMismatch(m) })
+    }
+
     const total = Number(inv.invoice_total)
     if (!Number.isFinite(total) || total <= 0) return // nothing to reconcile against
 
