@@ -33,7 +33,8 @@ import {
   matchSummary, rowsFromParsed, sumLineItems, sumCharges, goodsGstPercent, toInwardPayload,
   type InvoiceForm, type Row, type Shortage,
 } from "./invoice-form"
-import { commitInvoice, fetchOpenPos, fetchSkuMatchContext, InvoiceApiError, parseInvoiceFile, type InwardStep } from "./invoice-api"
+import { commitInvoice, fetchOpenPos, fetchSkuMatchContext, fetchUniwareOnlyPos, InvoiceApiError, parseInvoiceFile, type InwardStep } from "./invoice-api"
+import { invoiceNoFromReference, sameInvoiceNo, skusMissingFromPo, type ExternalPoCandidate } from "@/lib/uniware/external-po"
 import { clearDraft, loadDraft, saveDraft, savedAgo, type InvoiceDraft } from "./invoice-draft"
 import { InvoiceFields } from "./InvoiceFields"
 import { InvoiceLineItems } from "./InvoiceLineItems"
@@ -101,6 +102,9 @@ export default function AddInvoiceDialog({
   const [openPos, setOpenPos] = useState<OpenPoOption[]>([])
   /** SKUs the open POs couldn't cover, from the last FIFO match. */
   const [shortages, setShortages] = useState<Shortage[]>([])
+  /** Uniware-only POs for this manufacturer, and the one this invoice links to ("" = create a new one). */
+  const [uniwarePos, setUniwarePos] = useState<ExternalPoCandidate[]>([])
+  const [adoptCode, setAdoptCode] = useState("")
 
   /** A checkpointed review found on open, offered for resume. */
   const [draft, setDraft] = useState<InvoiceDraft | null>(null)
@@ -110,6 +114,8 @@ export default function AddInvoiceDialog({
   /** Latest rows, readable from applyFifo without putting `rows` in the
    *  open-PO effect's deps — which would re-fetch on every allocation. */
   const rowsRef      = useRef<Row[]>([])
+  /** Latest invoice number, for auto-picking a Uniware-only PO without refetching on every keystroke. */
+  const invoiceNoRef = useRef("")
   /** Set once the invoice is filed, so closing doesn't resurrect its draft. */
   const committedRef = useRef(false)
   const split        = useSplitPane(50)
@@ -129,6 +135,7 @@ export default function AddInvoiceDialog({
     setPdfUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return "" })
     setFile(null)
     setForm(EMPTY_FORM); setRows([]); setExtra({}); setCharges([]); setGstDerived(false); setOpenPos([]); setShortages([])
+    setUniwarePos([]); setAdoptCode("")
     committedRef.current = false
     split.reset()
   }
@@ -209,6 +216,20 @@ export default function AddInvoiceDialog({
   // rows, mirrored for applyFifo. An effect rather than assigning during render,
   // so a concurrent re-render can't publish a value the commit then discards.
   useEffect(() => { rowsRef.current = rows }, [rows])
+  useEffect(() => { invoiceNoRef.current = form.invoiceNo }, [form.invoiceNo])
+
+  // Uniware-only POs follow the manufacturer; one whose ReferenceNo is this invoice is picked for the user.
+  useEffect(() => {
+    if (phase !== "review" || !form.mfgId) return
+    let cancelled = false
+    void fetchUniwareOnlyPos(form.mfgId).then((pos) => {
+      if (cancelled) return
+      setUniwarePos(pos)
+      const hit = pos.find((p) => p.kind === "missing" && sameInvoiceNo(invoiceNoFromReference(p.reference_no), invoiceNoRef.current))
+      setAdoptCode((prev) => prev || hit?.uniware_po_code || "")
+    })
+    return () => { cancelled = true }
+  }, [form.mfgId, phase])
 
   /** Allocate every line against `pos`, oldest PO raise date first. Splits a
    *  line across POs when one can't cover it, and re-running is idempotent —
@@ -247,6 +268,8 @@ export default function AddInvoiceDialog({
     setField("mfgId", value)
     setOpenPos([])
     setShortages([])
+    setUniwarePos([])
+    setAdoptCode("")
     setRows((prev) => (prev.some((r) => r.reference_po_id)
       ? prev.map((r) => ({ ...r, reference_po_id: "" }))
       : prev))
@@ -310,10 +333,15 @@ export default function AddInvoiceDialog({
     () => sumCharges(charges, goodsGstPercent(rows)),
     [charges, rows]
   )
-  const problems = useMemo(
-    () => collectProblems(form, rows, poById, shortages, chargeSum, warehouseOptions),
-    [form, rows, poById, shortages, chargeSum, warehouseOptions]
-  )
+  const problems = useMemo(() => {
+    const found = collectProblems(form, rows, poById, shortages, chargeSum, warehouseOptions)
+    const adopted = uniwarePos.find((p) => p.uniware_po_code === adoptCode)
+    if (adopted) {
+      const missing = skusMissingFromPo(rows.map((r) => r.sku_code), adopted.items)
+      if (missing.length) found.push(`${adopted.uniware_po_code} does not carry ${missing.join(", ")}`)
+    }
+    return found
+  }, [form, rows, poById, shortages, chargeSum, warehouseOptions, uniwarePos, adoptCode])
   const matched  = useMemo(() => matchSummary(form, rows, shortages), [form, rows, shortages])
   const receiveCount = useMemo(() => rows.filter((r) => r.reference_po_id).length, [rows])
 
@@ -325,7 +353,8 @@ export default function AddInvoiceDialog({
       // One request: S3, our rows and the Uniware mirror have to succeed or
       // unwind together, which they can't if the client drives them separately.
       // Its step events arrive as they happen, so each gets its own toast.
-      const outcome = await commitInvoice(file, toInwardPayload(form, rows, charges), (e) => {
+      const payload = { ...toInwardPayload(form, rows, charges), adopt_uniware_po_code: adoptCode || null }
+      const outcome = await commitInvoice(file, payload, (e) => {
         if (e.status === "start") { setSubmitStep(e.step); return }
         if (e.status === "ok")      toast({ title: STEP_LABEL[e.step], description: e.message, variant: "success" })
         if (e.status === "skipped") toast({ title: `${STEP_NOUN[e.step]} skipped`, description: e.message, variant: "info" })
@@ -540,6 +569,9 @@ export default function AddInvoiceDialog({
                   chargeSum={chargeSum}
                   extra={extra}
                   setExtra={setExtra}
+                  uniwarePos={uniwarePos}
+                  adoptCode={adoptCode}
+                  setAdoptCode={setAdoptCode}
                 />
 
                 <InvoiceLineItems

@@ -55,6 +55,9 @@ import { brandInitial } from "../constants"
 import { panOf } from "./gstin"
 import { warehouse } from "../queries/warehouse"
 import { mfgFacilityMap } from "../queries/mfg-facility-map"
+import { uniwareExternalPoSql } from "../queries/uniware-external-po"
+import { explorePoDetail } from "../uniware/po-explorer"
+import { mapPoDetail, skusMissingFromPo, type ExternalPoItem } from "../uniware/external-po"
 
 export const INWARD_STEPS = ["s3", "po", "uniware", "docs", "email"] as const
 export type InwardStep = (typeof INWARD_STEPS)[number]
@@ -308,6 +311,7 @@ export async function runInwardInvoice(
 
   const mfgRows = await query<{ code: string; name: string }>(manufacturersSql.selectById, [Number(mfg_id)])
   const mfgCode = mfgRows[0]?.code ?? ""
+  const adopt = body.adopt_uniware_po_code ? await checkAdoptable(body.adopt_uniware_po_code, Number(mfg_id), lineSkus) : null
   let facility:string | undefined
   // This manufacturer's Uniware VENDOR code AT that facility — a different
   // identifier from master_mfgs.code, and different per facility (Archeesh is
@@ -343,12 +347,19 @@ export async function runInwardInvoice(
         `(PAN ${pan}). Set it on /masters/warehouses — otherwise this PO would land in the wrong facility.`
       )
     }
+    if (adopt && !UNIWARE_SANDBOX && facility !== adopt.facility_code) {
+      throw new ApiError(
+        400, "adopt_facility_mismatch",
+        `${adopt.uniware_po_code} is at ${adopt.facility_code}, but this invoice's destination and buyer GSTIN resolve to ${facility}.`
+      )
+    }
     // Vendors are configured PER FACILITY in Uniware, so this is the same lookup
     // /po-tracking/mfg-overview writes and cannot be a global setting. Refused
     // here rather than left to Uniware: the tenant answers "Vendor [X] is not
     // configured for the facility [Y]", which is true but names neither the
     // manufacturer nor the screen that fixes it.
-    if (whRows[0] && !UNIWARE_SANDBOX) {
+    // An adopted PO already names its vendor in Uniware.
+    if (whRows[0] && !UNIWARE_SANDBOX && !adopt) {
       const vcRows = await query<{ un_mfg_code: string | null }>(
         mfgFacilityMap.selectVendorCode, [whRows[0].wh_id, Number(mfg_id)]
       )
@@ -424,7 +435,27 @@ export async function runInwardInvoice(
 
   let uniwarePoCode: string | null = null
   await emit({ step: "uniware", status: "start" })
-  if (!uniwareEnabled()) {
+  if (adopt) {
+    try {
+      await conn.execute(uniwareExternalPoSql.selectByCodeForUpdate, [adopt.uniware_po_code])
+      const [res] = await conn.execute(uniwareExternalPoSql.markAdopted, [written.invoiceId, adopt.id])
+      if ((res as { affectedRows: number }).affectedRows !== 1) {
+        throw new Error(`${adopt.uniware_po_code} was just linked to another invoice.`)
+      }
+      uniwarePoCode = adopt.uniware_po_code
+      await conn.execute(supplierInvoicesSql.setUniwarePoCode, [uniwarePoCode, written.invoiceId])
+      const poIds = written.poLines.map((l) => l.id)
+      await conn.execute(purchaseOrdersSql.buildSetUniwarePoCode(poIds.length), [uniwarePoCode, ...poIds])
+      await emit({ step: "uniware", status: "ok", message: `Linked to ${uniwarePoCode}, already in Uniware`, data: { uniwarePoCode } })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      await conn.rollback()
+      conn.release()
+      await dropS3()
+      await emit({ step: "uniware", status: "failed", message })
+      return { ok: false, created: [], received: [], error: message, failedStep: "uniware" }
+    }
+  } else if (!uniwareEnabled()) {
     await emit({ step: "uniware", status: "skipped", message: "Uniware is not configured" })
   } else {
     try {
@@ -512,6 +543,9 @@ export async function runInwardInvoice(
   await emit({ step: "docs", status: "start" })
   if (!uniwarePoCode) {
     await emit({ step: "docs", status: "skipped", message: "No Uniware PO to attach to" })
+  } else if (adopt && UNIWARE_SANDBOX) {
+    // An adopted code is a real warehouse PO; a test environment must not write to it.
+    await emit({ step: "docs", status: "skipped", message: "Not attached from a test environment — this is a live Uniware PO" })
   } else if (!docSyncFacilityAllowed(facility)) {
     await emit({ step: "docs", status: "skipped", message: "Document sync is not enabled for this facility" })
   } else {
@@ -541,7 +575,10 @@ export async function runInwardInvoice(
 
   // ── 5. Email — after commit, and never a reason to undo ───────────────────
   await emit({ step: "email", status: "start" })
-  try {
+  if (adopt) {
+    // The warehouse raised this PO itself, so the inward notice would tell it nothing new.
+    await emit({ step: "email", status: "skipped", message: "PO was raised in Uniware by the warehouse — no notice sent" })
+  } else try {
     // Not the PO-status mail procurement sends, and not to the manufacturer:
     // they shipped the goods and already know the order. This tells the
     // receiving warehouse what is arriving, with the invoice we just read
@@ -578,6 +615,29 @@ export async function runInwardInvoice(
     received: written.received,
     uniwarePoCode: uniwarePoCode ?? undefined,
   }
+}
+
+/** Refuses an adopt the cache or Uniware itself says is wrong; checked before anything is written. */
+async function checkAdoptable(code: string, mfgId: number, lineSkus: string[]) {
+  const [row] = await query<{ id: number; uniware_po_code: string; facility_code: string; mfg_id: number | null; all_fg: number; adopted: number; items: ExternalPoItem[] | string }>(
+    uniwareExternalPoSql.selectByCode, [code]
+  )
+  if (!row) throw new ApiError(400, "adopt_unknown", `${code} is not a Uniware-only PO. Run "Find Uniware-only POs" first.`)
+  if (Number(row.adopted)) throw new ApiError(409, "adopt_taken", `${code} is already linked to an ERP invoice.`)
+  if (Number(row.mfg_id) !== mfgId) throw new ApiError(400, "adopt_mfg_mismatch", `${code} is for a different manufacturer.`)
+  if (!Number(row.all_fg)) throw new ApiError(400, "adopt_not_fg", `${code} carries items that are not in the SKU master.`)
+
+  // Live, not cached: a PO cancelled since the sweep must not be adopted.
+  const live = await explorePoDetail(code, row.facility_code)
+  const po = mapPoDetail(live.header, live.items)
+  if ((po.un_status ?? "").toUpperCase() === "CANCELLED") {
+    throw new ApiError(409, "adopt_cancelled", `${code} has been cancelled in Uniware.`)
+  }
+  const missing = skusMissingFromPo(lineSkus, po.items)
+  if (missing.length) {
+    throw new ApiError(400, "adopt_sku_mismatch", `${code} does not carry ${missing.join(", ")}. Fix the SKU or pick another Uniware PO.`)
+  }
+  return { id: row.id, uniware_po_code: row.uniware_po_code, facility_code: row.facility_code }
 }
 
 /** Turn a driver error into something the desk can act on. */

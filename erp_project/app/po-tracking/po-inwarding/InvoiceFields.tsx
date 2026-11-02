@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 import { destinationEvidence, noDestinationMessage, type InvoiceForm } from "./invoice-form"
 import { resolveFacility } from "@/lib/invoice/invoice-mapping"
 import type { ParsedCharge } from "@/types/invoice"
+import type { ExternalPoCandidate } from "@/lib/uniware/external-po"
 import type { MfgOption, WarehouseOption } from "../po-procurement/po-types"
 import { warehousesForEntity, warehouseLabel, warehouseKey } from "../po-procurement/po-utils"
 
@@ -70,6 +71,17 @@ export function SectionHead({ children }: { children: string }) {
   )
 }
 
+/** One Uniware-only PO as a picker option; anything but `missing` says why it can't be picked. */
+function externalPoLabel(p: ExternalPoCandidate): string {
+  const units = p.items.reduce((t, i) => t + i.qty, 0)
+  const day = p.un_created_at ? p.un_created_at.slice(0, 10) : ""
+  const base = `${p.uniware_po_code} · ${p.facility_code} · ${day} · ${units.toLocaleString("en-IN")} units · ref ${p.reference_no ?? "—"}`
+  if (p.kind === "replacement") return `${base} — revert ERP invoice ${p.live_invoice_no} first`
+  if (p.kind === "not_fg") return `${base} — items not in the SKU master`
+  if (p.kind === "cancelled") return `${base} — cancelled in Uniware`
+  return base
+}
+
 /** What the extractor read for a field the user is now overriding via a picker. */
 function ParsedHint({ value }: { value: string }) {
   if (!value) return null
@@ -79,6 +91,7 @@ function ParsedHint({ value }: { value: string }) {
 export function InvoiceFields({
   form, setField, onChangeMfg, mfgOptions, warehouseOptions, lineSum,
   charges, setCharges, chargeSum, extra, setExtra,
+  uniwarePos = [], adoptCode = "", setAdoptCode = () => {},
 }: {
   form: InvoiceForm
   setField: SetField
@@ -96,8 +109,13 @@ export function InvoiceFields({
   chargeSum: number
   extra: Record<string, string>
   setExtra: (next: Record<string, string>) => void
+  /** This manufacturer's Uniware-only POs; picking one links to it instead of creating a PO. */
+  uniwarePos?: ExternalPoCandidate[]
+  adoptCode?: string
+  setAdoptCode?: (code: string) => void
 }) {
   const [showExtra, setShowExtra] = useState(false)
+  const adoptedPo = uniwarePos.find((p) => p.uniware_po_code === adoptCode) ?? null
   const extraKeys = Object.keys(extra)
 
   // Line items vs the invoice's own total. Tolerance is ₹1 because suppliers
@@ -176,6 +194,32 @@ export function InvoiceFields({
             </p>
           )}
         </div>
+
+        {uniwarePos.length > 0 && (
+          <div className="grid gap-1.5 col-span-full">
+            <Label className="text-xs">Already in Uniware?</Label>
+            <Select value={adoptCode} onChange={(e) => setAdoptCode(e.target.value)} className="w-full">
+              <option value="">No — create a new Uniware PO</option>
+              {uniwarePos.map((p) => (
+                <option key={p.uniware_po_code} value={p.uniware_po_code} disabled={p.kind !== "missing"}>
+                  {externalPoLabel(p)}
+                </option>
+              ))}
+            </Select>
+            {adoptedPo ? (
+              <p className="text-[11px] text-emerald-700 dark:text-emerald-500">
+                Links to {adoptedPo.uniware_po_code} at {adoptedPo.facility_code}, raised by hand
+                {adoptedPo.un_created_by ? ` by ${adoptedPo.un_created_by.split("@")[0]}` : ""}:{" "}
+                {adoptedPo.items.map((i) => `${i.sku_code} × ${i.qty}`).join(", ")}. No new Uniware PO is created.
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                {uniwarePos.length} PO{uniwarePos.length === 1 ? "" : "s"} for this manufacturer exist only in Uniware.
+                Pick one if this invoice is it.
+              </p>
+            )}
+          </div>
+        )}
 
         <Field label="Seller GSTIN" value={form.sellerGstin} onChange={(v) => setField("sellerGstin", v)} />
         <Field label="Buyer GSTIN" value={form.buyerGstin} onChange={(v) => setField("buyerGstin", v)} />

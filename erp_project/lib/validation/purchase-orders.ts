@@ -103,6 +103,8 @@ export const invoiceInwardSchema = z.object({
     amount:      z.coerce.number().finite(),
     gst_percent: z.coerce.number().finite().optional().nullable(),
   })).optional().default([]),
+  // A Uniware PO keyed by hand (uniware_external_po) to link instead of creating one.
+  adopt_uniware_po_code: optionalText(64),
 
   line_items: z
     .array(

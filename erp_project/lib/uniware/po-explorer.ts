@@ -238,6 +238,16 @@ export async function explorePurchaseOrders(opts: {
   }
 }
 
+/** PO codes created at one facility between two instants, without the per-PO detail calls. */
+export async function listPurchaseOrderCodes(facility: string, from: Date, to: Date): Promise<string[]> {
+  const list = await call(
+    PO_LIST_PATH, { createdBetween: { start: isoMillis(from), end: isoMillis(to) } }, facility, `purchase orders at ${facility}`
+  )
+  return (Array.isArray(list.purchaseOrderCodes) ? list.purchaseOrderCodes : [])
+    .map((c) => (c == null ? "" : String(c).trim()))
+    .filter(Boolean)
+}
+
 export type RawGrn = {
   code: string
   /** Every top-level key the receipt really returned, so a shape change is visible. */

@@ -1512,3 +1512,26 @@ model report_snapshots {
   @@id([day, metric, mfg_code])
   @@index([metric, day], map: "idx_snap_metric_day")
 }
+
+/// Uniware POs at our facilities that no live ERP invoice owns; Add Invoice adopts one. prisma/add_uniware_external_po.sql.
+/// FKs fk_uniware_external_po_mfg / _invoice live in the SQL only.
+model uniware_external_po {
+  id                 Int       @id @default(autoincrement())
+  uniware_po_code    String    @unique(map: "uq_uniware_external_po_code") @db.VarChar(64)
+  facility_code      String    @db.VarChar(50)
+  vendor_code        String?   @db.VarChar(100)
+  mfg_id             Int?
+  reference_no       String?   @db.VarChar(100)
+  un_status          String?   @db.VarChar(40)
+  grn_count          Int?
+  un_created_by      String?   @db.VarChar(255)
+  un_created_at      DateTime? @db.DateTime(0)
+  all_fg             Boolean   @default(false)
+  items              Json
+  adopted_invoice_id Int?      @unique(map: "uq_uniware_external_po_invoice")
+  first_seen_at      DateTime  @default(now()) @db.DateTime(0)
+  synced_at          DateTime  @default(now()) @db.DateTime(0)
+
+  @@index([mfg_id, adopted_invoice_id], map: "idx_uniware_external_po_mfg")
+  @@index([reference_no], map: "idx_uniware_external_po_ref")
+}

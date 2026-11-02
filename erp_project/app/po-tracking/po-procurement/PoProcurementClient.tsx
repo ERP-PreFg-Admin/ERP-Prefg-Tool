@@ -20,6 +20,7 @@ import { DownloadButton } from "@/components/masters/DownloadButton"
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { cn } from "@/lib/utils"
 import SyncUniwareButton from "../SyncUniwareButton"
+import FindUniwareOnlyButton from "../FindUniwareOnlyButton"
 
 import type { MfgOption, PoRow, SkuOption, TabKey, WarehouseOption } from "./po-types"
 import { INWARD_TABS, STATUS_CONFIG, TAB_LABEL, TABS } from "./po-types"
@@ -333,6 +334,7 @@ export default function PoProcurementClient({
             {/* router.refresh() is enough here: this list is server-rendered, so
                 the refreshed statuses arrive with the next render. */}
             <SyncUniwareButton onDone={afterAction} />
+            <FindUniwareOnlyButton />
           </>
         )}
         {!isInwarding && (

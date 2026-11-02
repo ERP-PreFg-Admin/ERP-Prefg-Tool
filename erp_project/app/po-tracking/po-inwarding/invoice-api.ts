@@ -7,6 +7,7 @@ import { monthIST } from "@/lib/date"
 import { tooLargeMessage } from "./invoice-form"
 import type { SkuHistoryRow, SkuMatchContext } from "@/lib/invoice/invoice-mapping"
 import type { SkuOption } from "../po-procurement/po-types"
+import type { ExternalPoCandidate } from "@/lib/uniware/external-po"
 
 /** Thrown with the server's own message so the dialog can show something actionable. */
 export class InvoiceApiError extends Error {
@@ -184,6 +185,17 @@ export async function fetchOpenPos(mfgId: string): Promise<OpenPoOption[]> {
   try {
     const res = await fetch(`/api/v1/purchase-orders/open-for-receive?mfg_id=${encodeURIComponent(mfgId)}`)
     const data = await res.json()
+    return Array.isArray(data.pos) ? data.pos : []
+  } catch {
+    return []
+  }
+}
+
+/** This manufacturer's Uniware-only POs not yet linked to an invoice. [] on any failure. */
+export async function fetchUniwareOnlyPos(mfgId: string): Promise<ExternalPoCandidate[]> {
+  if (!mfgId) return []
+  try {
+    const data = await (await fetch(`/api/v1/purchase-orders/uniware-external?mfg_id=${encodeURIComponent(mfgId)}`)).json()
     return Array.isArray(data.pos) ? data.pos : []
   } catch {
     return []
