@@ -163,7 +163,8 @@ async function checkReferencePos(conn: PoolConnection, body: InvoiceInward, user
 export async function writeInvoiceAndPos(
   conn: PoolConnection,
   body: InvoiceInward,
-  attachmentKey: string,
+  /** NULL for an invoice made from a Uniware PO, which has no document yet. */
+  attachmentKey: string | null,
   userId: number,
   brandBySku: Map<string, string>
 ) {

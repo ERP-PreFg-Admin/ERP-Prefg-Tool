@@ -8,13 +8,15 @@ const LIVE_INVOICE_JOIN = `
   LEFT JOIN invoice_mfg li
     ON li.mfg_id = x.mfg_id AND li.reverted_at IS NULL
    AND li.invoice_no IN (x.reference_no, SUBSTRING_INDEX(x.reference_no, ' ', 1))
-   AND (li.uniware_po_code IS NULL OR li.uniware_po_code <> x.uniware_po_code)`
+   AND (li.uniware_po_code IS NULL OR li.uniware_po_code <> x.uniware_po_code)
+  LEFT JOIN (SELECT invoice_id, COUNT(*) AS n FROM grn_uniware GROUP BY invoice_id) lg ON lg.invoice_id = li.id`
 
 const CANDIDATE_COLUMNS = `
   x.id, x.uniware_po_code, x.facility_code, x.vendor_code, x.mfg_id, m.code AS mfg_code, m.name AS mfg_name,
   x.reference_no, x.un_status, x.grn_count, x.un_created_by, x.un_created_at, x.all_fg, x.items,
   ${ADOPTED_LIVE} AS adopted,
-  MIN(li.invoice_no) AS live_invoice_no, MIN(li.uniware_po_code) AS live_invoice_uniware_po_code`
+  MIN(li.invoice_no) AS live_invoice_no, MIN(li.uniware_po_code) AS live_invoice_uniware_po_code,
+  MAX(GREATEST(COALESCE(li.uniware_grn_count, 0), COALESCE(lg.n, 0))) AS live_invoice_grn_count`
 
 export const uniwareExternalPoSql = {
   /** Codes a live ERP invoice already owns — never cached. Takes the facility's code list. */
@@ -110,6 +112,37 @@ export const uniwareExternalPoSql = {
       LEFT JOIN invoice_mfg ai ON ai.id = x.adopted_invoice_id
        SET x.adopted_invoice_id = ?
      WHERE x.id = ? AND (x.adopted_invoice_id IS NULL OR ai.reverted_at IS NOT NULL)`,
+
+  /** The warehouse and billed GSTIN behind a facility, for an invoice made from its PO. Params: [facility] */
+  selectFacilityEntity: `
+    SELECT w.name AS destination, COALESCE(NULLIF(dwe.bill_to_gstin, ''), NULLIF(dwe.ship_to_gstin, '')) AS gstin
+      FROM details_warehouse_entity dwe
+      JOIN master_warehouse w ON w.id = dwe.warehouse_id
+     WHERE dwe.facility_code = ? AND dwe.status = 'active'
+     LIMIT 1`,
+
+  /** The live invoice a replacement points at. Params: [mfg_id, invoice_no] */
+  selectLiveInvoiceByNo: `
+    SELECT si.id, si.invoice_no, si.destination, si.buyer_gstin, si.uniware_po_code, m.name AS mfg_name
+      FROM invoice_mfg si
+      JOIN master_mfgs m ON m.id = si.mfg_id
+     WHERE si.mfg_id = ? AND si.invoice_no = ? AND si.reverted_at IS NULL`,
+
+  /** Params: [invoice_id] */
+  selectInvoiceLines: `SELECT sku_code, qty FROM invoice_items_mfg WHERE invoice_id = ?`,
+
+  /** The invoice's inward POs, the rows carrying its Uniware code. Params: [invoice_id] */
+  selectInwardPosByInvoice: `
+    SELECT DISTINCT po.id, po.po_no, po.uniware_po_code
+      FROM purchase_orders po
+      JOIN invoice_items_mfg x ON x.po_id = po.id
+     WHERE x.invoice_id = ?`,
+
+  /** Points a live invoice at another Uniware PO; the sync caches are cleared for the next pass. Params: [code, id, old_code] */
+  relinkInvoice: `
+    UPDATE invoice_mfg
+       SET uniware_po_code = ?, uniware_status = NULL, uniware_synced_at = NULL, uniware_grn_count = NULL
+     WHERE id = ? AND uniware_po_code <=> ? AND reverted_at IS NULL`,
 
   /** Active facilities, for the button's per-facility loop. */
   selectFacilities: `

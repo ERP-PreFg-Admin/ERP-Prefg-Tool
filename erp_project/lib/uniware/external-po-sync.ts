@@ -2,9 +2,7 @@
 import { query, execute } from "@/lib/db"
 import { uniwareExternalPoSql as sql } from "@/lib/queries/uniware-external-po"
 import { listPurchaseOrderCodes, explorePoDetail } from "./po-explorer"
-import { classifyExternalPo, mapPoDetail, type ExternalPoCandidate, type ExternalPoItem } from "./external-po"
-
-export const EXTERNAL_PO_WINDOW_DAYS = 45
+import { classifyExternalPo, mapPoDetail, EXTERNAL_PO_WINDOW_DAYS, type ExternalPoCandidate, type ExternalPoItem } from "./external-po"
 // Under the route's maxDuration; a cut-short facility finishes on the next press.
 const BUDGET_MS = 240_000
 
@@ -21,12 +19,14 @@ export type FacilitySweep = {
   rows: ExternalPoCandidate[]
 }
 
-type CandidateRow = Omit<ExternalPoCandidate, "kind" | "items" | "un_created_at"> & {
+type CandidateRow = Omit<ExternalPoCandidate, "kind" | "items" | "un_created_at" | "live_invoice_grn_count"> & {
   all_fg: number; adopted: number; items: ExternalPoItem[] | string; un_created_at: Date | string | null
+  live_invoice_grn_count: number | string | null
 }
 
 export function toCandidate(r: CandidateRow): ExternalPoCandidate {
   const items = typeof r.items === "string" ? (JSON.parse(r.items) as ExternalPoItem[]) : r.items
+  const grns = Number(r.live_invoice_grn_count ?? 0)
   return {
     uniware_po_code: r.uniware_po_code,
     facility_code: r.facility_code,
@@ -39,9 +39,10 @@ export function toCandidate(r: CandidateRow): ExternalPoCandidate {
     items,
     live_invoice_no: r.live_invoice_no,
     live_invoice_uniware_po_code: r.live_invoice_uniware_po_code,
+    live_invoice_grn_count: grns,
     kind: classifyExternalPo({
       un_status: r.un_status, all_fg: Boolean(Number(r.all_fg)), adopted: Boolean(Number(r.adopted)),
-      live_invoice_no: r.live_invoice_no,
+      live_invoice_no: r.live_invoice_no, live_invoice_grn_count: grns,
     }),
   }
 }

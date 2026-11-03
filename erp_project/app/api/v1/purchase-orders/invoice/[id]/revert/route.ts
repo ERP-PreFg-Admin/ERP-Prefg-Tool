@@ -8,12 +8,11 @@ import type { PoolConnection } from "mysql2/promise"
 import { pool, query } from "@/lib/db"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
-import { approvalsSql } from "@/lib/queries/approvals"
 import { invoiceRevertSql } from "@/lib/queries/invoice-revert"
 import { invoiceIdParamSchema, invoiceRevertSchema } from "@/lib/validation/invoice-verify"
 import { assertSkuCodesInBrandScope } from "@/lib/brand-guard"
 import { assertPoInScope } from "@/lib/po/po-guard"
-import { assertNoLiveGrn, planInvoiceRevert } from "@/lib/invoice/invoice-revert"
+import { assertNoLiveGrn, stageInvoiceRevertRequest } from "@/lib/invoice/invoice-revert"
 import logger from "@/lib/logger"
 
 type Header = {
@@ -55,38 +54,10 @@ export const POST = withGateway({
     const conn: PoolConnection = await pool.getConnection()
     await conn.beginTransaction()
     try {
-      // Locks the invoice first, so two concurrent requests serialise on hasPending below.
-      const plan = await planInvoiceRevert(conn, invoiceId)
-      const [pending] = await conn.execute(approvalsSql.hasPending, ["INVOICE_REVERT", invoiceId])
-      if ((pending as unknown[]).length) {
-        throw new ApiError(409, "revert_pending", `A revert of ${header.invoice_no} is already waiting for approval.`)
-      }
-
-      const preview = {
-        invoice_no: header.invoice_no,
-        mfg_name: header.mfg_name,
-        uniware_po_code: header.uniware_po_code,
-        receipts: plan.receipts,
-        inward_pos: plan.inward.map((i) => ({ po_id: i.po_id, po_no: i.po_no, status_before: i.status_before })),
-      }
+      const { approvalId, preview } = await stageInvoiceRevertRequest(conn, header, userId, body.reason, body.dry_run)
       if (body.dry_run) {
         await conn.rollback()
         return NextResponse.json({ ok: true, plan: preview })
-      }
-
-      const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, "INVOICE_REVERT", invoiceId, "edit"])
-      const approvalId = (ar as { insertId: number }).insertId
-      // Display only — the handler re-plans from live rows. invoice_no old = new keeps it under Edits.
-      const items: [string, string, string][] = [
-        ["invoice_no", header.invoice_no, header.invoice_no],
-        ["manufacturer", "", header.mfg_name],
-        ["reason", "", body.reason],
-        ...plan.receipts.map((r): [string, string, string] => [`receipt:${r.po_no}`, String(r.before), String(r.after)]),
-        ...plan.receipts.filter((r) => r.reopen).map((r): [string, string, string] => [`reopen:${r.po_no}`, "received", "raised"]),
-        ...plan.inward.map((i): [string, string, string] => [`inward_po:${i.po_no}`, i.status_before ?? "", "reverted"]),
-      ]
-      for (const [field, oldV, newV] of items) {
-        await conn.execute(approvalsSql.insertApprovalItem, [approvalId, field, oldV, newV])
       }
 
       await conn.commit()

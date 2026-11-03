@@ -77,6 +77,7 @@ function externalPoLabel(p: ExternalPoCandidate): string {
   const day = p.un_created_at ? p.un_created_at.slice(0, 10) : ""
   const base = `${p.uniware_po_code} · ${p.facility_code} · ${day} · ${units.toLocaleString("en-IN")} units · ref ${p.reference_no ?? "—"}`
   if (p.kind === "replacement") return `${base} — revert ERP invoice ${p.live_invoice_no} first`
+  if (p.kind === "duplicate") return `${base} — duplicate of ERP invoice ${p.live_invoice_no}, cancel it in Uniware`
   if (p.kind === "not_fg") return `${base} — items not in the SKU master`
   if (p.kind === "cancelled") return `${base} — cancelled in Uniware`
   return base

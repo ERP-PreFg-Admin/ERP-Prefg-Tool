@@ -5,6 +5,7 @@ import type { PoolConnection } from "mysql2/promise"
 import { ApiError } from "@/lib/gateway/errors"
 import { formatDateTimeIST } from "@/lib/date"
 import { invoiceRevertSql } from "@/lib/queries/invoice-revert"
+import { approvalsSql } from "@/lib/queries/approvals"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { uniwareEnabled } from "@/lib/uniware/auth"
 import { fetchInflowReceiptCodes } from "@/lib/uniware/grn"
@@ -108,6 +109,46 @@ export async function assertNoLiveGrn(invoice: Pick<InvoiceRow, "invoice_no" | "
       `in Uniware first, then request the revert again.`,
       { uniware_po_code: invoice.uniware_po_code, grn_codes: codes })
   }
+}
+
+/** Stage the INVOICE_REVERT approval on the caller's open transaction; dryRun writes nothing and returns the preview. */
+export async function stageInvoiceRevertRequest(
+  conn: PoolConnection,
+  header: { id: number; invoice_no: string; mfg_name: string; uniware_po_code: string | null },
+  userId: number,
+  reason: string,
+  dryRun = false,
+) {
+  // Locks the invoice first, so two concurrent requests serialise on hasPending below.
+  const plan = await planInvoiceRevert(conn, header.id)
+  const [pending] = await conn.execute(approvalsSql.hasPending, ["INVOICE_REVERT", header.id])
+  if ((pending as unknown[]).length) {
+    throw new ApiError(409, "revert_pending", `A revert of ${header.invoice_no} is already waiting for approval.`)
+  }
+  const preview = {
+    invoice_no: header.invoice_no,
+    mfg_name: header.mfg_name,
+    uniware_po_code: header.uniware_po_code,
+    receipts: plan.receipts,
+    inward_pos: plan.inward.map((i) => ({ po_id: i.po_id, po_no: i.po_no, status_before: i.status_before })),
+  }
+  if (dryRun) return { approvalId: null, preview }
+
+  const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, "INVOICE_REVERT", header.id, "edit"])
+  const approvalId = (ar as { insertId: number }).insertId
+  // Display only — the handler re-plans from live rows. invoice_no old = new keeps it under Edits.
+  const items: [string, string, string][] = [
+    ["invoice_no", header.invoice_no, header.invoice_no],
+    ["manufacturer", "", header.mfg_name],
+    ["reason", "", reason],
+    ...plan.receipts.map((r): [string, string, string] => [`receipt:${r.po_no}`, String(r.before), String(r.after)]),
+    ...plan.receipts.filter((r) => r.reopen).map((r): [string, string, string] => [`reopen:${r.po_no}`, "received", "raised"]),
+    ...plan.inward.map((i): [string, string, string] => [`inward_po:${i.po_no}`, i.status_before ?? "", "reverted"]),
+  ]
+  for (const [field, oldV, newV] of items) {
+    await conn.execute(approvalsSql.insertApprovalItem, [approvalId, field, oldV, newV])
+  }
+  return { approvalId, preview }
 }
 
 export type ApplyRevertOptions = {
