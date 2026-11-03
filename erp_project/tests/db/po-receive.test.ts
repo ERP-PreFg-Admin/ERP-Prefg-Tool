@@ -58,9 +58,8 @@ test("receiving the full quantity closes the PO", async (t) => {
   })
 })
 
-test("tolerance auto-closes a PO whose shortfall is within 100 units", async (t) => {
-  // Deliberately pinned: 99 units never arrived and the PO still closes. That is
-  // the policy (poTolerance caps at 100), and it must not change by accident.
+test("a shortfall within the old tolerance no longer auto-closes the PO", async (t) => {
+  // Since 2026-11: a short delivery waits for a manual short-close, however small.
   await withRollback(async (conn) => {
     const a = await anchors(conn)
     if (!a) return t.skip("no anchors")
@@ -68,12 +67,12 @@ test("tolerance auto-closes a PO whose shortfall is within 100 units", async (t)
     assert.equal(poTolerance(1000), 100, "precondition")
 
     const po = await makePo(conn, a, { qty: 1000 })
-    const result = await receivePo(conn, po.id, 901, a.userId)
+    const result = await receivePo(conn, po.id, 999, a.userId)
 
-    assert.equal(result.status, "received", "remaining 99 <= tolerance 100")
+    assert.equal(result.status, "raised", "1 short of 1000 stays open")
     const row = await readPo(conn, po.id)
-    assert.equal(row.status, "received")
-    assert.equal(num(row.received_qty), 901, "the shortfall is NOT written up to qty")
+    assert.equal(row.status, "raised")
+    assert.equal(num(row.received_qty), 999)
   })
 })
 

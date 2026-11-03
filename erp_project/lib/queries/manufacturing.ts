@@ -11,6 +11,9 @@
  */
 
 import { SQL_TODAY_IST } from "@/lib/date"
+import {
+  APPROVED_ONLY, CHILD_AGG_JOIN, DISPLAY_STATUS_EXPR, MASTERS_ONLY, RECEIVED_TOTAL_EXPR,
+} from "@/lib/queries/purchase-orders"
 
 const LINES_SELECT = `
   SELECT
@@ -187,17 +190,26 @@ export const manufacturingSql = {
    * clock is IST via SQL_TODAY_IST, not the session's UTC: on the 1st of a
    * month before 05:30 IST a plain CURDATE() still reports last month, while
    * the heading above this table is rendered in IST and says the new one.
+   * Each order counts once at its own qty: splits are parts of it, and inward POs
+   * are receipt records, so neither is a row here. Received is the order's own plus
+   * its splits'; pending is what is still owed on an open order.
    * Params: [mfg_id]
    */
   selectMonthlyPoSummaryByMfg: `
     SELECT
       po.mfg_id, po.sku_code, sk.name AS sku_name,
       SUM(po.qty) AS po_qty,
-      SUM(COALESCE(po.received_qty, 0)) AS received_qty
+      SUM(${RECEIVED_TOTAL_EXPR}) AS received_qty,
+      SUM(CASE WHEN ${DISPLAY_STATUS_EXPR} IN ('raised', 'punched', 'partially_received')
+               THEN GREATEST(po.qty - ${RECEIVED_TOTAL_EXPR}, 0) ELSE 0 END) AS pending_qty
     FROM purchase_orders po
     LEFT JOIN master_skus sk ON sk.sku_code = po.sku_code
+    ${CHILD_AGG_JOIN}
     WHERE po.mfg_id = ?
-      AND po.status NOT IN ('draft', 'cancelled', 'rejected', 'reverted', 'discarded')
+      AND COALESCE(po.po_type, '') <> 'inward'
+      ${MASTERS_ONLY}
+      ${APPROVED_ONLY}
+      AND ${DISPLAY_STATUS_EXPR} NOT IN ('draft', 'cancelled', 'rejected', 'reverted', 'discarded')
       AND YEAR(po.date) = YEAR(${SQL_TODAY_IST}) AND MONTH(po.date) = MONTH(${SQL_TODAY_IST})
     GROUP BY po.mfg_id, po.sku_code, sk.name
     ORDER BY sk.name ASC
@@ -221,15 +233,20 @@ export const manufacturingSql = {
     INNER JOIN details_mfg d ON d.mfg_id = m.id
     LEFT JOIN master_recipe_mfg l ON l.mfg_id = m.id
     LEFT JOIN (
-      SELECT mfg_id,
+      -- One row per open order: splits are parts of their parent and inward POs are receipts.
+      -- Open value is the unreceived share of the order's value, splits' receipts included.
+      SELECT po.mfg_id,
         COUNT(*) AS open_pos,
-        -- Split children are priced, but the parent keeps its full value, so
-        -- counting both would double the split qty.
-        SUM(CASE WHEN reference_po IS NOT NULL AND COALESCE(po_type, '') <> 'inward'
-                 THEN 0 ELSE COALESCE(total_amount, 0) END) AS open_value
-      FROM purchase_orders
-      WHERE status NOT IN ('received', 'cancelled', 'reverted', 'draft', 'rejected', 'discarded')
-      GROUP BY mfg_id
+        SUM(CASE WHEN po.qty > 0
+                 THEN COALESCE(po.total_amount, 0) * GREATEST(po.qty - ${RECEIVED_TOTAL_EXPR}, 0) / po.qty
+                 ELSE 0 END) AS open_value
+      FROM purchase_orders po
+      ${CHILD_AGG_JOIN}
+      WHERE COALESCE(po.po_type, '') <> 'inward'
+        ${MASTERS_ONLY}
+        ${APPROVED_ONLY}
+        AND ${DISPLAY_STATUS_EXPR} IN ('raised', 'punched', 'partially_received')
+      GROUP BY po.mfg_id
     ) po ON po.mfg_id = m.id
     WHERE d.status = 'active'
       AND (? IS NULL OR m.id IN (?))

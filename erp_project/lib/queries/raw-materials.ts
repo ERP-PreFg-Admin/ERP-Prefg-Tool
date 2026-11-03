@@ -520,8 +520,11 @@ export const rawMaterials = {
     WHERE LOWER(name) = LOWER(?) AND LOWER(IFNULL(make,'')) = LOWER(?) AND LOWER(IFNULL(inci_name,'')) = LOWER(?)
   `,
 
-  /** Total RM count — used to auto-generate the next rm_code (RM<serial>). */
-  countTotal: `SELECT COUNT(*) AS total FROM master_rm`,
+  /** Highest serial ending an RM-…-NNNN code: seeds the RM series in serial_counters on first use. */
+  maxCodeSerial: `
+    SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(rm_code, '-', -1) AS UNSIGNED)), 0) AS n
+    FROM master_rm WHERE rm_code REGEXP '^RM-.*-[0-9]+$'
+  `,
 
   /**
    * Insert a minimal manufacturer approval row (no rate data yet)

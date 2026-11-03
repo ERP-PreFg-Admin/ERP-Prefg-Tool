@@ -8,6 +8,7 @@ import {
   type SkuMatch, type SkuMatchContext, type WarehouseMatchBy,
 } from "@/lib/invoice/invoice-mapping"
 import { MATCH_TOLERANCE } from "@/lib/invoice/three-way"
+import { destinationTier, poDestinationLabel } from "@/lib/invoice/po-eligibility"
 import { qtyAmountMismatches, describeQtyAmountMismatch } from "@/lib/invoice/qty-amount-check"
 import type { OpenPoOption, ParsedCharge, ParsedInvoice } from "@/types/invoice"
 import type { MfgOption, WarehouseOption } from "../po-procurement/po-types"
@@ -255,6 +256,22 @@ function byRaiseDate(a: OpenPoOption, b: OpenPoOption): number {
   return a.id - b.id
 }
 
+const byDestination = (a: OpenPoOption, b: OpenPoOption, dest: string) =>
+  destinationTier(a.destination, dest) - destinationTier(b.destination, dest)
+
+/** Lines booked against another warehouse's PO — listed in the confirm-on-save dialog. */
+export type DestinationMismatch = { sku_code: string; qty: string; po_no: string; po_destination: string }
+
+export function destinationMismatches(rows: Row[], poById: Map<string, OpenPoOption>, invoiceDestination: string): DestinationMismatch[] {
+  const out: DestinationMismatch[] = []
+  for (const r of rows) {
+    const po = r.reference_po_id ? poById.get(r.reference_po_id) : undefined
+    if (!po || destinationTier(po.destination, invoiceDestination) !== 2) continue
+    out.push({ sku_code: r.sku_code, qty: r.qty, po_no: po.po_no, po_destination: poDestinationLabel(po.destination) })
+  }
+  return out
+}
+
 const sumStr = (a: string, b: string, dp: number) =>
   a === "" && b === "" ? "" : String(roundTo((Number(a) || 0) + (Number(b) || 0), dp))
 
@@ -325,17 +342,20 @@ function splitMoney(raw: string, chunks: number[], total: number): string[] {
  */
 export function allocateFifo(
   rows: Row[],
-  openPos: OpenPoOption[]
+  openPos: OpenPoOption[],
+  invoiceDestination = ""
 ): { rows: Row[]; shortages: Shortage[] } {
   const buckets = new Map<string, OpenPoOption[]>()
   for (const po of openPos) {
     const key = norm(po.sku_code)
-    if (!key) continue
+    // Never another warehouse's PO: that is only ever a hand pick (and confirmed on save).
+    if (!key || destinationTier(po.destination, invoiceDestination) === 2) continue
     const list = buckets.get(key)
     if (list) list.push(po)
     else buckets.set(key, [po])
   }
-  for (const list of buckets.values()) list.sort(byRaiseDate)
+  // Same warehouse first, then POs with no destination; FIFO within each.
+  for (const list of buckets.values()) list.sort((a, b) => byDestination(a, b, invoiceDestination) || byRaiseDate(a, b))
 
   const left = new Map<number, number>(
     openPos.map((p) => [p.id, Math.max(0, Number(p.remaining) || 0)])
@@ -458,7 +478,8 @@ export function collectProblems(
     }
   }
   for (const sh of bySku.values()) {
-    out.push(`Only ${sh.available} of ${sh.needed} ${sh.sku_code} are on open POs — ${roundTo(sh.needed - sh.available, 3)} short.`)
+    const where = form.destination.trim() ? ` for ${form.destination.trim()}` : ""
+    out.push(`Only ${sh.available} of ${sh.needed} ${sh.sku_code} are on open POs${where} — ${roundTo(sh.needed - sh.available, 3)} short.`)
   }
 
   // Every line books against an existing order; there is no "raise an inward PO
@@ -571,10 +592,11 @@ export function sumLineItems(rows: Row[]): number {
  * is "which version of *this product* did the goods come from". Offering another
  * SKU's POs would answer a question nobody asked.
  */
-export function poOptionsFor(openPos: OpenPoOption[], skuCode: string): OpenPoOption[] {
+/** The SKU's open POs for the picker, in the order FIFO would take them: same warehouse, none, other. */
+export function poOptionsFor(openPos: OpenPoOption[], skuCode: string, invoiceDestination = ""): OpenPoOption[] {
   const target = skuCode.trim().toLowerCase()
-  if (!target) return openPos
-  return openPos.filter((p) => p.sku_code?.trim().toLowerCase() === target)
+  const list = target ? openPos.filter((p) => p.sku_code?.trim().toLowerCase() === target) : [...openPos]
+  return list.sort((a, b) => byDestination(a, b, invoiceDestination) || byRaiseDate(a, b))
 }
 
 /** Live-Recipe facts per SKU, keyed lowercase, read off whichever open POs carry

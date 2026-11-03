@@ -109,8 +109,11 @@ export const vendors = {
       AND (? IS NULL OR v.id IN (?))
   `,
 
-  /** Unconditional count, used only to seed the next VEN-<serial> code. */
-  countTotal: `SELECT COUNT(*) AS total FROM master_vendors`,
+  /** Highest serial ending a VEN-…-NNN code: seeds the VENDOR series in serial_counters on first use. */
+  maxCodeSerial: `
+    SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(code, '-', -1) AS UNSIGNED)), 0) AS n
+    FROM master_vendors WHERE code REGEXP '^VEN-.*-[0-9]+$'
+  `,
 
   /** Distinct non-null zones for the filter dropdown. */
   selectDistinctZones: `

@@ -22,6 +22,8 @@ const FIELD_LABEL: Record<string, string> = {
   attachment_key: "PO Document",
   received_qty: "Received Qty",
   split: "Split off",
+  split_received: "Received on split",
+  destination_mismatch: "Booked from another warehouse",
   revert_reason: "Revert",
 }
 

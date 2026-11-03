@@ -36,6 +36,9 @@ import { pool, query } from "@/lib/db"
 import { deleteFile, uploadFile } from "@/lib/s3"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { supplierInvoicesSql } from "@/lib/queries/supplier-invoices"
+import { destinationTier, poDestinationLabel, referencePoBlock, type RefPo } from "@/lib/invoice/po-eligibility"
+import { assertPoInScope } from "@/lib/po/po-guard"
+import { nextPoNo } from "@/lib/po/po-number"
 import { manufacturers as manufacturersSql } from "@/lib/queries/manufacturers"
 import { skus as skusSql } from "@/lib/queries/skus"
 import { receivePo, type ReceiveResult } from "@/lib/po/po-receive"
@@ -127,6 +130,34 @@ async function resolveBrands(
   return brandBySku
 }
 
+type RefPoRow = RefPo & { destination: string | null }
+
+/** Re-checks every line's reference PO on the server. Wrong manufacturer, SKU, inward PO or
+ *  out-of-scope is refused; another warehouse's PO needs the user's confirmation. Returns the confirmed mismatches. */
+async function checkReferencePos(conn: PoolConnection, body: InvoiceInward, userId: number) {
+  const ids = [...new Set(body.line_items.map((l) => Number(l.reference_po_id)).filter(Boolean))]
+  if (ids.length === 0) return []
+  const [rows] = await conn.query(purchaseOrdersSql.selectRefPos, [ids])
+  const byId = new Map((rows as RefPoRow[]).map((r) => [Number(r.id), r]))
+
+  const mismatches: { po: RefPoRow; sku: string; qty: number }[] = []
+  for (const [i, line] of body.line_items.entries()) {
+    const po = byId.get(Number(line.reference_po_id))
+    const blocked = referencePoBlock(po, line, Number(body.mfg_id))
+    if (blocked || !po) throw new ApiError(400, "reference_po_mismatch", `Line ${i + 1} (${line.sku_code}): ${blocked}.`)
+    if (destinationTier(po.destination, body.destination) === 2) mismatches.push({ po, sku: line.sku_code, qty: Number(line.qty) })
+  }
+  for (const id of ids) await assertPoInScope(userId, id, conn)
+
+  if (mismatches.length && !body.confirm_destination_mismatch) {
+    const lines = mismatches.map((m) => `${m.sku} on ${m.po.po_no} (${poDestinationLabel(m.po.destination)})`)
+    throw new ApiError(409, "destination_mismatch",
+      `This invoice is for ${body.destination}, but ${lines.join("; ")} ${lines.length === 1 ? "is" : "are"} for another warehouse. Confirm to book against ${lines.length === 1 ? "it" : "them"}.`,
+      { lines: mismatches.map((m) => ({ sku_code: m.sku, qty: m.qty, po_no: m.po.po_no, po_destination: m.po.destination })) })
+  }
+  return mismatches
+}
+
 /** Step 2's database work. Runs inside the caller's open transaction. Exported for the
  *  re-inward-after-revert DB test (tests/db/invoice-revert.test.ts). */
 export async function writeInvoiceAndPos(
@@ -144,6 +175,8 @@ export async function writeInvoiceAndPos(
   // invoice's own — backdated on purpose.
   const expectedOn = invoice_date?.trim() || todayIST()
 
+  const destinationMismatches = await checkReferencePos(conn, body, userId)
+
   // Header first: uq_supplier_invoice (mfg_id, invoice_no) rejects a
   // re-submission, and it has to fire before any receipt is credited or the
   // duplicate would inflate received_qty on its way to the error.
@@ -158,24 +191,22 @@ export async function writeInvoiceAndPos(
   ])
   const invoiceId = (invRes as { insertId: number }).insertId
 
+  // Each confirmed cross-warehouse booking leaves a row on that PO, so it can be traced and reported on.
+  for (const po of new Map(destinationMismatches.map((m) => [m.po.id, m.po])).values()) {
+    await conn.execute(purchaseOrdersSql.insertPoHistory, [
+      po.id, po.po_no, "update", "destination_mismatch", poDestinationLabel(po.destination),
+      `${destination} · invoice ${invoice_no} · confirmed`, null, userId,
+    ])
+  }
+
   const created: InwardOutcome["created"] = []
   const receivedOut: InwardOutcome["received"] = []
   const poLines: { id: number; po_no: string; sku_code: string; sku_name: string | null; qty: number; unitPrice: number | null; mrp: number | null }[] = []
   /** Every line, in invoice order — merged by SKU below into the inward POs. */
   const staged: InwardLine[] = []
 
-  const nextSeq = new Map<string, number>()
-  /** Seeds lazily: a brand reached only via a received line comes from the
-   *  parent PO's number, which the SKU pass never saw. */
-  const nextPoNo = async (brand: string) => {
-    if (!nextSeq.has(brand)) {
-      const [rows] = await conn.execute(purchaseOrdersSql.lastSeqByPrefix, [`${brand}-INW-${yyyymm}-%`])
-      nextSeq.set(brand, Number((rows as { last_seq: number }[])[0]?.last_seq ?? 0) + 1)
-    }
-    const seq = nextSeq.get(brand)!
-    nextSeq.set(brand, seq + 1)
-    return `${brand}-INW-${yyyymm}-${String(seq).padStart(3, "0")}`
-  }
+  /** One INW series per brand prefix and IST month, from the serial table. */
+  const nextInwardNo = (brand: string) => nextPoNo(conn, `${brand}-INW-${yyyymm}`)
 
   // One receipt per PO for the whole invoice: per-line receipts let an early batch auto-close the PO and refuse the rest.
   const receiptTotal = new Map<number, number>()
@@ -237,7 +268,7 @@ export async function writeInvoiceAndPos(
   const poIdBySku = new Map<string, number>()
   for (const line of mergeInwardLinesBySku(staged)) {
     const { skuCode, qty, unitPrice, totalAmount } = line
-    const po_no = await nextPoNo(line.brand)
+    const po_no = await nextInwardNo(line.brand)
 
     const [res] = line.refPoNo
       ? await conn.execute(purchaseOrdersSql.insertInwardReceived, [

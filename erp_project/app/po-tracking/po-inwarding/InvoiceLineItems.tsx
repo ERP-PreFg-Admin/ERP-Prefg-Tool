@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 import { SectionHead } from "./InvoiceFields"
 import { bomBySku, lineTotal, poOptionsFor, type Row } from "./invoice-form"
 import type { OpenPoOption } from "@/types/invoice"
+import { destinationTier, poDestinationLabel } from "@/lib/invoice/po-eligibility"
 import type { SkuOption } from "../po-procurement/po-types"
 
 const cellCls =
@@ -32,7 +33,7 @@ const money = (v: string | number | null | undefined) => {
  * just not shown or edited on this screen. */
 
 export function InvoiceLineItems({
-  rows, setRow, addRow, removeRow, rematch, skuOptions, openPos, mfgId, gstDerived,
+  rows, setRow, addRow, removeRow, rematch, skuOptions, openPos, mfgId, gstDerived, invoiceDestination,
 }: {
   rows: Row[]
   setRow: (i: number, field: keyof Row, value: string) => void
@@ -47,6 +48,8 @@ export function InvoiceLineItems({
   /** The GST rate was worked out from the invoice total rather than printed per
    *  line — see the column header. */
   gstDerived: boolean
+  /** The invoice's warehouse; a line booked against another warehouse's PO is flagged. */
+  invoiceDestination: string
 }) {
   const poById = useMemo(() => new Map(openPos.map((p) => [String(p.id), p])), [openPos])
   const bomInfo = useMemo(() => bomBySku(openPos), [openPos])
@@ -127,12 +130,11 @@ export function InvoiceLineItems({
             )}
             {rows.map((r, i) => {
               const bom = bomInfo.get(r.sku_code.trim().toLowerCase())
-              // The only case the desk still picks a PO by hand: two Recipe versions
-              // of this product are live at once and nothing on the PO records
-              // which one it was raised against. Everywhere else the FIFO match
-              // decides, and showing a picker would only invite it to be undone.
+              // Two Recipe versions live at once: nothing on the PO says which it was
+              // raised against, so the desk must check FIFO's pick by hand.
               const needsChoice = (bom?.count ?? 0) > 1
               const refPo = poById.get(r.reference_po_id)
+              const mismatch = !!refPo && destinationTier(refPo.destination, invoiceDestination) === 2
               // A tie the matcher couldn't break opens on just its look-alikes.
               const tie = new Set((r.sku_candidates ?? "").split(", ").filter(Boolean))
               const suggested = tie.size ? skuOptions.filter((o) => tie.has(o.sku_code)) : undefined
@@ -178,41 +180,43 @@ export function InvoiceLineItems({
                 <td>
                   {!mfgId ? (
                     <span className="text-[11px] text-muted-foreground">Pick a manufacturer first</span>
-                  ) : needsChoice ? (
+                  ) : (
                     <>
+                      {/* FIFO fills this in; the desk may pick another PO for the SKU. Same warehouse first. */}
                       <FuzzySelect
-                        options={poOptionsFor(openPos, r.sku_code)}
+                        options={poOptionsFor(openPos, r.sku_code, invoiceDestination)}
                         value={r.reference_po_id}
                         onChange={(v) => setRow(i, "reference_po_id", v)}
                         getValue={(o) => String(o.id)}
-                        getLabel={(o) => `${o.po_no} — ${Number(o.remaining)} left`}
-                        searchKeys={["po_no", "sku_code", "sku_name"]}
-                        placeholder="Pick the PO…"
-                        className={cn("text-xs", !r.reference_po_id && warnCls)}
+                        getLabel={(o) => `${o.po_no} — ${poDestinationLabel(o.destination)} · ${Number(o.remaining)} left`}
+                        searchKeys={["po_no", "sku_code", "sku_name", "destination"]}
+                        placeholder={openPos.length === 0 ? "No open POs" : "Pick the PO…"}
+                        className={cn("text-xs", (!r.reference_po_id || mismatch) && warnCls)}
                       />
-                      <p className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-500">
-                        {bom?.count} Recipe versions live — pick the right PO
-                      </p>
+                      {needsChoice ? (
+                        <p className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-500">
+                          {bom?.count} Recipe versions live — pick the right PO
+                        </p>
+                      ) : mismatch && refPo ? (
+                        <p className="mt-0.5 flex items-start gap-1 text-[10px] text-amber-700 dark:text-amber-500">
+                          <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
+                          PO is for {poDestinationLabel(refPo.destination)}, invoice is for {invoiceDestination} — you&apos;ll confirm on save
+                        </p>
+                      ) : refPo ? (
+                        <p className="mt-0.5 flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-500">
+                          <Check className="h-3 w-3 shrink-0" />
+                          {destinationTier(refPo.destination, invoiceDestination) === 0
+                            ? "same warehouse"
+                            : `Mumbai fallback${refPo.destination ? "" : " (PO has no destination)"}`}
+                          {refPo.date ? ` · raised ${String(refPo.date).slice(0, 10)}` : ""}
+                        </p>
+                      ) : (
+                        <p className="mt-0.5 flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-500">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          {openPos.length === 0 ? "No open POs" : "No open PO left to cover this"}
+                        </p>
+                      )}
                     </>
-                  ) : refPo ? (
-                    // Assigned by the FIFO match, not chosen: read-only, with the
-                    // reason it won stated so it isn't a black box.
-                    <div className="flex items-start gap-1 py-1 text-[11px] text-emerald-700 dark:text-emerald-500">
-                      <Check className="mt-0.5 h-3 w-3 shrink-0" />
-                      <span>
-                        <span className="font-medium">{refPo.po_no}</span>
-                        <span className="block text-[10px] text-muted-foreground">
-                          oldest open PO{refPo.date ? ` · raised ${String(refPo.date).slice(0, 10)}` : ""}
-                        </span>
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="flex items-start gap-1 py-1 text-[11px] text-amber-700 dark:text-amber-500">
-                      <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                      <span>
-                        {openPos.length === 0 ? "No open POs" : "No open PO left to cover this"}
-                      </span>
-                    </div>
                   )}
                 </td>
 

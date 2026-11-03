@@ -21,16 +21,17 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { AlertTriangle, Check, FileUp, History, Loader2, RotateCw } from "lucide-react"
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
+import { HEAD_BG, HEAD_ROW_LOOK } from "@/components/ui/table"
 import type { OpenPoOption, ParsedCharge } from "@/types/invoice"
 import type { MfgOption, SkuOption, WarehouseOption } from "../po-procurement/po-types"
 import {
   EMPTY_FORM, MAX_MB, tooLargeMessage, allocateFifo, collectProblems, emptyRow, formFromParsed,
-  matchSummary, rowsFromParsed, sumLineItems, sumCharges, goodsGstPercent, toInwardPayload,
+  destinationMismatches, matchSummary, rowsFromParsed, sumLineItems, sumCharges, goodsGstPercent, toInwardPayload,
   type InvoiceForm, type Row, type Shortage,
 } from "./invoice-form"
 import { commitInvoice, fetchOpenPos, fetchSkuMatchContext, fetchUniwareOnlyPos, InvoiceApiError, parseInvoiceFile, type InwardStep } from "./invoice-api"
@@ -116,6 +117,8 @@ export default function AddInvoiceDialog({
   const rowsRef      = useRef<Row[]>([])
   /** Latest invoice number, for auto-picking a Uniware-only PO without refetching on every keystroke. */
   const invoiceNoRef = useRef("")
+  /** Latest invoice destination, so FIFO ranks same-warehouse POs first. */
+  const destRef      = useRef("")
   /** Set once the invoice is filed, so closing doesn't resurrect its draft. */
   const committedRef = useRef(false)
   const split        = useSplitPane(50)
@@ -217,6 +220,7 @@ export default function AddInvoiceDialog({
   // so a concurrent re-render can't publish a value the commit then discards.
   useEffect(() => { rowsRef.current = rows }, [rows])
   useEffect(() => { invoiceNoRef.current = form.invoiceNo }, [form.invoiceNo])
+  useEffect(() => { destRef.current = form.destination }, [form.destination])
 
   // Uniware-only POs follow the manufacturer; one whose ReferenceNo is this invoice is picked for the user.
   useEffect(() => {
@@ -235,7 +239,7 @@ export default function AddInvoiceDialog({
    *  line across POs when one can't cover it, and re-running is idempotent —
    *  allocateFifo merges previous splits back before it starts. */
   function applyFifo(pos: OpenPoOption[]) {
-    const result = allocateFifo(rowsRef.current, pos)
+    const result = allocateFifo(rowsRef.current, pos, destRef.current)
     rowsRef.current = result.rows
     setRows(result.rows)
     setShortages(result.shortages)
@@ -261,6 +265,13 @@ export default function AddInvoiceDialog({
     })
     return () => { cancelled = true }
   }, [form.mfgId, phase])
+
+  // A corrected destination re-matches every line against that warehouse's POs first.
+  useEffect(() => {
+    if (phase !== "review" || openPos.length === 0) return
+    applyFifo(openPos)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a destination change re-matches; new POs re-match in their own effect
+  }, [form.destination])
 
   /** Switching manufacturer invalidates both the PO list and every reference
    *  already chosen from it — they belonged to the previous manufacturer. */
@@ -344,16 +355,21 @@ export default function AddInvoiceDialog({
   }, [form, rows, poById, shortages, chargeSum, warehouseOptions, uniwarePos, adoptCode])
   const matched  = useMemo(() => matchSummary(form, rows, shortages), [form, rows, shortages])
   const receiveCount = useMemo(() => rows.filter((r) => r.reference_po_id).length, [rows])
+  // Lines booked against another warehouse's PO: allowed, but confirmed line by line on save.
+  const mismatches = useMemo(() => destinationMismatches(rows, poById, form.destination), [rows, poById, form.destination])
+  const [confirmingMismatch, setConfirmingMismatch] = useState(false)
 
-  async function handleSubmit() {
+  async function handleSubmit(confirmed = false) {
     if (problems.length > 0 || !file) return
+    if (mismatches.length > 0 && !confirmed) { setConfirmingMismatch(true); return }
+    setConfirmingMismatch(false)
     setError("")
     setSubmitStep("s3")
     try {
       // One request: S3, our rows and the Uniware mirror have to succeed or
       // unwind together, which they can't if the client drives them separately.
       // Its step events arrive as they happen, so each gets its own toast.
-      const payload = { ...toInwardPayload(form, rows, charges), adopt_uniware_po_code: adoptCode || null }
+      const payload = { ...toInwardPayload(form, rows, charges), adopt_uniware_po_code: adoptCode || null, confirm_destination_mismatch: mismatches.length > 0 }
       const outcome = await commitInvoice(file, payload, (e) => {
         if (e.status === "start") { setSubmitStep(e.step); return }
         if (e.status === "ok")      toast({ title: STEP_LABEL[e.step], description: e.message, variant: "success" })
@@ -585,6 +601,7 @@ export default function AddInvoiceDialog({
                   skuOptions={skuOptions}
                   openPos={openPos}
                   mfgId={form.mfgId}
+                  invoiceDestination={form.destination}
                 />
               </div>
             </div>
@@ -654,7 +671,7 @@ export default function AddInvoiceDialog({
                   )}
                 </p>
                 <Button variant="outline" onClick={closeAndReset} disabled={submitting}>Cancel</Button>
-                <Button size="lg" onClick={handleSubmit} disabled={submitting || problems.length > 0}>
+                <Button size="lg" onClick={() => handleSubmit()} disabled={submitting || problems.length > 0}>
                   {submitting ? (
                     <>
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -667,6 +684,44 @@ export default function AddInvoiceDialog({
           </>
         )}
       </DialogContent>
+
+      {/* Double check before booking goods against a PO for another warehouse. */}
+      <Dialog open={confirmingMismatch} onOpenChange={(o) => { if (!o) setConfirmingMismatch(false) }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600" /> Book against another warehouse&apos;s PO?
+            </DialogTitle>
+            <DialogDescription>
+              This invoice is for <span className="font-medium text-foreground">{form.destination}</span>, but{" "}
+              {mismatches.length === 1 ? "this line is" : `these ${mismatches.length} lines are`} booked against a PO raised for a different warehouse.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-64 overflow-auto rounded border border-border">
+            <table className="w-full text-xs">
+              <thead className={HEAD_BG}>
+                <tr className={cn(HEAD_ROW_LOOK, "text-left [&>th]:px-2 [&>th]:py-1.5")}>
+                  <th>SKU</th><th className="text-right">Qty</th><th>PO</th><th>PO destination → invoice</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mismatches.map((m, i) => (
+                  <tr key={i} className="border-t border-border [&>td]:px-2 [&>td]:py-1.5">
+                    <td className="font-mono">{m.sku_code}</td>
+                    <td className="text-right">{Number(m.qty).toLocaleString("en-IN")}</td>
+                    <td className="font-mono">{m.po_no}</td>
+                    <td>{m.po_destination} → <span className="font-medium">{form.destination}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmingMismatch(false)}>Go back</Button>
+            <Button onClick={() => handleSubmit(true)}>Yes, book against these POs</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   )
 }

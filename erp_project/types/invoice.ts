@@ -101,6 +101,8 @@ export type OpenPoOption = {
   status:       string
   /** Set when this PO is itself a split: the po_no it was split off. */
   reference_po: string | null
+  /** Where the PO ships; null on older POs, which match as Mumbai (lib/invoice/po-eligibility.ts). */
+  destination:  string | null
 }
 
 /** A row in the Invoice History list. Numerics arrive as strings from DECIMAL. */

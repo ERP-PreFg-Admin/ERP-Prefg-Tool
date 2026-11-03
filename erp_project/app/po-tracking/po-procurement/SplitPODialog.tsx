@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils"
 import type { MfgSkuOption, MfgUnitChoice, PoRow, SplitRow, WarehouseOption } from "./po-types"
 import { fmtInt, fmtRate, num, unitLabel, warehousesForEntity, warehouseLabel, warehouseKey } from "./po-utils"
 
-const blankRow = (unit = ""): SplitRow => ({ destination: "", qty: "", mfg_unit_id: unit })
+const blankRow = (unit = "", destination = ""): SplitRow => ({ destination, qty: "", mfg_unit_id: unit })
 
 export default function SplitPODialog({
   open, onClose, po, warehouseOptions, onSplit,
@@ -42,16 +42,18 @@ export default function SplitPODialog({
     () => warehousesForEntity(warehouseOptions, po?.entity_code ?? null),
     [warehouseOptions, po?.entity_code]
   )
+  // Every line starts on the parent's destination when it is one the split may use.
+  const parentDest = destinations.some((w) => w.name === po?.destination) ? po?.destination ?? "" : ""
 
   useEffect(() => {
     if (open && po) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the split form each time the dialog is opened
-      setRows([blankRow()])
+      setRows([blankRow("", parentDest)])
       setUnits([])
       setDefaultUnit("")
       setApiError("")
     }
-  }, [open, po])
+  }, [open, po, parentDest])
 
   // Lines start on the parent's unit, else the SKU's mapped one.
   useEffect(() => {
@@ -97,7 +99,7 @@ export default function SplitPODialog({
   }
 
   const addRow    = () => {
-    setRows((p) => [...p, blankRow(defaultUnit)])
+    setRows((p) => [...p, blankRow(defaultUnit, parentDest)])
     // Bring the new line into view once it has rendered.
     requestAnimationFrame(() => linesRef.current?.scrollTo({ top: linesRef.current.scrollHeight, behavior: "smooth" }))
   }
@@ -110,6 +112,10 @@ export default function SplitPODialog({
     if (!po) return
     if (rows.some((r) => !r.qty || num(r.qty) <= 0)) {
       setApiError("Each row must have a quantity greater than 0.")
+      return
+    }
+    if (rows.some((r) => !r.destination)) {
+      setApiError("Pick a destination on every line.")
       return
     }
     if (overLimit) {
@@ -235,7 +241,7 @@ export default function SplitPODialog({
                       <Select
                         value={row.destination}
                         onChange={(e) => setRow(i, "destination", e.target.value)}
-                        className="w-full truncate"
+                        className={cn("w-full truncate", !row.destination && "border-amber-400")}
                       >
                         <option value="">— Destination —</option>
                         {destinations.map((w) => (

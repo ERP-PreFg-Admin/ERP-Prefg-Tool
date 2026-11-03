@@ -35,7 +35,8 @@ export function canDirectEditPo(po: {
   return po.status === "raised" && !po.email_sent_at && po.po_type !== "inward" && !po.reference_po
 }
 
-/** Why this PO can't be discarded, or null. Discard is for a Draft the manufacturer never saw, with nothing booked on it. */
+/** Why this PO can't be discarded, or null. Discard is for a Draft the manufacturer never saw, with nothing booked on it.
+ *  An unmailed split qualifies too: its qty goes back to the parent, since CHILD_AGG_JOIN skips discarded rows. */
 export function discardBlock(po: {
   po_no: string; status: string | null; email_sent_at: string | Date | null; po_type: string | null
   reference_po: string | null; received_qty: string | number; child_count: string | number
@@ -45,10 +46,45 @@ export function discardBlock(po: {
   if (po.email_sent_at) return `${po.po_no} has already been mailed to the manufacturer — cancel or short-close it instead.`
   if (po.status !== "raised") return `${po.po_no} isn't a Draft PO (status '${po.status ?? ""}').`
   if (po.po_type === "inward") return `${po.po_no} is an inward PO — revert its invoice instead.`
-  if (po.reference_po) return `${po.po_no} is a split of ${po.reference_po} — cancel it instead.`
   if (Number(po.child_count) > 0) return `${po.po_no} has been split — cancel its splits first.`
   if (Number(po.received_qty) > 0 || Number(po.invoice_lines) > 0) return `${po.po_no} has goods booked against it — short-close it instead.`
   if (Number(po.edit_pending)) return `${po.po_no} has an edit awaiting approval — approve or reject it first.`
+  return null
+}
+
+/** What a split row needs for the close/cancel rules. */
+export type SplitRow = { po_no: string; status: string | null; qty: string | number; received_qty: string | number | null }
+
+const DEAD = new Set(["cancelled", "discarded"])
+const DONE = new Set(["cancelled", "discarded", "short_closed", "received", "reverted"])
+
+/** Not cancelled or discarded: its qty still counts against the parent. */
+export const isLiveSplit = (c: SplitRow): boolean => !DEAD.has(c.status ?? "")
+
+/** Still owes goods: live, not closed, and not received in full. */
+export const isOpenSplit = (c: SplitRow): boolean =>
+  !DONE.has(c.status ?? "") && Number(c.received_qty ?? 0) < Number(c.qty)
+
+/** Statuses a PO can be short-closed or cancelled from. partially_received is derived, never stored. */
+const CLOSEABLE = new Set(["raised", "punched", "partially_received"])
+
+/** Why this PO can't be short-closed, or null. A parent waits until every split is closed. */
+export function closeBlock(po: { po_no: string; status: string | null }, splits: SplitRow[]): string | null {
+  if (!CLOSEABLE.has(po.status ?? "")) return `${po.po_no} can't be short-closed from status '${po.status ?? ""}'.`
+  const open = splits.filter(isOpenSplit).map((c) => c.po_no)
+  if (open.length) return `${po.po_no} has open splits (${open.join(", ")}) — short-close or cancel them first.`
+  return null
+}
+
+/** Why this PO can't be cancelled, or null. Anything received means short-close; any live split must go first. */
+export function cancelBlock(
+  po: { po_no: string; status: string | null; received_qty: string | number | null },
+  splits: SplitRow[],
+): string | null {
+  if (!CLOSEABLE.has(po.status ?? "")) return `${po.po_no} can't be cancelled from status '${po.status ?? ""}'.`
+  if (Number(po.received_qty ?? 0) > 0) return `${po.po_no} has goods received against it — short-close it instead.`
+  const live = splits.filter(isLiveSplit).map((c) => c.po_no)
+  if (live.length) return `${po.po_no} has splits (${live.join(", ")}) — cancel or discard them first.`
   return null
 }
 

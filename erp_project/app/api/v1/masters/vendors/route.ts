@@ -80,7 +80,7 @@ export const POST = withGateway({
         await assertNoDuplicateBankingFields(conn, vendors, { gst_number, ifsc_number, account_number }, 0)
 
         // Auto-generate code as VEN-<RM/PM/BT>-<first 3 letters of name>.
-        const { vendorId, code } = await insertVendorWithGeneratedCode(conn, vendors.insertVendor, vendors.countTotal, name, type)
+        const { vendorId, code } = await insertVendorWithGeneratedCode(conn, vendors.insertVendor, vendors.maxCodeSerial, name, type)
         logger.info({ ...logCtx, vendorId, code, message: "Vendor created." })
         await conn.execute(vendors.insertVendorDetails, [
           vendorId,

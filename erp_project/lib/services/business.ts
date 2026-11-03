@@ -62,8 +62,9 @@ export async function getBusinessMetrics(
     throw new ApiError(403, "forbidden", "You do not have access to observability.")
   }
 
-  // All filters null, inward POs left in, scope UNRESTRICTED — 27 params.
-  const poParams = buildStatusCountParams(null, null, null, null, null, null, null, false, UNRESTRICTED)
+  // All filters null, scope UNRESTRICTED — 27 params. Inward POs are left out: each is a
+  // receipt already counted on its order, so including them counted every invoiced unit twice.
+  const poParams = buildStatusCountParams(null, null, null, null, null, null, null, true, UNRESTRICTED)
 
   const [statusRows, summaryRows, approvalRows, throughputRows, invoiceRows] = await Promise.all([
     timedQuery<Record<string, unknown>>(purchaseOrdersSql.statusCounts, poParams, { label: "observability.poStatusCounts" }),

@@ -145,7 +145,8 @@ export const PO_PROCUREMENT_EXPORT_COLUMNS: ExportColumn[] = [
   // be re-uploadable without hand-adding the column.
   { key: "bom_code",      label: "Recipe Code",            type: "text"   },
   { key: "qty",           label: "PO Qty",              type: "number" },
-  { key: "received_qty",  label: "Received Qty",        type: "number" },
+  // The order's whole receipt: its own plus its splits' (splits aren't rows in this file).
+  { key: "received_total", label: "Received Qty",       type: "number" },
   { key: "unit_price",    label: "Rate",                type: "number" },
   { key: "amount_pre_gst", label: "Amount (pre-GST)",   type: "number" },
   { key: "gst_percent",   label: "GST %",               type: "number" },

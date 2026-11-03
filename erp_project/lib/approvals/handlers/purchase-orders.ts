@@ -30,6 +30,8 @@ import { BULK_PO_TYPES, isSpecialPoType, specialPoPrice, SPECIAL_PO_LABEL } from
 import { ApiError } from "@/lib/gateway/errors"
 import { bulkUpdateBlock, type BulkUpdateTarget } from "@/lib/po/po-bulk-check"
 import { applyDraftPoEdit, draftEditFromItems } from "@/lib/po/po-edit"
+import { terminalBlock } from "@/lib/po/po-lifecycle"
+import { nextPoNo, poPrefix } from "@/lib/po/po-number"
 
 // PO_EDIT: an edit of a Draft PO, staged as field items + `reason`. Nothing on the PO
 // changes until approve; reject leaves it as it was.
@@ -119,12 +121,7 @@ export async function createBulkPoRow(
 
   const rawBrand = sku.brand?.trim() || skuCode.split("-")[0]
   const brand = brandCode(rawBrand)
-  const year = new Date().getFullYear()
-  const month = String(new Date().getMonth() + 1).padStart(2, "0")
-  const poPrefix = `${brand}-${poType === "impromptu" ? "IMP" : "PO"}-${year}${month}`
-  const [seqRows] = await conn.execute(purchaseOrdersSql.lastSeqByPrefix, [`${poPrefix}-%`])
-  const seq = (Number((seqRows as { last_seq: number }[])[0]?.last_seq ?? 0) + 1).toString().padStart(3, "0")
-  const newPoNo = `${poPrefix}-${seq}`
+  const newPoNo = await nextPoNo(conn, poPrefix(brand, poType === "impromptu" ? "IMP" : "PO"))
 
   // The price staged at upload (what the approver saw); files staged
   // before upload-time pricing carry no priced_at and resolve here.
@@ -182,6 +179,11 @@ export const poBulkHandler: ModuleHandler = {
           // Re-checked here: the PO may have been mailed since the file was uploaded.
           const blocked = bulkUpdateBlock(existing, row)
           if (blocked) { skipped++; skipReasons.push(`${poNo}: ${blocked}`); continue }
+          // Same rules as the close/cancel routes, on the locked order.
+          if ((rawStatus === "cancelled" || rawStatus === "short_closed") && rawStatus !== existing.status) {
+            const { blocked: refused } = await terminalBlock(conn, existing.id, rawStatus)
+            if (refused) { skipped++; skipReasons.push(`${poNo}: ${refused}`); continue }
+          }
           const rawExpectedOn = normalizeDateCell(row.expected_on) || null
           const rawDestination = row.destination?.trim() || null
           // Truncated, not rejected: the column is VARCHAR(300) and a long note

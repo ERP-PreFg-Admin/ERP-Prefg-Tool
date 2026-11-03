@@ -5,6 +5,7 @@ import { rawMaterials } from "@/lib/queries/raw-materials"
 import { packingMaterials } from "@/lib/queries/packing-materials"
 import { ApiError } from "@/lib/gateway/errors"
 import type { PoolConnection } from "mysql2/promise"
+import { nextSerial, seedFrom } from "@/lib/serials"
 
 const MAKE_FUZZY_THRESHOLD = 0.3
 
@@ -45,51 +46,44 @@ export async function findFuzzyMakeMatch(
 }
 
 /**
- * Auto-generates the next RM/PM business code (e.g. "RM001", "PM014") when
- * the caller didn't supply one. Queries the live count inside the caller's
- * open transaction, so within a single bulk-import loop each row sees the
- * previous rows' inserts and never repeats a code.
- *
- * rm_code/pm_code have no DB unique constraint (unlike vendors.code /
- * master_mfgs.code), so this doesn't retry-on-collision like the VEN-/MFG-
- * generators — acceptable here since concurrent RM/PM creation is rare.
+ * Auto-generates the next RM/PM business code (RM-NAME-MAKE-0042, PM-0014) when
+ * the caller didn't supply one, from the RM / PM series in serial_counters.
+ * rm_code/pm_code have no unique index, so the counter is their only guard.
  */
 export async function generateMaterialCode(
   conn: PoolConnection,
-  countSql: string,
+  seedSql: string,
   prefix: "RM" | "PM",
   name?: string,
   make?:string
 ): Promise<string> {
-  const [rows] = await conn.execute(countSql)
-  const total = (rows as { total: number }[])[0].total
+  const serial = String(await nextSerial(conn, prefix, seedFrom(conn, seedSql))).padStart(4, "0")
   if(prefix == "PM") {
-    return `${prefix}-${String(total + 1).padStart(4, "0")}`
+    return `${prefix}-${serial}`
   }
   else {
     const namePart =( name ?? "" ).replace(/[^a-zA-Z]/g , "").slice(0, 4).toUpperCase()
     const makePart =( make ?? "" ).replace(/[^a-zA-Z]/g , "").slice(0, 4).toUpperCase()
-    return `${prefix}-${namePart}-${makePart}-${String(total + 1).padStart(4, "0")}`
+    return `${prefix}-${namePart}-${makePart}-${serial}`
   }
 }
 
 /**
- * Auto-generates a vendor code as VEN-<serial>-<XX> (XX = first 2 letters of
- * the vendor name) and inserts the vendor row with it, retrying with the
- * next serial on a rare collision — vendors.code is UNIQUE.
+ * Auto-generates a vendor code as VEN-<TYPE>-<XXX>-<serial> from the VENDOR series
+ * and inserts the vendor row with it. vendors.code is UNIQUE, so a clash with a
+ * hand-typed code takes the next serial.
  */
 export async function insertVendorWithGeneratedCode(
   conn: PoolConnection,
   insertVendorSql: string,
-  countTotalSql: string,
+  seedSql: string,
   name: string,
   type: string,
 ): Promise<{ vendorId: number; code: string }> {
   const suffix = name.replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase()
-  const [countRows] = await conn.execute(countTotalSql)
-  let serial = (countRows as { total: number }[])[0].total
-  for (; ; serial++) {
-    const code = `VEN-${type.toUpperCase()}-${suffix}-${String(serial+1).padStart(3, "0")}`
+  for (;;) {
+    const serial = await nextSerial(conn, "VENDOR", seedFrom(conn, seedSql))
+    const code = `VEN-${type.toUpperCase()}-${suffix}-${String(serial).padStart(3, "0")}`
     try {
       const [result] = await conn.execute(insertVendorSql, [code, name, type])
       return { vendorId: (result as { insertId: number }).insertId, code }
@@ -102,22 +96,20 @@ export async function insertVendorWithGeneratedCode(
 }
 
 /**
- * Auto-generates a manufacturer code as MFG-<serial>-<XX> (XX = first 2
- * letters of the name) and inserts the manufacturer row with it, retrying
- * with the next serial on a rare collision — master_mfgs.code is UNIQUE.
+ * Auto-generates a manufacturer code as MFG-<serial>-<XXX> from the MFG series and
+ * inserts the manufacturer row with it. master_mfgs.code is UNIQUE, so a clash with
+ * a hand-typed code takes the next serial.
  */
 export async function insertMfgWithGeneratedCode(
   conn: PoolConnection,
   insertMfgSql: string,
-  countTotalSql: string,
+  seedSql: string,
   name: string,
 ): Promise<{ mfgId: number; code: string }> {
   const suffix = name.replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase()
-  const [countRows] = await conn.execute(countTotalSql)
-  let serial = (countRows as { total: number }[])[0].total
-
-  for (; ; serial++) {
-    const code = `MFG-${String(serial+1).padStart(3, "0")}-${suffix}`
+  for (;;) {
+    const serial = await nextSerial(conn, "MFG", seedFrom(conn, seedSql))
+    const code = `MFG-${String(serial).padStart(3, "0")}-${suffix}`
     try {
       const [result] = await conn.execute(insertMfgSql, [code, name])
       return { mfgId: (result as { insertId: number }).insertId, code }
@@ -153,7 +145,7 @@ type PmParamsInput = {
  *  handlers pass "active" since the insert IS the approval being applied. */
 export async function toRmParams(conn: PoolConnection, r: RmParamsInput, status = "in_review"): Promise<(string | null)[]> {
   return [
-    r.rm_code?.trim() || await generateMaterialCode(conn, rawMaterials.countTotal, "RM", r.name, r.make ?? undefined), r.name.trim(),
+    r.rm_code?.trim() || await generateMaterialCode(conn, rawMaterials.maxCodeSerial, "RM", r.name, r.make ?? undefined), r.name.trim(),
     r.make?.trim() || null, r.type?.trim() || null,
     r.uom?.trim() || null, status,
     r.hsn_code?.trim() || null, r.inci_name?.trim() || null,
@@ -163,7 +155,7 @@ export async function toRmParams(conn: PoolConnection, r: RmParamsInput, status 
 /** Builds params for packingMaterials.insert/update. See toRmParams above for the `status` note. */
 export async function toPmParams(conn: PoolConnection, r: PmParamsInput, status = "in_review"): Promise<(string | null)[]> {
   return [
-    r.pm_code?.trim() || await generateMaterialCode(conn, packingMaterials.countTotal, "PM"), r.name.trim(),
+    r.pm_code?.trim() || await generateMaterialCode(conn, packingMaterials.maxCodeSerial, "PM"), r.name.trim(),
     r.type?.trim() || null, r.hsn_code?.trim() || null,
     r.uom?.trim() || null, status,
     r.pantone_color?.trim() || null,

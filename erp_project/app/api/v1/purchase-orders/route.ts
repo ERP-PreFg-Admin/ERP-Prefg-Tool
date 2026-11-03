@@ -20,6 +20,7 @@ import { monthIST } from "@/lib/date"
 import { brandCode } from "@/lib/constants"
 import { isSpecialPoType, specialPoPrice, SPECIAL_PO_LABEL } from "@/lib/po/po-rules"
 import { resolvePoUnitOrThrow } from "@/lib/po/po-unit-load"
+import { nextPoNo, poPrefix } from "@/lib/po/po-number"
 
 // GET /api/v1/purchase-orders — list all POs the caller is scoped to, with MFG + SKU details
 export const GET = withGateway({
@@ -142,15 +143,9 @@ export const POST = withGateway({
   // const brand    = (BRAND_CODES[rawBrand.toLowerCase()] ?? rawBrand).toUpperCase()
   const brand = brandCode(rawBrand)
   
-  // Generate po_no: {Brand}-{PO|IMP}-{yyyymm}-{nnnn}, sequence scoped per brand+type+month
-  const year    = new Date().getFullYear()
-  const month   = String(new Date().getMonth() + 1).padStart(2, "0")
-  // Special types number as -PO-, like the bulk upload; the type shows as a badge.
-  const typeTag = po_type === "impromptu" ? "IMP" : "PO"
-  const poPrefix = `${brand}-${typeTag}-${year}${month}`
-  const seqRows = await query<{ last_seq: number }>(purchaseOrdersSql.lastSeqByPrefix, [`${poPrefix}-%`])
-  const seq  = (Number(seqRows[0]?.last_seq ?? 0) + 1).toString().padStart(3, "0")
-  const po_no = `${poPrefix}-${seq}`
+  // po_no is {Brand}-{PO|IMP}-{yyyymm}-{nnn}, one series per brand+type+IST month, taken inside
+  // each insert's transaction (lib/po/po-number.ts). Special types number as -PO-; the type shows as a badge.
+  const prefix = poPrefix(brand, po_type === "impromptu" ? "IMP" : "PO")
 
   // Resolved server-side from the agreed rate, not taken from the body: a
   // client-supplied price is a second source of truth, and the invoice
@@ -179,6 +174,7 @@ export const POST = withGateway({
     const conn: PoolConnection = await pool.getConnection()
     await conn.beginTransaction()
     try {
+      const po_no = await nextPoNo(conn, prefix)
       const [poResult] = await conn.execute(purchaseOrdersSql.insertNormal, [
         po_no, Number(mfg_id), sku_code, Number(qty), unitPrice, amountPreGst, totalAmount, expected_on || null, destination || null,
         reason?.trim() || null,
@@ -208,6 +204,7 @@ export const POST = withGateway({
   const conn: PoolConnection = await pool.getConnection()
   await conn.beginTransaction()
   try {
+    const po_no = await nextPoNo(conn, prefix)
     const [poResult] = await conn.execute(purchaseOrdersSql.insert, [
       po_no, Number(mfg_id), sku_code, Number(qty), unitPrice, amountPreGst, totalAmount, expected_on || null, po_type, destination || null,
       reason?.trim() || null,

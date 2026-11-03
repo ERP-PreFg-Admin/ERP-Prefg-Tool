@@ -1,7 +1,7 @@
 "use client"
 
 import { Ban, FileText, History, PackageCheck, Pencil, Trash2, XCircle } from "lucide-react"
-import { canDirectEditPo, isUnapprovedPo } from "@/lib/po/po-rules"
+import { canDirectEditPo, isOpenSplit, isUnapprovedPo } from "@/lib/po/po-rules"
 import { Fragment, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
@@ -18,7 +18,7 @@ import DiscardPODialog from "./DiscardPODialog"
 import ReceivePODialog from "./ReceivePODialog"
 import PoDataRow from "./PoDataRow"
 import { type MenuAction } from "./PoActionMenu"
-import { poTolerance, SortHead, type SortDir } from "./PoTableCells"
+import { SortHead, type SortDir } from "./PoTableCells"
 
 // Columns always present: PO No., Manufacturer, PO Date, Exp. Dispatch (Last Updated on FG), SKU,
 // Recipe, PO Qty, Received, Rate, Amount, Destination, Status, Actions.
@@ -134,22 +134,23 @@ export default function PoTable({
   // same set, so it takes the row rather than closing over one.
   function buildMenu(row: PoRow): MenuAction[] {
     const status        = row.status ?? "draft"
-    const originalQty   = num(row.qty)
     const receivedQty   = num(row.received_qty)
     const allocatedQty  = num(row.split_qty)
-    // What this PO still owes itself. Quantity on its children is theirs to
-    // deliver, so it is neither short-closeable nor cancellable from here.
-    const remaining     = originalQty - receivedQty - allocatedQty
-    const tolerance     = poTolerance(originalQty)
-    const canShortClose = ["raised", "punched", "partially_received"].includes(status) && remaining > tolerance
+    // Nothing closes on its own, so any open PO can be short-closed — a split
+    // parent only once every split is closed. Same rule the route re-checks (closeBlock).
+    const splits        = (childrenByParent[row.po_no] ?? []).map((c) => ({
+      po_no: c.po_no, status: c.status, qty: c.qty, received_qty: c.received_qty,
+    }))
+    const canShortClose = ["raised", "punched", "partially_received"].includes(status) && !splits.some(isOpenSplit)
     // Cancel voids the whole order, so it's off the table once anything has
     // been received — Short Close handles that case. A master with live
     // children can't be cancelled either: they'd point at a voided order.
     const canCancel     = !inwardingMode && ["raised", "punched"].includes(status)
       && receivedQty === 0 && allocatedQty === 0
-    // A Draft the manufacturer never saw is discarded, not cancelled. The route re-checks every rule.
+    // A Draft the manufacturer never saw is discarded, not cancelled — an unmailed split too,
+    // which hands its qty back to the parent. The route re-checks every rule.
     const canDiscard    = !inwardingMode && status === "draft" && row.raw_status === "raised"
-      && row.po_type !== "inward" && !row.reference_po && Number(row.child_count) === 0 && receivedQty === 0
+      && row.po_type !== "inward" && !Number(row.child_count) && receivedQty === 0
 
     // Every Draft row: a stored draft re-submits for approval (its raiser only); a raised
     // PO not yet mailed is edited in place. Same rule the PUT route re-checks.

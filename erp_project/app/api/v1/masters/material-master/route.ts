@@ -56,7 +56,7 @@ export const POST = withGateway({
       const conn = await pool.getConnection()
       await conn.beginTransaction()
       try {
-        const rmCode = await generateMaterialCode(conn, rawMaterials.countTotal, "RM", name, make)
+        const rmCode = await generateMaterialCode(conn, rawMaterials.maxCodeSerial, "RM", name, make)
         const [rmResult] = await conn.execute(rawMaterials.insert, [
           rmCode,
           name,
@@ -126,7 +126,7 @@ export const POST = withGateway({
       await conn.beginTransaction()
 
       try {
-        const pmCode = await generateMaterialCode(conn, PMMaterials.countTotal, "PM")
+        const pmCode = await generateMaterialCode(conn, PMMaterials.maxCodeSerial, "PM")
         const [pmResult] = await conn.execute(PMMaterials.insert, [
           pmCode,
           name,

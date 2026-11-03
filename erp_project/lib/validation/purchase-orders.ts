@@ -105,6 +105,8 @@ export const invoiceInwardSchema = z.object({
   })).optional().default([]),
   // A Uniware PO keyed by hand (uniware_external_po) to link instead of creating one.
   adopt_uniware_po_code: optionalText(64),
+  // The user confirmed booking lines against another warehouse's PO (Add Invoice's confirm dialog).
+  confirm_destination_mismatch: z.boolean().optional().default(false),
 
   line_items: z
     .array(

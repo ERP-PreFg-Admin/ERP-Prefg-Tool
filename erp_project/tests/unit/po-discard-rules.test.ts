@@ -20,7 +20,6 @@ test("each blocking condition names why", () => {
     [{ status: "cancelled" }, /isn't a Draft/],
     [{ status: "draft" }, /isn't a Draft/],          // a stored draft is still awaiting its PO approval
     [{ po_type: "inward" }, /inward PO/],
-    [{ reference_po: "MPO-1" }, /split of MPO-1/],
     [{ child_count: 2 }, /has been split/],
     [{ received_qty: "10.000" }, /goods booked/],
     [{ invoice_lines: 1 }, /goods booked/],
@@ -29,6 +28,13 @@ test("each blocking condition names why", () => {
   for (const [over, why] of cases) {
     assert.match(String(discardBlock({ ...draft, ...over })), why, JSON.stringify(over))
   }
+})
+
+test("an unmailed split may be discarded; a mailed one may not", () => {
+  const split = { ...draft, po_no: "MPO-1-S001", reference_po: "MPO-1" }
+  assert.equal(discardBlock(split), null)
+  assert.match(String(discardBlock({ ...split, email_sent_at: new Date() })), /mailed/)
+  assert.match(String(discardBlock({ ...split, received_qty: 1 })), /goods booked/)
 })
 
 test("mailed wins over every other reason — it is the one the desk can't fix", () => {

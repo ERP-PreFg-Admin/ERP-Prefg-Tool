@@ -1,27 +1,18 @@
 // Booking a goods receipt against a PO.
 //
 // Extracted from the manual receive route so the invoice-inwarding flow credits
-// quantities exactly the same way. Two copies of the tolerance/auto-close rule
-// would eventually disagree, and the automated path is the one nobody watches.
+// quantities exactly the same way. Two copies of the receipt rule would
+// eventually disagree, and the automated path is the one nobody watches.
 
 import type { PoolConnection } from "mysql2/promise"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { ApiError } from "@/lib/gateway/errors"
-import { poTolerance } from "@/lib/po/po-rules"
+import { isLiveSplit } from "@/lib/po/po-rules"
+import { lockPoFamily } from "@/lib/po/po-lifecycle"
 
 /** Statuses a receipt can be booked against. `punched` is included because the
  *  manual desk flow has always allowed it. */
 export const RECEIVABLE = new Set(["raised", "punched", "partially_received"])
-
-type ReceivePoRow = {
-  id: number
-  po_no: string
-  sku_code: string | null
-  recipe_id: number | null
-  qty: number
-  received_qty: number | null
-  status: string
-}
 
 export type ReceiveResult = {
   po_no: string
@@ -39,8 +30,8 @@ export type ReceiveResult = {
 }
 
 /**
- * Credit `qty` to a PO's received_qty and auto-close it once the remainder
- * falls within tolerance. Also writes the history_pos audit row.
+ * Credit `qty` to a PO's received_qty and write the history_pos audit row.
+ * Closes the PO only when the whole quantity has arrived.
  *
  * Takes an already-open connection and does NOT begin/commit/rollback — the
  * route handler owns the transaction. Calling beginTransaction here would
@@ -52,11 +43,8 @@ export async function receivePo(
   qty: number,
   userId: number
 ): Promise<ReceiveResult> {
-  // FOR UPDATE holds the row for the rest of the transaction, so a concurrent
-  // receipt on the same PO blocks instead of reading a stale received_qty.
-  const [poRows] = await conn.execute(purchaseOrdersSql.selectForReceiveLocked, [poId])
-  const po = (poRows as ReceivePoRow[])[0]
-  if (!po) throw new ApiError(404, "not_found", `PO id=${poId} not found`)
+  // Parent then split, so a receipt can't race a cancel or close of the same order.
+  const { po, splits } = await lockPoFamily(conn, poId)
 
   if (!RECEIVABLE.has(po.status)) {
     throw new ApiError(
@@ -73,8 +61,7 @@ export async function receivePo(
   // goods arrive against the child, which is its own row with its own receipt.
   // Without this a fully-split PO would still accept its whole quantity here
   // and the units would be counted on both rows.
-  const [childRows] = await conn.execute(purchaseOrdersSql.childSplitSummary, [po.po_no, po.po_no])
-  const allocated = Number((childRows as { allocated_qty: string }[])[0]?.allocated_qty ?? 0)
+  const allocated = splits.filter(isLiveSplit).reduce((sum, c) => sum + Number(c.qty), 0)
 
   const remaining = originalQty - receivedQty - allocated
   if (qty > remaining) {
@@ -90,16 +77,12 @@ export async function receivePo(
   await conn.execute(purchaseOrdersSql.incrementReceivedQtyManual, [qty, poId])
 
   const newReceivedQty = receivedQty + qty
-  const newRemaining   = originalQty - newReceivedQty
 
-  // Only 'received' is ever written. 'partially_received' is derived from
-  // received_qty by EFFECTIVE_STATUS_EXPR at read time, never stored — storing
-  // it would leave a stale value behind once the PO is fully received.
-  // A split PO is never closed by its own receipts: the children still owe
-  // their share. It reaches 'received' through EFFECTIVE_STATUS_EXPR once the
-  // rolled-up total covers the order, so nothing needs storing here.
+  // Only a receipt covering the whole order closes it; a short one waits for a
+  // manual short-close (no tolerance). A split PO is never closed by its own
+  // receipts — it reads as received through EFFECTIVE_STATUS_EXPR once the splits arrive.
   let newStatus = po.status
-  if (allocated === 0 && newRemaining <= poTolerance(originalQty)) {
+  if (allocated === 0 && newReceivedQty >= originalQty) {
     newStatus = "received"
     await conn.execute(purchaseOrdersSql.setStatus, ["received", poId])
   }
@@ -107,6 +90,12 @@ export async function receivePo(
   await conn.execute(purchaseOrdersSql.insertPoHistory, [
     poId, po.po_no, "update", "received_qty", String(receivedQty), String(newReceivedQty), null, userId,
   ])
+  // The parent rolls the split's receipt up at read time; this puts it in the parent's history too.
+  if (po.reference_po && po.po_type !== "inward") {
+    await conn.execute(purchaseOrdersSql.insertPoHistoryByPoNo, [
+      "update", "split_received", "", `${qty} via ${po.po_no}`, userId, po.reference_po,
+    ])
+  }
 
   return {
     po_no: po.po_no,

@@ -11,6 +11,7 @@
  * manufacturer 7's PO by guessing its id.
  */
 
+import type { PoolConnection } from "mysql2/promise"
 import { query } from "@/lib/db"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { getUserScope, assertInScope } from "@/lib/scope"
@@ -21,10 +22,12 @@ import { ApiError } from "@/lib/gateway/errors"
  * warehouse or brand the user isn't scoped to. Returns the row so callers that
  * need mfg_id don't have to re-fetch it.
  */
-export async function assertPoInScope(userId: number, poId: number) {
-  const rows = await query<{
-    id: number; mfg_id: number; destination: string | null; brand_id: number | null
-  }>(purchaseOrdersSql.selectScopeById, [poId])
+export async function assertPoInScope(userId: number, poId: number, conn?: PoolConnection) {
+  type Row = { id: number; mfg_id: number; destination: string | null; brand_id: number | null }
+  // Inside a transaction, read on its connection so rows it has written are visible.
+  const rows = conn
+    ? ((await conn.query(purchaseOrdersSql.selectScopeById, [poId]))[0] as Row[])
+    : await query<Row>(purchaseOrdersSql.selectScopeById, [poId])
   const po = rows[0]
   if (!po) throw new ApiError(404, "not_found", "Purchase order not found")
 

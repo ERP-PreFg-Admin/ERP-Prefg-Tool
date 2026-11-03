@@ -257,7 +257,7 @@ export async function pmCreateFull(body: PmCreateFullBody, userId: number, ctx: 
   await conn.beginTransaction()
   try {
     const [pmResult] = await conn.execute(packingMaterials.insert, [
-      pm.pm_code?.trim() || await generateMaterialCode(conn, packingMaterials.countTotal, "PM"),
+      pm.pm_code?.trim() || await generateMaterialCode(conn, packingMaterials.maxCodeSerial, "PM"),
       pmName, pm.type?.trim() || null,
       pm.hsn_code?.trim() || null, pm.uom?.trim() || null, "in_review",
       pm.pantone_color?.trim() || null,

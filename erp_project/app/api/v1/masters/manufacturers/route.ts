@@ -84,7 +84,7 @@ export const POST = withGateway({
       try {
         await assertNoDuplicateBankingFields(conn, manufacturers, { gst_number, ifsc_number, account_number }, 0)
 
-        const { mfgId, code } = await insertMfgWithGeneratedCode(conn, manufacturers.insert, manufacturers.countTotal, name)
+        const { mfgId, code } = await insertMfgWithGeneratedCode(conn, manufacturers.insert, manufacturers.maxCodeSerial, name)
         logger.info({ ...logCtx, mfgId, code, message: "Manufacturer created" })
 
         await conn.execute(manufacturers.insertDetails, [

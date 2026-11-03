@@ -218,7 +218,7 @@ export const mfgBulkHandler = bulkHandler("MFG_BULK", {
 
     const { row } = r
     const name = row.name?.trim() ?? ""
-    const { mfgId } = await insertMfgWithGeneratedCode(conn, mfgSql.insert, mfgSql.countTotal, name)
+    const { mfgId } = await insertMfgWithGeneratedCode(conn, mfgSql.insert, mfgSql.maxCodeSerial, name)
     await conn.execute(mfgSql.insertDetails, [
       mfgId,
       row.location?.trim() || null,

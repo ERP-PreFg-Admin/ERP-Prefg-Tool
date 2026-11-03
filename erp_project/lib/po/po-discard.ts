@@ -5,6 +5,7 @@ import type { PoolConnection, ResultSetHeader } from "mysql2/promise"
 import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
 import { ApiError } from "@/lib/gateway/errors"
 import { discardBlock } from "@/lib/po/po-rules"
+import { lockPoFamily } from "@/lib/po/po-lifecycle"
 
 type LockedForDiscard = Parameters<typeof discardBlock>[0] & { id: number }
 
@@ -18,6 +19,8 @@ export async function discardDraftPo(
   const why = reason.trim()
   if (!why) throw new ApiError(400, "reason_required", "Give a reason for discarding this PO.")
 
+  // A split's parent is locked first (the order every PO writer follows).
+  await lockPoFamily(conn, poId)
   const [rows] = await conn.execute(purchaseOrdersSql.selectForDiscardLocked, [poId])
   const po = (rows as LockedForDiscard[])[0]
   if (!po) throw new ApiError(404, "not_found", "Purchase order not found")
@@ -30,5 +33,9 @@ export async function discardDraftPo(
 
   await conn.execute(purchaseOrdersSql.insertPoHistory, [po.id, po.po_no, "update", "status", "raised", "discarded", null, userId])
   await conn.execute(purchaseOrdersSql.insertPoHistory, [po.id, po.po_no, "update", "discard_reason", null, why.slice(0, 500), null, userId])
+  // Its qty is back on the parent; say so where the parent's history is read.
+  if (po.reference_po && po.po_type !== "inward") {
+    await conn.execute(purchaseOrdersSql.insertPoHistoryByPoNo, ["update", "split", po.po_no, `${po.po_no} discarded`, userId, po.reference_po])
+  }
   return { po_no: po.po_no }
 }

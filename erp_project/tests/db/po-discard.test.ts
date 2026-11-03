@@ -57,8 +57,10 @@ test("refuses without a reason, and every PO that isn't a clean draft", async ()
     const parent = await fresh()
     const child = await fresh()
     await setPo(conn, child.id, "reference_po = ?", [parent.po_no])
-    await rejects(discardDraftPo(conn, child.id, "x", a.userId), /split of/)
     await rejects(discardDraftPo(conn, parent.id, "x", a.userId), /has been split/)
+    // An unmailed split is discardable (2026-11); then the parent is free again.
+    await discardDraftPo(conn, child.id, "x", a.userId)
+    await discardDraftPo(conn, parent.id, "x", a.userId)
 
     const editing = await fresh()
     await conn.execute(`INSERT INTO approvals (raised_by, module, entity_id, approval_type, status) VALUES (?, 'PO_EDIT', ?, 'edit', 'pending')`,

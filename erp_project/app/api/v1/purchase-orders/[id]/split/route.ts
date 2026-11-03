@@ -20,8 +20,10 @@ import { manufacturers as mfgsSql } from "@/lib/queries/manufacturers"
 import { recordRawEvent, recordProcessedEvent, recordFailedEvent, makeEventId } from "@/lib/events"
 import logger from "@/lib/logger"
 import { withGateway } from "@/lib/gateway/with-gateway"
-import { assertPoInScope, assertDestinationActive } from "@/lib/po/po-guard"
-import { isDraftPo, splitChildPrice, impliedGstPercent, isSpecialPoType, specialPoPrice } from "@/lib/po/po-rules"
+import { assertPoInScope, assertDestinationServesEntity } from "@/lib/po/po-guard"
+import { isDraftPo, isLiveSplit, splitChildPrice, impliedGstPercent, isSpecialPoType, specialPoPrice } from "@/lib/po/po-rules"
+import { lockPoFamily } from "@/lib/po/po-lifecycle"
+import { nextSplitNo } from "@/lib/po/po-number"
 import { skuGstPercent } from "@/lib/po/po-rate"
 import { ApiError } from "@/lib/gateway/errors"
 import { loadPoUnitContext } from "@/lib/po/po-unit-load"
@@ -73,28 +75,14 @@ export const POST = withGateway({
       )
     }
 
-    // What this PO can still hand out: its quantity, less what has arrived, less
-    // what earlier splits already took. The parent's qty no longer shrinks when
-    // it is split, so subtracting existing allocation is what stops the same
-    // units being split away twice.
-    const [childSummary] = await query<{ allocated_qty: string; seq: number }>(
-      purchaseOrdersSql.childSplitSummary, [po.po_no, po.po_no]
-    )
-    const allocated  = Number(childSummary?.allocated_qty ?? 0)
-    const remaining  = Number(po.qty) - Number(po.received_qty ?? 0) - allocated
     const splitTotal = splits.reduce((sum, s) => sum + Number(s.qty), 0)
-    if (splitTotal > remaining) {
-      throw new ApiError(
-        400,
-        "over_limit",
-        allocated > 0
-          ? `Split total (${splitTotal}) exceeds the ${remaining} still unallocated on ${po.po_no} — ${allocated} is already on earlier splits.`
-          : `Split total (${splitTotal}) exceeds remaining qty (${remaining}).`
-      )
-    }
 
-    // Each child is a new PO, so a closed site can't take one.
-    for (const s of splits) await assertDestinationActive(s.destination)
+    // Each child is a new PO: a real, open site that serves this SKU's legal entity.
+    for (const s of splits) {
+      const [w] = await query<{ name: string }>(purchaseOrdersSql.selectWarehouseByName, [s.destination])
+      if (!w) throw new ApiError(400, "destination_unknown", `"${s.destination}" is not a warehouse. Pick a destination from the list.`)
+      await assertDestinationServesEntity(po.sku_code, s.destination)
+    }
 
     const userId = Number(session.user.id)
     const uniqueMfgIds = [...new Set(splits.map((s) => s.mfg_id))]
@@ -115,7 +103,7 @@ export const POST = withGateway({
 
     const eventId = makeEventId("PO_SPLIT", "split", poId)
     const logCtx = { ...ctx, eventId, module: "PO_SPLIT" }
-    logger.info({ ...logCtx, parentPoId: poId, splitCount: splits.length, remaining, splitTotal, message: "PO split started" })
+    logger.info({ ...logCtx, parentPoId: poId, splitCount: splits.length, splitTotal, message: "PO split started" })
     recordRawEvent("PO_SPLIT", eventId, { parentPoId: poId, parentPoNo: po.po_no, splits })
 
     // Pre-fetch all unique manufacturer names needed for approval diffs
@@ -136,6 +124,27 @@ export const POST = withGateway({
     const conn: PoolConnection = await pool.getConnection()
     await conn.beginTransaction()
     try {
+      // Re-read under lock, so a receipt or another split can't land between the check and the insert.
+      const { po: locked, splits: existing } = await lockPoFamily(conn, poId)
+      if (isDraftPo(locked) || !SPLITTABLE.has(locked.status)) {
+        throw new ApiError(409, "not_splittable", `${locked.po_no} changed while it was being split — reload and try again.`)
+      }
+      // What this PO can still hand out: its quantity, less what has arrived, less
+      // what live splits already took (the parent's qty never shrinks).
+      const allocated = existing.filter(isLiveSplit).reduce((sum, c) => sum + Number(c.qty), 0)
+      const remaining = Number(locked.qty) - Number(locked.received_qty) - allocated
+      if (splitTotal > remaining) {
+        throw new ApiError(
+          400,
+          "over_limit",
+          allocated > 0
+            ? `Split total (${splitTotal}) exceeds the ${remaining} still unallocated on ${locked.po_no} — ${allocated} is already on earlier splits.`
+            : `Split total (${splitTotal}) exceeds remaining qty (${remaining}).`
+        )
+      }
+      // Highest suffix on its splits (cancelled and discarded included): seeds the order's series on first use.
+      const lastSeq = Math.max(0, ...existing.map((c) => Number(/-S(\d+)$/.exec(c.po_no)?.[1] ?? 0)))
+
       // Unreachable since drafts stopped being splittable (isDraft above), so
       // childStatus is always 'raised'. Kept because it is the only description
       // of what splitting a draft would have to do — mint an approval per child,
@@ -145,11 +154,7 @@ export const POST = withGateway({
 
       for (let i = 0; i < splits.length; i++) {
         const { mfg_id, destination, qty } = splits[i]
-        // Numbered from how many children this PO already has, not from the
-        // loop index: a second split of the same parent would otherwise re-issue
-        // -S001. Cancelled children still count, so a spent number is never
-        // handed out again.
-        const childPoNo = `${po.po_no}-S${String(Number(childSummary?.seq ?? 0) + i + 1).padStart(3, "0")}`
+        const childPoNo = await nextSplitNo(conn, po.po_no, lastSeq)
         const mfg = mfgMap[mfg_id]
 
         // recipe_id is passed LAST, followed by the two resolver params: the
@@ -159,7 +164,7 @@ export const POST = withGateway({
           purchaseOrdersSql.insertSplit,
           [childPoNo, mfg_id, po.sku_code, Number(qty), prices[i].unitPrice,
            prices[i].amountPreGst, prices[i].totalAmount,
-           po.expected_on, childStatus, destination || null, po.po_no, childType, po.recipe_id ?? null, mfg_id, po.sku_code]
+           po.expected_on, childStatus, destination, po.po_no, childType, po.recipe_id ?? null, mfg_id, po.sku_code]
         )
         const childId = (childResult as any).insertId
         const unit = childUnits[i]
@@ -197,6 +202,7 @@ export const POST = withGateway({
       return NextResponse.json({ ok: true, splits_created: splits.length })
     } catch (err: any) {
       await conn.rollback()
+      if (err instanceof ApiError) throw err
       recordFailedEvent("PO_SPLIT", eventId, { parentPoId: poId, splits }, err.message)
       logger.error({ ...logCtx, parentPoId: poId, error: err.message, message: "PO split failed" })
       throw new ApiError(500, "internal", "Database error: " + err.message)

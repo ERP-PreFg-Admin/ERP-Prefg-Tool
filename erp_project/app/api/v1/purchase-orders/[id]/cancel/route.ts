@@ -5,18 +5,18 @@
 // Procurement table's checkbox selection + "Review & Send Mail" flow
 // (POST /api/v1/purchase-orders/send-mail) — cancelling no longer sends an
 // email on its own.
+// Refused once anything is received or while a split is live (setTerminalStatus re-checks under lock).
 
 import { NextResponse } from "next/server"
-import { query, execute } from "@/lib/db"
-import { purchaseOrdersSql } from "@/lib/queries/purchase-orders"
+import type { PoolConnection } from "mysql2/promise"
+import { pool } from "@/lib/db"
 import logger from "@/lib/logger"
 import { recordFailedEvent, recordRawEvent, makeEventId, recordProcessedEvent } from "@/lib/events"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { assertPoInScope } from "@/lib/po/po-guard"
+import { setTerminalStatus } from "@/lib/po/po-lifecycle"
 import { ApiError } from "@/lib/gateway/errors"
 import { poIdParamSchema, poCancelSchema } from "@/lib/validation/purchase-order-detail"
-
-const CANCELLABLE = new Set(["raised", "punched", "partially_received"])
 
 export const POST = withGateway({
   paramsSchema: poIdParamSchema,
@@ -33,35 +33,24 @@ export const POST = withGateway({
     const eventId = makeEventId("PO_CANCEL", "cancel", poId)
     recordRawEvent("PO_CANCEL", eventId, { poId, userId, reason })
 
+    const conn: PoolConnection = await pool.getConnection()
+    await conn.beginTransaction()
     try {
-      const poRows = await query<{ id: number; po_no: string; status: string }>(
-        purchaseOrdersSql.selectForEdit,
-        [poId]
-      )
-      const po = poRows[0]
-      if (!po) throw new ApiError(404, "not_found", `PO id=${poId} not found`)
-
-      if (!CANCELLABLE.has(po.status)) {
-        throw new ApiError(
-          409,
-          "not_cancellable",
-          `Cannot cancel a PO with status '${po.status}'. Allowed: raised, punched, partially_received.`
-        )
-      }
-
-      await execute(purchaseOrdersSql.setStatus, ["cancelled", poId])
-      await execute(purchaseOrdersSql.insertPoHistory, [poId, po.po_no, "update", "status", po.status, "cancelled", null, userId])
+      const po = await setTerminalStatus(conn, poId, "cancelled", userId)
+      await conn.commit()
       logger.info({ ...ctx, eventId, poId, po_no: po.po_no, previousStatus: po.status, message: "PO manually cancelled" })
       recordProcessedEvent("PO_CANCEL", eventId, { poId, poNo: po.po_no, userId })
-
       return NextResponse.json({ ok: true })
     } catch (err: unknown) {
+      await conn.rollback()
       if (err instanceof ApiError) throw err
       const message = err instanceof Error ? err.message : String(err)
       const stack = err instanceof Error ? err.stack : undefined
       recordFailedEvent("PO_CANCEL", eventId, { poId, userId }, message)
       logger.error({ ...ctx, eventId, poId, err: message, stack, message: "PO cancellation failed" })
       throw new ApiError(500, "internal", "Database error: " + message)
+    } finally {
+      conn.release()
     }
   },
 })

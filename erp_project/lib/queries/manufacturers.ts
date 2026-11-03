@@ -117,8 +117,11 @@ export const manufacturers = {
     INSERT INTO master_mfgs (code, name) VALUES (?, ?)
   `,
 
-  /** Total manufacturer count — used to seed the next auto-generated code serial. */
-  countTotal: `SELECT COUNT(*) AS total FROM master_mfgs`,
+  /** Highest serial in MFG-NNN-XXX codes: seeds the MFG series in serial_counters on first use. */
+  maxCodeSerial: `
+    SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(code, '-', 2), '-', -1) AS UNSIGNED)), 0) AS n
+    FROM master_mfgs WHERE code REGEXP '^MFG-[0-9]+-'
+  `,
 
   /**
    * Insert manufacturer details record.

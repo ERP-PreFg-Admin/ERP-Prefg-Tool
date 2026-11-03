@@ -8,7 +8,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
-  allocateFifo, bomBySku, collectProblems, emptyRow, EMPTY_FORM, matchSummary, poOptionsFor,
+  allocateFifo, bomBySku, collectProblems, destinationMismatches, emptyRow, EMPTY_FORM, matchSummary, poOptionsFor,
   type InvoiceForm, type Row,
 } from "../../app/po-tracking/po-inwarding/invoice-form"
 import type { OpenPoOption } from "../../types/invoice"
@@ -19,8 +19,9 @@ const line = (sku: string, qty: number, extra: Partial<Row> = {}): Row => ({
 
 /** `date` is the PO raise date — the FIFO key. */
 const po = (
-  id: number, sku: string, remaining: number, date: string, liveBoms = 1
+  id: number, sku: string, remaining: number, date: string, liveBoms = 1, destination: string | null = null
 ): OpenPoOption => ({
+  destination,
   id, po_no: `PO-${id}`, date, sku_code: sku, sku_name: sku,
   bom_code: `BOM-${sku}`, live_bom_count: liveBoms,
   // Null = a master, not a split child. The picker now carries this so it can
@@ -171,7 +172,7 @@ test("a shortage is reported once, not also as a blank reference PO", () => {
     form(), rows, poMap(), [{ sku_code: "A", needed: 5, available: 0 }]
   )
   assert.equal(problems.filter((p) => p.includes("reference PO")).length, 0)
-  assert.ok(problems.some((p) => p.includes("Only 0 of 5 A are on open POs — 5 short.")))
+  assert.ok(problems.some((p) => p.includes("Only 0 of 5 A are on open POs for MWH — 5 short.")))
 })
 
 test("outstanding quantity is checked per PO, not per row", () => {
@@ -276,4 +277,49 @@ test("a partly-covered SKU across two lines totals both sides", () => {
     shortLines[0].includes("1000 of 5280") && shortLines[0].includes("4280 short"),
     `expected totals across both lines, got: ${shortLines[0]}`
   )
+})
+
+// Destination ranking (2026-11): same warehouse first, then Mumbai as every warehouse's fallback
+// (POs are raised against Mumbai first; no destination counts as Mumbai). Any other warehouse's PO is
+// never auto-picked; only a hand pick, confirmed on save.
+const at = (id: number, date: string, destination: string | null, remaining = 100) => po(id, "A", remaining, date, 1, destination)
+
+test("a same-warehouse PO is used before an older Mumbai PO", () => {
+  const pos = [at(1, "2026-01-01", "Mumbai"), at(2, "2026-06-01", "Gurgaon")]
+  const { rows } = allocateFifo([line("A", 100)], pos, "Gurgaon")
+  assert.deepEqual(rows.map((r) => r.reference_po_id), ["2"])
+})
+
+test("Mumbai POs (and POs with no destination) are the fallback, oldest first; other warehouses are never used", () => {
+  const pos = [at(1, "2026-01-01", "Bangalore"), at(2, "2026-02-01", "Mumbai"), at(3, "2026-03-01", null), at(4, "2026-04-01", "Gurgaon")]
+  const { rows, shortages } = allocateFifo([line("A", 400)], pos, "Gurgaon")
+  assert.deepEqual(rows.map((r) => [r.reference_po_id, r.qty]), [["4", "100"], ["2", "100"], ["3", "100"], ["", "100"]])
+  assert.deepEqual(shortages, [{ sku_code: "A", needed: 400, available: 300 }], "the Bangalore PO is not offered")
+})
+
+test("for a Mumbai invoice, Mumbai POs and POs with no destination are one pool", () => {
+  const pos = [at(1, "2026-01-01", "Gurgaon"), at(2, "2026-05-01", null), at(3, "2026-03-01", "Mumbai")]
+  const { rows } = allocateFifo([line("A", 200)], pos, "Mumbai")
+  assert.deepEqual(rows.map((r) => r.reference_po_id), ["3", "2"], "both are Mumbai's, so oldest first")
+})
+
+test("a split for the invoice's warehouse is taken before its parent's Mumbai remainder", () => {
+  const parent = { ...at(1, "2026-01-01", "Mumbai", 600) }
+  const split = { ...at(2, "2026-02-01", "Gurgaon", 400), reference_po: "PO-1" }
+  const { rows } = allocateFifo([line("A", 500)], [parent, split], "Gurgaon")
+  assert.deepEqual(rows.map((r) => [r.reference_po_id, r.qty]), [["2", "400"], ["1", "100"]])
+})
+
+test("a Mumbai fallback needs no confirmation; only another warehouse's hand-picked PO does", () => {
+  const pos = [at(1, "2026-01-01", "Mumbai"), at(2, "2026-01-01", "Bangalore")]
+  const byId = new Map(pos.map((p) => [String(p.id), p]))
+  const mumbai = [{ ...line("A", 50), reference_po_id: "1" }]
+  const bangalore = [{ ...line("A", 50), reference_po_id: "2" }]
+  assert.deepEqual(destinationMismatches(mumbai, byId, "Gurgaon"), [])
+  assert.deepEqual(destinationMismatches(bangalore, byId, "Gurgaon"), [{ sku_code: "A", qty: "50", po_no: "PO-2", po_destination: "Bangalore" }])
+})
+
+test("the picker lists the SKU's POs in the order FIFO would take them", () => {
+  const pos = [at(1, "2026-01-01", "Bangalore"), at(2, "2026-02-01", "Mumbai"), at(3, "2026-03-01", "Gurgaon")]
+  assert.deepEqual(poOptionsFor(pos, "A", "Gurgaon").map((p) => p.id), [3, 2, 1])
 })

@@ -840,11 +840,33 @@ export const purchaseOrdersSql = {
     WHERE reference_po = ? AND COALESCE(po_type, '') <> 'inward'
   `,
 
-  /** Full PO row for a manual receive operation. Parameters: [id] */
-  /** Same as selectForReceive but locks the row for the duration of the transaction — prevents two concurrent receives from both reading a stale received_qty. Parameters: [id] */
-  selectForReceiveLocked: `
-    SELECT id, po_no, sku_code, recipe_id, qty, received_qty, status
+  /** An invoice's reference POs, for the inward re-check. Use conn.query (expands the array). Params: [ids[]] */
+  selectRefPos: `
+    SELECT id, po_no, mfg_id, sku_code, po_type, destination FROM purchase_orders WHERE id IN (?)
+  `,
+
+  /** Which order a PO belongs to, read unlocked: reference_po never changes. Params: [id] */
+  selectFamilyKey: `
+    SELECT id, po_no, CASE WHEN COALESCE(po_type, '') <> 'inward' THEN reference_po END AS parent_po_no
+    FROM purchase_orders WHERE id = ? LIMIT 1
+  `,
+
+  /** Lock one PO by po_no — the parent, taken before any of its splits. Params: [po_no] */
+  lockByPoNo: `SELECT id FROM purchase_orders WHERE po_no = ? LIMIT 1 FOR UPDATE`,
+
+  /** A PO locked with what the close/cancel/receive rules read. Params: [id] */
+  selectFamilyMemberLocked: `
+    SELECT id, po_no, mfg_id, sku_code, recipe_id, destination, status, email_sent_at, po_type, reference_po,
+           qty, COALESCE(received_qty, 0) AS received_qty
     FROM purchase_orders WHERE id = ? LIMIT 1 FOR UPDATE
+  `,
+
+  /** A parent's splits, every status, locked in id order. Params: [parent po_no] */
+  selectSplitsLocked: `
+    SELECT id, po_no, status, qty, COALESCE(received_qty, 0) AS received_qty
+    FROM purchase_orders
+    WHERE reference_po = ? AND COALESCE(po_type, '') <> 'inward'
+    ORDER BY id FOR UPDATE
   `,
 
   /**
@@ -953,6 +975,12 @@ export const purchaseOrdersSql = {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
+  /** The same row, addressed by po_no (a split's parent). Params: [action_type, field_name, old_value, new_value, changed_by, po_no] */
+  insertPoHistoryByPoNo: `
+    INSERT INTO history_pos (po_id, po_no, action_type, field_name, old_value, new_value, s3_key, changed_by)
+    SELECT id, po_no, ?, ?, ?, ?, NULL, ? FROM purchase_orders WHERE po_no = ? LIMIT 1
+  `,
+
   /** All history_pos entries for one PO, newest first, each with where it came from.
    *  history_pos has no source column, so it is derived: an inward PO's create is the invoice,
    *  a receipt with an inward PO minted beside it is an invoice receipt, an s3_key a PO_BULK
@@ -1050,7 +1078,7 @@ export const purchaseOrdersSql = {
    * Parameters: [mfg_id]
    */
   openForReceiveByMfg: `
-    SELECT po.id, po.po_no, po.date, po.sku_code, ${PO_SKU_NAME} AS sku_name, po.reference_po,
+    SELECT po.id, po.po_no, po.date, po.sku_code, ${PO_SKU_NAME} AS sku_name, po.reference_po, po.destination,
            COALESCE(pb.bom_code, lb.bom_codes) AS bom_code,
            COALESCE(lb.live_bom_count, 0) AS live_bom_count,
            po.qty, COALESCE(po.received_qty, 0) AS received_qty,

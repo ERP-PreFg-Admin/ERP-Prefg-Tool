@@ -85,7 +85,8 @@ export async function buildDigestData(
   const { from, to } = istDayWindowUtc(day)
   const utc = [sqlTs(from), sqlTs(to)]
   logger.info({ ...ctx, day, from: utc[0], to: utc[1], message: "Ops digest starting" })
-  const poParams = buildStatusCountParams(null, null, null, day, day, null, null, false, UNRESTRICTED)
+  // Inward POs excluded: each is a receipt on an order already counted here.
+  const poParams = buildStatusCountParams(null, null, null, day, day, null, null, true, UNRESTRICTED)
 
   const [pos, posMailed, emails, approvalsRaised, approvalsDecided, approvalsPending, invoices] =
     await Promise.all([

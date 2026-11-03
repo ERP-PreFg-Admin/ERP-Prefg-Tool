@@ -228,7 +228,7 @@ export const vendorBulkHandler = bulkHandler("VENDOR_BULK", {
     const { row } = r
     const name = row.name?.trim() ?? ""
     const type = row.type?.trim() ?? ""
-    const { vendorId } = await insertVendorWithGeneratedCode(conn, vendorSql.insertVendor, vendorSql.countTotal, name, type)
+    const { vendorId } = await insertVendorWithGeneratedCode(conn, vendorSql.insertVendor, vendorSql.maxCodeSerial, name, type)
     await conn.execute(vendorSql.insertVendorDetails, [
       vendorId,
       row.location?.trim() || null,

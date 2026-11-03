@@ -111,6 +111,12 @@ test("a split must contain at least one row", () => {
   assert.equal(poSplitSchema.safeParse({}).success, false)
 })
 
+test("a split row must name a destination", () => {
+  const row = (destination: unknown) => ({ splits: [{ mfg_id: 1, qty: 10, destination }] })
+  for (const d of [undefined, null, "", "   "]) assert.equal(poSplitSchema.safeParse(row(d)).success, false, JSON.stringify(d))
+  assert.equal(poSplitSchema.safeParse(row("Gurgaon")).success, true)
+})
+
 test("a split row rejects a non-positive quantity", () => {
   const row = (qty: unknown) => ({ splits: [{ mfg_id: 1, qty, destination: "Guwahati" }] })
   assert.equal(poSplitSchema.safeParse(row(10)).success, true)

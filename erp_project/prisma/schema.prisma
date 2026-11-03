@@ -1535,3 +1535,10 @@ model uniware_external_po {
   @@index([mfg_id, adopted_invoice_id], map: "idx_uniware_external_po_mfg")
   @@index([reference_no], map: "idx_uniware_external_po_ref")
 }
+
+/// One row per numbering series (prisma/add_serial_counters.sql); written only by lib/serials.ts.
+model serial_counters {
+  scope      String   @id @db.VarChar(100)
+  last_no    Int      @db.UnsignedInt
+  updated_at DateTime @default(now()) @updatedAt @db.DateTime(0)
+}

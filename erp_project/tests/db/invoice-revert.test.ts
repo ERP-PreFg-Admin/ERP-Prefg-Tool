@@ -28,8 +28,8 @@ async function setup(conn: PoolConnection) {
   if (!a) return null
   const b = await otherUser(conn, a.userId)
   if (!b) return null
-  // 2,990 received of 5,000; the invoice's 2,000 takes it to 4,990, inside tolerance → auto-closed.
-  const po = await makePo(conn, a, { qty: 5000, received_qty: 2990 })
+  // 3,000 received of 5,000; the invoice's 2,000 completes it → closed.
+  const po = await makePo(conn, a, { qty: 5000, received_qty: 3000 })
   const inv = await makeInvoice(conn, a, { lines: [{ against: po, qty: 2000 }] })
   return { a, b, po, inv }
 }
@@ -39,13 +39,13 @@ test("approve reverses the receipt, reopens, marks the inward PO reverted and st
     const s = await setup(conn)
     if (!s) return t.skip("needs a mfg, a SKU and two users")
     const { a, b, po, inv } = s
-    assert.equal((await one<{ status: string }>(conn, "SELECT status FROM purchase_orders WHERE id = ?", [po.id])).status, "received", "precondition: auto-closed")
+    assert.equal((await one<{ status: string }>(conn, "SELECT status FROM purchase_orders WHERE id = ?", [po.id])).status, "received", "precondition: closed on full receipt")
 
     const { approvalId, items } = await request(conn, a, inv.invoiceId)
     await MODULE_HANDLERS.INVOICE_REVERT.applyAndArchive(conn, inv.invoiceId, items, b, a.userId)
 
     const p = await one<{ received_qty: string; status: string }>(conn, "SELECT received_qty, status FROM purchase_orders WHERE id = ?", [po.id])
-    assert.equal(num(p.received_qty), 2990)
+    assert.equal(num(p.received_qty), 3000)
     assert.equal(p.status, "raised")
 
     const inw = await one<{ status: string }>(conn, "SELECT status FROM purchase_orders WHERE id = ?", [inv.inwardIds[0]])
@@ -64,10 +64,10 @@ test("approve reverses the receipt, reopens, marks the inward PO reverted and st
 
     const [hist] = await conn.query("SELECT field_name, old_value, new_value, changed_by FROM history_pos WHERE po_id = ? ORDER BY id", [po.id])
     const fields = (hist as { field_name: string; old_value: string; new_value: string; changed_by: number }[])
-    assert.ok(fields.some((r) => r.field_name === "received_qty" && r.old_value === "4990" && r.new_value === "2990"), "reversal row")
+    assert.ok(fields.some((r) => r.field_name === "received_qty" && r.old_value === "5000" && r.new_value === "3000"), "reversal row")
     assert.ok(fields.some((r) => r.field_name === "status" && r.old_value === "received" && r.new_value === "raised"), "reopen row")
     assert.ok(fields.some((r) => r.field_name === "revert_reason" && r.new_value.includes(`approval #${approvalId}`)), "reason row")
-    assert.ok(fields.filter((r) => r.field_name !== "received_qty" || r.new_value === "2990").every((r) => r.changed_by === a.userId), "credited to the requester")
+    assert.ok(fields.filter((r) => r.field_name !== "received_qty" || r.new_value === "3000").every((r) => r.changed_by === a.userId), "credited to the requester")
 
     const [rows] = await conn.query("SELECT COUNT(*) n FROM invoice_items_mfg WHERE invoice_id = ?", [inv.invoiceId])
     assert.equal(num((rows as { n: number }[])[0].n), 1, "nothing deleted")
@@ -97,7 +97,7 @@ test("the requester can't approve their own revert, and nothing is written", asy
     const { a, po, inv } = s
     const { items } = await request(conn, a, inv.invoiceId)
     await assert.rejects(MODULE_HANDLERS.INVOICE_REVERT.applyAndArchive(conn, inv.invoiceId, items, a.userId, a.userId), code("self_approval"))
-    assert.equal(num((await one<{ received_qty: string }>(conn, "SELECT received_qty FROM purchase_orders WHERE id = ?", [po.id])).received_qty), 4990)
+    assert.equal(num((await one<{ received_qty: string }>(conn, "SELECT received_qty FROM purchase_orders WHERE id = ?", [po.id])).received_qty), 5000)
   })
 })
 
@@ -113,7 +113,7 @@ for (const [name, arrange, expected] of [
       const { a, b, po, inv } = s
       await arrange(conn, inv.invoiceId, a.userId)
       await assert.rejects(applyInvoiceRevert(conn, inv.invoiceId, { reason: "x", requestedBy: a.userId, approvedBy: b, approvalId: null }), code(expected))
-      assert.equal(num((await one<{ received_qty: string }>(conn, "SELECT received_qty FROM purchase_orders WHERE id = ?", [po.id])).received_qty), 4990)
+      assert.equal(num((await one<{ received_qty: string }>(conn, "SELECT received_qty FROM purchase_orders WHERE id = ?", [po.id])).received_qty), 5000)
     })
   })
 }
@@ -126,7 +126,7 @@ test("a PO that would go below zero, and an already-reverted inward PO, refuse",
     await conn.execute("UPDATE purchase_orders SET received_qty = 100 WHERE id = ?", [po.id])
     await assert.rejects(applyInvoiceRevert(conn, inv.invoiceId, { reason: "x", requestedBy: a.userId, approvedBy: b, approvalId: null }), code("po_below_zero"))
 
-    await conn.execute("UPDATE purchase_orders SET received_qty = 4990 WHERE id = ?", [po.id])
+    await conn.execute("UPDATE purchase_orders SET received_qty = 5000 WHERE id = ?", [po.id])
     await conn.execute("UPDATE purchase_orders SET status = 'reverted' WHERE id = ?", [inv.inwardIds[0]])
     await assert.rejects(applyInvoiceRevert(conn, inv.invoiceId, { reason: "x", requestedBy: a.userId, approvedBy: b, approvalId: null }), code("inward_po_reverted"))
   })
@@ -164,7 +164,7 @@ test("the live GRN check runs after the locks and before any write; a refusal wr
     const { a, b, po, inv } = s
     const refuse = async () => { throw Object.assign(new Error("GRN exists"), { code: "uniware_grn_exists" }) }
     await assert.rejects(applyInvoiceRevert(conn, inv.invoiceId, { reason: "x", requestedBy: a.userId, approvedBy: b, approvalId: null, checkLiveGrn: refuse }), code("uniware_grn_exists"))
-    assert.equal(num((await one<{ received_qty: string }>(conn, "SELECT received_qty FROM purchase_orders WHERE id = ?", [po.id])).received_qty), 4990)
+    assert.equal(num((await one<{ received_qty: string }>(conn, "SELECT received_qty FROM purchase_orders WHERE id = ?", [po.id])).received_qty), 5000)
   })
 })
 

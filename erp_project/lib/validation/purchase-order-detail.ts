@@ -7,7 +7,7 @@ export const poIdParamSchema = z.object({
 
 export const poSplitRowSchema = z.object({
   mfg_id: z.coerce.number().int().positive("Each split row must have a manufacturer selected."),
-  destination: z.string().trim().optional().nullable(),
+  destination: z.string({ error: "Each split must have a destination." }).trim().min(1, "Each split must have a destination."),
   qty: z.coerce.number().positive("Each split must have a quantity greater than 0."),
   // Supplier unit (details_mfg_unit.id); blank keeps the parent's unit, else the SKU's mapped one.
   mfg_unit_id: z.coerce.number().int().positive().optional().nullable(),

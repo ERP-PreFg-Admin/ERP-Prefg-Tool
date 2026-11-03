@@ -467,8 +467,11 @@ export const packingMaterials = {
     SELECT id, pm_code FROM master_pm WHERE name = ? AND type <=> ? LIMIT 1
   `,
 
-  /** Total PM count — used to auto-generate the next pm_code (PM<serial>). */
-  countTotal: `SELECT COUNT(*) AS total FROM master_pm`,
+  /** Highest serial in PM-NNNN codes: seeds the PM series in serial_counters on first use. */
+  maxCodeSerial: `
+    SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(pm_code, '-', -1) AS UNSIGNED)), 0) AS n
+    FROM master_pm WHERE pm_code REGEXP '^PM-[0-9]+$'
+  `,
 
   /**
    * Check if a vendor rate exists for this pm + vendor + MOQ combination.
