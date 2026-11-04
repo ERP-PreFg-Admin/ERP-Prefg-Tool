@@ -1,6 +1,7 @@
 "use client"
 
-import { ChevronDown, ChevronRight, Clock, FileText } from "lucide-react"
+import { AlertTriangle, ChevronDown, ChevronRight, Clock, FileText } from "lucide-react"
+import { printedOnlyShipToChanges } from "@/app/masters/warehouses/address-check"
 import { Badge } from "@/components/ui/badge"
 import { APPROVAL_STATUS_VARIANT, type ApprovalStatus } from "@/lib/constants"
 import type { Approval } from "../approvals-types"
@@ -48,6 +49,9 @@ export default function ApprovalCard({
   const reasonText  = isBom
     ? approval.items.find(i => i.field_name === "__reason__")?.new_value || null
     : approval.reason
+  const printedOnly = approval.module === "WAREHOUSE"
+    ? printedOnlyShipToChanges(approval.items.map((i) => i.field_name))
+    : []
 
   return (
     <div className={`rounded-xl border border-border bg-card overflow-hidden transition-all ${isExpanded ? "ring-1 ring-primary/20 shadow-sm" : ""}`}>
@@ -140,7 +144,15 @@ export default function ApprovalCard({
           ) : isBom ? (
             <RecipeLineDiffTable items={approval.items} materialMap={materialMap} hideReason />
           ) : (
-            <FieldDiffTable items={approval.items} />
+            <>
+              {printedOnly.map((code) => (
+                <p key={code} className="mb-2 flex items-start gap-1 text-xs text-amber-700 dark:text-amber-500">
+                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                  Only the printed ship-to address changed for {code}. The structured address — what POs print — is unchanged.
+                </p>
+              ))}
+              <FieldDiffTable items={approval.items} />
+            </>
           )}
         </div>
       )}

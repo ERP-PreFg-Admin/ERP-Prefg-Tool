@@ -238,6 +238,7 @@ export function EditWarehouseDialog({
           onChange={setEntityForm}
           disabled={locked}
           ourPans={ourPans}
+          initial={formFromRow(entityRow)}
         />
 
         <p className="text-xs text-muted-foreground">

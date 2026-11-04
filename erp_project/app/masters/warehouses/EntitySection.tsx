@@ -1,5 +1,6 @@
 "use client"
 
+import { AlertTriangle } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
@@ -7,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { isGstinShape, panOf } from "@/lib/invoice/gstin"
 import type { Entity } from "@/types/masters"
 import type { EntityForm } from "./entity-section"
+import { shipToMismatch } from "./address-check"
 
 /**
  * One legal entity's block: its Unicommerce facility, GST registration and
@@ -25,6 +27,7 @@ export function EntitySection({
   onChange,
   disabled,
   ourPans,
+  initial,
 }: {
   entity: Entity
   value: EntityForm
@@ -32,6 +35,8 @@ export function EntitySection({
   disabled?: boolean
   /** Every entity's PAN, for validating ship-to. */
   ourPans: string[]
+  /** The row as the dialog opened it, to spot an edit that changed only "as printed". */
+  initial?: EntityForm
 }) {
   const set = (key: keyof EntityForm, v: string) => onChange({ ...value, [key]: v })
 
@@ -59,6 +64,7 @@ export function EntitySection({
 
   const pincode = value.ship_to_pincode.trim()
   const pincodeError = pincode && !/^\d{6}$/.test(pincode) ? "Must be exactly 6 digits." : null
+  const addressWarning = shipToMismatch(value, initial)
 
   return (
     <fieldset className="rounded-lg border border-border p-4 space-y-3" disabled={disabled}>
@@ -205,7 +211,9 @@ export function EntitySection({
               onChange={(e) => set("ship_to_pincode", e.target.value.replace(/\D/g, "").slice(0, 6))}
               aria-invalid={Boolean(pincodeError)}
             />
-            {pincodeError && <p className="text-xs text-destructive">{pincodeError}</p>}
+            {pincodeError
+              ? <p className="text-xs text-destructive">{pincodeError}</p>
+              : <p className="text-xs text-muted-foreground">Printed on POs.</p>}
           </div>
         </div>
 
@@ -218,6 +226,15 @@ export function EntitySection({
             value={value.ship_to_address}
             onChange={(e) => set("ship_to_address", e.target.value)}
           />
+          {addressWarning ? (
+            <p className="flex items-start gap-1 text-xs text-amber-700 dark:text-amber-500">
+              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{addressWarning}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Only used when the fields above are blank. POs and invoice matching use Building / Plot, Area, City and Pincode.
+            </p>
+          )}
         </div>
 
         <div className="flex flex-col gap-1.5 col-span-2">
