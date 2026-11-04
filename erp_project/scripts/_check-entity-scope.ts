@@ -39,7 +39,8 @@ import { manufacturingSql } from "../lib/queries/manufacturing"
 function withoutScope(sql: string): string {
   return sql.replace(/AND \(\? IS NULL OR [^)]*\) IN \(\?\)\)/g, "")
             .replace(/AND \(\? IS NULL OR [\w.]+ IS NULL OR [\w.]+ IN \(\?\)\)/g, "")
-            .replace(/AND \(\? IS NULL OR [\w.]+ +IN \(\?\)\)/g, "")
+            // m.code IN (?) is the PO manufacturer filter, not scope.
+            .replace(/AND \(\? IS NULL OR (?!m\.code )[\w.]+ +IN \(\?\)\)/g, "")
 }
 
 /**
@@ -90,7 +91,7 @@ async function main() {
   assertStripped(purchaseOrdersSql.countPaginated, 6, "purchaseOrdersSql.countPaginated")
   const poFp = buildFilterParams(null, null, null, null, null, null, null, null, false, UNRESTRICTED)
   const poScoped = countOf(await query<{ total: number }>(purchaseOrdersSql.countPaginated, poFp))
-  const poBare = countOf(await query<{ total: number }>(withoutScope(purchaseOrdersSql.countPaginated), poFp.slice(0, 25)))
+  const poBare = countOf(await query<{ total: number }>(withoutScope(purchaseOrdersSql.countPaginated), poFp.slice(0, 29)))
   assert.equal(poScoped, poBare, "PO countPaginated unchanged by unrestricted scope")
   console.log(`  purchase orders: ${poScoped} == ${poBare}`)
 
@@ -211,8 +212,8 @@ async function main() {
   // ── 6. Param-count guards, so a WHERE and its builder can't drift ─────────
   // 25 filter params + 6 scope. Both grew by 2 when the destination filter gained
   // its entity half — a location is one master_warehouse row but two destinations.
-  assert.equal(buildFilterParams(null, null, null, null, null, null, null, null, false, UNRESTRICTED).length, 31)
-  assert.equal(buildStatusCountParams(null, null, null, null, null, null, null, false, UNRESTRICTED).length, 27)
+  assert.equal(buildFilterParams(null, null, null, null, null, null, null, null, false, UNRESTRICTED).length, 35)
+  assert.equal(buildStatusCountParams(null, null, null, null, null, null, null, false, UNRESTRICTED).length, 31)
   assert.equal(manufacturers.filterParams(null, UNRESTRICTED).length, 7)
   assert.equal(vendors.filterParams(null, null, null, UNRESTRICTED).length, 9)
   assert.deepEqual(scopeParams(null), [null, [0]], "unrestricted params are inert")

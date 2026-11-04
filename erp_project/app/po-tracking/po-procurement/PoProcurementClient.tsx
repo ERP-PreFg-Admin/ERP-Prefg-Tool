@@ -16,6 +16,7 @@ import { UrlSearchInput } from "@/components/masters/UrlSearchInput"
 import { PaginationBar } from "@/components/ui/pagination-bar"
 import { FuzzySelect } from "@/components/ui/FuzzySelect"
 import { Select } from "@/components/ui/select"
+import { MultiSelect } from "@/components/ui/multi-select"
 import { DownloadButton } from "@/components/masters/DownloadButton"
 import { CsvImportDialog } from "@/components/masters/CsvImportDialog"
 import { cn } from "@/lib/utils"
@@ -97,6 +98,8 @@ export default function PoProcurementClient({
   currentSku,
   currentDestination,
   currentDestEntity,
+  currentLastFrom = "",
+  currentLastTo = "",
   statusCounts,
   summary,
   skuOptions,
@@ -123,6 +126,9 @@ export default function PoProcurementClient({
   currentDestination: string
   /** master_entity.code half of the destination filter — see destFilterValue. */
   currentDestEntity: string
+  /** Last Change range (FG only): when the PO last changed, in IST days. */
+  currentLastFrom?: string
+  currentLastTo?: string
   statusCounts: Record<string, number>
   /** Quantities, not PO counts — see summaryStats in lib/queries/purchase-orders.ts. */
   summary: { total: number; openQty: number; committedQty: number; receivedQty: number; overdueQty: number; overduePos: number; draftPos: number }
@@ -193,6 +199,8 @@ export default function PoProcurementClient({
   const [draftDateFrom,    setDraftDateFrom]    = useState(currentDateFrom)
   const [draftDateTo,      setDraftDateTo]      = useState(currentDateTo)
   const [draftSku,         setDraftSku]         = useState(currentSku)
+  const [draftLastFrom,    setDraftLastFrom]    = useState(currentLastFrom)
+  const [draftLastTo,      setDraftLastTo]      = useState(currentLastTo)
   // One <select>, two URL params: the option value packs the site and the entity
   // (see destFilterValue), because purchase_orders.destination only stores the site.
   const [draftDestination, setDraftDestination] = useState(
@@ -202,6 +210,11 @@ export default function PoProcurementClient({
   const skuFilterOptions = useMemo(
     () => [{ id: 0, sku_code: "", name: "All SKUs", status: "active" }, ...skuOptions],
     [skuOptions]
+  )
+  // Several manufacturers at once; comma-joined into the one mfgCode param.
+  const mfgFilterOptions = useMemo(
+    () => mfgOptions.map((m) => [m.code, `${m.code} — ${m.name}`] as const),
+    [mfgOptions]
   )
 
   function applyFilters() {
@@ -213,6 +226,7 @@ export default function PoProcurementClient({
       dateTo:      draftDateTo,
       sku:         draftSku,
       ...parseDestFilter(draftDestination),
+      ...(isInwarding ? {} : { lastFrom: draftLastFrom, lastTo: draftLastTo }),
     })
     setShowFilters(false)
   }
@@ -225,7 +239,9 @@ export default function PoProcurementClient({
     setDraftDateTo("")
     setDraftSku("")
     setDraftDestination("")
-    navigate({ mfgCode: "", poType: "", status: "", dateFrom: "", dateTo: "", sku: "", destination: "", destEntity: "" })
+    setDraftLastFrom("")
+    setDraftLastTo("")
+    navigate({ mfgCode: "", poType: "", status: "", dateFrom: "", dateTo: "", sku: "", destination: "", destEntity: "", lastFrom: "", lastTo: "" })
     setShowFilters(false)
   }
 
@@ -239,7 +255,10 @@ export default function PoProcurementClient({
   // of a 0% that looks like a supply failure.
   const fillRate = summary.committedQty > 0 ? (summary.receivedQty / summary.committedQty) * 100 : null
 
-  const hasActiveFilters = !!(currentMfgCode || currentPoType || currentDateFrom || currentDateTo || currentSku || currentDestination)
+  const activeFilterCount = [
+    currentMfgCode, currentPoType, currentDateFrom || currentDateTo, currentSku, currentDestination, currentLastFrom || currentLastTo,
+  ].filter(Boolean).length
+  const hasActiveFilters = activeFilterCount > 0
   const afterAction = () => router.refresh()
   const activeTab = (currentStatus || "all") as TabKey
 
@@ -301,6 +320,8 @@ export default function PoProcurementClient({
             setDraftDateTo(currentDateTo)
             setDraftSku(currentSku)
             setDraftDestination(destFilterSelection(currentDestination, currentDestEntity))
+            setDraftLastFrom(currentLastFrom)
+            setDraftLastTo(currentLastTo)
             setShowFilters((v) => !v)
           }}
         >
@@ -308,7 +329,7 @@ export default function PoProcurementClient({
           Filters
           {hasActiveFilters && (
             <span className="ml-0.5 rounded-full bg-blue-600 px-1.5 py-0 text-[10px] text-white">
-              {[currentMfgCode, currentPoType, currentDateFrom, currentDateTo, currentSku, currentDestination].filter(Boolean).length}
+              {activeFilterCount}
             </span>
           )}
         </ToggleButton>
@@ -372,16 +393,12 @@ export default function PoProcurementClient({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="grid gap-1.5">
                 <Label className="text-xs">Manufacturer</Label>
-                <Select
-                  value={draftMfgCode}
-                  onChange={(e) => setDraftMfgCode(e.target.value)}
-                  className="w-full"
-                >
-                  <option value="">All Manufacturers</option>
-                  {mfgOptions.map((m) => (
-                    <option key={m.id} value={m.code}>{m.code} — {m.name}</option>
-                  ))}
-                </Select>
+                <MultiSelect
+                  options={mfgFilterOptions}
+                  value={draftMfgCode.split(",").filter(Boolean)}
+                  onChange={(next) => setDraftMfgCode(next.join(","))}
+                  placeholder="All Manufacturers"
+                />
               </div>
               <div className="grid gap-1.5">
                 <Label className="text-xs">Status</Label>
@@ -431,6 +448,21 @@ export default function PoProcurementClient({
                   className="h-9 text-sm"
                 />
               </div>
+              {!isInwarding && (
+                <div className="grid gap-1.5">
+                  {/* Same moment the Last Updated column shows: newest history row, approval or mail. */}
+                  <Label className="text-xs">Last Change</Label>
+                  <DateRangePicker
+                    from={draftLastFrom}
+                    to={draftLastTo}
+                    onChange={(f, t) => {
+                      setDraftLastFrom(f)
+                      setDraftLastTo(t)
+                    }}
+                    className="h-9 text-sm"
+                  />
+                </div>
+              )}
               <div className="grid gap-1.5">
                 <Label className="text-xs">SKU</Label>
                 <FuzzySelect

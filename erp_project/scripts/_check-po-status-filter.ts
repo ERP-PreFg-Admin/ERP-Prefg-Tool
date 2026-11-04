@@ -15,8 +15,8 @@ const params = (status: string | null) =>
 // 6 search + 4 status + 14 filter + 1 excludeInward + 6 entity scope (mfg,
 // warehouse, brand — 2 each). The filter dozen became fourteen when the
 // destination filter gained its entity half: a location is one master_warehouse
-// row but two destinations, so the filter matches site AND entity.
-assert.equal(params(null).length, 31)
+// row but two destinations, so the filter matches site AND entity. Then 18 with Last Change (from ×2, to ×2).
+assert.equal(params(null).length, 35)
 
 // The invariant this file's header claims to guard but never checked: one bound
 // param per placeholder. mysql2 binds positionally, so a predicate added to the
@@ -47,6 +47,6 @@ assert.deepEqual(statusMatchValues("received"), ["received", "short_closed", "sh
 assert.deepEqual(statusMatchValues("draft"), ["draft", "draft", "draft"])
 
 console.log(
-  `PO status filter OK — 31 params matching ${placeholders} placeholders, ` +
+  `PO status filter OK — ${params(null).length} params matching ${placeholders} placeholders, ` +
     "open/received groups intact, all 3 scope pairs inert"
 )

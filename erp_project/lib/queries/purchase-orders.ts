@@ -165,40 +165,53 @@ export const SCOPE_WHERE = `
     AND (? IS NULL OR po.destination IN (?))
     AND (? IS NULL OR sk.brand_id IS NULL OR sk.brand_id IN (?))`
 
+// Same three timestamps lastPoUpdate picks from; GREATEST is NULL if any arg is, hence the floors.
+const LAST_UPDATED_EXPR = `GREATEST(
+    COALESCE((SELECT MAX(h.changed_on) FROM history_pos h WHERE h.po_id = po.id), '1000-01-01'),
+    COALESCE((SELECT MAX(a.approved_on) FROM approvals a WHERE a.module = 'PO' AND a.entity_id = po.id AND a.status = 'approved'), '1000-01-01'),
+    COALESCE(po.email_sent_at, '1000-01-01'))`
+
+// Last Change filter: IST calendar days, since the stamps are stored UTC.
+const LAST_CHANGE_WHERE = `
+    AND (? IS NULL OR DATE(CONVERT_TZ(${LAST_UPDATED_EXPR}, '+00:00', '+05:30')) >= ?)
+    AND (? IS NULL OR DATE(CONVERT_TZ(${LAST_UPDATED_EXPR}, '+00:00', '+05:30')) <= ?)`
+
 // ── Shared WHERE fragment (all filters) ──────────────────────────────────────
-// Params (25 + 6 scope = 31 via buildFilterParams): [like×6, status×4, mfgCode×2,
-// poType×2, dateFrom×2, dateTo×2, sku×2, destination×2, destEntity×2, excludeInward]
+// Params (29 + 6 scope = 35 via buildFilterParams): [like×6, status×4, mfgCodes×2,
+// poType×2, dateFrom×2, dateTo×2, sku×2, destination×2, destEntity×2, lastFrom×2, lastTo×2, excludeInward]
 // The status filter matches an IN-list rather than a single value so the
 // "received" tab can also pull in short-closed POs and the PO Inwarding page's
 // "open" tab can span raised/punched/partially_received — see statusMatchValues().
 const FULL_WHERE = `
   WHERE (? IS NULL OR po.po_no LIKE ? OR m.code LIKE ? OR m.name LIKE ? OR po.sku_code LIKE ? OR CONCAT_WS(' ', sk.name, sk.supply_name) LIKE ?)
     AND (? IS NULL OR ${DISPLAY_STATUS_EXPR} IN (?, ?, ?))
-    AND (? IS NULL OR m.code         = ?)
+    AND (? IS NULL OR m.code        IN (?))
     AND (? IS NULL OR po.po_type     = ?)
     AND (? IS NULL OR po.date       >= ?)
     AND (? IS NULL OR po.date       <= ?)
     AND (? IS NULL OR po.sku_code    = ?)
     AND (? IS NULL OR po.destination = ?)
     AND (? IS NULL OR ent.code       = ?)
+    ${LAST_CHANGE_WHERE}
     ${EXCLUDE_INWARD}
     ${MASTERS_ONLY}
     ${APPROVED_ONLY}
     ${SCOPE_WHERE}
 `
 
-// Params (21 + 6 scope = 27 via buildStatusCountParams): [like×6, mfgCode×2, poType×2,
-// dateFrom×2, dateTo×2, sku×2, destination×2, destEntity×2, excludeInward]
+// Params (25 + 6 scope = 31 via buildStatusCountParams): [like×6, mfgCodes×2, poType×2,
+// dateFrom×2, dateTo×2, sku×2, destination×2, destEntity×2, lastFrom×2, lastTo×2, excludeInward]
 // Used by statusCounts and summaryStats which ignore the status filter.
 const SUMMARY_WHERE = `
   WHERE (? IS NULL OR po.po_no LIKE ? OR m.code LIKE ? OR m.name LIKE ? OR po.sku_code LIKE ? OR CONCAT_WS(' ', sk.name, sk.supply_name) LIKE ?)
-    AND (? IS NULL OR m.code         = ?)
+    AND (? IS NULL OR m.code        IN (?))
     AND (? IS NULL OR po.po_type     = ?)
     AND (? IS NULL OR po.date       >= ?)
     AND (? IS NULL OR po.date       <= ?)
     AND (? IS NULL OR po.sku_code    = ?)
     AND (? IS NULL OR po.destination = ?)
     AND (? IS NULL OR ent.code       = ?)
+    ${LAST_CHANGE_WHERE}
     ${EXCLUDE_INWARD}
     ${MASTERS_ONLY}
     ${APPROVED_ONLY}
@@ -286,11 +299,7 @@ const SAFE_SORT_COLS: Record<string, string> = {
   total_amount: "po.total_amount",
   expected_on:  "po.expected_on",
   status:       `(${DISPLAY_STATUS_EXPR})`,
-  // Same three timestamps lastPoUpdate picks from; GREATEST is NULL if any arg is, hence the floors.
-  last_updated: `GREATEST(
-    COALESCE((SELECT MAX(h.changed_on) FROM history_pos h WHERE h.po_id = po.id), '1000-01-01'),
-    COALESCE((SELECT MAX(a.approved_on) FROM approvals a WHERE a.module = 'PO' AND a.entity_id = po.id AND a.status = 'approved'), '1000-01-01'),
-    COALESCE(po.email_sent_at, '1000-01-01'))`,
+  last_updated: LAST_UPDATED_EXPR,
 }
 
 export const purchaseOrdersSql = {
@@ -310,7 +319,7 @@ export const purchaseOrdersSql = {
   /**
    * Paginated PO list with all filters.
    * Use buildSelectPaginated(sortBy, sortDir) to get the sorted variant.
-   * Params: buildFilterParams(...) + [LIMIT, OFFSET]  (31 + 2 = 33 total)
+   * Params: buildFilterParams(...) + [LIMIT, OFFSET]  (35 + 2 = 37 total)
    */
   buildSelectPaginated(sortBy = "date", sortDir: "asc" | "desc" = "desc"): string {
     const col = SAFE_SORT_COLS[sortBy] ?? "po.date"
@@ -324,7 +333,7 @@ export const purchaseOrdersSql = {
     `
   },
 
-  /** COUNT matching the full WHERE. Params: buildFilterParams(...)  (31 total) */
+  /** COUNT matching the full WHERE. Params: buildFilterParams(...)  (35 total) */
   countPaginated: `
     SELECT COUNT(*) AS total
     ${FROM_JOINS}
@@ -334,7 +343,7 @@ export const purchaseOrdersSql = {
   /**
    * Every PO matching the full WHERE, unpaginated — for the CSV/Excel export
    * (which must return all rows a filtered/searched view would page through,
-   * not just the current page). Params: buildFilterParams(...)  (31 total)
+   * not just the current page). Params: buildFilterParams(...)  (35 total)
    */
   buildSelectFiltered(sortBy = "date", sortDir: "asc" | "desc" = "desc"): string {
     const col = SAFE_SORT_COLS[sortBy] ?? "po.date"
@@ -347,7 +356,7 @@ export const purchaseOrdersSql = {
     `
   },
 
-  /** Per-status counts for tab badges (ignores status param). Params: buildStatusCountParams(...)  (27 total) */
+  /** Per-status counts for tab badges (ignores status param). Params: buildStatusCountParams(...)  (31 total) */
   statusCounts: `
     SELECT ${DISPLAY_STATUS_EXPR} AS status, COUNT(*) AS cnt
     ${FROM_JOINS}
@@ -394,7 +403,7 @@ export const purchaseOrdersSql = {
    * received figure is the rolled-up one, so a split PO contributes its full
    * original quantity exactly once no matter how many children it has.
    *
-   * Params: buildStatusCountParams(...)  (27 total)
+   * Params: buildStatusCountParams(...)  (31 total)
    */
   summaryStats: `
     SELECT
@@ -1378,8 +1387,19 @@ export function inwardTabFilters(
   }
 }
 
+/** Last Change date range (IST days, inclusive); either end may be open. */
+export type LastChangeRange = { from: string | null; to: string | null }
+const NO_LAST_CHANGE: LastChangeRange = { from: null, to: null }
+const lastChangeParams = (r: LastChangeRange) => [r.from, r.from, r.to, r.to]
+
+/** The manufacturer filter is a comma-joined list of codes; null when empty, since `IN ()` is invalid. */
+export function mfgCodeList(mfgCode: string | null): string[] | null {
+  const codes = (mfgCode ?? "").split(",").map((c) => c.trim()).filter(Boolean)
+  return codes.length ? codes : null
+}
+
 /**
- * Build the 27-element param array for selectPaginated / countPaginated.
+ * Build the 35-element param array for selectPaginated / countPaginated.
  * All-null values disable the corresponding filter.
  *
  * `excludeInward` is the FG PO Tracking page's standing filter — true there,
@@ -1414,19 +1434,22 @@ export function buildFilterParams(
    * that have a destination filter pass it.
    */
   destEntity:  string | null = null,
+  lastChange:  LastChangeRange = NO_LAST_CHANGE,
 ): unknown[] {
   const like = search ? `%${search}%` : null
   const [statusA, statusB, statusC] = statusMatchValues(status)
+  const mfgs = mfgCodeList(mfgCode)
   return [
     like, like, like, like, like, like,               // search ×6
     status, statusA, statusB, statusC,                // status ×4 (IS NULL check + IN-list triple)
-    mfgCode,     mfgCode,               // mfgCode ×2
+    mfgs && 1,   mfgs,                  // mfgCodes: set flag + IN list
     poType,      poType,                // poType ×2
     dateFrom,    dateFrom,              // dateFrom ×2
     dateTo,      dateTo,                // dateTo ×2
     sku,         sku,                   // sku ×2
     destination, destination,           // destination ×2
     destEntity,  destEntity,            // destEntity ×2
+    ...lastChangeParams(lastChange),    // lastFrom ×2, lastTo ×2
     excludeInward ? 1 : null,           // excludeInward ×1
     ...scopeParams(scope.mfgIds),         // entity scope: mfg ×2
     ...scopeParams(scope.warehouseNames), // entity scope: warehouse ×2
@@ -1435,7 +1458,7 @@ export function buildFilterParams(
 }
 
 /**
- * Build the 25-element param array for statusCounts / summaryStats
+ * Build the 31-element param array for statusCounts / summaryStats
  * (same as buildFilterParams but without the status filter quad).
  */
 export function buildStatusCountParams(
@@ -1450,17 +1473,20 @@ export function buildStatusCountParams(
   scope:       UserScope,
   /** master_entity.code, paired with `destination` — see buildFilterParams. */
   destEntity:  string | null = null,
+  lastChange:  LastChangeRange = NO_LAST_CHANGE,
 ): unknown[] {
   const like = search ? `%${search}%` : null
+  const mfgs = mfgCodeList(mfgCode)
   return [
     like, like, like, like, like, like, // search ×6
-    mfgCode,     mfgCode,               // mfgCode ×2
+    mfgs && 1,   mfgs,                  // mfgCodes: set flag + IN list
     poType,      poType,                // poType ×2
     dateFrom,    dateFrom,              // dateFrom ×2
     dateTo,      dateTo,                // dateTo ×2
     sku,         sku,                   // sku ×2
     destination, destination,           // destination ×2
     destEntity,  destEntity,            // destEntity ×2
+    ...lastChangeParams(lastChange),    // lastFrom ×2, lastTo ×2
     excludeInward ? 1 : null,           // excludeInward ×1
     ...scopeParams(scope.mfgIds),         // entity scope: mfg ×2
     ...scopeParams(scope.warehouseNames), // entity scope: warehouse ×2

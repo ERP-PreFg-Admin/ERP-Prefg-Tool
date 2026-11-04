@@ -13,7 +13,11 @@ export type PoListFilters = {
   search: string; status: string; sortBy: string; sortDir: "asc" | "desc"
   mfgCode: string; poType: string; dateFrom: string; dateTo: string
   sku: string; destination: string; destEntity: string
+  /** Last Change range, FG PO Tracking only. */
+  lastFrom?: string; lastTo?: string
 }
+
+const lastChangeOf = (f: PoListFilters) => ({ from: f.lastFrom || null, to: f.lastTo || null })
 
 type Dropdowns = Awaited<ReturnType<typeof getPoDropdownOptions>>
 export type PoListPage = {
@@ -70,8 +74,8 @@ export async function getPoProcurementPage(userId: number, f: PoListFilters): Pr
   // dateFrom, dateFrom as dateTo, dateTo as sku. All three are `string | null`,
   // so nothing type-checked it, and the tab counts stayed right while the rows
   // went wrong — which is the symptom to look for if this ever regresses.
-  const filterParams      = buildFilterParams(f.search || null, status, f.mfgCode || null, f.poType || null, f.dateFrom || null, f.dateTo || null, f.sku || null, f.destination || null, true, scope, f.destEntity || null)
-  const statusCountParams = buildStatusCountParams(f.search || null, f.mfgCode || null, f.poType || null, f.dateFrom || null, f.dateTo || null, f.sku || null, f.destination || null, true, scope, f.destEntity || null)
+  const filterParams      = buildFilterParams(f.search || null, status, f.mfgCode || null, f.poType || null, f.dateFrom || null, f.dateTo || null, f.sku || null, f.destination || null, true, scope, f.destEntity || null, lastChangeOf(f))
+  const statusCountParams = buildStatusCountParams(f.search || null, f.mfgCode || null, f.poType || null, f.dateFrom || null, f.dateTo || null, f.sku || null, f.destination || null, true, scope, f.destEntity || null, lastChangeOf(f))
 
   const elapsed = stopwatch()
   console.log(`[AUDIT] PO Procurement load - page=${f.page}, size=${f.size}, search=${f.search || "none"}, status=${status ?? "all"}, sortBy=${f.sortBy}, sortDir=${f.sortDir}`)

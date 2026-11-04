@@ -11,7 +11,8 @@
  *   status      — PO status tab. "all" clears the filter and "inward" is not a
  *                 status at all — it selects po_type, matching PO Inwarding's
  *                 tabs. Both go through inwardTabFilters().
- *   mfgCode     — exact manufacturer code
+ *   mfgCode     — manufacturer code(s), comma-joined
+ *   lastFrom / lastTo — Last Change date range (IST days)
  *   poType      — "normal" | "impromptu"
  *   dateFrom    — PO date >=
  *   dateTo      — PO date <=
@@ -73,6 +74,7 @@ export const GET = withGateway({
       excludeInward,
       await getViewScope(Number(session.user.id)),
       destEntity || null,
+      { from: sp.get("lastFrom") || null, to: sp.get("lastTo") || null },
     )
     // Uniware only ever mirrors inward POs, so the column is empty in an export
     // that has none. Filtered rather than kept as a second column config.

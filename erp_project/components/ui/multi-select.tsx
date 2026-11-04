@@ -56,7 +56,7 @@ export function MultiSelect({
       </button>
       <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
       {open && (
-        <div role="listbox" aria-multiselectable className="absolute left-0 right-0 z-50 mt-1 rounded-lg border bg-popover p-1 shadow-md">
+        <div role="listbox" aria-multiselectable className="absolute left-0 right-0 z-50 mt-1 max-h-72 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md">
           {options.map(([v, l]) => (
             <label key={v} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
               <input type="checkbox" className="h-3.5 w-3.5" checked={value.includes(v)} onChange={() => toggle(v)} />

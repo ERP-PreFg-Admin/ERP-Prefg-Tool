@@ -34,10 +34,12 @@ export default async function PoProcurementPage({
   // one master_warehouse row but two destinations, and purchase_orders.destination
   // stores only the shared site name. See destFilterValue in po-utils.ts.
   const destEntity      = String(sp.destEntity ?? "")
+  const lastFrom        = String(sp.lastFrom    ?? "")
+  const lastTo          = String(sp.lastTo      ?? "")
 
   const data = await getPoProcurementPage(userId, {
     page, size, offset, search, status: statusFilter, sortBy, sortDir, mfgCode, poType,
-    dateFrom, dateTo, sku: skuFilter, destination: destFilter, destEntity,
+    dateFrom, dateTo, sku: skuFilter, destination: destFilter, destEntity, lastFrom, lastTo,
   })
 
   return (
@@ -65,6 +67,8 @@ export default async function PoProcurementPage({
         currentSku={skuFilter}
         currentDestination={destFilter}
         currentDestEntity={destEntity}
+        currentLastFrom={lastFrom}
+        currentLastTo={lastTo}
         statusCounts={data.statusCounts}
         summary={data.summary}
         skuOptions={data.skuOptions}
