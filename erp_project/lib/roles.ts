@@ -19,8 +19,8 @@
  * change, no new column, and each of the fifteen is independently grantable.
  *
  * ── What a role does NOT do ───────────────────────────────────────────────
- * Nothing in the app branches on a role name; there is no `if (role === ...)`
- * anywhere. A role's only power is the `page_permissions` rows attached to it
+ * Nothing in the app branches on a role name, with one exception: an Executive
+ * may not approve their own PO request (lib/approvals/self-approval.ts). Otherwise a role's only power is the `page_permissions` rows attached to it
  * (see lib/permissions.ts resolveAccess). `approver: true` on Head is
  * descriptive — it documents why Heads are seeded `editor` on /approvals, and
  * drives a UI hint. The actual gate is still the page permission.

@@ -50,6 +50,13 @@ export const POST = withGateway({
         `${inReview.map((r) => r.po_no).join(", ")} ${inReview.length === 1 ? "has an edit" : "have edits"} awaiting approval — approve or reject before mailing.`)
     }
 
+    // A pending cancel mailed now would reach the manufacturer as a live order.
+    const statusPending = await query<{ po_no: string }>(purchaseOrdersSql.selectStatusPendingAmong, [poIds])
+    if (statusPending.length > 0) {
+      throw new ApiError(409, "status_pending",
+        `${statusPending.map((r) => r.po_no).join(", ")} ${statusPending.length === 1 ? "has a short close or cancel" : "have short closes or cancels"} awaiting approval — approve or reject before mailing.`)
+    }
+
     // A PO still waiting on (or refused) its approval isn't an order yet; the email_sent_at stamp already skips these.
     const unapproved = await query<{ po_no: string }>(purchaseOrdersSql.selectUnapprovedAmong, [poIds])
     if (unapproved.length > 0) {

@@ -76,7 +76,7 @@ export default function PoDataRow({
   // Nor a draft: `status` here is the DISPLAYED one, so this also covers a
   // raised PO the manufacturer hasn't been mailed about yet. A split divides an
   // order they already have; the split route refuses the same set.
-  const canSplit = !inwardingMode && !isChild
+  const canSplit = !inwardingMode && !isChild && !r.status_request
     && ["raised", "punched", "partially_received"].includes(status)
     && num(r.qty) - num(r.received_qty) - num(r.split_qty) > 0
   // Goods arrive against the split, not the order it came off, so a master with
@@ -91,9 +91,10 @@ export default function PoDataRow({
   // A split master isn't mailable: the manufacturer needs the individual splits,
   // each with its own quantity and destination. Nor is a PO whose edit awaits approval.
   const editPending = Number(r.edit_pending) === 1
+  const statusRequest = r.status_request ? (r.status_request === "cancelled" ? "Cancel" : "Short close") : null
   const unapproved = isUnapprovedPo(r.raw_status)
   // A discarded draft was never sent and never will be, so there is nothing to mail.
-  const selectDisabled = isSplitMaster || editPending || unapproved || status === "discarded"
+  const selectDisabled = isSplitMaster || editPending || !!statusRequest || unapproved || status === "discarded"
   const lastUpdate = inwardingMode ? null : lastPoUpdate(r)
 
   return (
@@ -141,6 +142,7 @@ export default function PoDataRow({
             onChange={() => onToggleRow(r.id)}
             title={editPending
               ? "An edit to this PO is awaiting approval — it can be mailed once that's approved or rejected."
+              : statusRequest ? `${statusRequest} is awaiting approval — it can be mailed once that's approved or rejected.`
               : unapproved ? "This PO isn't approved yet — it can be mailed once its approval goes through."
               : selectDisabled ? "This PO is split — select the individual split POs to mail them." : undefined}
             className={cn(selectDisabled && "cursor-not-allowed opacity-40")}
@@ -195,9 +197,10 @@ export default function PoDataRow({
       <TableCell>
         <div className="flex flex-col items-start gap-1">
           <Badge variant={cfg.variant} className="whitespace-nowrap">{cfg.label}</Badge>
-          {editPending && (
-            <Badge variant="info" className="whitespace-nowrap px-1.5 py-0 text-[10px]" title="An edit to this PO is awaiting approval">
-              In Review
+          {(editPending || statusRequest) && (
+            <Badge variant="info" className="whitespace-nowrap px-1.5 py-0 text-[10px]"
+              title={statusRequest ? `${statusRequest} requested — awaiting approval` : "An edit to this PO is awaiting approval"}>
+              {statusRequest ? `${statusRequest} in review` : "In Review"}
             </Badge>
           )}
         </div>

@@ -129,6 +129,11 @@ export const POST = withGateway({
       if (isDraftPo(locked) || !SPLITTABLE.has(locked.status)) {
         throw new ApiError(409, "not_splittable", `${locked.po_no} changed while it was being split — reload and try again.`)
       }
+      // A split of an order that is about to be closed or cancelled would outlive it.
+      const [statusPending] = await conn.execute(approvalsSql.hasPending, ["PO_STATUS", poId])
+      if ((statusPending as unknown[]).length > 0) {
+        throw new ApiError(409, "status_pending", `${locked.po_no} has a short close or cancel awaiting approval — approve or reject it first.`)
+      }
       // What this PO can still hand out: its quantity, less what has arrived, less
       // what live splits already took (the parent's qty never shrinks).
       const allocated = existing.filter(isLiveSplit).reduce((sum, c) => sum + Number(c.qty), 0)

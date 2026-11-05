@@ -123,7 +123,7 @@ export default function PoTable({
   // page, plus the children of the split ones. A split master is skipped —
   // mailing it means nothing, so ticking it would silently do nothing.
   // An edit awaiting approval, or a PO never approved, can't be mailed either, so select-all skips them too.
-  const mailable = (r: PoRow) => Number(r.edit_pending) !== 1 && !isUnapprovedPo(r.raw_status) && r.raw_status !== "discarded"
+  const mailable = (r: PoRow) => Number(r.edit_pending) !== 1 && !r.status_request && !isUnapprovedPo(r.raw_status) && r.raw_status !== "discarded"
   const pageIds = [
     ...rows.filter((r) => Number(r.child_count) === 0 && mailable(r)).map((r) => r.id),
     ...rows.flatMap((r) => (childrenByParent[r.po_no] ?? []).filter(mailable).map((c) => c.id)),
@@ -161,15 +161,20 @@ export default function PoTable({
     )
 
     const actions: MenuAction[] = []
+    // One request at a time: a pending edit, short close or cancel locks the others. The routes re-check.
+    const editPending   = Number(row.edit_pending) === 1
+    const statusPending = !!row.status_request
+    const lockedReason  = statusPending
+      ? `${row.status_request === "cancelled" ? "A cancel" : "A short close"} is awaiting approval`
+      : editPending ? "An edit is awaiting approval — approve or reject it first" : undefined
 
     if (canEdit) {
-      const pending = Number(row.edit_pending) === 1
       actions.push({
         label:   "Edit PO",
         icon:    <Pencil className="h-3.5 w-3.5" />,
         onClick: () => onEdit!(row),
-        disabled: pending,
-        disabledReason: pending ? "An edit is already awaiting approval" : undefined,
+        disabled: editPending || statusPending,
+        disabledReason: editPending ? "An edit is already awaiting approval" : lockedReason,
       })
     }
 
@@ -205,6 +210,8 @@ export default function PoTable({
         icon:    <Ban className="h-3.5 w-3.5" />,
         variant: "warning",
         onClick: () => setShortCloseTarget(row.id),
+        disabled: editPending || statusPending,
+        disabledReason: lockedReason,
       })
     }
 
@@ -214,18 +221,19 @@ export default function PoTable({
         icon:    <XCircle className="h-3.5 w-3.5" />,
         variant: "destructive",
         onClick: () => setCancelTarget(row.id),
+        disabled: editPending || statusPending,
+        disabledReason: lockedReason,
       })
     }
 
     if (canDiscard) {
-      const pending = Number(row.edit_pending) === 1
       actions.push({
         label:   "Discard Draft",
         icon:    <Trash2 className="h-3.5 w-3.5" />,
         variant: "destructive",
         onClick: () => setDiscardTarget(row),
-        disabled: pending,
-        disabledReason: pending ? "An edit is awaiting approval — approve or reject it first" : undefined,
+        disabled: editPending || statusPending,
+        disabledReason: lockedReason,
       })
     }
 

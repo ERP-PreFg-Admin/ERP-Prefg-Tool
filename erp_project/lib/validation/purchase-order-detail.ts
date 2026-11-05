@@ -17,8 +17,9 @@ export const poSplitSchema = z.object({
   splits: z.array(poSplitRowSchema).min(1, "At least 1 split row is required."),
 })
 
+/** Short close and cancel are both approval requests; the approver reads the reason. */
 export const poCancelSchema = z.object({
-  reason: z.string().trim().max(1000, "Reason must be 1000 characters or fewer.").optional(),
+  reason: z.string().trim().min(1, "A reason is required.").max(1000, "Reason must be 1000 characters or fewer."),
 })
 
 export const poDiscardSchema = z.object({

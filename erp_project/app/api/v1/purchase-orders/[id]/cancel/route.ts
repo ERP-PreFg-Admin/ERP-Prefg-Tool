@@ -1,11 +1,8 @@
 // POST /api/v1/purchase-orders/[id]/cancel
-// Fully cancel a raised PO. Distinct from Short Close: cancellation voids
+// Request a full cancel of a raised PO. Distinct from Short Close: cancellation voids
 // the whole PO rather than accepting partial fulfillment as final.
-// Notifying the manufacturer is a separate, explicit step — see the PO
-// Procurement table's checkbox selection + "Review & Send Mail" flow
-// (POST /api/v1/purchase-orders/send-mail) — cancelling no longer sends an
-// email on its own.
-// Refused once anything is received or while a split is live (setTerminalStatus re-checks under lock).
+// Staged as a PO_STATUS approval; the rules are re-checked under lock now and again on approve.
+// Notifying the manufacturer stays a separate step — "Review & Send Mail" once it is approved.
 
 import { NextResponse } from "next/server"
 import type { PoolConnection } from "mysql2/promise"
@@ -14,7 +11,7 @@ import logger from "@/lib/logger"
 import { recordFailedEvent, recordRawEvent, makeEventId, recordProcessedEvent } from "@/lib/events"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { assertPoInScope } from "@/lib/po/po-guard"
-import { setTerminalStatus } from "@/lib/po/po-lifecycle"
+import { stagePoStatusRequest } from "@/lib/po/po-status-request"
 import { ApiError } from "@/lib/gateway/errors"
 import { poIdParamSchema, poCancelSchema } from "@/lib/validation/purchase-order-detail"
 
@@ -30,24 +27,24 @@ export const POST = withGateway({
     const { reason } = body
     const userId = Number(session.user.id)
 
-    const eventId = makeEventId("PO_CANCEL", "cancel", poId)
+    const eventId = makeEventId("PO_CANCEL", "cancel-request", poId)
     recordRawEvent("PO_CANCEL", eventId, { poId, userId, reason })
 
     const conn: PoolConnection = await pool.getConnection()
     await conn.beginTransaction()
     try {
-      const po = await setTerminalStatus(conn, poId, "cancelled", userId)
+      const { approvalId, poNo } = await stagePoStatusRequest(conn, poId, "cancelled", reason, userId)
       await conn.commit()
-      logger.info({ ...ctx, eventId, poId, po_no: po.po_no, previousStatus: po.status, message: "PO manually cancelled" })
-      recordProcessedEvent("PO_CANCEL", eventId, { poId, poNo: po.po_no, userId })
-      return NextResponse.json({ ok: true })
+      logger.info({ ...ctx, eventId, poId, po_no: poNo, approvalId, message: "PO cancel sent for approval" })
+      recordProcessedEvent("PO_CANCEL", eventId, { poId, poNo, approvalId, userId })
+      return NextResponse.json({ ok: true, approval_id: approvalId })
     } catch (err: unknown) {
       await conn.rollback()
       if (err instanceof ApiError) throw err
       const message = err instanceof Error ? err.message : String(err)
       const stack = err instanceof Error ? err.stack : undefined
       recordFailedEvent("PO_CANCEL", eventId, { poId, userId }, message)
-      logger.error({ ...ctx, eventId, poId, err: message, stack, message: "PO cancellation failed" })
+      logger.error({ ...ctx, eventId, poId, err: message, stack, message: "PO cancel request failed" })
       throw new ApiError(500, "internal", "Database error: " + message)
     } finally {
       conn.release()

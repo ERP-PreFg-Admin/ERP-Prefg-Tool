@@ -439,7 +439,7 @@ export default function AddPODialog({
           <p className="text-xs text-muted-foreground pt-1">
             {poType === "impromptu"
               ? "Impromptu POs are submitted for approval before being raised."
-              : "Normal POs are raised immediately. Pick NPD, TT (Tech Transfer) or CPR under Type to raise that PO at ₹0 — it goes for approval first."}
+              : "Every PO goes for approval and shows in PO Tracking once approved. Pick NPD, TT (Tech Transfer) or CPR under Type to raise that PO at ₹0."}
           </p>
         </DialogHeader>
 

@@ -193,6 +193,10 @@ async function editUnmailedPo(poId: number, userId: number, skuCode: string | nu
     if ((pending as unknown[]).length > 0) {
       throw new ApiError(409, "edit_pending", `${plan.po.po_no} already has an edit awaiting approval.`)
     }
+    const [statusPending] = await conn.execute(approvalsSql.hasPending, ["PO_STATUS", poId])
+    if ((statusPending as unknown[]).length > 0) {
+      throw new ApiError(409, "status_pending", `${plan.po.po_no} has a short close or cancel awaiting approval — approve or reject it first.`)
+    }
 
     const [ar] = await conn.execute(approvalsSql.insertApproval, [userId, "PO_EDIT", poId, "edit"])
     const approvalId = (ar as ResultSetHeader).insertId

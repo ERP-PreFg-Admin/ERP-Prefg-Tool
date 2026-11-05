@@ -280,6 +280,9 @@ const SELECT_COLS = `
     (SELECT raised_by FROM approvals WHERE module = 'PO' AND entity_id = po.id ORDER BY id DESC LIMIT 1) AS po_raised_by,
     -- An edit awaiting approval: the row reads Draft + In Review and can't be mailed.
     EXISTS (SELECT 1 FROM approvals WHERE module = 'PO_EDIT' AND entity_id = po.id AND status = 'pending') AS edit_pending,
+    -- A short close or cancel awaiting approval: 'short_closed' / 'cancelled', else NULL.
+    (SELECT ai.new_value FROM approvals a JOIN approval_items ai ON ai.approval_id = a.id AND ai.field_name = 'status'
+      WHERE a.module = 'PO_STATUS' AND a.entity_id = po.id AND a.status = 'pending' LIMIT 1) AS status_request,
     -- "Last updated": newest history row and the PO approval; lastPoUpdate (lib/po/po-last-update.ts) picks.
     (SELECT h.changed_on FROM history_pos h WHERE h.po_id = po.id ORDER BY h.changed_on DESC, h.id DESC LIMIT 1) AS hist_at,
     (SELECT CONCAT_WS('|', h.action_type, COALESCE(h.field_name, ''), COALESCE(h.new_value, ''))
@@ -773,7 +776,9 @@ export const purchaseOrdersSql = {
            (SELECT COUNT(*) FROM invoice_items_mfg i
              WHERE i.received_against_po_id = po.id OR i.po_id = po.id) AS invoice_lines,
            EXISTS (SELECT 1 FROM approvals a
-             WHERE a.module = 'PO_EDIT' AND a.entity_id = po.id AND a.status = 'pending') AS edit_pending
+             WHERE a.module = 'PO_EDIT' AND a.entity_id = po.id AND a.status = 'pending') AS edit_pending,
+           EXISTS (SELECT 1 FROM approvals a
+             WHERE a.module = 'PO_STATUS' AND a.entity_id = po.id AND a.status = 'pending') AS status_pending
     FROM purchase_orders po WHERE po.id = ? LIMIT 1 FOR UPDATE
   `,
 
@@ -793,6 +798,14 @@ export const purchaseOrdersSql = {
     SELECT po.po_no FROM purchase_orders po
     WHERE po.id IN (?)
       AND EXISTS (SELECT 1 FROM approvals a WHERE a.module = 'PO_EDIT' AND a.entity_id = po.id AND a.status = 'pending')
+    ORDER BY po.po_no
+  `,
+
+  /** Which of these POs have a short close or cancel awaiting approval. query() expands the array. Params: [ids[]] */
+  selectStatusPendingAmong: `
+    SELECT po.po_no FROM purchase_orders po
+    WHERE po.id IN (?)
+      AND EXISTS (SELECT 1 FROM approvals a WHERE a.module = 'PO_STATUS' AND a.entity_id = po.id AND a.status = 'pending')
     ORDER BY po.po_no
   `,
 

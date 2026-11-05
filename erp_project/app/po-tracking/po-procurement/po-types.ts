@@ -87,6 +87,8 @@ export type PoRow = {
   po_raised_by: number | null
   /** 1 while a PO_EDIT approval is pending: reads Draft + In Review, can't be mailed. */
   edit_pending: number | null
+  /** A short close or cancel awaiting approval: the status it asks for. */
+  status_request: "short_closed" | "cancelled" | null
   /** Inputs to lastPoUpdate (lib/po/po-last-update.ts) — the FG "Last updated" column. */
   hist_at: string | null
   hist_kind: string | null

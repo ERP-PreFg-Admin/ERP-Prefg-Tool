@@ -20,7 +20,7 @@ import { rmRateHandler, rmVrmHandler, rmMatHandler, rmBulkHandler, rmVrmBulkHand
 import { pmRateHandler, pmVrmHandler, pmMatHandler, pmBulkHandler, pmVrmBulkHandler, pmRateBulkHandler } from "./handlers/packing-materials"
 import { vendorHandler, vendorBulkHandler } from "./handlers/vendors"
 import { mfgHandler, mfgBulkHandler } from "./handlers/manufacturers"
-import { poHandler, poEditHandler, poBulkHandler } from "./handlers/purchase-orders"
+import { poHandler, poEditHandler, poStatusHandler, poBulkHandler } from "./handlers/purchase-orders"
 import { bomHandler, bomBulkHandler } from "./handlers/recipe"
 import { mfgMiscHandler, mfgMiscBulkHandler } from "./handlers/misc-cost"
 import { mfgLineHandler } from "./handlers/mfg-line"
@@ -45,6 +45,7 @@ export const MODULE_HANDLERS: Record<string, ModuleHandler> = {
   MFG:     mfgHandler,
   PO:      poHandler,
   PO_EDIT: poEditHandler,
+  PO_STATUS: poStatusHandler,
   INVOICE_REVERT: invoiceRevertHandler,
   PO_BULK: poBulkHandler,
   VENDOR_BULK: vendorBulkHandler,

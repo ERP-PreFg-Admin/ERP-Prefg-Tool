@@ -169,38 +169,7 @@ export const POST = withGateway({
   const eventId = makeEventId("PO", "create")
   recordRawEvent("PO", eventId, { mfg_id, sku_code, qty, unit_price: unitPrice, expected_on, destination, reason, po_type })
 
-  // ── Normal PO: insert directly as raised, no approval needed ──────────────
-  if (po_type === "normal") {
-    const conn: PoolConnection = await pool.getConnection()
-    await conn.beginTransaction()
-    try {
-      const po_no = await nextPoNo(conn, prefix)
-      const [poResult] = await conn.execute(purchaseOrdersSql.insertNormal, [
-        po_no, Number(mfg_id), sku_code, Number(qty), unitPrice, amountPreGst, totalAmount, expected_on || null, destination || null,
-        reason?.trim() || null,
-        Number(mfg_id), sku_code,
-      ])
-      const poId = (poResult as any).insertId
-      if (unitId !== null) await conn.execute(purchaseOrdersSql.setMfgUnit, [unitId, poId])
-      await conn.commit()
-      logger.info({ ...ctx, eventId, poId, po_no, message: "Normal PO created" })
-      recordProcessedEvent("PO", eventId, { poId, po_no })
-
-      return NextResponse.json({ ok: true, po_no })
-    } catch (err: any) {
-      await conn.rollback()
-      logger.error({ ...ctx, eventId, err: err.message, stack: err.stack, message: "Normal PO create failed" })
-      recordFailedEvent("PO", eventId, { mfg_id, sku_code, qty, expected_on, destination }, err.message)
-      if (err.code === "ER_DUP_ENTRY") {
-        throw new ApiError(409, "duplicate", "PO number already exists, please retry.")
-      }
-      throw new ApiError(500, "internal", "Database error: " + err.message)
-    } finally {
-      conn.release()
-    }
-  }
-
-  // ── Impromptu / NPD / Tech Transfer / CPR: insert as draft and submit for approval ──
+  // ── Every PO raised by hand (normal, Impromptu, NPD / Tech Transfer / CPR): insert as draft and submit for approval ──
   const conn: PoolConnection = await pool.getConnection()
   await conn.beginTransaction()
   try {

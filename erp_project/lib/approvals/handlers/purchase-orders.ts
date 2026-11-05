@@ -1,4 +1,4 @@
-// ── PO (Impromptu / NPD / Tech Transfer / CPR — creation approval), PO_BULK (bulk CSV
+// ── PO (every PO raised by hand — normal, Impromptu, NPD / Tech Transfer / CPR), PO_BULK (bulk CSV
 // create-or-update) ──────────────────────────────────────────────────────────
 // PO: the PO is inserted as 'draft' before approval is submitted.
 //     approve → set status to 'raised'   reject → set status to 'rejected'
@@ -32,6 +32,8 @@ import { bulkUpdateBlock, type BulkUpdateTarget } from "@/lib/po/po-bulk-check"
 import { applyDraftPoEdit, draftEditFromItems } from "@/lib/po/po-edit"
 import { terminalBlock } from "@/lib/po/po-lifecycle"
 import { nextPoNo, poPrefix } from "@/lib/po/po-number"
+import { applyPoStatusRequest } from "@/lib/po/po-status-request"
+import { assertSelfApprovalAllowed } from "@/lib/approvals/self-approval"
 
 // PO_EDIT: an edit of a Draft PO, staged as field items + `reason`. Nothing on the PO
 // changes until approve; reject leaves it as it was.
@@ -62,9 +64,19 @@ export const poHandler: ModuleHandler = {
   async setStatus(conn, entityId, status) {
     await conn.execute(purchaseOrdersSql.setStatus, [status, entityId])
   },
-  async applyAndArchive(conn, entityId) {
+  async applyAndArchive(conn, entityId, _items, approverId, raisedBy) {
+    await assertSelfApprovalAllowed(conn, raisedBy, approverId)
     await assertSpecialPoStillFree(conn, entityId)
     await conn.execute(purchaseOrdersSql.setStatus, ["raised", entityId])
+  },
+}
+
+// PO_STATUS: a short close or cancel request. Reject leaves the PO as it was.
+export const poStatusHandler: ModuleHandler = {
+  async setStatus() {},
+  async applyAndArchive(conn, entityId, items, approverId, raisedBy) {
+    await assertSelfApprovalAllowed(conn, raisedBy, approverId)
+    await applyPoStatusRequest(conn, entityId, items, raisedBy ?? approverId)
   },
 }
 

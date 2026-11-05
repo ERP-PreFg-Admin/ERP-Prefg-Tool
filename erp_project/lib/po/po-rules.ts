@@ -41,6 +41,7 @@ export function discardBlock(po: {
   po_no: string; status: string | null; email_sent_at: string | Date | null; po_type: string | null
   reference_po: string | null; received_qty: string | number; child_count: string | number
   invoice_lines: string | number; edit_pending: string | number | boolean
+  status_pending?: string | number | boolean
 }): string | null {
   if (po.status === "discarded") return `${po.po_no} is already discarded.`
   if (po.email_sent_at) return `${po.po_no} has already been mailed to the manufacturer — cancel or short-close it instead.`
@@ -49,6 +50,7 @@ export function discardBlock(po: {
   if (Number(po.child_count) > 0) return `${po.po_no} has been split — cancel its splits first.`
   if (Number(po.received_qty) > 0 || Number(po.invoice_lines) > 0) return `${po.po_no} has goods booked against it — short-close it instead.`
   if (Number(po.edit_pending)) return `${po.po_no} has an edit awaiting approval — approve or reject it first.`
+  if (Number(po.status_pending)) return `${po.po_no} has a short close or cancel awaiting approval — approve or reject it first.`
   return null
 }
 
