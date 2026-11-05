@@ -67,6 +67,17 @@ export const uniwareDocsSql = {
      ORDER BY id DESC
      LIMIT ?`,
 
+  /** Mirrored invoices whose PDF never reached Uniware, oldest first so none waits forever. */
+  selectUnpushedCandidates: `
+    SELECT si.id, si.invoice_no, si.mfg_id, si.destination, si.buyer_gstin,
+           si.uniware_po_code, si.attachment_key
+      FROM invoice_mfg si
+     WHERE si.uniware_po_code IS NOT NULL AND si.uniware_po_code <> ''
+       AND si.reverted_at IS NULL
+       AND si.attachment_key IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM attachments_invoice a WHERE a.invoice_id = si.id AND a.source = 'erp')
+     ORDER BY si.id ASC`,
+
   selectSyncCandidateById: `
     SELECT id, invoice_no, mfg_id, destination, buyer_gstin,
            uniware_po_code, attachment_key

@@ -66,7 +66,7 @@ const STEP_PROGRESS: Record<InwardStep, string> = {
   s3:      "Storing invoice…",
   po:      "Creating inward POs…",
   uniware: "Sending to Uniware…",
-  docs:    "Attaching invoice in Uniware…",
+  docs:    "Attaching invoice in Uniware (can take up to a minute)…",
   email:   "Notifying warehouse…",
 }
 

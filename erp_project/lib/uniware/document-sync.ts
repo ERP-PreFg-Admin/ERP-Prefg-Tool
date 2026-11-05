@@ -31,12 +31,14 @@
 import crypto from "node:crypto"
 import { query, execute } from "@/lib/db"
 import { uniwareDocsSql } from "@/lib/queries/uniware-documents"
-import { mintCapability, listDocuments, downloadDocument, uploadDocument, DOC_MAX_BYTES, type DocCapability } from "./document"
+import { mintCapability, listDocuments, downloadDocument, uploadDocument, DOC_MAX_BYTES, UploadLinkRefused, type DocCapability } from "./document"
+import { retryAfter } from "./retry-after"
 import { UniwareSessionStale } from "./web-session"
 import { getFileBuffer, uploadFile } from "@/lib/s3"
 import { monthIST } from "@/lib/date"
 import { UNIWARE_SANDBOX, UNIWARE_DOC_FACILITIES } from "@/lib/env"
 import { facilityForInvoice } from "./facility-resolve"
+import { composeDocBatch } from "./doc-batch"
 import logger from "@/lib/logger"
 
 // ponytail: a flat cap like the GRN sweep's. Each invoice is 1 mint + a list +
@@ -137,11 +139,12 @@ async function pushInvoicePdf(
   return uploaded
 }
 
+/** Waits before each retry at save. Every first try on 2026-11-05 was refused on a PO made seconds before. */
+export const SAVE_PUSH_RETRY_MS = [5_000, 15_000, 30_000]
+
 /**
- * Push one invoice's PDF to its Uniware PO, minting its own capability — the
- * entry point for the inline invoice-commit path, which already holds the PDF
- * bytes. Throws UniwareSessionStale if the web session is dead; the caller treats
- * that as a non-fatal skip, since the Sync Documents button will retry it.
+ * Push one invoice's PDF to its Uniware PO at save, retrying a refused upload link.
+ * Throws UniwareSessionStale on a dead web session; any failure is left to the document sync.
  */
 export async function pushInvoicePdfToUniware(
   inv: { id: number; invoice_no: string; uniware_po_code: string },
@@ -149,7 +152,14 @@ export async function pushInvoicePdfToUniware(
   s3Key: string
 ): Promise<boolean> {
   const cap = await mintCapability(inv.uniware_po_code)
-  return pushInvoicePdf(cap, inv, pdf, s3Key)
+  return retryAfter(
+    (attempt) => {
+      if (attempt > 0) logger.info({ module: "PO_INVOICE", invoice_no: inv.invoice_no, attempt, message: "Retrying Uniware document push" })
+      return pushInvoicePdf(cap, inv, pdf, s3Key)
+    },
+    (err) => err instanceof UploadLinkRefused,
+    SAVE_PUSH_RETRY_MS,
+  )
 }
 
 /**
@@ -203,9 +213,15 @@ export async function runDocumentSync(
   // On prod with no facilities chosen, the feature is inert — say so plainly.
   if (!UNIWARE_SANDBOX && DOC_FACILITIES.length === 0) return { ...empty, disabled: true }
 
-  const rows = await query<Candidate>(uniwareDocsSql.selectSyncCandidates, [limit + 1])
-  const truncated = rows.length > limit
-  const batch = truncated ? rows.slice(0, limit) : rows
+  // The newest alone would never come back to an older PDF whose upload failed, so those
+  // get a share of the run. Only facilities the sync is on for, or they would hold slots forever.
+  const unpushed: Candidate[] = []
+  for (const inv of await query<Candidate>(uniwareDocsSql.selectUnpushedCandidates, [])) {
+    const facility = !UNIWARE_SANDBOX && !DOC_ALL ? await facilityForInvoice(inv) : undefined
+    if (docSyncFacilityAllowed(facility)) unpushed.push(inv)
+  }
+  const newest = await query<Candidate>(uniwareDocsSql.selectSyncCandidates, [limit + 1])
+  const { batch, truncated } = composeDocBatch(unpushed, newest, limit)
 
   let pulled = 0
   let pushed = 0

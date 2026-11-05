@@ -567,11 +567,9 @@ export async function runInwardInvoice(
   conn.release()
 
   // ── 4. Docs — attach our invoice PDF to the Uniware PO (non-fatal) ─────────
-  // After commit, like email: the upload is not reversible, and its failure is
-  // never a reason to undo a receipt that has physically arrived. A skip here is
-  // picked up by the Sync Documents button, which reconciles both directions.
-  // Enabled per facility: sandbox everywhere off prod, the UNIWARE_DOC_FACILITIES
-  // allowlist on prod.
+  // After commit, like email: never a reason to undo a receipt. Uniware can refuse a PO made seconds
+  // ago, so this retries for up to ~50 s; what still fails is attached by the document sync (cron + button).
+  // Enabled per facility: sandbox off prod, UNIWARE_DOC_FACILITIES on prod.
   await emit({ step: "docs", status: "start" })
   if (!uniwarePoCode) {
     await emit({ step: "docs", status: "skipped", message: "No Uniware PO to attach to" })
@@ -582,8 +580,7 @@ export async function runInwardInvoice(
     await emit({ step: "docs", status: "skipped", message: "Document sync is not enabled for this facility" })
   } else {
     try {
-      // The PDF is already in hand — no need to re-fetch from S3. attachmentKey is
-      // reused as the stored row's s3_key rather than duplicating the object.
+      // The PDF is already in hand; attachmentKey is reused as the stored row's s3_key.
       const pushed = await pushInvoicePdfToUniware(
         { id: written.invoiceId, invoice_no, uniware_po_code: uniwarePoCode },
         pdf.buffer,
@@ -596,12 +593,13 @@ export async function runInwardInvoice(
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      // A dead web session is a "log in again" situation (the extension refreshes
-      // it), not a failure of this invoice. Everything else is reported but still
-      // non-fatal: the goods are received and both POs exist.
+      // A dead web session means "log in again" (the extension refreshes it), not a failure of this invoice.
       const stale = err instanceof UniwareSessionStale
       logger.warn({ module: "PO_INVOICE", invoice_no, err: message, message: "Uniware document push skipped" })
-      await emit({ step: "docs", status: stale ? "skipped" : "failed", message })
+      await emit({
+        step: "docs", status: stale ? "skipped" : "failed",
+        message: `${message} — the next document sync will attach it.`,
+      })
     }
   }
 

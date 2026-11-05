@@ -23,6 +23,9 @@ import { requireUniwareWebCookie, UniwareSessionStale, withCookieSession } from 
 
 export const DOC_MAX_BYTES = 2 * 1024 * 1024
 
+/** Uniware gave no upload link and no "already exists" — seen on a PO created seconds before; worth retrying. */
+export class UploadLinkRefused extends Error {}
+
 // Slef authorization for single PO
 export type DocCapability = {
     identifier : string
@@ -178,7 +181,7 @@ export async function uploadDocument(
     `${cap.docsHost}${DOCS_UPLOAD_PATH}?${docsQuery(cap, { filename, maxFileSize: "2" })}`,
     { signal: AbortSignal.timeout(TIMEOUT_MS) }
   ).then((r) => r.json()).catch(() => null) as
-    { preSignedUploadUrl?: unknown; errors?: { code?: number; message?: string }[] } | null
+    { preSignedUploadUrl?: unknown; message?: unknown; errors?: { code?: number; message?: string; description?: string }[] } | null
   const put = step1?.preSignedUploadUrl
   if (typeof put !== "string" || !put) {
     // Already on the PO is the goal, not a failure — the sweep's dedup normally
@@ -187,7 +190,10 @@ export async function uploadDocument(
       (e) => e.code === 1003 || /DOCUMENT_ALREADY_EXIST/i.test(e.message ?? "")
     )
     if (already) return false
-    throw new Error(`Uniware upload-url for "${filename}" returned no presigned URL — keys were ${JSON.stringify(Object.keys(step1 ?? {}))}`)
+    // Uniware's own reason, so a refusal names its cause rather than just the reply's keys.
+    const why = [step1?.message, ...(step1?.errors ?? []).map((e) => [e.code, e.message, e.description].filter(Boolean).join(" "))]
+      .filter((s) => typeof s === "string" && s.trim()).join("; ")
+    throw new UploadLinkRefused(`Uniware refused the upload link for "${filename}": ${why || `no reason given — keys were ${JSON.stringify(Object.keys(step1 ?? {}))}`}`)
   }
 
   // Buffer isn't in the fetch BodyInit types; Uint8Array is, and Buffer already is one.
