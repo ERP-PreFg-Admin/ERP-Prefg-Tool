@@ -117,7 +117,7 @@ const INVOICE_LIST_BODY = `
          -- no FK, so the code is a join on the name. Safe: uq_warehouse_name
          -- makes it 1:1, and a LEFT JOIN keeps an invoice whose destination
          -- predates the warehouse master rather than dropping it.
-         w.code AS destination_code,
+         w.code AS destination_code, dwe.facility_code,
          e.code AS entity_code, e.legal_name AS entity_name,
          u.name AS created_by_name,
          si.reverted_at, si.revert_reason,
@@ -218,12 +218,14 @@ const INVOICE_LIST_BODY = `
   LEFT JOIN master_warehouse w ON w.name = si.destination
   -- PAN, never the full GSTIN — see the line-item query for why.
   LEFT JOIN master_entity e ON e.pan = SUBSTRING(si.buyer_gstin, 3, 10)
+  -- One active facility per (warehouse, entity), so this adds no rows to the SUMs.
+  LEFT JOIN details_warehouse_entity dwe ON dwe.warehouse_id = w.id AND dwe.entity_id = e.id AND dwe.status = 'active'
   LEFT JOIN users u ON u.id = si.created_by
   LEFT JOIN users ru ON ru.id = si.reverted_by
   LEFT JOIN users au ON au.id = si.revert_approved_by
   LEFT JOIN invoice_items_mfg sii ON sii.invoice_id = si.id
   ${INVOICE_WHERE}
-  GROUP BY si.id, w.code, e.code, e.legal_name
+  GROUP BY si.id, w.code, e.code, e.legal_name, dwe.facility_code
   ORDER BY si.created_at DESC, si.id DESC
 `
 
@@ -456,7 +458,7 @@ export const supplierInvoicesSql = {
      SELECT si.id AS invoice_id, si.mfg_id,
            DATE_FORMAT(si.invoice_date, '%Y-%m-%d') AS invoice_date_iso,
            si.invoice_no, si.invoice_date, si.destination,
-           w.code AS destination_code,
+           w.code AS destination_code, dwe.facility_code,
            e.code AS entity_code, e.legal_name AS entity_name,
            si.uniware_po_code,
            si.invoice_total, si.eway_bill_no, si.vehicle_no,
@@ -480,6 +482,7 @@ export const supplierInvoicesSql = {
     -- characters, so the state code does not identify it. Mirrors panOf()
     -- (gstin.slice(2,12)) and the rule facilityForInvoice already follows.
     LEFT  JOIN master_entity e ON e.pan = SUBSTRING(si.buyer_gstin, 3, 10)
+    LEFT  JOIN details_warehouse_entity dwe ON dwe.warehouse_id = w.id AND dwe.entity_id = e.id AND dwe.status = 'active'
     LEFT  JOIN users u ON u.id = si.created_by
     LEFT  JOIN invoice_items_mfg sii ON sii.invoice_id = si.id
     LEFT JOIN purchase_orders inw ON inw.id = sii.po_id

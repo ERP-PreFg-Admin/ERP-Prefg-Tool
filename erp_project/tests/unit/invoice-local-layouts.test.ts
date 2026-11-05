@@ -375,6 +375,13 @@ test("NG Electro parses locally from its position-ordered text", () => {
   )
 })
 
+test("NG Electro's description skips a PO number wrapped under its label", () => {
+  const r = parseLocallyVerbose(NG_ELECTRO.replace("PO No : MPO-OO119999-1", "PO No :\nMCAFF-PO-202610-008-S005"))
+  assert.ok(r.ok, r.ok ? "" : r.reason)
+  assert.equal(r.parsed.line_items[0].sku_name, "MCAFFEINE TEST FOAM BODY WASH 250ML")
+  assert.equal(r.parsed.purchase_order, "MCAFF-PO-202610-008-S005")
+})
+
 test("NG Electro's SKU code drops a trailing tag like (NF)", () => {
   const r = parseLocallyVerbose(NG_ELECTRO.replace("1F0250", "1F0250(NF)"))
   assert.ok(r.ok)

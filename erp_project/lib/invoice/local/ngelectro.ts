@@ -25,9 +25,11 @@ export function ngElectroRows(text: string): number {
 }
 
 // The description prints just above the row's "PO No" line, back to the previous row or the header.
+// A long PO number wraps onto its own line under a bare "PO No :", so skip both.
 function description(lines: string[], rowAt: number): string | null {
   const out: string[] = []
-  for (let i = rowAt - (/^PO No\s*:/i.test(lines[rowAt - 1] ?? "") ? 2 : 1); i >= 0 && out.length < 3; i--) {
+  const skip = /^PO No\s*:\s*$/i.test(lines[rowAt - 2] ?? "") ? 2 : /^PO No\s*:/i.test(lines[rowAt - 1] ?? "") ? 1 : 0
+  for (let i = rowAt - 1 - skip; i >= 0 && out.length < 3; i--) {
     const l = lines[i]
     if (RATE.test(l) || EXPIRY.test(l) || ROW.test(l) || /INS\. NO\.|Page No|\s:$|^[:\s]+$/i.test(l)) break
     out.unshift(l)

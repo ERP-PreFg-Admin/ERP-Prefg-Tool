@@ -131,8 +131,9 @@ export type ParsedHeader = {
 export function parseHeader(text: string): ParsedHeader {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
 
-  const invoiceLine = after(lines, /^Invoice No\.?/i) ?? ""
-  const [invoiceNo, second] = invoiceLine.split(/\s+/)
+  // Vedic prints "Invoice No.: <n>" on the label's own line; the stock layout puts it on the next.
+  const inline = lines.find((l) => /^Invoice No\.?/i.test(l))?.match(/^Invoice No\.?\s*:\s*(\S+)/i)?.[1]
+  const [invoiceNo, second] = inline ? [inline] : (after(lines, /^Invoice No\.?/i) ?? "").split(/\s+/)
 
   const gstins = findGstins(text)
   const seller = gstins.find((g) => !isOurs(g)) ?? null
@@ -150,7 +151,8 @@ export function parseHeader(text: string): ParsedHeader {
 
   return {
     invoice_number: clean(invoiceNo),
-    eway_bill_number: /^\d{10,}$/.test(second ?? "") ? second : null,
+    // Beside the invoice number in the stock layout; some (Vedic) print "e-Way Bill No.: <n>" inline instead.
+    eway_bill_number: /^\d{10,}$/.test(second ?? "") ? second : clean(text.match(/e-?Way Bill No\.?\s*:\s*(\d{12})\b/i)?.[1]),
     date: date ?? clean(text.match(DATE)?.[1]),
     from: sellerName(lines),
     destination: after(lines, /^Destination$/i),

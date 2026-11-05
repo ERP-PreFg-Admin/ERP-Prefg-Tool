@@ -126,6 +126,16 @@ test("an invoice with no e-way bill leaves it null, not the next token", () => {
   assert.equal(p.eway_bill_number, null)
 })
 
+test("an e-way bill printed inline (Vedic) is read when it is not beside the invoice number", () => {
+  const text = invoice(SHIP_THEN_BILL).replace(
+    "Invoice No. e-Way Bill No.\nRP/L/26-27/482 292220364349",
+    "Invoice No.: VNCS202627000917\nDated: 4-Nov-26\ne-Way Bill No.: 421794469682"
+  )
+  const p = parseHeader(text)
+  assert.equal(p.invoice_number, "VNCS202627000917")
+  assert.equal(p.eway_bill_number, "421794469682")
+})
+
 test("the grand total is read, not the per-HSN tax summary below it", () => {
   // Both lines start with "Total". The grand total comes first and carries the
   // rupee glyph; the summary underneath holds a different, smaller number.
