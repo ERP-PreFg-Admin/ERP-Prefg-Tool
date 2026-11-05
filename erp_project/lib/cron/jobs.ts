@@ -15,6 +15,10 @@ import { runDailyDigest } from "@/lib/reports/daily-digest"
 import { runLowOpenReport } from "../reports/low-open-po"
 import { runTraceExtract } from "@/lib/reports/trace-extract"
 import { runReportSnapshots } from "@/lib/reports/snapshots"
+import { runScheduledStatusSync } from "../uniware/status-sync"
+import { runGrnSync } from "../uniware/grn-sync"
+import { runDocumentSync } from "../uniware/document-sync"
+import { uniwareEnabled } from "../uniware"
 
 export type CronJob = {
   name: string
@@ -33,6 +37,14 @@ export const CRON_JOBS: CronJob[] = [
   { name: "trace-extract", hours: [2], run: runTraceExtract },
   // Writes only when REPORT_SNAPSHOTS_ENABLED=1; see lib/reports/snapshots.ts.
   { name: "report-snapshots", hours: [2], run: runReportSnapshots },
+  // Status first: it stamps the GRN count the GRN sweep reads. 150 POs per run, oldest-checked first.
+  { name: "uniware-status", hours: [10, 13, 16, 19], run: runScheduledStatusSync },
+  // The GRNs the status job had no budget for.
+  { name: "uniware-grn", hours: [10, 13, 16, 19],
+    run: (ctx) => (uniwareEnabled() ? runGrnSync(ctx) : Promise.resolve({ skipped: "uniware_unconfigured" })) },
+  // Attaches invoice PDFs to their Uniware POs (none can go up at save) and pulls Uniware's; 40 per run.
+  { name: "uniware-documents", hours: [10, 13, 16, 19],
+    run: (ctx) => (uniwareEnabled() ? runDocumentSync(ctx) : Promise.resolve({ skipped: "uniware_unconfigured" })) },
 ]
 
 /** The jobs due at a given IST hour, in execution order. */

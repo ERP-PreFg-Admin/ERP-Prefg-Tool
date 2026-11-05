@@ -32,17 +32,14 @@ export const maxDuration = 300
 
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { query, execute } from "@/lib/db"
+import { query } from "@/lib/db"
 import { withGateway } from "@/lib/gateway/with-gateway"
 import { ApiError } from "@/lib/gateway/errors"
 import { supplierInvoicesSql, buildInvoiceParams } from "@/lib/queries/supplier-invoices"
-import { uniwareGrn } from "@/lib/queries/uniware-grn"
-import { fetchPurchaseOrderStatus, uniwareEnabled } from "@/lib/uniware"
-import { requireFacilityForInvoice } from "@/lib/uniware/facility-resolve"
-import { syncGrnsForInvoice } from "@/lib/uniware/grn-sync"
+import { uniwareEnabled } from "@/lib/uniware"
+import { runStatusSync, MAX_PER_RUN, type StatusSyncRow } from "@/lib/uniware/status-sync"
 import { getViewScope } from "@/lib/brand-view"
 import { resolveAccess } from "@/lib/permissions"
-import logger from "@/lib/logger"
 
 /** Same slug app/api/v1/admin/* gates on. */
 const ADMIN_PAGE = "/admin"
@@ -69,34 +66,7 @@ const syncFilterSchema = z.object({
   enteredTo:   z.string().trim().max(20).nullish(),
 })
 
-// ponytail: a flat cap rather than a cursor or a job queue. At one request per PO
-// this is the most that fits in maxDuration; when the mirrored set outgrows it,
-// the answer is a scheduled sweep, not a bigger number. What it cut off is
-// reported, never silently dropped.
-const MAX_PER_RUN = 150
-
-/**
- * How many POs this run will walk receipts for, on top of their status.
- *
- * ponytail: a second flat cap, deliberately much smaller than MAX_PER_RUN. A
- * receipt walk is 1+N calls where a status check is 1, so budgeting them the
- * same would let one unusually busy day exhaust maxDuration and lose the
- * statuses too. Overflow is reported as `grnDeferred` and picked up by
- * /uniware-grn, which exists for exactly that.
- */
-const GRN_BUDGET = 25
-
-type Row = {
-  id: number
-  uniware_po_code: string
-  destination: string | null
-  buyer_gstin: string | null
-}
-
-// The facility resolver moved to lib/uniware/facility-resolve.ts when the GRN
-// sweep needed the same rule — two implementations of "which facility" would
-// eventually disagree about where a PO lives, and the failure is silent: asking
-// the wrong facility answers "not found", which would be stored as a real status.
+// The sweep itself, its caps and its per-PO contract live in lib/uniware/status-sync.ts, shared with the cron job.
 
 export const POST = withGateway({
   access: { pageSlug: ["/po-tracking/po-procurement", "/po-tracking/invoices"], level: "editor" },
@@ -111,7 +81,7 @@ export const POST = withGateway({
     // tool rather than a daily one — the nightly job covers normal operation,
     // and at 17 manufacturers this costs minutes. Editor on /po-tracking is not
     // enough for that; /admin is the gate the admin routes already use.
-    let rows: Row[]
+    let rows: StatusSyncRow[]
     if (body.scoped) {
       const scope = await getViewScope(Number(session.user.id))
       const params = buildInvoiceParams(body.search ?? null, scope, {
@@ -122,125 +92,16 @@ export const POST = withGateway({
         enteredFrom: body.enteredFrom ?? null,
         enteredTo:   body.enteredTo   ?? null,
       })
-      rows = await query<Row>(supplierInvoicesSql.selectForStatusSyncByFilter, [...params, MAX_PER_RUN + 1])
+      rows = await query<StatusSyncRow>(supplierInvoicesSql.selectForStatusSyncByFilter, [...params, MAX_PER_RUN + 1])
     } else {
       const level = await resolveAccess(Number(session.user.id), session.user.roles ?? [], ADMIN_PAGE)
       if (level !== "editor") {
         throw new ApiError(403, "forbidden",
           "A full Uniware sweep is admin-only. Use Sync on the invoices tab to refresh what you are viewing.")
       }
-      rows = await query<Row>(supplierInvoicesSql.selectAllForStatusSync, [MAX_PER_RUN + 1])
+      rows = await query<StatusSyncRow>(supplierInvoicesSql.selectAllForStatusSync, [MAX_PER_RUN + 1])
     }
 
-    const truncated = rows.length > MAX_PER_RUN
-    const batch = truncated ? rows.slice(0, MAX_PER_RUN) : rows
-
-    let synced = 0
-    let receipts = 0
-    let unmatchedLines = 0
-    let grnBudget = GRN_BUDGET
-    let grnDeferred = 0
-    let cancelled = 0
-    const failures: { code: string; error: string }[] = []
-
-    for (const row of batch) {
-      try {
-        // Off prod the facility is pinned to the sandbox anyway, so an unmapped
-        // destination is not a reason to skip. On prod it is, and this throws —
-        // see requireFacilityForInvoice.
-        const facility = await requireFacilityForInvoice(row)
-        const { status, grnCount, lines } = await fetchPurchaseOrderStatus(row.uniware_po_code, facility)
-        await execute(supplierInvoicesSql.setUniwareStatus, [status, row.id])
-        // Free: the same call already carried it, and it is what tells us
-        // whether the receipt walk below is worth making at all.
-        await execute(uniwareGrn.setGrnCount, [grnCount, row.id])
-
-        // The warehouse cancels in Uniware and nothing told this side, so the
-        // inward POs went on reading `received` against an order that no longer
-        // exists — still counted on the Inward tab and in every open-PO figure.
-        // Idempotent, so a re-sync of an already-cancelled PO is a no-op.
-        if (String(status).toUpperCase() === "CANCELLED") {
-          const res = await execute(uniwareGrn.cancelInwardPosByUniwareCode, [row.uniware_po_code])
-          if (res.affectedRows > 0) {
-            cancelled += res.affectedRows
-            logger.info({
-              ...ctx, poCode: row.uniware_po_code, inwardPos: res.affectedRows,
-              message: "Uniware cancelled this PO — cancelled our inward POs for it",
-            })
-          }
-        }
-
-        // Also free from that call: pending and QC-pass per line, which have no
-        // local equivalent. Matched onto our inward PO by SKU. A line whose SKU
-        // we never raised simply updates nothing — affectedRows 0 — which is the
-        // same finding grn_items_uniware.po_id IS NULL reports for receipts.
-        for (const l of lines) {
-          await execute(uniwareGrn.setUniwareLineQty, [
-            l.pendingQty, l.qcPassQty, row.uniware_po_code, l.sku,
-          ])
-        }
-        synced++
-
-        // Only POs Uniware says have receipts, and only while the budget lasts.
-        // A status that stored fine must not be undone by a receipt failure, so
-        // this has its own catch — a shape we don't recognise (grn-map.ts throws
-        // rather than reading zero) is reported against the PO and the run
-        // continues.
-        if (grnCount > 0) {
-          if (grnBudget > 0) {
-            grnBudget--
-            try {
-              const one = await syncGrnsForInvoice(row, facility)
-              receipts += one.receipts
-              unmatchedLines += one.unmatchedLines
-            } catch (err) {
-              const error = err instanceof Error ? err.message : String(err)
-              failures.push({ code: `${row.uniware_po_code} (receipts)`, error })
-              logger.warn({
-                ...ctx, poCode: row.uniware_po_code, err: error,
-                message: "Uniware receipt sync failed for one PO",
-              })
-            }
-          } else {
-            grnDeferred++
-          }
-        }
-      } catch (err) {
-        const error = err instanceof Error ? err.message : String(err)
-        failures.push({ code: row.uniware_po_code, error })
-        logger.warn({
-          ...ctx, poCode: row.uniware_po_code, err: error,
-          message: "Uniware status sync failed for one PO",
-        })
-      }
-    }
-
-    if (unmatchedLines > 0) {
-      // Its own log line: the warehouse received a SKU we never raised a PO for,
-      // which no failure count would surface.
-      logger.warn({
-        ...ctx, unmatchedLines,
-        message: "GRN lines matched no inward PO — receipts for SKUs we did not raise",
-      })
-    }
-
-    return NextResponse.json({
-      total: batch.length,
-      synced,
-      failed: failures.length,
-      // Capped at 10: this is a toast, not a report. `failed` is the real count.
-      failures: failures.slice(0, 10),
-      // Named so the UI can say so — a silent cap reads as "everything is synced".
-      truncated,
-      limit: MAX_PER_RUN,
-      // Receipts, reported separately: "40 synced" says nothing about whether
-      // any goods were booked, and grnDeferred is the number /uniware-grn still
-      // has to pick up.
-      receipts,
-      grnDeferred,
-      // Inward POs closed off because Uniware cancelled the PO they mirror.
-      cancelled,
-      unmatchedLines,
-    })
+    return NextResponse.json(await runStatusSync(rows, ctx))
   },
 })
