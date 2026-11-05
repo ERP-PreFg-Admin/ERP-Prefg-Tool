@@ -9,27 +9,25 @@
 
 export const entityEmails = {
   /**
-   * Paginated list with optional entity_type filter + search across
-   * code/email/purpose. Params: [type, type, like, like, like, like, LIMIT, OFFSET]
+   * Every row the filter matches, unpaged: the screen groups them into one card per list
+   * (171 rows on prod, 2026-11-05). A search also matches a warehouse's Uniware facility code,
+   * counting only the list's own entity when it has one. Params: [type, type, like, like, like, like, like]
    */
-  selectPaginated: `
+  selectFiltered: `
     SELECT ee.id, ee.entity_type, ee.entity_code, ee.legal_entity_code, ee.email,
            ee.recipient_type, ee.purpose, ee.status, ee.created_at,
            ee.created_by, u.name AS created_by_name
     FROM entity_emails ee
     LEFT JOIN users u ON u.id = ee.created_by
     WHERE (? IS NULL OR ee.entity_type = ?)
-      AND (? IS NULL OR ee.entity_code LIKE ? OR ee.email LIKE ? OR ee.purpose LIKE ?)
-    ORDER BY ee.id DESC
-    LIMIT ? OFFSET ?
-  `,
-
-  /** Params: [type, type, like, like, like, like] */
-  countPaginated: `
-    SELECT COUNT(*) AS total
-    FROM entity_emails
-    WHERE (? IS NULL OR entity_type = ?)
-      AND (? IS NULL OR entity_code LIKE ? OR email LIKE ? OR purpose LIKE ?)
+      AND (? IS NULL OR ee.entity_code LIKE ? OR ee.email LIKE ? OR ee.purpose LIKE ?
+           OR (ee.entity_type IN ('warehouse', 'employee') AND EXISTS (
+             SELECT 1 FROM master_warehouse w
+             JOIN details_warehouse_entity dwe ON dwe.warehouse_id = w.id AND dwe.status = 'active'
+             JOIN master_entity e ON e.id = dwe.entity_id
+             WHERE w.name = ee.entity_code AND dwe.facility_code LIKE ?
+               AND (ee.legal_entity_code IS NULL OR ee.legal_entity_code = e.code))))
+    ORDER BY ee.entity_type, ee.entity_code, ee.legal_entity_code, ee.recipient_type DESC, ee.id
   `,
 
   /** Params: [entity_type, entity_code, legal_entity_code, email, recipient_type, purpose].

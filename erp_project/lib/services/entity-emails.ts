@@ -1,7 +1,7 @@
 // Reads behind /po-tracking/po-procurement/entity-emails.
-import { paginate } from "@/lib/pagination"
 import { timedQuery } from "@/lib/query-timing"
 import { entityEmails } from "@/lib/queries/entity-emails"
+import { warehouse as warehouseSql } from "@/lib/queries/warehouse"
 import { getUserScope, filterByScope } from "@/lib/scope"
 
 export type EntityEmailRow = {
@@ -19,25 +19,20 @@ export type EntityEmailRow = {
 }
 type Option = { id: number; code: string; name: string }
 
-export async function getEntityEmailsPage(userId: number, f: { page: number; size: number; offset: number; search: string; type: string }) {
+export async function getEntityEmailsPage(userId: number, f: { search: string; type: string }) {
   const like = f.search ? `%${f.search}%` : null
   const type = f.type   || null
 
   const scope = await getUserScope(userId)
 
-  const [result, allVendorOptions, allMfgOptions, allWarehouseOptions, legalEntityOptions] = await Promise.all([
-    paginate<EntityEmailRow>(
-      entityEmails.selectPaginated,
-      [type, type, like, like, like, like, f.size, f.offset],
-      entityEmails.countPaginated,
-      [type, type, like, like, like, like],
-      f.page,
-      f.size
-    ),
+  const [rows, allVendorOptions, allMfgOptions, allWarehouseOptions, legalEntityOptions, facilities] = await Promise.all([
+    timedQuery<EntityEmailRow>(entityEmails.selectFiltered, [type, type, like, like, like, like, like], { label: "entityEmails.selectFiltered" }),
     timedQuery<Option>(entityEmails.vendorOptions, [], { label: "entityEmails.vendorOptions" }),
     timedQuery<Option>(entityEmails.mfgOptions, [], { label: "entityEmails.mfgOptions" }),
     timedQuery<Option>(entityEmails.warehouseOptions, [], { label: "entityEmails.warehouseOptions" }),
     timedQuery<{ code: string; legal_name: string }>(entityEmails.legalEntityOptions, [], { label: "entityEmails.legalEntityOptions" }),
+    // Each warehouse's Uniware facility per legal entity, shown on its card.
+    timedQuery<{ facility_code: string; wh_name: string; entity_code: string }>(warehouseSql.activeFacilities, [], { label: "warehouse.activeFacilities" }),
   ])
 
   // These three were ungated full lists of every vendor, manufacturer and
@@ -50,10 +45,11 @@ export async function getEntityEmailsPage(userId: number, f: { page: number; siz
   // matched nothing — dormant only because no user has warehouse scope rows yet,
   // so filterByScope short-circuits on null and returns everything.
   return {
-    result,
+    rows,
     vendorOptions: filterByScope(allVendorOptions, "id", scope.vendorIds),
     mfgOptions: filterByScope(allMfgOptions, "id", scope.mfgIds),
     warehouseOptions: filterByScope(allWarehouseOptions, "code", scope.warehouseNames),
     legalEntityOptions,
+    facilities,
   }
 }
